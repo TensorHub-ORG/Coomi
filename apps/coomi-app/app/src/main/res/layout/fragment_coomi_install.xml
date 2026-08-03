@@ -10,7 +10,7 @@
     android:layout_height="match_parent"
     android:fillViewport="true"
     android:scrollbars="none"
-    android:background="@color/coomi_white">
+    android:background="?attr/coomiPage">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -80,7 +80,7 @@
                         android:layout_height="20dp"
                         android:layout_gravity="center"
                         android:src="@drawable/coomi_ic_check"
-                        android:tint="@color/coomi_ok"
+                        android:tint="?attr/coomiOk"
                         android:visibility="gone"
                         android:contentDescription="@null"/>
                 </FrameLayout>
@@ -148,7 +148,7 @@
                         android:layout_height="20dp"
                         android:layout_gravity="center"
                         android:src="@drawable/coomi_ic_check"
-                        android:tint="@color/coomi_ok"
+                        android:tint="?attr/coomiOk"
                         android:visibility="gone"
                         android:contentDescription="@null"/>
                 </FrameLayout>
@@ -216,7 +216,7 @@
                         android:layout_height="20dp"
                         android:layout_gravity="center"
                         android:src="@drawable/coomi_ic_check"
-                        android:tint="@color/coomi_ok"
+                        android:tint="?attr/coomiOk"
                         android:visibility="gone"
                         android:contentDescription="@null"/>
                 </FrameLayout>
@@ -279,7 +279,7 @@
                         android:layout_height="18dp"
                         android:layout_gravity="center"
                         android:src="@drawable/coomi_ic_check"
-                        android:tint="@color/coomi_ok"
+                        android:tint="?attr/coomiOk"
                         android:visibility="gone"
                         android:contentDescription="@null"/>
                 </FrameLayout>
@@ -291,7 +291,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginStart="10dp"
-                    android:textColor="@color/coomi_blue"
+                    android:textColor="?attr/coomiBlue"
                     android:textStyle="bold"
                     android:text="@string/coomi_install_waiting"/>
             </LinearLayout>
@@ -328,7 +328,7 @@
                     android:layout_width="@dimen/coomi_icon_m"
                     android:layout_height="@dimen/coomi_icon_m"
                     android:src="@drawable/coomi_ic_alert"
-                    android:tint="@color/coomi_danger"
+                    android:tint="?attr/coomiDanger"
                     android:contentDescription="@null"/>
 
                 <LinearLayout
@@ -343,7 +343,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:textStyle="bold"
-                        android:textColor="@color/coomi_danger"
+                        android:textColor="?attr/coomiDanger"
                         android:text="@string/coomi_install_error_title"/>
 
                     <TextView
@@ -370,7 +370,7 @@
                 android:background="@drawable/coomi_bg_log"
                 android:padding="@dimen/coomi_space_m"
                 android:scrollbars="vertical"
-                android:textColor="@color/coomi_danger"
+                android:textColor="?attr/coomiDanger"
                 android:visibility="gone"
                 android:text=""/>
 

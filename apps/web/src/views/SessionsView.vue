@@ -5,7 +5,7 @@
  * 列表来自引擎磁盘会话（/api/sessions 为权威源），本地 localStorage 保存标题/置顶等
  * 元数据与最近对话正文；删除会话会同时删除引擎磁盘记录与本地记录。
  */
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore, formatSessionTime, type SessionMeta } from '@/stores/sessions'
@@ -49,6 +49,9 @@ function doClear() {
   session.newSession()
   router.push('/')
 }
+
+// 进入页面时刷新各会话的后台运行状态。
+onMounted(() => { sessions.refreshRunning() })
 </script>
 <template>
   <div class="page">
@@ -89,6 +92,7 @@ function doClear() {
                 <span class="rmeta">
                   <span v-if="m.id === session.sessionId" class="badge">当前</span>
                   {{ formatSessionTime(m.updatedAt) }} · {{ m.turns }} 轮
+                  <span v-if="sessions.isRunning(m.id)" class="rspin" aria-label="后台运行中" />
                 </span>
               </button>
               <button class="more" aria-label="更多" @click="menuFor = m"><CoomiIcon name="more" :size="18" /></button>
@@ -169,6 +173,16 @@ function doClear() {
 .rmain:active { background: var(--fill); }
 .rtitle { display: flex; align-items: center; gap: 5px; }
 .pin { flex-shrink: 0; color: var(--blue); }
+.rmeta { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+/* 会话在后台执行中的小圈（放在时间/轮数之后，与 meta 文字同高） */
+.rspin {
+  flex-shrink: 0;
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--blue-soft);
+  border-top-color: var(--blue);
+  animation: coomi-rspin 0.9s linear infinite;
+}
+@keyframes coomi-rspin { to { transform: rotate(360deg); } }
 .ttext {
   min-width: 0; font-size: 14.5px; font-weight: 550; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

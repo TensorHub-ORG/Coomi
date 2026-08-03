@@ -28,6 +28,26 @@
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
 
         <item name="android:editTextBackground">@drawable/coomi_bg_input</item>
+
+        <!-- 设计令牌：layout 引用 ?attr/coomiXxx，夜间主题给另一套值 -->
+        <item name="coomiPage">@color/coomi_page</item>
+        <item name="coomiText">@color/coomi_text</item>
+        <item name="coomiText2">@color/coomi_text_2</item>
+        <item name="coomiText3">@color/coomi_text_3</item>
+        <item name="coomiCard">@color/coomi_white</item>
+        <item name="coomiBorder">@color/coomi_border</item>
+        <item name="coomiDivider">@color/coomi_divider</item>
+        <item name="coomiFill">@color/coomi_fill</item>
+        <item name="coomiBlue">@color/coomi_blue</item>
+        <item name="coomiBlueSoft">@color/coomi_blue_soft</item>
+        <item name="coomiOk">@color/coomi_ok</item>
+        <item name="coomiOkSoft">@color/coomi_ok_soft</item>
+        <item name="coomiDanger">@color/coomi_danger</item>
+        <item name="coomiDangerSoft">@color/coomi_danger_soft</item>
+        <item name="coomiWarnSoft">@color/coomi_warn_soft</item>
+        <item name="coomiOrange">@color/coomi_orange</item>
+        <item name="coomiOrangeSoft">@color/coomi_orange_soft</item>
+        <item name="coomiOrangeBorder">@color/coomi_orange_border</item>
     </style>
 
     <!-- 页面底色为浅灰的变体（仪表盘 / 设置类页面） -->
@@ -42,11 +62,69 @@
         <item name="android:windowBackground">@color/coomi_white</item>
     </style>
 
+    <!-- ==================== 夜间模式 ====================
+         三档主题（跟随系统 / 明亮 / 夜间）由 CoomiTheme 在 Activity
+         onCreate 之前 setTheme 选择：dark 档位或系统暗色时用 Night 变体。
+         刻意不用 values-night 资源限定符，避免系统暗色下白底 UI 被强制翻黑。 -->
+    <style name="Theme.Coomi.Night" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/coomi_blue</item>
+        <item name="colorPrimaryDark">@color/coomi_blue_press</item>
+        <item name="colorAccent">@color/coomi_blue</item>
+        <item name="colorControlNormal">@color/coomi_night_text_3</item>
+        <item name="colorControlActivated">@color/coomi_blue</item>
+        <item name="colorControlHighlight">@color/coomi_blue_soft</item>
+
+        <item name="android:windowBackground">@color/coomi_night_bg</item>
+        <item name="android:colorBackground">@color/coomi_night_bg</item>
+        <item name="android:textColorPrimary">@color/coomi_night_text</item>
+        <item name="android:textColorSecondary">@color/coomi_night_text_2</item>
+        <item name="android:textColorHint">@color/coomi_night_text_3</item>
+        <item name="android:textColorLink">@color/coomi_blue</item>
+
+        <item name="android:statusBarColor">@color/coomi_night_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/coomi_night_bg</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+
+        <!-- 设计令牌：夜间值（对齐前端 global.css dark 色板） -->
+        <item name="coomiPage">@color/coomi_night_bg</item>
+        <item name="coomiText">@color/coomi_night_text</item>
+        <item name="coomiText2">@color/coomi_night_text_2</item>
+        <item name="coomiText3">@color/coomi_night_text_3</item>
+        <item name="coomiCard">@color/coomi_night_page</item>
+        <item name="coomiBorder">@color/coomi_night_border</item>
+        <item name="coomiDivider">@color/coomi_night_border</item>
+        <item name="coomiFill">@color/coomi_night_fill</item>
+        <item name="coomiBlue">@color/coomi_night_blue</item>
+        <item name="coomiBlueSoft">@color/coomi_night_blue_soft</item>
+        <item name="coomiOk">@color/coomi_night_ok</item>
+        <item name="coomiOkSoft">@color/coomi_night_ok_soft</item>
+        <item name="coomiDanger">@color/coomi_night_danger</item>
+        <item name="coomiDangerSoft">@color/coomi_night_danger_soft</item>
+        <item name="coomiWarnSoft">@color/coomi_night_warn_soft</item>
+        <item name="coomiOrange">@color/coomi_night_orange</item>
+        <item name="coomiOrangeSoft">@color/coomi_night_orange_soft</item>
+        <item name="coomiOrangeBorder">@color/coomi_night_orange_border</item>
+    </style>
+
+    <!-- 页面底色为深灰的变体（仪表盘 / 设置类页面） -->
+    <style name="Theme.Coomi.Night.Page">
+        <item name="android:windowBackground">@color/coomi_night_page</item>
+        <item name="android:statusBarColor">@color/coomi_night_page</item>
+        <item name="android:navigationBarColor">@color/coomi_night_page</item>
+    </style>
+
+    <!-- WebView 宿主夜间启动闪屏 -->
+    <style name="Theme.Coomi.Night.Web">
+        <item name="android:windowBackground">@color/coomi_night_bg</item>
+    </style>
+
 
     <!-- ==================== 文字 ==================== -->
 
     <style name="Coomi.Text" parent="">
-        <item name="android:textColor">@color/coomi_text</item>
+        <!-- 不设 textColor：走主题 android:textColorPrimary，夜间自动变浅 -->
         <item name="android:textSize">@dimen/coomi_text_body</item>
         <item name="android:lineSpacingExtra">3sp</item>
         <item name="android:includeFontPadding">false</item>
@@ -73,19 +151,19 @@
     </style>
 
     <style name="Coomi.Text.Secondary">
-        <item name="android:textColor">@color/coomi_text_2</item>
+        <item name="android:textColor">?attr/coomiText2</item>
         <item name="android:textSize">@dimen/coomi_text_secondary</item>
         <item name="android:lineSpacingExtra">4sp</item>
     </style>
 
     <style name="Coomi.Text.Caption">
-        <item name="android:textColor">@color/coomi_text_3</item>
+        <item name="android:textColor">?attr/coomiText3</item>
         <item name="android:textSize">@dimen/coomi_text_caption</item>
     </style>
 
     <!-- 卡片组上方的小节标题 -->
     <style name="Coomi.Text.SectionLabel">
-        <item name="android:textColor">@color/coomi_text_3</item>
+        <item name="android:textColor">?attr/coomiText3</item>
         <item name="android:textSize">@dimen/coomi_text_caption</item>
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0.06</item>
@@ -96,7 +174,7 @@
     <!-- 等宽：日志 / 版本号 / 命令 -->
     <style name="Coomi.Text.Mono">
         <item name="android:fontFamily">monospace</item>
-        <item name="android:textColor">@color/coomi_text_2</item>
+        <item name="android:textColor">?attr/coomiText2</item>
         <item name="android:textSize">@dimen/coomi_text_caption</item>
         <item name="android:lineSpacingExtra">3sp</item>
     </style>
@@ -123,19 +201,19 @@
     <!-- 次级：浅灰底深字 -->
     <style name="Coomi.Button.Secondary">
         <item name="android:background">@drawable/coomi_bg_button_secondary</item>
-        <item name="android:textColor">@color/coomi_text</item>
+        <item name="android:textColor">?attr/coomiText2</item>
     </style>
 
     <!-- 描边：白底蓝字 -->
     <style name="Coomi.Button.Outline">
         <item name="android:background">@drawable/coomi_bg_button_outline</item>
-        <item name="android:textColor">@color/coomi_blue</item>
+        <item name="android:textColor">?attr/coomiBlue</item>
     </style>
 
     <!-- 危险：白底红字描边 -->
     <style name="Coomi.Button.Danger">
         <item name="android:background">@drawable/coomi_bg_button_danger</item>
-        <item name="android:textColor">@color/coomi_danger</item>
+        <item name="android:textColor">?attr/coomiDanger</item>
     </style>
 
     <!-- 小号胶囊：卡片内的「允许」「重试」 -->
@@ -152,7 +230,7 @@
     <!-- 文字按钮 -->
     <style name="Coomi.Button.Text">
         <item name="android:background">@drawable/coomi_bg_ghost</item>
-        <item name="android:textColor">@color/coomi_blue</item>
+        <item name="android:textColor">?attr/coomiBlue</item>
         <item name="android:textSize">@dimen/coomi_text_body</item>
         <item name="android:minHeight">@dimen/coomi_tap_target</item>
         <item name="android:paddingStart">@dimen/coomi_space_m</item>
@@ -164,8 +242,8 @@
 
     <style name="Coomi.Input" parent="Widget.AppCompat.EditText">
         <item name="android:background">@drawable/coomi_bg_input</item>
-        <item name="android:textColor">@color/coomi_text</item>
-        <item name="android:textColorHint">@color/coomi_text_3</item>
+        <item name="android:textColor">?attr/coomiText</item>
+        <item name="android:textColorHint">?attr/coomiText3</item>
         <item name="android:textSize">@dimen/coomi_text_body</item>
         <item name="android:minHeight">@dimen/coomi_input_height</item>
         <item name="android:paddingStart">@dimen/coomi_space_l</item>
@@ -209,7 +287,7 @@
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">1dp</item>
         <item name="android:layout_marginStart">@dimen/coomi_space_l</item>
-        <item name="android:background">@color/coomi_divider</item>
+        <item name="android:background">?attr/coomiDivider</item>
     </style>
 
     <!-- 进度条 -->
@@ -234,7 +312,6 @@
         <item name="android:background">@drawable/coomi_bg_provider_card</item>
         <item name="android:button">@null</item>
         <item name="android:drawableEnd">@drawable/coomi_check_selector</item>
-        <item name="android:textColor">@color/coomi_provider_text</item>
         <item name="android:textSize">@dimen/coomi_text_body</item>
         <item name="android:minHeight">54dp</item>
         <item name="android:gravity">center_vertical</item>

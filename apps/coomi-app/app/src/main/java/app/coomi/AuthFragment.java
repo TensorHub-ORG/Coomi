@@ -209,13 +209,26 @@ public class AuthFragment extends Fragment implements CoomiSetupActivity.StepFra
         mToggleKeyButton.setImageResource(
             mKeyVisible ? R.drawable.coomi_ic_eye_off : R.drawable.coomi_ic_eye);
         mToggleKeyButton.setColorFilter(ContextCompat.getColor(mToggleKeyButton.getContext(),
-            mKeyVisible ? R.color.coomi_blue : R.color.coomi_text_3));
+            mKeyVisible ? themeColor(R.color.coomi_blue) : themeColor(R.color.coomi_text_3)));
         mApiKeyInput.setSelection(mApiKeyInput.getText().length());
     }
 
-    /** 状态文案不再靠 ✓ / ✗ 符号，改用颜色表达。 */
+    /** 浅色资源色 -> 当前主题（暗色时换夜间色板）。 */
+    private int themeColor(int lightRes) {
+        if (!CoomiTheme.isDark(requireActivity())) {
+            return lightRes;
+        }
+        if (lightRes == R.color.coomi_text_2) return R.color.coomi_night_text_2;
+        if (lightRes == R.color.coomi_text_3) return R.color.coomi_night_text_3;
+        if (lightRes == R.color.coomi_blue) return R.color.coomi_night_blue;
+        if (lightRes == R.color.coomi_ok) return R.color.coomi_night_ok;
+        if (lightRes == R.color.coomi_danger) return R.color.coomi_night_danger;
+        return lightRes;
+    }
+
+    /** 状态文案不再靠 (v) / (x) 符号，改用颜色表达。 */
     private void setStatus(@StringRes int textRes, int colorRes) {
-        mStatusText.setTextColor(ContextCompat.getColor(mStatusText.getContext(), colorRes));
+        mStatusText.setTextColor(ContextCompat.getColor(mStatusText.getContext(), themeColor(colorRes)));
         mStatusText.setText(textRes);
     }
 

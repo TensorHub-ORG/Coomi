@@ -69,9 +69,14 @@ const rows = computed(() => {
     { k: '事件通道', v: connection.label, mono: false },
   ]
 })
+// 从控制台进入：返回统一回控制台（浏览器环境回聊天主页）
+function goDashboard() {
+  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
+  else router.push('/')
+}
 </script><template>
   <div class="page">
-    <PageHead title="内置环境" @back="router.push('/settings')">
+    <PageHead title="内置环境" @back="goDashboard">
       <template #right>
         <button class="icon-btn" aria-label="刷新" @click="load(true)">
           <CoomiIcon name="refresh" :class="{ spin: refreshing }" />

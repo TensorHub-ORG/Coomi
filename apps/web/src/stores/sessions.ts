@@ -69,6 +69,41 @@ export const useSessionsStore = defineStore('sessions', () => {
   const query = ref('')
   /** 引擎当前工作目录（来自 /api/runtime/health），用于会话按项目隔离。 */
   const currentCwd = ref('')
+  /** 引擎侧正在后台执行的会话 id 集合（/api/sessions 的 running 字段）。 */
+  const runningIds = ref<Set<string>>(new Set())
+
+  /** 从引擎刷新各会话的 running 状态 + 合并「最后执行时间」（列表排序依据）；引擎不可用时保持原状。 */
+  async function refreshRunning() {
+    try {
+      const res = await authedFetch('/api/sessions')
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        sessions: Array<{ id: string; running: boolean; updated_at: string }>
+      }
+      runningIds.value = new Set(
+        (data.sessions ?? []).filter(s => s.running).map(s => s.id),
+      )
+      // 引擎 updated_at = 最后一轮 agent 执行时间（完成/取消/中断都落盘）。
+      // 只向前合并：比本地新的才覆盖，避免旧数据把新会话时间拉回去。
+      let changed = false
+      for (const s of data.sessions ?? []) {
+        const meta = find(s.id)
+        if (!meta) continue
+        const engineTime = Date.parse(s.updated_at)
+        if (Number.isFinite(engineTime) && engineTime > meta.updatedAt) {
+          meta.updatedAt = engineTime
+          changed = true
+        }
+      }
+      if (changed) persistMeta()
+    } catch {
+      /* 引擎未就绪：静默保持上次状态 */
+    }
+  }
+
+  function isRunning(id: string): boolean {
+    return runningIds.value.has(id)
+  }
 
   function setCurrentCwd(cwd: string) {
     currentCwd.value = cwd
@@ -147,11 +182,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     return m
   }
 
+  /**
+   * 会话元数据更新（标题 / 轮数）。【不再刷新 updatedAt】：
+   * 排序时间 = 最后一轮 agent 的执行时间，由引擎在任务完成/中断时
+   * 落盘到会话 updated_at，前端轮询合并——点击/打开会话不应改变排序。
+   */
   function touch(id: string, patch: Partial<Pick<SessionMeta, 'title' | 'turns'>> = {}) {
     const m = ensure(id)
     if (patch.title) m.title = patch.title
     if (patch.turns != null) m.turns = patch.turns
-    m.updatedAt = Date.now()
     persistMeta()
   }
 
@@ -304,5 +343,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     syncFromEngine,
     ensure, touch, rename, togglePin, remove, find, deriveTitle,
     saveTranscript, loadTranscript, migrateId, clearAll,
+    refreshRunning, isRunning,
   }
 })

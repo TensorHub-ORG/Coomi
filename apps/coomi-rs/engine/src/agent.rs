@@ -46,6 +46,10 @@ pub struct Agent {
     max_tool_rounds: usize,
     force_compaction: bool,
     input_queue: Option<Arc<InputQueue>>,
+    /// 是否在请求中重放历史图片（Tool 消息的 images）。
+    /// 为 false 时（图片降级会话）每个模型请求前都会剥离历史/当轮
+    /// 工具消息携带的图片，避免上游拒绝图片导致整会话反复失败。
+    vision_replay: bool,
 }
 
 impl Agent {
@@ -55,6 +59,7 @@ impl Agent {
             max_tool_rounds: 96,
             force_compaction: false,
             input_queue: None,
+            vision_replay: true,
         }
     }
 
@@ -70,6 +75,11 @@ impl Agent {
 
     pub fn with_input_queue(mut self, input_queue: Arc<InputQueue>) -> Self {
         self.input_queue = Some(input_queue);
+        self
+    }
+
+    pub fn with_vision_replay(mut self, vision_replay: bool) -> Self {
+        self.vision_replay = vision_replay;
         self
     }
 
@@ -261,6 +271,14 @@ impl Agent {
             let mut messages = Vec::with_capacity(session.messages.len() + 1);
             messages.push(ChatMessage::system(self.system_prompt.clone()));
             messages.extend(session.messages.iter().cloned());
+            if !self.vision_replay {
+                // 图片降级：请求中剥离工具消息携带的图片（base64），避免上游
+                // 拒绝图片导致整会话反复失败。图片本身仍留在会话记录中，
+                // 前端历史展示与 show_image 预览不受影响。
+                for message in &mut messages {
+                    message.images.clear();
+                }
+            }
             let request = ModelRequest {
                 model: provider.model().to_string(),
                 messages,

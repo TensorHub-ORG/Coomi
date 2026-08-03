@@ -2,14 +2,14 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@android:id/background">
         <shape android:shape="rectangle">
-            <solid android:color="@color/coomi_fill"/>
+            <solid android:color="?attr/coomiFill"/>
             <corners android:radius="@dimen/coomi_radius_pill"/>
         </shape>
     </item>
     <item android:id="@android:id/progress">
         <clip android:clipOrientation="horizontal" android:gravity="start">
             <shape android:shape="rectangle">
-                <gradient android:startColor="@color/coomi_blue" android:endColor="#4B7BDD" android:angle="0"/>
+                <gradient android:startColor="?attr/coomiBlue" android:endColor="#4B7BDD" android:angle="0"/>
                 <corners android:radius="@dimen/coomi_radius_pill"/>
             </shape>
         </clip>

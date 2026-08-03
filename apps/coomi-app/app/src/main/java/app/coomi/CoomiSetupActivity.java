@@ -43,6 +43,7 @@ public class CoomiSetupActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        CoomiTheme.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_coomi_setup);
 

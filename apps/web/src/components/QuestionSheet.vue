@@ -22,8 +22,8 @@ function submitCustom() {
       <div class="grip" />
 
       <div class="qhead">
-        <span class="tile"><CoomiIcon name="user" :size="17" /></span>
         <p class="question">{{ card.question }}</p>
+        <button class="skip" @click="emit('answer', '')">跳过</button>
       </div>
 
       <div v-if="card.options?.length" class="options">
@@ -74,13 +74,15 @@ function submitCustom() {
 
 .grip { width: 38px; height: 4px; margin: 4px auto 14px; border-radius: 2px; background: var(--border-strong); }
 
-.qhead { display: flex; align-items: flex-start; gap: 10px; }
-.tile {
-  display: grid; place-items: center; flex-shrink: 0;
-  width: 30px; height: 30px; border-radius: 9px;
-  background: var(--blue-soft); color: var(--blue);
+.qhead { display: flex; align-items: center; gap: 10px; }
+.question { flex: 1; min-width: 0; word-break: break-word; font-size: 15.5px; font-weight: 600; line-height: 1.5; color: var(--text); }
+.skip {
+  flex-shrink: 0; padding: 5px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: var(--fill); font-size: 12.5px; color: var(--text-3);
+  transition: background .14s, color .14s, border-color .14s;
 }
-.question { flex: 1; min-width: 0; word-break: break-word; padding-top: 4px; font-size: 15.5px; font-weight: 600; line-height: 1.5; color: var(--text); }
+.skip:active { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 
 .options { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .opt {

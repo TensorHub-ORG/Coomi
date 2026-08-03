@@ -55,4 +55,22 @@
     <!-- 自适应图标背景（纯白，与 mipmap 前景配合） -->
     <color name="coomi_icon_bg">#FFFFFF</color>
 
+    <color name="coomi_night_fill_strong">#22262D</color>
+    <color name="coomi_night_blue">#5B8BF0</color>
+    <color name="coomi_night_ok">#38B98A</color>
+    <color name="coomi_night_ok_soft">#1B362C</color>
+    <color name="coomi_night_danger">#E86A58</color>
+    <color name="coomi_night_warn_soft">#332C1C</color>
+    <color name="coomi_night_orange">#E08A6B</color>
+    <color name="coomi_night_orange_soft">#3A2821</color>
+    <color name="coomi_night_orange_border">#5E3B2E</color>
+    <color name="coomi_night_bg">#131518</color>
+    <color name="coomi_night_page">#191C21</color>
+    <color name="coomi_night_fill">#1A1D22</color>
+    <color name="coomi_night_border">#252A32</color>
+    <color name="coomi_night_text">#E7E9EE</color>
+    <color name="coomi_night_text_2">#9AA2AF</color>
+    <color name="coomi_night_text_3">#68717F</color>
+    <color name="coomi_night_blue_soft">#1C2C50</color>
+    <color name="coomi_night_danger_soft">#3D241F</color>
 </resources>

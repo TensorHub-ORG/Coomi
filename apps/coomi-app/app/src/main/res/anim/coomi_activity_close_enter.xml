@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 复刻 Android 16 framework activity_close_enter：
+     下层页 450ms 从 -96dp 滑回原位 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shareInterpolator="false">
+    <alpha
+        android:interpolator="@android:interpolator/linear"
+        android:duration="450"
+        android:fromAlpha="1.0"
+        android:toAlpha="1.0"
+        android:fillBefore="true"
+        android:fillAfter="true"
+        android:fillEnabled="true" />
+    <translate
+        android:interpolator="@interpolator/coomi_fast_out_extra_slow_in"
+        android:duration="450"
+        android:fromXDelta="-96dp"
+        android:toXDelta="0"
+        android:fillBefore="true"
+        android:fillAfter="true"
+        android:fillEnabled="true" />
+</set>

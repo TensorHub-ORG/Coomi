@@ -201,7 +201,9 @@ pub fn estimate_request_tokens(
         for image in &message.images {
             bytes = bytes
                 .saturating_add(u64::try_from(image.media_type.len()).unwrap_or(u64::MAX))
-                .saturating_add(u64::try_from(image.data.len()).unwrap_or(u64::MAX));
+                // 图片 base64 数据不计入 token 预算：全量数据会撑爆估算，
+                // 导致「读一张图就触发上下文压缩」。每张图按固定 ~85 token 估算。
+                .saturating_add(85 * 4);
         }
     }
     for tool in tools {

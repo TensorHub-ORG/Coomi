@@ -8,7 +8,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/coomi_white"
+    android:background="?attr/coomiPage"
     tools:context="app.coomi.CoomiLauncherActivity">
 
     <!-- ================= 阶段一：欢迎 / 权限 ================= -->
@@ -103,7 +103,7 @@
                                 android:layout_height="@dimen/coomi_icon_m"
                                 android:layout_gravity="center"
                                 android:src="@drawable/coomi_ic_bell"
-                                android:tint="@color/coomi_blue"
+                                android:tint="?attr/coomiBlue"
                                 android:contentDescription="@null"/>
                         </FrameLayout>
 
@@ -163,7 +163,7 @@
                                 android:layout_height="@dimen/coomi_icon_m"
                                 android:layout_gravity="center"
                                 android:src="@drawable/coomi_ic_battery"
-                                android:tint="@color/coomi_blue"
+                                android:tint="?attr/coomiBlue"
                                 android:contentDescription="@null"/>
                         </FrameLayout>
 

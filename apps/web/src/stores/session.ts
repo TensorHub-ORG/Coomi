@@ -104,12 +104,19 @@ export const useSessionStore = defineStore('session', () => {
       case 'reasoning_chunk': if (runState.value === 'idle') runState.value = 'thinking'; appendReasoning(ev.content); break
       case 'tool_start':
         endAssistantStream()
-        timeline.value.push({ kind: 'tool', callId: ev.call_id, toolName: ev.tool_name, arguments: ev.arguments, status: 'starting', expanded: false })
+        timeline.value.push({ kind: 'tool', callId: ev.call_id, toolName: ev.tool_name, arguments: ev.arguments, status: 'starting', expanded: ev.tool_name === 'show_image' })
         runState.value = 'executing'
         break
       case 'tool_running': patchTool(ev.call_id, c => c.status = 'running'); runState.value = 'executing'; break
       case 'tool_done':
-        patchTool(ev.call_id, c => { c.status = ev.is_error ? 'error' : 'success'; c.elapsed = ev.elapsed; c.resultPreview = ev.result_preview; c.isError = ev.is_error })
+        patchTool(ev.call_id, c => {
+          c.status = ev.is_error ? 'error' : 'success'
+          c.elapsed = ev.elapsed
+          c.resultPreview = ev.result_preview
+          c.isError = ev.is_error
+          // 工具产生的图片：瀑布流渲染（历史恢复时由 messages.images 补回）
+          if (Array.isArray(ev.images) && ev.images.length > 0) c.images = ev.images
+        })
         // 工具跑完不等于一轮结束 —— 模型接着想下一步。回 idle 只认 turn_end /
         // 取消 / 致命错误，否则输入区会在循环中途闪回「下达任务」和发送箭头。
         runState.value = 'thinking'
@@ -163,6 +170,12 @@ export const useSessionStore = defineStore('session', () => {
         loop.value = { ...loop.value, active: true, totalSteps: ev.total_steps, currentStep: ev.step_index, currentDescription: ev.step_description }
         break
       case 'turn_end': endAssistantStream(); cancelRunningTools(); connection.setRetry(null); runState.value = 'idle'; persistSoon(); break
+      case 'session_state': {
+        // 重连后引擎告知本会话是否仍在后台执行（切走会话后任务继续跑）。
+        sessions.refreshRunning()
+        if (ev.running && runState.value === 'idle') runState.value = 'thinking'
+        break
+      }
       case 'session_loaded': {
         // 打开历史会话时，引擎把持久化的累计用量推过来，避免显示 0。
         const u = ev.usage ?? {}
@@ -246,6 +259,20 @@ export const useSessionStore = defineStore('session', () => {
       const session = await res.json()
       const messages = (session.messages ?? []) as ChatMessageJson[]
       if (messages.length === 0) return false
+      if (messages.some(m => m.compaction_summary)) {
+        // 上下文已压缩：引擎只剩摘要 + 截断的部分历史。前端从未收到压缩版，
+        // 本机 localStorage 缓存仍是完整时间线 —— 优先用它恢复展示，
+        // 并把压缩摘要折叠成一条提示附在末尾。
+        const cached = sessions.loadTranscript(id)
+        if (cached && cached.length > 0) {
+          const detail = messages.find(m => m.compaction_summary)?.content ?? ''
+          timeline.value = [
+            ...cached,
+            { kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 点击查看摘要）', detail },
+          ]
+          return true
+        }
+      }
       timeline.value = messagesToTimeline(messages)
       return true
     } catch {
@@ -257,11 +284,11 @@ export const useSessionStore = defineStore('session', () => {
   function messagesToTimeline(messages: ChatMessageJson[]): Timelineitem[] {
     const items: Timelineitem[] = []
     const toolResults = new Map<string, string>()
+    const toolImages = new Map<string, string[]>()
     for (const m of messages) {
       if (m.internal) continue
       if (m.compaction_summary) {
-        const snippet = (m.content ?? '').slice(0, 120)
-        items.push({ kind: 'notice', id: nextId(), tone: 'info', text: `（上下文已压缩${snippet ? '：' + snippet + '…' : ''}）` })
+        items.push({ kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 点击查看摘要）', detail: m.content ?? '' })
         continue
       }
       if (m.role === 'user') {
@@ -272,11 +299,17 @@ export const useSessionStore = defineStore('session', () => {
           items.push({
             kind: 'tool', callId: tc.id, toolName: tc.name,
             arguments: tc.arguments as Record<string, unknown>,
-            status: 'success', expanded: false,
+            status: 'success', expanded: tc.name === 'show_image',
+            images: (tc.images ?? []).map((img: { media_type: string; data: string }) =>
+              `data:${img.media_type};base64,${img.data}`),
           })
         }
       } else if (m.role === 'tool' && m.tool_call_id) {
         toolResults.set(m.tool_call_id, m.content)
+        if (m.images?.length) {
+          toolImages.set(m.tool_call_id, m.images.map((img: { media_type: string; data: string }) =>
+            `data:${img.media_type};base64,${img.data}`))
+        }
       }
     }
     for (const item of items) {
@@ -290,6 +323,13 @@ export const useSessionStore = defineStore('session', () => {
           // 没有结果回填（比如被取消/未执行）的调用收尾为已取消
           item.status = 'cancelled'
           item.isError = true
+        }
+        const imgs = toolImages.get(item.callId)
+        if (imgs?.length) {
+          item.images = imgs
+        } else if (item.toolName === 'show_image' && item.expanded && item.status === 'success') {
+          // show_image 历史恢复但图片数据不可用（如已被上下文压缩清理）
+          item.imageMissing = true
         }
       }
     }
@@ -325,6 +365,7 @@ export const useSessionStore = defineStore('session', () => {
 
   function deleteSession(id: string) {
     sessions.remove(id)
+    try { localStorage.removeItem(`coomi.draft.${id}`) } catch { /* ignore */ }
     if (id === sessionId.value) newSession()
   }
 
@@ -386,10 +427,16 @@ function isUuid(value: string): boolean {
 interface ChatMessageJson {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
-  tool_calls?: Array<{ id: string; name: string; arguments: unknown }>
+  tool_calls?: Array<{
+    id: string
+    name: string
+    arguments: unknown
+    images?: Array<{ media_type: string; data: string }>
+  }>
   tool_call_id?: string
   compaction_summary?: boolean
   internal?: boolean
+  images?: Array<{ media_type: string; data: string }>
 }
 
 function createSessionId(): string {

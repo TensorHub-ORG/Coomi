@@ -5,6 +5,6 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24"
-    android:tint="@color/coomi_text_2">
+    android:tint="?attr/coomiText2">
     <path android:pathData="M8.4,7.6h7.2a1.4,1.4 0 0,1 1.4,1.4v6a1.4,1.4 0 0,1 -1.4,1.4H8.4a1.4,1.4 0 0,1 -1.4,-1.4v-6a1.4,1.4 0 0,1 1.4,-1.4z" android:fillColor="#000000"/>
 </vector>

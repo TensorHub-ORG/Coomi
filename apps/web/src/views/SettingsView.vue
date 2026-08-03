@@ -3,9 +3,9 @@
  * 设置。分组白卡 + 行的结构，选中态用蓝勾而不是描边 ——
  * 和抽屉、空态里的选中语言保持一致。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useConfigStore, PERMISSION_MODES } from '@/stores/config'
+import { useConfigStore, PERMISSION_MODES, THEME_MODES } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { useConnectionStore } from '@/stores/connection'
@@ -18,6 +18,17 @@ const config = useConfigStore()
 const session = useSessionStore()
 const sessions = useSessionsStore()
 const connection = useConnectionStore()
+
+/** 全局记忆开关同步失败时的行内提示。 */
+const gmError = ref('')
+async function toggleGlobalMemory() {
+  gmError.value = ''
+  try {
+    await config.toggleGlobalMemory()
+  } catch (e) {
+    gmError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 
 const MODE_ICON: Record<PermissionMode, string> = { ask: 'shield', auto: 'bolt', full: 'plusCircle' }
 
@@ -60,13 +71,27 @@ function isCurrent(providerId: string, model: string): boolean {
           </span>
           <span class="sw" :class="{ on: config.planMode }" />
         </button>
-        <button class="row" @click="config.toggleGlobalMemory()">
+        <button class="row" @click="toggleGlobalMemory">
           <span class="ri" :class="{ on: config.globalMemory }"><CoomiIcon name="clock" :size="17" /></span>
           <span class="rt">
             <span class="rmain">全局会话记忆</span>
-            <span class="rsub">开启后 Coomi 可读取所有历史会话文件</span>
+            <span class="rsub" :class="{ err: !!gmError }">{{ gmError || '开启后 Coomi 可读取所有历史会话文件' }}</span>
           </span>
           <span class="sw" :class="{ on: config.globalMemory }" />
+        </button>
+      </div>
+
+      <p class="sec-label">外观</p>
+      <div class="group">
+        <button v-for="m in THEME_MODES" :key="m.mode" class="row" @click="config.setThemeMode(m.mode)">
+          <span class="ri" :class="{ on: config.themeMode === m.mode }">
+            <CoomiIcon :name="m.mode === 'dark' ? 'moon' : m.mode === 'light' ? 'sun' : 'phone'" :size="17" />
+          </span>
+          <span class="rt">
+            <span class="rmain">{{ m.label }}</span>
+            <span class="rsub">{{ m.desc }}</span>
+          </span>
+          <CoomiIcon v-if="config.themeMode === m.mode" name="check" :size="17" class="tick" />
         </button>
       </div>
 
@@ -83,27 +108,6 @@ function isCurrent(providerId: string, model: string): boolean {
       </div>
       <p class="sec-label">配置</p>
       <div class="group">
-        <button class="row" @click="router.push('/providers')">
-          <span class="ri"><CoomiIcon name="key" :size="17" /></span>
-          <span class="rt"><span class="rmain">Provider / API Key</span></span>
-          <span class="rside">{{ config.providers.length }}</span>
-          <CoomiIcon name="chevronRight" :size="15" class="arw" />
-        </button>
-        <button class="row" @click="router.push('/catalog')">
-          <span class="ri"><CoomiIcon name="plug" :size="17" /></span>
-          <span class="rt"><span class="rmain">SKILL / MCP 管理</span></span>
-          <CoomiIcon name="chevronRight" :size="15" class="arw" />
-        </button>
-        <button class="row" @click="router.push('/runtime')">
-          <span class="ri"><CoomiIcon name="cpu" :size="17" /></span>
-          <span class="rt"><span class="rmain">内置环境</span></span>
-          <CoomiIcon name="chevronRight" :size="15" class="arw" />
-        </button>
-        <button class="row" @click="router.push('/files')">
-          <span class="ri"><CoomiIcon name="folder" :size="17" /></span>
-          <span class="rt"><span class="rmain">文件管理</span></span>
-          <CoomiIcon name="chevronRight" :size="15" class="arw" />
-        </button>
         <button class="row" @click="router.push('/sessions')">
           <span class="ri"><CoomiIcon name="chat" :size="17" /></span>
           <span class="rt"><span class="rmain">会话历史</span></span>
@@ -151,6 +155,7 @@ function isCurrent(providerId: string, model: string): boolean {
 .rmain { font-size: 14.5px; font-weight: 550; color: var(--text); }
 .rmain.mono { font-family: var(--font-mono); font-size: 13.2px; word-break: break-all; }
 .rsub { font-size: 12.2px; line-height: 1.5; color: var(--text-3); }
+.rsub.err { color: var(--danger, #d43d2e); }
 .rside { flex-shrink: 0; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .tick { flex-shrink: 0; color: var(--blue); }
 .arw { flex-shrink: 0; color: var(--text-3); }

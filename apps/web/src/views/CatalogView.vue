@@ -12,6 +12,18 @@ import { authedFetch } from '@/bridge/http'
 
 const router = useRouter()
 
+/** 解析引擎响应：兼容空 body（旧引擎进程对未知路由返回 404 空体），错误带可读信息。 */
+async function parseRes(res: Response): Promise<any> {
+  const text = await res.text()
+  let data: any = {}
+  try { data = text ? JSON.parse(text) : {} } catch { data = {} }
+  if (!res.ok) {
+    const detail = data.error ?? data.message ?? ''
+    throw new Error(detail || `HTTP ${res.status}${text ? '' : '（引擎响应为空，可能版本过旧，请重启应用）'}`)
+  }
+  return data
+}
+
 type Tab = 'mcp' | 'skills'
 const tab = ref<Tab>('mcp')
 
@@ -20,7 +32,7 @@ interface McpItem {
   id: string; name: string; description: string; transport: string
   required_parameters: RequiredParam[]; installed: boolean; enabled: boolean
 }
-interface SkillItem { id: string; name: string; description: string; repository: string; installed: boolean }
+interface SkillItem { id: string; name: string; description: string; repository: string; installed: boolean; enabled: boolean }
 
 const mcp = ref<McpItem[]>([])
 const skills = ref<SkillItem[]>([])
@@ -63,53 +75,53 @@ function confirmSkillInstall(item: SkillItem) {
   askSkill.value = item
 }
 
-// ── MCP 卸载（已安装项可卸载，带确认）──
-const askUninstall = ref<McpItem | null>(null)
+// ── 停用 / 启用（管理页卸载 = 停用可恢复；删除 = 彻底删除）──
+const askDelete = ref<{ kind: 'mcp' | 'skill'; item: McpItem | SkillItem } | null>(null)
 
-function confirmUninstall(item: McpItem) {
-  askUninstall.value = item
-}
-
-async function uninstallMcp() {
-  const item = askUninstall.value
-  if (!item) return
+async function setEnabled(kind: 'mcp' | 'skill', item: McpItem | SkillItem, enabled: boolean) {
   busy.value = item.id
   notice.value = ''
   try {
-    const res = await authedFetch(`/api/catalog/mcp/${item.id}`, { method: 'DELETE' })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? data.message ?? `HTTP ${res.status}`)
-    notice.value = `已卸载 MCP「${item.name}」，重启引擎或新开会话后生效`
-    askUninstall.value = null
+    // 注意：引擎路由为 /api/catalog/{mcp,skills}/...（skills 是复数）
+    const resource = kind === 'mcp' ? 'mcp' : 'skills'
+    const res = await authedFetch(`/api/catalog/${resource}/${item.id}/enabled`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+    await parseRes(res)
+    // 本地乐观更新：立即反映按钮/徽标状态（不依赖后续 load 是否成功）。
+    item.enabled = enabled
+    notice.value = enabled
+      ? `已启用${kind === 'mcp' ? ' MCP' : ' Skill'}「${item.name}」，新开会话后生效`
+      : `已停用${kind === 'mcp' ? ' MCP' : ' Skill'}「${item.name}」，文件与配置已保留，可随时重新启用`
     await load()
   } catch (e) {
-    notice.value = `卸载失败：${e instanceof Error ? e.message : String(e)}`
+    notice.value = `${enabled ? '启用' : '停用'}失败：${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = null
   }
 }
 
-// ── Skill 卸载（带确认）──
-const askSkillUninstall = ref<SkillItem | null>(null)
-
-function confirmSkillUninstall(item: SkillItem) {
-  askSkillUninstall.value = item
+function confirmDelete(kind: 'mcp' | 'skill', item: McpItem | SkillItem) {
+  askDelete.value = { kind, item }
 }
 
-async function uninstallSkill() {
-  const item = askSkillUninstall.value
-  if (!item) return
-  busy.value = item.id
+async function deleteItem() {
+  const target = askDelete.value
+  if (!target) return
+  busy.value = target.item.id
   notice.value = ''
   try {
-    const res = await authedFetch(`/api/catalog/skills/${item.id}`, { method: 'DELETE' })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? data.message ?? `HTTP ${res.status}`)
-    notice.value = `已卸载 Skill「${item.name}」，重启引擎或新开会话后生效`
-    askSkillUninstall.value = null
+    // 注意：引擎路由为 /api/catalog/{mcp,skills}/...（skills 是复数）
+    const resource = target.kind === 'mcp' ? 'mcp' : 'skills'
+    const res = await authedFetch(`/api/catalog/${resource}/${target.item.id}`, { method: 'DELETE' })
+    await parseRes(res)
+    notice.value = `已彻底删除${target.kind === 'mcp' ? ' MCP' : ' Skill'}「${target.item.name}」`
+    askDelete.value = null
     await load()
   } catch (e) {
-    notice.value = `卸载失败：${e instanceof Error ? e.message : String(e)}`
+    notice.value = `删除失败：${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = null
   }
@@ -133,7 +145,7 @@ async function load() {
   try {
     const res = await authedFetch('/api/catalog')
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await parseRes(res)
     mcp.value = data.mcp ?? []
     skills.value = data.skills ?? []
   } catch (e) {
@@ -154,8 +166,7 @@ async function installMcp() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: item.id, values: installValues.value }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? data.message ?? `HTTP ${res.status}`)
+    await parseRes(res)
     notice.value = `已安装 MCP「${item.name}」，重启引擎或新开会话后生效`
     closeInstallForm()
     await load()
@@ -175,8 +186,7 @@ async function installSkill(item: SkillItem) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: item.id }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? data.message ?? `HTTP ${res.status}`)
+    await parseRes(res)
     notice.value = `已安装 Skill「${item.name}」，重启引擎或新开会话后生效`
     await load()
   } catch (e) {
@@ -187,11 +197,16 @@ async function installSkill(item: SkillItem) {
 }
 
 onMounted(load)
+// 从控制台进入：返回统一回控制台（浏览器环境回聊天主页）
+function goDashboard() {
+  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
+  else router.push('/')
+}
 </script>
 
 <template>
   <div class="page">
-    <PageHead title="SKILL / MCP 管理" @back="router.push('/')" />
+    <PageHead title="SKILL / MCP 管理" @back="goDashboard" />
     <main class="body">
       <div class="tabs">
         <button class="tab" :class="{ on: tab === 'mcp' }" @click="tab = 'mcp'">
@@ -227,16 +242,25 @@ onMounted(load)
               <p class="cdesc">{{ item.description }}</p>
               <span class="cmeta"><CoomiIcon name="link" :size="12" />{{ item.transport }}</span>
             </div>
+            <template v-if="item.installed">
+              <button
+                class="act"
+                :disabled="busy !== null"
+                @click="setEnabled('mcp', item, !item.enabled)"
+              >
+                {{ item.enabled ? '停用' : '启用' }}
+              </button>
+              <button class="act danger" :disabled="busy !== null" @click="confirmDelete('mcp', item)">
+                删除
+              </button>
+            </template>
             <button
-              v-if="!item.installed"
+              v-else
               class="act"
               :disabled="busy !== null"
               @click="confirmMcpInstall(item)"
             >
               {{ busy === item.id ? '安装中…' : '安装' }}
-            </button>
-            <button v-else class="act danger" :disabled="busy !== null" @click="confirmUninstall(item)">
-              卸载
             </button>
           </div>
         </div>
@@ -253,36 +277,54 @@ onMounted(load)
             <div class="cbody">
               <div class="cline">
                 <span class="cname">{{ item.name }}</span>
-                <span v-if="item.installed" class="badge ok">已安装</span>
+                <span v-if="item.installed" class="badge" :class="item.enabled ? 'ok' : 'off'">
+                  {{ item.enabled ? '已启用' : '已停用' }}
+                </span>
                 <span v-else class="badge plain">未安装</span>
               </div>
               <p class="cdesc">{{ item.description }}</p>
               <span v-if="item.repository" class="cmeta"><CoomiIcon name="globe" :size="12" />{{ item.repository }}</span>
             </div>
+            <template v-if="item.installed">
+              <button
+                class="act"
+                :disabled="busy !== null"
+                @click="setEnabled('skill', item, !item.enabled)"
+              >
+                {{ item.enabled ? '停用' : '启用' }}
+              </button>
+              <button class="act danger" :disabled="busy !== null" @click="confirmDelete('skill', item)">
+                删除
+              </button>
+            </template>
             <button
-              v-if="!item.installed"
+              v-else
               class="act"
               :disabled="busy !== null"
               @click="confirmSkillInstall(item)"
             >
               {{ busy === item.id ? '安装中…' : '安装' }}
             </button>
-            <button v-else class="act danger" :disabled="busy !== null" @click="confirmSkillUninstall(item)">
-              卸载
-            </button>
           </div>
         </div>
       </template>
 
-      <!-- MCP 卸载确认 -->
-      <div v-if="askUninstall" class="sheet-mask" @click.self="askUninstall = null">
+      <!-- 彻底删除确认（管理页卸载 = 停用可恢复，删除 = 彻底删除） -->
+      <div v-if="askDelete" class="sheet-mask" @click.self="askDelete = null">
         <div class="sheet">
           <div class="grip" />
-          <div class="stitle"><CoomiIcon name="plug" :size="17" />卸载 MCP「{{ askUninstall.name }}」？</div>
-          <p class="sdesc">将从 config/mcp_servers.json 中移除该服务，重启引擎或新开会话后生效。</p>
+          <div class="stitle">
+            <CoomiIcon :name="askDelete.kind === 'mcp' ? 'plug' : 'wrench'" :size="17" />
+            彻底删除{{ askDelete.kind === 'mcp' ? ' MCP' : ' Skill' }}「{{ askDelete.item.name }}」？
+          </div>
+          <p class="sdesc">
+            {{ askDelete.kind === 'mcp'
+              ? '将从 config/mcp_servers.json 中移除该服务（不可恢复）。若只是想暂时不用，请改用「停用」。'
+              : '将删除已安装的 Skill 目录与配置记录（不可恢复）。若只是想暂时不用，请改用「停用」。' }}
+          </p>
           <div class="sheet-actions">
-            <button class="btn ghost" @click="askUninstall = null">取消</button>
-            <button class="btn danger-solid" :disabled="busy !== null" @click="uninstallMcp">确认卸载</button>
+            <button class="btn ghost" @click="askDelete = null">取消</button>
+            <button class="btn danger-solid" :disabled="busy !== null" @click="deleteItem">确认彻底删除</button>
           </div>
         </div>
       </div>
@@ -301,19 +343,6 @@ onMounted(load)
           <div class="sheet-actions">
             <button class="btn ghost" @click="askMcp = null">取消</button>
             <button class="btn primary" @click="proceedMcp">继续配置</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Skill 卸载确认 -->
-      <div v-if="askSkillUninstall" class="sheet-mask" @click.self="askSkillUninstall = null">
-        <div class="sheet">
-          <div class="grip" />
-          <div class="stitle"><CoomiIcon name="wrench" :size="17" />卸载 Skill「{{ askSkillUninstall.name }}」？</div>
-          <p class="sdesc">将删除已安装的 Skill 目录与配置记录，重启引擎或新开会话后生效。</p>
-          <div class="sheet-actions">
-            <button class="btn ghost" @click="askSkillUninstall = null">取消</button>
-            <button class="btn danger-solid" :disabled="busy !== null" @click="uninstallSkill">确认卸载</button>
           </div>
         </div>
       </div>

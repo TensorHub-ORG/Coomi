@@ -1,19 +1,25 @@
 package com.termux.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
+import android.util.Base64;
 import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.content.res.Configuration;
@@ -35,6 +41,7 @@ import app.coomi.CoomiDemo;
 import app.coomi.CoomiEngineMonitor;
 import app.coomi.CoomiService;
 import app.coomi.CoomiDashboardActivity;
+import app.coomi.CoomiTheme;
 import com.termux.R;
 import com.termux.shared.logger.Logger;
 
@@ -63,6 +70,10 @@ public class CoomiActivity extends Activity {
     private static final int REQUEST_IMPORT_FILES = 2101;
     private static final int REQUEST_AUTHORIZE_TREE = 2102;
     private static final int REQUEST_EXPORT_FILE = 2103;
+    private static final int REQUEST_SAVE_IMAGE = 2104;
+    /** 旧系统（API < 29）走 SAF 保存对话框时的待写图片数据。 */
+    private byte[] mPendingImageBytes;
+    private String mPendingImageName;
 
     /** Intent extra：直达前端 hash 路由，如 "#/catalog"。 */
     public static final String EXTRA_ROUTE = "coomi.route";
@@ -102,6 +113,7 @@ public class CoomiActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        CoomiTheme.applyWebTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_coomi);
         mWebView = findViewById(R.id.coomi_webview);
@@ -296,8 +308,8 @@ public class CoomiActivity extends Activity {
     private void showLoading(String text) {
         runOnUiThread(() -> {
             if (mLoadingText == null) return;
-            mLoadingText.setTextColor(
-                ContextCompat.getColor(mLoadingText.getContext(), R.color.coomi_text_2));
+            mLoadingText.setTextColor(ContextCompat.getColor(mLoadingText.getContext(),
+                CoomiTheme.isDark(CoomiActivity.this) ? R.color.coomi_night_text_2 : R.color.coomi_text_2));
             mLoadingText.setText(text);
             mLoadingDetail.setVisibility(View.GONE);
             mRetryButton.setVisibility(View.GONE);
@@ -322,8 +334,8 @@ public class CoomiActivity extends Activity {
     private void showFailure(String message, String detail) {
         runOnUiThread(() -> {
             if (mLoadingText == null) return;
-            mLoadingText.setTextColor(
-                ContextCompat.getColor(mLoadingText.getContext(), R.color.coomi_danger));
+            mLoadingText.setTextColor(ContextCompat.getColor(mLoadingText.getContext(),
+                CoomiTheme.isDark(CoomiActivity.this) ? R.color.coomi_night_danger : R.color.coomi_danger));
             mLoadingText.setText(message);
             mSplashSpinner.setVisibility(View.GONE);
             mRetryButton.setVisibility(View.VISIBLE);
@@ -336,31 +348,53 @@ public class CoomiActivity extends Activity {
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);
         finish();
+        // 返回动画与系统设置页（运行权限/手机存储访问）一致：
+        // 复刻 framework 的 activity_close_enter / activity_close_exit 源码动画。
+        overridePendingTransition(R.anim.coomi_activity_close_enter, R.anim.coomi_activity_close_exit);
     }
 
-    /** 系统是否处于深色模式（Theme.Coomi 刻意固定浅色，但 Web 内容需跟随系统）。 */
-    private boolean isSystemDark() {
-        int mode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        return mode == Configuration.UI_MODE_NIGHT_YES;
+    /** 是否深色：按三档主题偏好（system 跟随系统）计算，Web 内容与原生状态栏共用。 */
+    private boolean isDark() {
+        return CoomiTheme.isDark(this);
     }
 
-    /** 把系统深浅色写入 <html data-theme>，前端 global.css 据此切换暗色主题。 */
+    /** 把深浅色写入 <html data-theme>，前端 global.css 据此切换暗色主题。 */
     private void applyThemeToWebView() {
         if (mWebView == null) return;
         runOnUiThread(() -> evaluateJavascript(
-            "document.documentElement.setAttribute('data-theme','" + (isSystemDark() ? "dark" : "light") + "')"));
+            "document.documentElement.setAttribute('data-theme','" + (isDark() ? "dark" : "light") + "')"));
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         // 系统切换深浅色时实时同步到 Web 内容（configChanges 含 uiMode，Activity 不重建）。
+        // 跟随系统档位下状态栏颜色也随之刷新；手动档位不受系统变化影响。
+        if (CoomiTheme.MODE_SYSTEM.equals(CoomiTheme.getMode(this))) {
+            runOnUiThread(() -> CoomiTheme.applySystemBars(this));
+        }
         applyThemeToWebView();
     }
 
     private final class AndroidBridge {
         @JavascriptInterface
         public void openDashboard() { runOnUiThread(CoomiActivity.this::openDashboard); }
+
+        /** 当前主题档位（system/light/dark），前端初始化时同步。 */
+        @JavascriptInterface
+        public String getThemeMode() {
+            return CoomiTheme.getMode(CoomiActivity.this);
+        }
+
+        /** 前端设置页切换主题档位：持久化 + 刷新 Web 主题与原生状态栏。 */
+        @JavascriptInterface
+        public void setThemeMode(String mode) {
+            CoomiTheme.setMode(CoomiActivity.this, mode);
+            runOnUiThread(() -> {
+                applyThemeToWebView();
+                CoomiTheme.applySystemBars(CoomiActivity.this);
+            });
+        }
 
         @JavascriptInterface
         public void importFiles() {
@@ -434,6 +468,90 @@ public class CoomiActivity extends Activity {
             launchExportPicker(path, suggestedName);
         }
 
+        /**
+         * 保存图片（data URL）到相册或下载目录。
+         * Android 10+（API 29+）：MediaStore 免权限直写，弹二选一；
+         * 旧系统：走 SAF「另存为」对话框（用户自选位置，免权限）。
+         */
+        @JavascriptInterface
+        public void saveImageData(String dataUrl, String fileName) {
+            byte[] bytes = decodeDataUrl(dataUrl);
+            if (bytes == null) {
+                Toast.makeText(CoomiActivity.this, "图片数据无效", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            final String mime = mimeFromDataUrl(dataUrl);
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    new AlertDialog.Builder(CoomiActivity.this)
+                        .setTitle("保存图片")
+                        .setItems(new String[]{"保存到相册", "保存到下载目录"}, (dialog, which) -> {
+                            new Thread(() -> {
+                                boolean ok = saveViaMediaStore(which == 0, bytes, mime, fileName);
+                                runOnUiThread(() -> Toast.makeText(
+                                    CoomiActivity.this, ok ? "已保存" : "保存失败", Toast.LENGTH_SHORT).show());
+                            }).start();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+                } else {
+                    // 旧系统：SAF 另存为（免存储权限）
+                    mPendingImageBytes = bytes;
+                    mPendingImageName = TextUtils.isEmpty(fileName) ? "coomi-image.png" : fileName;
+                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType(mime);
+                    intent.putExtra(Intent.EXTRA_TITLE, mPendingImageName);
+                    startActivityForResult(intent, REQUEST_SAVE_IMAGE);
+                }
+            });
+        }
+
+        /** 解析 data:image/png;base64,.... → bytes；非法返回 null。 */
+        private byte[] decodeDataUrl(String dataUrl) {
+            try {
+                int comma = dataUrl.indexOf("base64,");
+                if (comma < 0) return null;
+                return Base64.decode(dataUrl.substring(comma + "base64,".length()), Base64.DEFAULT);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        private String mimeFromDataUrl(String dataUrl) {
+            try {
+                int semi = dataUrl.indexOf(';');
+                int colon = dataUrl.indexOf(':');
+                if (colon >= 0 && semi > colon) return dataUrl.substring(colon + 1, semi);
+            } catch (Exception ignored) { }
+            return "image/png";
+        }
+
+        /** API 29+：MediaStore 直写相册（Pictures/Coomi）或下载目录（Download/Coomi）。 */
+        private boolean saveViaMediaStore(boolean toGallery, byte[] bytes, String mime, String fileName) {
+            try {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                values.put(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    (toGallery ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_DOWNLOADS) + "/Coomi");
+                Uri collection = toGallery
+                    ? MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    : MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+                Uri uri = getContentResolver().insert(collection, values);
+                if (uri == null) return false;
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    if (out == null) return false;
+                    out.write(bytes);
+                }
+                return true;
+            } catch (Exception e) {
+                Logger.logError(LOG_TAG, "saveViaMediaStore failed: " + e.getMessage());
+                return false;
+            }
+        }
+
         private void launchExportPicker(String path, String suggestedName) {
             runOnUiThread(() -> {
                 File source = new File(path);
@@ -488,6 +606,23 @@ public class CoomiActivity extends Activity {
         } else if (requestCode == REQUEST_EXPORT_FILE && data.getData() != null) {
             Uri target = data.getData();
             new Thread(() -> exportToUri(target), "coomi-file-export").start();
+        } else if (requestCode == REQUEST_SAVE_IMAGE && data.getData() != null) {
+            Uri target = data.getData();
+            byte[] bytes = mPendingImageBytes;
+            mPendingImageBytes = null;
+            new Thread(() -> {
+                boolean ok = false;
+                if (bytes != null) {
+                    try (java.io.OutputStream out = getContentResolver().openOutputStream(target)) {
+                        if (out != null) { out.write(bytes); ok = true; }
+                    } catch (Exception e) {
+                        Logger.logError(LOG_TAG, "save image failed: " + e.getMessage());
+                    }
+                }
+                final boolean saved = ok;
+                runOnUiThread(() -> Toast.makeText(
+                    CoomiActivity.this, saved ? "已保存" : "保存失败", Toast.LENGTH_SHORT).show());
+            }, "coomi-image-save").start();
         }
     }
 

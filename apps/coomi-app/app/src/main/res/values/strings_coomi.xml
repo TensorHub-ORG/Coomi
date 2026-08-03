@@ -16,6 +16,11 @@
     <string name="coomi_dash_provider_settings_desc">密钥、模型与服务地址</string>
     <string name="coomi_dash_storage_settings">手机存储访问</string>
     <string name="coomi_dash_storage_settings_desc">允许 Agent 读取真实手机目录</string>
+    <string name="coomi_dash_section_appearance">外观</string>
+    <string name="coomi_dash_appearance_desc">控制台与对话界面的明暗风格</string>
+    <string name="coomi_dash_theme_system">跟随系统</string>
+    <string name="coomi_dash_theme_light">明亮</string>
+    <string name="coomi_dash_theme_dark">夜间</string>
     <string name="coomi_auth_discover_models">检索可用模型</string>
     <string name="coomi_auth_discovering">正在检索可用模型…</string>
     <string name="coomi_auth_discovered">已更新可用模型</string>
@@ -99,6 +104,8 @@
     <string name="coomi_dash_catalog_desc">安装与管理 Skills 和 MCP Server</string>
     <string name="coomi_dash_files">文件管理</string>
     <string name="coomi_dash_files_desc">浏览独立环境，管理项目文件</string>
+    <string name="coomi_dash_env_settings">内置环境</string>
+    <string name="coomi_dash_env_settings_desc">运行状态与环境信息</string>
     <string name="coomi_dash_check_update">检查更新</string>
     <string name="coomi_dash_check_update_desc">从更新源获取新版本并下载安装</string>
     <string name="coomi_dash_checking">正在检查更新…</string>

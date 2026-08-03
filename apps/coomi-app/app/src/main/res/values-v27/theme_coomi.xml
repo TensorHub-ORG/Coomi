@@ -24,5 +24,25 @@
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
 
         <item name="android:editTextBackground">@drawable/coomi_bg_input</item>
+
+        <!-- 设计令牌：layout 引用 ?attr/coomiXxx（与 values/theme_coomi.xml 保持一致） -->
+        <item name="coomiPage">@color/coomi_page</item>
+        <item name="coomiText">@color/coomi_text</item>
+        <item name="coomiText2">@color/coomi_text_2</item>
+        <item name="coomiText3">@color/coomi_text_3</item>
+        <item name="coomiCard">@color/coomi_white</item>
+        <item name="coomiBorder">@color/coomi_border</item>
+        <item name="coomiDivider">@color/coomi_divider</item>
+        <item name="coomiFill">@color/coomi_fill</item>
+        <item name="coomiBlue">@color/coomi_blue</item>
+        <item name="coomiBlueSoft">@color/coomi_blue_soft</item>
+        <item name="coomiOk">@color/coomi_ok</item>
+        <item name="coomiOkSoft">@color/coomi_ok_soft</item>
+        <item name="coomiDanger">@color/coomi_danger</item>
+        <item name="coomiDangerSoft">@color/coomi_danger_soft</item>
+        <item name="coomiWarnSoft">@color/coomi_warn_soft</item>
+        <item name="coomiOrange">@color/coomi_orange</item>
+        <item name="coomiOrangeSoft">@color/coomi_orange_soft</item>
+        <item name="coomiOrangeBorder">@color/coomi_orange_border</item>
     </style>
 </resources>

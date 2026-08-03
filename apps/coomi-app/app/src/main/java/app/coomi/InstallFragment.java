@@ -213,7 +213,8 @@ public class InstallFragment extends Fragment implements CoomiSetupActivity.Step
         for (int i = 0; i < mPhaseViews.length; i++) setPhase(i, PHASE_DONE);
         mStatusSpinner.setVisibility(View.GONE);
         mStatusCheck.setVisibility(View.VISIBLE);
-        mStepStatus.setTextColor(ContextCompat.getColor(requireContext(), R.color.coomi_ok));
+        mStepStatus.setTextColor(ContextCompat.getColor(requireContext(),
+            CoomiTheme.isDark(requireActivity()) ? R.color.coomi_night_ok : R.color.coomi_ok));
         mStepStatus.setText(R.string.coomi_install_done_title);
         mProgressText.setText(R.string.coomi_install_done_desc);
     }
@@ -234,7 +235,8 @@ public class InstallFragment extends Fragment implements CoomiSetupActivity.Step
         mProgressContainer.setVisibility(View.VISIBLE);
         mStatusSpinner.setVisibility(View.GONE);
         mStatusCheck.setVisibility(View.VISIBLE);
-        mStepStatus.setTextColor(ContextCompat.getColor(requireContext(), R.color.coomi_ok));
+        mStepStatus.setTextColor(ContextCompat.getColor(requireContext(),
+            CoomiTheme.isDark(requireActivity()) ? R.color.coomi_night_ok : R.color.coomi_ok));
         mStepStatus.setText(R.string.coomi_demo_install_title);
         mProgressText.setText(R.string.coomi_demo_install_desc);
     }

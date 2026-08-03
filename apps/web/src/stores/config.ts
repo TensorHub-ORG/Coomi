@@ -9,13 +9,14 @@ export interface ProviderConfig {
   type?: string; model?: string; fastModel?: string | null; toolProtocol?: string
   contextWindow?: number
   supportsWebSearch?: boolean
+  supportsVision?: boolean
   active?: boolean
 }
 
 export interface ProviderInput {
   id: string; name: string; apiKey: string; models: string[]
   baseUrl?: string; type?: string; toolProtocol?: string; contextWindow?: number
-  fastModel?: string | null; activate?: boolean; supportsWebSearch?: boolean
+  fastModel?: string | null; activate?: boolean; supportsWebSearch?: boolean; supportsVision?: boolean
 }
 
 export const PERMISSION_MODES: { mode: PermissionMode; label: string; desc: string }[] = [
@@ -23,6 +24,34 @@ export const PERMISSION_MODES: { mode: PermissionMode; label: string; desc: stri
   { mode: 'auto', label: '自动', desc: '读写自动放行，仅破坏性需确认' },
   { mode: 'full', label: '放行', desc: '全部自动执行（仅信任场景）' },
 ]
+
+/** 主题三档：system 跟随系统、light 明亮、dark 夜间。 */
+export type ThemeMode = 'system' | 'light' | 'dark'
+export const THEME_MODES: { mode: ThemeMode; label: string; desc: string }[] = [
+  { mode: 'system', label: '跟随系统', desc: '与手机系统深浅色保持一致' },
+  { mode: 'light', label: '明亮模式', desc: '始终使用浅色界面' },
+  { mode: 'dark', label: '夜间模式', desc: '始终使用深色界面' },
+]
+
+/** 取当前主题档位：优先 Android 原生偏好（JS 桥），其次 localStorage，默认跟随系统。 */
+export function readThemeMode(): ThemeMode {
+  const bridge = (window as any).CoomiAndroid
+  if (bridge && typeof bridge.getThemeMode === 'function') {
+    try {
+      const v = String(bridge.getThemeMode() ?? '')
+      if (v === 'light' || v === 'dark' || v === 'system') return v
+    } catch { /* 桥未就绪时走 localStorage */ }
+  }
+  const saved = localStorage.getItem('coomi.themeMode')
+  return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
+}
+
+/** 写入 <html data-theme>，前端 global.css 据此切换暗色主题。 */
+export function applyTheme(mode: ThemeMode) {
+  const dark = mode === 'dark'
+    || (mode === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+}
 
 // 浏览器独立开发时的兜底数据（后端不可达时使用）
 const MOCK_PROVIDERS: ProviderConfig[] = [
@@ -34,6 +63,7 @@ export const useConfigStore = defineStore('config', () => {
   const savedPermission = localStorage.getItem('coomi.permissionMode') as PermissionMode | null
   const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
   const planMode = ref(false)
+  const themeMode = ref<ThemeMode>(readThemeMode())
 
   const providers = ref<ProviderConfig[]>([])
   const activeId = ref('')
@@ -85,6 +115,22 @@ export const useConfigStore = defineStore('config', () => {
     permissionMode.value = mode
     localStorage.setItem('coomi.permissionMode', mode)
   }
+
+  /**
+   * 三档主题。应用后：
+   * - 写入 <html data-theme>（前端样式即时切换）；
+   * - Android WebView 内通知原生（CoomiAndroid.setThemeMode），原生据此改状态栏
+   *   颜色并重新注入 data-theme；桌面浏览器直接由 applyTheme 生效。
+   */
+  function setThemeMode(mode: ThemeMode) {
+    themeMode.value = mode
+    localStorage.setItem('coomi.themeMode', mode)
+    applyTheme(mode)
+    const bridge = (window as any).CoomiAndroid
+    if (bridge && typeof bridge.setThemeMode === 'function') {
+      try { bridge.setThemeMode(mode) } catch { /* 忽略桥异常 */ }
+    }
+  }
   function cyclePermissionMode(): PermissionMode {
     const order: PermissionMode[] = ['ask', 'auto', 'full']
     const idx = order.indexOf(permissionMode.value)
@@ -96,13 +142,34 @@ export const useConfigStore = defineStore('config', () => {
   /**
    * 全局会话记忆：关闭（默认）时 Coomi 无法读取任何历史会话文件；
    * 开启后它才能读取所有历史会话记录。历史会话列表始终可见，与本开关无关。
+   * 引擎 settings.json 是权威值；localStorage 只是 UI 缓存，启动时以引擎为准。
    */
   const globalMemory = ref(localStorage.getItem('coomi.globalMemory') === '1')
-  function toggleGlobalMemory() {
-    globalMemory.value = !globalMemory.value
-    localStorage.setItem('coomi.globalMemory', globalMemory.value ? '1' : '0')
+  /** 从引擎拉取权威值（应用启动时调用），覆盖本地缓存与开关显示。 */
+  async function syncGlobalMemoryFromEngine() {
+    try {
+      const data = await apiGet<{ enabled: boolean }>('/api/runtime/global-memory')
+      const enabled = !!data?.enabled
+      globalMemory.value = enabled
+      localStorage.setItem('coomi.globalMemory', enabled ? '1' : '0')
+    } catch {
+      /* 引擎未就绪：保持本地缓存，稍后用户操作开关时会再次同步 */
+    }
+  }
+  async function toggleGlobalMemory() {
+    const previous = globalMemory.value
+    const next = !previous
+    globalMemory.value = next
+    localStorage.setItem('coomi.globalMemory', next ? '1' : '0')
     // 同步引擎侧：关闭时引擎屏蔽会话/配置目录的工具访问 + 系统提示加隐私禁令。
-    void apiSend('/api/runtime/global-memory', 'POST', { enabled: globalMemory.value }).catch(() => {})
+    // 失败必须回滚并提示，否则会出现「开关显示关、引擎实际开着」的脱节。
+    try {
+      await apiSend('/api/runtime/global-memory', 'POST', { enabled: next })
+    } catch {
+      globalMemory.value = previous
+      localStorage.setItem('coomi.globalMemory', previous ? '1' : '0')
+      throw new Error('同步引擎失败，开关已还原')
+    }
   }
 
   /** 新增/更新 Provider。空 apiKey 表示沿用旧 key（后端语义）。 */
@@ -128,6 +195,7 @@ export const useConfigStore = defineStore('config', () => {
         contextWindow: input.contextWindow,
         fastModel: input.fastModel,
         supportsWebSearch: input.supportsWebSearch,
+        supportsVision: input.supportsVision,
         activate: input.activate,
       })
       await fetchProviders()
@@ -198,10 +266,10 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   return {
-    permissionMode, planMode, globalMemory, providers, activeId, loading, usingMock, lastError,
+    permissionMode, planMode, themeMode, globalMemory, providers, activeId, loading, usingMock, lastError,
     currentProviderId, currentModel, currentProvider,
-    fetchProviders, selectModel, setPermissionMode, cyclePermissionMode, togglePlanMode,
-    toggleGlobalMemory,
+    fetchProviders, selectModel, setPermissionMode, setThemeMode, cyclePermissionMode, togglePlanMode,
+    toggleGlobalMemory, syncGlobalMemoryFromEngine,
     upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels,
   }
 })

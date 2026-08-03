@@ -17,6 +17,7 @@ serde_yaml = "0.9"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.28"
 dirs = "6"
+fs2 = "0.4"
 ignore = "0.4"
 ratatui = "0.29"
 pulldown-cmark = "0.13"

@@ -65,6 +65,17 @@ impl Session {
     }
 }
 
+impl SessionStore {
+    /// 刷新会话的「最后执行时间」并落盘。
+    /// 列表排序以此为准：无论 agent 执行完成、被用户取消还是意外中断，
+    /// 都要记录最后一次执行的时间（cancel 等路径不会走 run_turn 的 save）。
+    pub fn touch_updated_at(&self, id: Uuid) -> Result<()> {
+        let mut session = self.load(id)?;
+        session.touch();
+        self.save(&session)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionSummary {
     pub id: Uuid,

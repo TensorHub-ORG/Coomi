@@ -11,7 +11,7 @@
     android:layout_height="match_parent"
     android:fillViewport="true"
     android:scrollbars="none"
-    android:background="@color/coomi_white">
+    android:background="?attr/coomiPage">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -133,7 +133,7 @@
                 android:padding="11dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/coomi_ic_eye"
-                android:tint="@color/coomi_text_3"
+                android:tint="?attr/coomiText3"
                 android:contentDescription="@string/coomi_auth_toggle_key"/>
         </FrameLayout>
 

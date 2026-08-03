@@ -8,7 +8,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/coomi_white"
+    android:background="?attr/coomiPage"
     android:fitsSystemWindows="true"
     tools:context="app.coomi.CoomiSetupActivity">
 
@@ -61,7 +61,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="@color/coomi_divider"/>
+        android:background="?attr/coomiDivider"/>
 
     <LinearLayout
         android:id="@+id/setup_nav_bar"
@@ -69,7 +69,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="@color/coomi_white"
+        android:background="?attr/coomiPage"
         android:paddingStart="@dimen/coomi_gutter"
         android:paddingEnd="@dimen/coomi_gutter"
         android:paddingTop="@dimen/coomi_space_m"

@@ -11,7 +11,7 @@ export interface TextChunkEvent { event_type: 'text_chunk'; content: string }
 export interface ReasoningChunkEvent { event_type: 'reasoning_chunk'; content: string }
 export interface ToolStartEvent { event_type: 'tool_start'; call_id: string; tool_name: string; arguments: Record<string, unknown> }
 export interface ToolRunningEvent { event_type: 'tool_running'; call_id: string; tool_name: string }
-export interface ToolDoneEvent { event_type: 'tool_done'; call_id: string; tool_name: string; elapsed: number; result_preview: string; is_error: boolean }
+export interface ToolDoneEvent { event_type: 'tool_done'; call_id: string; tool_name: string; elapsed: number; result_preview: string; is_error: boolean; images?: string[] }
 export interface ToolCacheHitEvent { event_type: 'tool_cache_hit'; call_id: string; tool_name: string }
 export interface UsageUpdateEvent { event_type: 'usage_update'; usage: UsageInfo }
 export interface ConnectionRetryEvent { event_type: 'connection_retry'; attempt: number; max_attempts: number; delay: number; message: string }
@@ -28,6 +28,8 @@ export interface ToolApprovalRequestEvent { event_type: 'tool_approval_request';
 export interface UserQuestionRequestEvent { event_type: 'user_question_request'; call_id: string; question: string; options?: string[]; allow_free_text?: boolean }
 export interface FileTransferRequestEvent { event_type: 'file_transfer_request'; request_id: string; operation: 'import' | 'export'; path?: string; suggested_name?: string; multiple: boolean }
 export interface TurnEndEvent { event_type: 'turn_end' }
+/** 重连补发：会话是否正在后台执行（切走会话后任务继续跑）。 */
+export interface SessionStateEvent { event_type: 'session_state'; running: boolean }
 export interface SessionLoadedEvent {
   event_type: 'session_loaded'
   session_id: string
@@ -43,6 +45,7 @@ export type AgentEvent =
   | LoopIssueCreatedEvent | ToolApprovalRequestEvent | UserQuestionRequestEvent
   | FileTransferRequestEvent
   | TurnEndEvent
+  | SessionStateEvent
   | SessionLoadedEvent
 
 export type AgentEventType = AgentEvent['event_type']

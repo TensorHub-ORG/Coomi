@@ -53,6 +53,8 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub model: String,
     pub fast_model: Option<String>,
+    /// 前端保存的模型列表（extra.models），用于 resolve 校验“已声明模型”。
+    pub models: Vec<String>,
     pub capabilities: coomi_engine::ModelCapabilities,
     pub remote_compaction_mode: RemoteCompactionMode,
 }
@@ -181,6 +183,15 @@ impl ProviderRegistry {
                     base_url: provider.base_url,
                     model: provider.model,
                     fast_model: provider.fast_model.filter(|value| !value.trim().is_empty()),
+                    models: provider
+                        .extra
+                        .get("models")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect(),
                     capabilities: coomi_engine::ModelCapabilities {
                         context_window: provider.context_window.unwrap_or(256_000),
                         effective_context_window_percent: provider
@@ -273,11 +284,14 @@ impl ProviderRegistry {
         if let Some((provider_id, model)) = selector.split_once(':')
             && let Some(provider) = self.find_provider(provider_id)
         {
+            // declared = model / fast_model 字段，或前端保存的 models 列表（extra.models）
+            let in_models = provider.models.iter().any(|candidate| candidate.eq_ignore_ascii_case(model));
             let allowed = provider.model.eq_ignore_ascii_case(model)
                 || provider
                     .fast_model
                     .as_deref()
-                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(model));
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(model))
+                || in_models;
             if allowed {
                 let mut provider = provider.clone();
                 provider.model = model.to_string();

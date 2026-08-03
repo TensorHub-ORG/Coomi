@@ -8,7 +8,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/coomi_white"
+    android:background="?attr/coomiPage"
     tools:context="com.termux.app.CoomiActivity">
 
     <!-- WebView：Vue 前端由 coomi-rs 通过 loopback 提供 -->
@@ -16,7 +16,7 @@
         android:id="@+id/coomi_webview"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@color/coomi_white"
+        android:background="?attr/coomiPage"
         android:visibility="gone"/>
 
     <!-- 启动闪屏 -->
@@ -26,7 +26,7 @@
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:gravity="center"
-        android:background="@color/coomi_white"
+        android:background="?attr/coomiPage"
         android:paddingStart="@dimen/coomi_gutter"
         android:paddingEnd="@dimen/coomi_gutter">
 

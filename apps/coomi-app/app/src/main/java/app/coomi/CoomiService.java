@@ -26,6 +26,9 @@ public class CoomiService extends Service {
     private static final String LOG_TAG = "CoomiService";
     private static final int HEALTH_CHECK_TIMEOUT_MS = 2000;
     private static final int CMD_TIMEOUT_SEC = 30;
+    /** ~/.profile 与 ~/.bashrc 里由 Coomi 管理的块标记：块内整体替换，块外保留用户内容。 */
+    private static final String SHELL_BLOCK_START = "# >>> Coomi Android managed block >>>";
+    private static final String SHELL_BLOCK_END = "# <<< Coomi Android managed block <<<";
 
     private final IBinder mBinder = new LocalBinder();
     private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
@@ -188,10 +191,13 @@ public class CoomiService extends Service {
         });
     }
 
+    /**
+     * 把 Coomi 需要的环境变量写入 ~/.profile / ~/.bashrc。
+     * 用「托管块」而非整文件覆盖：软件升级不会丢用户自定义的终端环境。
+     */
     private void writeShellEnvironment() throws Exception {
-        File profile = new File(home(), ".profile");
-        try (FileWriter writer = new FileWriter(profile)) {
-            writer.write("# Created by Coomi Android\n"
+        writeShellBlock(new File(home(), ".profile"),
+            "# Created by Coomi Android\n"
                 + "export PREFIX=\"" + prefix() + "\"\n"
                 + "export HOME=\"" + home() + "\"\n"
                 + "export COOMI_HOME=\"$HOME/.coomi\"\n"
@@ -199,15 +205,48 @@ public class CoomiService extends Service {
                 + "export SSL_CERT_FILE=\"$PREFIX/etc/tls/cert.pem\"\n"
                 + "export PATH=\"$PREFIX/bin:$PATH\"\n"
                 + "[ -f ~/.bashrc ] && . ~/.bashrc\n");
-        }
-        File bashrc = new File(home(), ".bashrc");
-        try (FileWriter writer = new FileWriter(bashrc)) {
-            writer.write("# Created by Coomi Android\n"
+        writeShellBlock(new File(home(), ".bashrc"),
+            "# Created by Coomi Android\n"
                 + "export COOMI_HOME=\"$HOME/.coomi\"\n"
                 + "export COOMI_SHELL=\"$PREFIX/bin/bash\"\n"
                 + "export SSL_CERT_FILE=\"$PREFIX/etc/tls/cert.pem\"\n"
                 + "alias ll='ls -la'\n");
+    }
+
+    /** 幂等合并写入：仅替换两个标记之间的托管块，块外用户内容原样保留。 */
+    private void writeShellBlock(File file, String body) throws Exception {
+        String existing = file.exists() ? readText(file) : "";
+        // 旧版（无块标记）整文件都是 Coomi 生成的：整体迁移为新格式。
+        // 旧版本来就是覆盖写，用户内容无从保留，一次性迁移后进入块保护。
+        if (!existing.isEmpty() && !existing.contains(SHELL_BLOCK_START)
+            && existing.contains("# Created by Coomi Android")) {
+            existing = "";
         }
+        String block = SHELL_BLOCK_START + "\n" + body + SHELL_BLOCK_END + "\n";
+        if (existing.contains(SHELL_BLOCK_START)) {
+            int start = existing.indexOf(SHELL_BLOCK_START);
+            int end = existing.indexOf(SHELL_BLOCK_END, start);
+            if (end >= 0) end += SHELL_BLOCK_END.length();
+            else end = start; // 块未闭合（被用户截断过），从标记处截掉
+            existing = existing.substring(0, start) + existing.substring(end);
+        }
+        String content = existing;
+        if (!content.isEmpty() && !content.endsWith("\n")) content += "\n";
+        content += block;
+        try (FileWriter writer = new FileWriter(file)) {
+            writer.write(content);
+        }
+    }
+
+    private static String readText(File file) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+        }
+        return sb.toString();
     }
 
     private void removeLegacyRuntimePayloads() {
@@ -222,18 +261,59 @@ public class CoomiService extends Service {
         mExecutor.execute(() -> callback.accept(startEngineSync()));
     }
 
+    /** 引擎自身写入的指纹（~/.coomi/engine.version，MD5+版本）是否与 APK 内二进制一致。 */
+    private boolean engineMatchesApk() {
+        try {
+            File versionFile = new File(CoomiConstants.COOMI_CONFIG_DIR, "engine.version");
+            if (!versionFile.isFile()) return false; // 旧引擎无指纹文件：视为不匹配，重启以加载新代码
+            String recorded = new String(
+                java.nio.file.Files.readAllBytes(versionFile.toPath()),
+                java.nio.charset.StandardCharsets.UTF_8
+            ).trim();
+            String current = binaryFingerprint(nativeBinary());
+            if (current.isEmpty()) return false;
+            return recorded.startsWith(current);
+        } catch (Exception e) {
+            Logger.logError(LOG_TAG, "engine fingerprint check failed: " + e.getMessage());
+            return true; // 读不到指纹时不冒险杀引擎
+        }
+    }
+
+    /** 文件 MD5（十六进制小写）；失败返回空串。 */
+    private static String binaryFingerprint(File file) {
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest()) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private CommandResult startEngineSync() {
         mIsEngineStarting = true;
         try {
             if (mEngineProcess != null && mEngineProcess.isAlive()) {
                 if (checkHealth(mEnginePort)) {
-                    mIsEngineStarting = false;
-                    return new CommandResult(true, "already running", "", 0);
+                    // 引擎进程活着且健康，但 APK 更新后引擎二进制可能已换新：
+                    // 旧进程加载的还是旧代码（新旧 API 不匹配，前端会 404）。
+                    // 对比引擎自身写入的二进制指纹，不一致则重启。
+                    if (engineMatchesApk()) {
+                        mIsEngineStarting = false;
+                        return new CommandResult(true, "already running", "", 0);
+                    }
+                    Logger.logInfo(LOG_TAG, "Engine binary changed (APK updated), restarting engine");
+                    stopEngineSync();
+                } else {
+                    // 进程活着但健康检查失败（假死/端口错乱）：先清理旧进程再重启，
+                    // 避免双引擎并发写同一会话目录。
+                    Logger.logInfo(LOG_TAG, "Engine process alive but unhealthy, killing before restart");
+                    stopEngineSync();
                 }
-                // 进程活着但健康检查失败（假死/端口错乱）：先清理旧进程再重启，
-                // 避免双引擎并发写同一会话目录。
-                Logger.logInfo(LOG_TAG, "Engine process alive but unhealthy, killing before restart");
-                stopEngineSync();
             }
             if (!isDeployComplete()) {
                 mIsEngineStarting = false;

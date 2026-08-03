@@ -43,7 +43,10 @@ impl HttpModelProvider {
         let endpoint = endpoint(&self.config.base_url, "chat/completions");
         let mut body = json!({
             "model": request.model,
-            "messages": openai_messages(&request.messages)?,
+            "messages": openai_messages(
+                &request.messages,
+                self.config.capabilities.supports_vision,
+            )?,
             "stream": false
         });
         if !request.tools.is_empty() {
@@ -92,7 +95,10 @@ impl HttpModelProvider {
         let endpoint = endpoint(&self.config.base_url, "chat/completions");
         let mut body = json!({
             "model": request.model,
-            "messages": openai_messages(&request.messages)?,
+            "messages": openai_messages(
+                &request.messages,
+                self.config.capabilities.supports_vision,
+            )?,
             "stream": true
         });
         if !request.tools.is_empty() {
@@ -137,7 +143,7 @@ impl HttpModelProvider {
         let endpoint = endpoint(&self.config.base_url, "responses/compact");
         let body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "instructions": request.system_prompt
         });
         let value = checked_json(
@@ -213,6 +219,7 @@ impl HttpModelProvider {
             &request,
             self.config.capabilities.supports_web_search,
             self.config.capabilities.supports_parallel_tool_calls,
+            self.config.capabilities.supports_vision,
         )?;
         let response = self
             .authenticated(self.client.post(endpoint))
@@ -237,7 +244,7 @@ impl HttpModelProvider {
         let endpoint = endpoint(&self.config.base_url, "responses");
         let mut body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "stream": false
         });
         let provider_tools =
@@ -298,7 +305,7 @@ impl HttpModelProvider {
         let endpoint = endpoint(&self.config.base_url, "responses");
         let mut body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "stream": true
         });
         let provider_tools =
@@ -325,7 +332,8 @@ impl HttpModelProvider {
 
     async fn anthropic_messages(&self, request: ModelRequest) -> Result<ModelResponse> {
         let endpoint = endpoint(&self.config.base_url, "messages");
-        let (system, messages) = anthropic_messages(&request.messages)?;
+        let (system, messages) =
+            anthropic_messages(&request.messages, self.config.capabilities.supports_vision)?;
         let mut body = json!({
             "model": request.model,
             "max_tokens": 8192,
@@ -409,7 +417,8 @@ impl HttpModelProvider {
         } else {
             format!("{base}/models/{}:generateContent", request.model)
         };
-        let (system, contents) = gemini_messages(&request.messages)?;
+        let (system, contents) =
+            gemini_messages(&request.messages, self.config.capabilities.supports_vision)?;
         let mut body = json!({"contents": contents});
         if !system.is_empty() {
             body["systemInstruction"] = json!({"parts": [{"text": system}]});
@@ -838,58 +847,70 @@ async fn checked_json(response: Response) -> Result<Value> {
     serde_json::from_str(&body).context("provider returned invalid JSON")
 }
 
-fn openai_messages(messages: &[ChatMessage]) -> Result<Vec<Value>> {
-    messages
-        .iter()
-        .filter(|message| message.provider_items.is_empty())
-        .map(|message| {
-            let value = match message.role {
-                Role::System => json!({"role": "system", "content": message.content}),
-                Role::User => json!({"role": "user", "content": message.content}),
-                Role::Assistant => {
-                    let mut value = json!({
-                        "role": "assistant",
-                        "content": if message.content.is_empty() { Value::Null } else { Value::String(message.content.clone()) }
-                    });
-                    if !message.tool_calls.is_empty() {
-                        value["tool_calls"] = Value::Array(
-                            message
-                                .tool_calls
-                                .iter()
-                                .map(|call| {
-                                    json!({
-                                        "id": call.id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": call.name,
-                                            "arguments": serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into())
-                                        }
-                                    })
+fn openai_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<Vec<Value>> {
+    let mut output = Vec::new();
+    for message in messages {
+        if !message.provider_items.is_empty() {
+            continue;
+        }
+        let value = match message.role {
+            Role::System => json!({"role": "system", "content": message.content}),
+            Role::User => json!({"role": "user", "content": message.content}),
+            Role::Assistant => {
+                let mut value = json!({
+                    "role": "assistant",
+                    "content": if message.content.is_empty() { Value::Null } else { Value::String(message.content.clone()) }
+                });
+                if !message.tool_calls.is_empty() {
+                    value["tool_calls"] = Value::Array(
+                        message
+                            .tool_calls
+                            .iter()
+                            .map(|call| {
+                                json!({
+                                    "id": call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": call.name,
+                                        "arguments": serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into())
+                                    }
                                 })
-                                .collect(),
-                        );
-                    }
-                    value
+                            })
+                            .collect(),
+                    );
                 }
-                Role::Tool => {
-                    let content = if message.images.is_empty() {
-                        Value::String(message.content.clone())
-                    } else {
-                        Value::Array(tool_output_images(message, "text", "image_url"))
-                    };
-                    json!({
-                        "role": "tool",
-                        "tool_call_id": message.tool_call_id.as_deref().context("tool message has no call id")?,
-                        "content": content
-                    })
+                value
+            }
+            Role::Tool => {
+                // tool 消息的 content 在 OpenAI 兼容端点只接受字符串，图片
+                // 不能放进 tool 消息（上游会忽略或报错）。图片以独立的 user
+                // 消息紧跟在 tool 消息之后发送：
+                //   {"role":"user","content":[{"type":"text",...},
+                //    {"type":"image_url","image_url":{"url":"data:...;base64,..."}}]}
+                output.push(json!({
+                    "role": "tool",
+                    "tool_call_id": message.tool_call_id.as_deref().context("tool message has no call id")?,
+                    "content": message.content
+                }));
+                if supports_vision && !message.images.is_empty() {
+                    let mut content = vec![json!({"type": "text", "text": message.content})];
+                    content.extend(message.images.iter().map(|image| {
+                        json!({
+                            "type": "image_url",
+                            "image_url": {"url": image.data_url()}
+                        })
+                    }));
+                    output.push(json!({"role": "user", "content": content}));
                 }
-            };
-            Ok(value)
-        })
-        .collect()
+                continue;
+            }
+        };
+        output.push(value);
+    }
+    Ok(output)
 }
 
-fn responses_input(messages: &[ChatMessage]) -> Result<Vec<Value>> {
+fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Vec<Value>> {
     let mut input = Vec::new();
     for message in messages {
         if !message.provider_items.is_empty() {
@@ -915,7 +936,7 @@ fn responses_input(messages: &[ChatMessage]) -> Result<Vec<Value>> {
                 }
             }
             Role::Tool => {
-                let output = if message.images.is_empty() {
+                let output = if message.images.is_empty() || !supports_vision {
                     Value::String(message.content.clone())
                 } else {
                     let mut items = vec![json!({
@@ -945,8 +966,9 @@ fn remote_compaction_v2_body(
     request: &CompactionRequest,
     supports_web_search: bool,
     parallel_tool_calls: bool,
+    supports_vision: bool,
 ) -> Result<Value> {
-    let mut input = responses_input(&request.messages)?;
+    let mut input = responses_input(&request.messages, supports_vision)?;
     input.push(json!({"type": "compaction_trigger"}));
     let mut body = json!({
         "model": request.model,
@@ -962,7 +984,7 @@ fn remote_compaction_v2_body(
     Ok(body)
 }
 
-fn anthropic_messages(messages: &[ChatMessage]) -> Result<(String, Vec<Value>)> {
+fn anthropic_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<(String, Vec<Value>)> {
     let mut system = Vec::new();
     let mut output = Vec::new();
     for message in messages {
@@ -988,7 +1010,7 @@ fn anthropic_messages(messages: &[ChatMessage]) -> Result<(String, Vec<Value>)> 
                 output.push(json!({"role": "assistant", "content": blocks}));
             }
             Role::Tool => {
-                let content = if message.images.is_empty() {
+                let content = if message.images.is_empty() || !supports_vision {
                     Value::String(message.content.clone())
                 } else {
                     let mut blocks = vec![json!({"type": "text", "text": message.content})];
@@ -1018,7 +1040,7 @@ fn anthropic_messages(messages: &[ChatMessage]) -> Result<(String, Vec<Value>)> 
     Ok((system.join("\n\n"), output))
 }
 
-fn gemini_messages(messages: &[ChatMessage]) -> Result<(String, Vec<Value>)> {
+fn gemini_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<(String, Vec<Value>)> {
     let mut system = Vec::new();
     let mut output = Vec::new();
     let mut call_names = Map::new();
@@ -1060,14 +1082,16 @@ fn gemini_messages(messages: &[ChatMessage]) -> Result<(String, Vec<Value>)> {
                         "response": {"output": message.content}
                     }
                 })];
-                parts.extend(message.images.iter().map(|image| {
+                if supports_vision {
+                    parts.extend(message.images.iter().map(|image| {
                     json!({
                         "inlineData": {
                             "mimeType": image.media_type,
                             "data": image.data
                         }
                     })
-                }));
+                    }));
+                }
                 output.push(json!({"role": "user", "parts": parts}));
             }
         }
@@ -1094,17 +1118,6 @@ fn parse_openai_tool_calls(value: Option<&Value>) -> Result<Vec<ToolCall>> {
             })
         })
         .collect()
-}
-
-fn tool_output_images(message: &ChatMessage, text_type: &str, image_type: &str) -> Vec<Value> {
-    let mut parts = vec![json!({"type": text_type, "text": message.content})];
-    parts.extend(message.images.iter().map(|image| {
-        json!({
-            "type": image_type,
-            "image_url": {"url": image.data_url()}
-        })
-    }));
-    parts
 }
 
 fn parse_function_call_item(item: &Value) -> Result<ToolCall> {
@@ -1212,7 +1225,7 @@ mod tests {
                 arguments: json!({"path": "README.md"}),
             }],
         )];
-        let rendered = openai_messages(&messages).expect("render messages");
+        let rendered = openai_messages(&messages, true).expect("render messages");
         assert_eq!(
             rendered[0].pointer("/tool_calls/0/function/name"),
             Some(&Value::String("read_file".into()))
@@ -1267,13 +1280,16 @@ mod tests {
             "encrypted_content": "opaque"
         });
         let input =
-            responses_input(&[ChatMessage::provider_item(item.clone())]).expect("responses input");
+            responses_input(&[ChatMessage::provider_item(item.clone())], true).expect("responses input");
         assert_eq!(input, vec![item]);
         assert!(
-            openai_messages(&[ChatMessage::provider_item(json!({
-                "type": "compaction",
-                "encrypted_content": "opaque"
-            }))])
+            openai_messages(
+                &[ChatMessage::provider_item(json!({
+                    "type": "compaction",
+                    "encrypted_content": "opaque"
+                }))],
+                true,
+            )
             .expect("chat messages")
             .is_empty()
         );
@@ -1318,24 +1334,66 @@ mod tests {
         });
         let history = vec![ChatMessage::assistant("", vec![call]), output];
 
-        let responses = responses_input(&history).expect("Responses history");
+        let responses = responses_input(&history, true).expect("Responses history");
         assert_eq!(responses[1]["output"][1]["type"], "input_image");
         assert_eq!(
             responses[1]["output"][1]["image_url"],
             "data:image/png;base64,BASE64"
         );
 
-        let chat = openai_messages(&history).expect("Chat history");
-        assert_eq!(chat[1]["content"][1]["type"], "image_url");
+        let chat = openai_messages(&history, true).expect("Chat history");
+        // tool 消息 content 保持纯字符串；图片以独立的 user 消息跟随其后
+        assert_eq!(chat[1]["role"], "tool");
+        assert_eq!(chat[1]["content"], "success: image loaded");
+        assert_eq!(chat[2]["role"], "user");
+        assert_eq!(chat[2]["content"][0]["type"], "text");
+        assert_eq!(chat[2]["content"][1]["type"], "image_url");
+        assert_eq!(
+            chat[2]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,BASE64"
+        );
 
-        let (_, anthropic) = anthropic_messages(&history).expect("Anthropic history");
+        let (_, anthropic) = anthropic_messages(&history, true).expect("Anthropic history");
         assert_eq!(
             anthropic[1]["content"][0]["content"][1]["source"]["media_type"],
             "image/png"
         );
 
-        let (_, gemini) = gemini_messages(&history).expect("Gemini history");
+        let (_, gemini) = gemini_messages(&history, true).expect("Gemini history");
         assert_eq!(gemini[1]["parts"][1]["inlineData"]["mimeType"], "image/png");
+    }
+
+    #[test]
+    fn strips_images_when_provider_lacks_vision() {
+        // 不支持视觉的 provider：图片 part 必须被过滤，只保留纯文本工具输出，
+        // 否则历史中的图片消息会反复触发 400（unknown variant `image_url`）。
+        let call = ToolCall {
+            id: "call-1".into(),
+            name: "view_image".into(),
+            arguments: json!({"path": "image.png"}),
+        };
+        let mut output = ChatMessage::tool("call-1", "success: image loaded");
+        output.images.push(coomi_engine::ImageContent {
+            media_type: "image/png".into(),
+            data: "BASE64".into(),
+        });
+        let history = vec![ChatMessage::assistant("", vec![call]), output];
+
+        let responses = responses_input(&history, false).expect("Responses history");
+        assert_eq!(responses[1]["output"], "success: image loaded");
+
+        let chat = openai_messages(&history, false).expect("Chat history");
+        assert_eq!(chat[1]["content"], "success: image loaded");
+
+        let (_, anthropic) = anthropic_messages(&history, false).expect("Anthropic history");
+        assert_eq!(
+            anthropic[1]["content"][0]["content"],
+            "success: image loaded"
+        );
+
+        let (_, gemini) = gemini_messages(&history, false).expect("Gemini history");
+        assert_eq!(gemini[1]["parts"].as_array().unwrap().len(), 1);
+        assert!(gemini[1]["parts"][0]["inlineData"].is_null());
     }
 
     #[test]
@@ -1352,6 +1410,7 @@ mod tests {
                 }],
             },
             false,
+            true,
             true,
         )
         .expect("compaction body");

@@ -49,9 +49,14 @@ public class CoomiDashboardActivity extends Activity {
     private View mWebUiButtonContainer;
     private View mCatalogButton;
     private View mFilesButton;
+    private View mProvidersButton;
+    private View mRuntimeButton;
     private View mCheckUpdateButton;
     private View mPermissionSettingsButton;
     private View mStorageSettingsButton;
+    private TextView mThemeSystemButton;
+    private TextView mThemeLightButton;
+    private TextView mThemeDarkButton;
 
     private CoomiService mCoomiService;
     private boolean mBound = false;
@@ -77,6 +82,7 @@ public class CoomiDashboardActivity extends Activity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        CoomiTheme.applyPageTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_coomi_dashboard);
 
@@ -90,11 +96,19 @@ public class CoomiDashboardActivity extends Activity {
         mOpenTuiButton = findViewById(R.id.btn_open_tui);
         mOpenWebUiButton = findViewById(R.id.btn_open_webui);
         mWebUiButtonContainer = findViewById(R.id.webui_button_container);
-        mCatalogButton = findViewById(R.id.btn_open_catalog);
-        mFilesButton = findViewById(R.id.btn_open_files);
+        mCatalogButton = findViewById(R.id.btn_web_catalog);
+        mFilesButton = findViewById(R.id.btn_web_files);
         mCheckUpdateButton = findViewById(R.id.btn_check_update);
         mPermissionSettingsButton = findViewById(R.id.btn_permission_settings);
         mStorageSettingsButton = findViewById(R.id.btn_storage_settings);
+        mThemeSystemButton = findViewById(R.id.btn_theme_system);
+        mThemeLightButton = findViewById(R.id.btn_theme_light);
+        mThemeDarkButton = findViewById(R.id.btn_theme_dark);
+
+        mThemeSystemButton.setOnClickListener(v -> selectTheme("system"));
+        mThemeLightButton.setOnClickListener(v -> selectTheme("light"));
+        mThemeDarkButton.setOnClickListener(v -> selectTheme("dark"));
+        applyThemeHighlight();
 
         mOpenChatButton.setOnClickListener(v -> openChat());
         mRestartButton.setOnClickListener(v -> restartEngine());
@@ -104,6 +118,10 @@ public class CoomiDashboardActivity extends Activity {
         mOpenWebUiButton.setOnClickListener(v -> openWebUi());
         mCatalogButton.setOnClickListener(v -> openCatalog());
         mFilesButton.setOnClickListener(v -> openFiles());
+        mProvidersButton = findViewById(R.id.btn_web_providers);
+        mRuntimeButton = findViewById(R.id.btn_web_runtime);
+        mProvidersButton.setOnClickListener(v -> openProviders());
+        mRuntimeButton.setOnClickListener(v -> openRuntime());
         mCheckUpdateButton.setOnClickListener(v -> checkUpdate());
         mPermissionSettingsButton.setOnClickListener(v -> openPermissionSettings());
         mStorageSettingsButton.setOnClickListener(v -> openStorageSettings());
@@ -125,6 +143,30 @@ public class CoomiDashboardActivity extends Activity {
         mHandler.post(mStatusRunnable);
 
         mRuntimeVersionText.setText("coomi-rs 2.0.0");
+    }
+
+    /** 切换外观档位：持久化后重建 Activity，让主题完整重载。 */
+    private void selectTheme(String mode) {
+        CoomiTheme.setMode(this, mode);
+        recreate();
+    }
+
+    /** 高亮当前外观档位（三个分段按钮）。 */
+    private void applyThemeHighlight() {
+        String mode = CoomiTheme.getMode(this);
+        boolean dark = CoomiTheme.isDark(this);
+        int selectedBg = R.drawable.coomi_bg_pill_blue;
+        int selectedText = R.color.coomi_white;
+        int idleBg = dark ? R.color.coomi_night_fill : R.drawable.coomi_bg_fill;
+        int idleText = dark ? R.color.coomi_night_text_2 : R.color.coomi_text_2;
+        applyThemeButtonStyle(mThemeSystemButton, "system".equals(mode), selectedBg, selectedText, idleBg, idleText);
+        applyThemeButtonStyle(mThemeLightButton, "light".equals(mode), selectedBg, selectedText, idleBg, idleText);
+        applyThemeButtonStyle(mThemeDarkButton, "dark".equals(mode), selectedBg, selectedText, idleBg, idleText);
+    }
+
+    private void applyThemeButtonStyle(TextView button, boolean selected, int selectedBg, int selectedText, int idleBg, int idleText) {
+        button.setBackgroundResource(selected ? selectedBg : idleBg);
+        button.setTextColor(getColor(selected ? selectedText : idleText));
     }
 
     /** 演示包：引擎和终端都不存在，界面上直说，别让人以为它在跑。 */
@@ -325,6 +367,20 @@ public class CoomiDashboardActivity extends Activity {
     private void openFiles() {
         Intent intent = new Intent(this, com.termux.app.CoomiActivity.class);
         intent.putExtra(com.termux.app.CoomiActivity.EXTRA_ROUTE, "#/files");
+        startActivity(intent);
+    }
+
+    /** 打开应用内 Provider / API Key 配置页（WebView 直达 #/providers）。 */
+    private void openProviders() {
+        Intent intent = new Intent(this, com.termux.app.CoomiActivity.class);
+        intent.putExtra(com.termux.app.CoomiActivity.EXTRA_ROUTE, "#/providers");
+        startActivity(intent);
+    }
+
+    /** 打开应用内内置环境页（WebView 直达 #/runtime）。 */
+    private void openRuntime() {
+        Intent intent = new Intent(this, com.termux.app.CoomiActivity.class);
+        intent.putExtra(com.termux.app.CoomiActivity.EXTRA_ROUTE, "#/runtime");
         startActivity(intent);
     }
 

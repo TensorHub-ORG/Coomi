@@ -14,6 +14,10 @@ export interface ToolCard {
   access?: ToolAccess
   riskSummary?: string
   expanded?: boolean
+  /** 工具产生的图片（data URL），瀑布流渲染用。 */
+  images?: string[]
+  /** show_image 历史恢复但图片数据不可用（如已被上下文压缩清理）。 */
+  imageMissing?: boolean
 }
 
 export interface AssistantMessage { kind: 'assistant'; id: string; content: string; streaming: boolean }
@@ -25,7 +29,7 @@ export interface QuestionCard {
   options?: string[]; allowFreeText: boolean; answered: boolean; answer?: string
 }
 
-export interface NoticeItem { kind: 'notice'; id: string; tone: 'info' | 'warn' | 'error' | 'success'; text: string }
+export interface NoticeItem { kind: 'notice'; id: string; tone: 'info' | 'warn' | 'error' | 'success'; text: string; detail?: string }
 
 export type Timelineitem = UserMessage | AssistantMessage | ReasoningBlock | ToolCard | QuestionCard | NoticeItem
 

@@ -50,6 +50,8 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -81,6 +83,137 @@ struct AppState {
     /// `Authorization: Bearer <token>` 或 `?token=<token>`（WS 握手用）。
     token: String,
     permission: Arc<RwLock<PermissionMode>>,
+    /// 会话级任务表：session_id -> 正在执行的任务。
+    /// 任务与 WS 连接解耦：连接断开任务继续在后台执行，断线期间的
+    /// 交互事件缓存在 SessionTask 中，重连后补发。
+    tasks: Arc<StdMutex<HashMap<String, Arc<SessionTask>>>>,
+    /// 图片发送已降级的会话：请求因图片被上游拒绝后置位，
+    /// 该会话后续请求不再重放历史图片，避免「一张图报错→整会话报废」。
+    vision_degraded: Arc<StdMutex<HashSet<String>>>,
+    /// 含图片会话的连续请求失败计数：达到阈值（不依赖错误文本关键词）
+    /// 也触发图片降级，兜住上游只回笼统错误（如 Internal server error）的情况。
+    vision_failures: Arc<StdMutex<HashMap<String, u32>>>,
+}
+
+impl AppState {
+    /// 取会话任务；不存在则创建空任务（连接先于任务建立时也会建一个空壳，
+    /// send_message 时复用同一实例）。
+    fn task(&self, session_id: &str) -> Arc<SessionTask> {
+        {
+            let guard = self
+                .tasks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(task) = guard.get(session_id) {
+                return Arc::clone(task);
+            }
+        }
+        let task = Arc::new(SessionTask::new());
+        self.tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(session_id.to_owned())
+            .or_insert_with(|| Arc::clone(&task))
+            .clone()
+    }
+
+    fn remove_task(&self, session_id: &str) {
+        self.tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(session_id);
+    }
+}
+
+/// 会话级任务：一次 send_message 产生的整轮执行（含引擎内部的 loop 续跑）。
+/// 生命周期锚定在会话而不是 WS 连接上，这样「切会话 / 断线」不会中断执行：
+///  - 断线只清 conn_tx（连接引用），任务与子进程继续跑；
+///  - 断线期间到达的交互事件（审批 / 提问 / 文件传输）缓存在 pending_events，
+///    重连后补发；终态事件（turn_end 等）缓存在 terminal_event。
+/// 任务结束后 remove_task 删除条目；重连时若条目不存在则 running=false。
+struct SessionTask {
+    abort: StdMutex<Option<AbortHandle>>,
+    running: AtomicBool,
+    processes: StdMutex<Option<Arc<ProcessManager>>>,
+    /// 当前活跃连接的推送通道（None = 断线中）。
+    conn_tx: StdMutex<Option<mpsc::UnboundedSender<Message>>>,
+    input_queue: Arc<InputQueue>,
+    approvals: StdMutex<HashMap<String, oneshot::Sender<bool>>>,
+    questions: StdMutex<HashMap<String, oneshot::Sender<String>>>,
+    file_requests: StdMutex<HashMap<String, oneshot::Sender<Vec<String>>>>,
+    pending_events: StdMutex<VecDeque<Value>>,
+    terminal_event: StdMutex<Option<Value>>,
+}
+
+impl SessionTask {
+    fn new() -> Self {
+        Self {
+            abort: StdMutex::new(None),
+            running: AtomicBool::new(false),
+            processes: StdMutex::new(None),
+            conn_tx: StdMutex::new(None),
+            input_queue: Arc::new(InputQueue::default()),
+            approvals: StdMutex::new(HashMap::new()),
+            questions: StdMutex::new(HashMap::new()),
+            file_requests: StdMutex::new(HashMap::new()),
+            pending_events: StdMutex::new(VecDeque::new()),
+            terminal_event: StdMutex::new(None),
+        }
+    }
+
+    /// 事件出口：缓存交互/终态事件供断线补发，同时推送给当前活跃连接。
+    fn push_event(&self, payload: Value) {
+        match payload.get("event_type").and_then(Value::as_str) {
+            Some("tool_approval_request" | "user_question_request" | "file_transfer_request") => {
+                let mut queue = self
+                    .pending_events
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if queue.len() >= 64 {
+                    queue.pop_front();
+                }
+                queue.push_back(payload.clone());
+            }
+            Some("turn_end" | "agent_error" | "agent_cancelled") => {
+                *self
+                    .terminal_event
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(payload.clone());
+            }
+            _ => {}
+        }
+        if let Some(tx) = self
+            .conn_tx
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            let _ = tx.send(Message::Text(coomi_envelope("event", None, payload).to_string().into()));
+        }
+    }
+}
+
+/// 组装 WS envelope（与 ConnectionContext::send_envelope 共用）。
+fn coomi_envelope(kind: &str, id: Option<&str>, payload: Value) -> Value {
+    let mut envelope = json!({
+        "v": PROTOCOL_VERSION,
+        "type": kind,
+        "ts": unix_time(),
+        "payload": payload,
+    });
+    if let Some(id) = id {
+        envelope["id"] = Value::String(id.to_owned());
+    }
+    envelope
+}
+
+/// 当前引擎二进制自身的指纹（MD5 十六进制 + 版本号），写进 ~/.coomi/engine.version。
+/// Android 侧 CoomiService 启动时对比 APK 内二进制，不一致则强制重启引擎进程。
+fn engine_fingerprint() -> Result<String> {
+    let exe = std::env::current_exe().context("cannot locate engine executable")?;
+    let bytes =
+        std::fs::read(&exe).with_context(|| format!("cannot read engine binary {}", exe.display()))?;
+    Ok(format!("{:x} {}", md5::compute(&bytes), BRIDGE_VERSION))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,29 +228,24 @@ struct ConnectionContext {
     permission: Arc<RwLock<PermissionMode>>,
     plan_mode: AtomicBool,
     selected_model: RwLock<Option<String>>,
-    approvals: StdMutex<HashMap<String, oneshot::Sender<bool>>>,
-    questions: StdMutex<HashMap<String, oneshot::Sender<String>>>,
-    file_requests: StdMutex<HashMap<String, oneshot::Sender<Vec<String>>>>,
-    input_queue: Arc<InputQueue>,
-    active_task: StdMutex<Option<AbortHandle>>,
-    running: AtomicBool,
-    processes: StdMutex<Option<Arc<ProcessManager>>>,
+    /// 会话任务（连接生命周期内始终复用同一实例）：send_message 创建的任务
+    /// 结束 remove_task 后，新任务必须仍能通过 conn_tx 推送事件——
+    /// 若每次从 state.tasks 新建，conn_tx 会丢（表现为第二次消息无输出）。
+    task: Arc<SessionTask>,
 }
 
 impl ConnectionContext {
-    fn new(tx: mpsc::UnboundedSender<Message>, permission: Arc<RwLock<PermissionMode>>) -> Self {
+    fn new(
+        tx: mpsc::UnboundedSender<Message>,
+        permission: Arc<RwLock<PermissionMode>>,
+        task: Arc<SessionTask>,
+    ) -> Self {
         Self {
             tx,
             permission,
             plan_mode: AtomicBool::new(false),
             selected_model: RwLock::new(None),
-            approvals: StdMutex::new(HashMap::new()),
-            questions: StdMutex::new(HashMap::new()),
-            file_requests: StdMutex::new(HashMap::new()),
-            input_queue: Arc::new(InputQueue::default()),
-            active_task: StdMutex::new(None),
-            running: AtomicBool::new(false),
-            processes: StdMutex::new(None),
+            task,
         }
     }
 
@@ -138,16 +266,9 @@ impl ConnectionContext {
     }
 
     fn send_envelope(&self, kind: &str, id: Option<&str>, payload: Value) {
-        let mut envelope = json!({
-            "v": PROTOCOL_VERSION,
-            "type": kind,
-            "ts": unix_time(),
-            "payload": payload,
-        });
-        if let Some(id) = id {
-            envelope["id"] = Value::String(id.to_owned());
-        }
-        let _ = self.tx.send(Message::Text(envelope.to_string().into()));
+        let _ = self
+            .tx
+            .send(Message::Text(coomi_envelope(kind, id, payload).to_string().into()));
     }
 }
 
@@ -166,6 +287,33 @@ pub async fn serve(
         static_dir.display()
     );
 
+    // 单实例文件锁：同一 home 只允许一个引擎进程运行，防止多个实例
+    // 并发读写会话/配置导致「串会话」。锁文件随进程退出自动释放；
+    // 崩溃残留的锁由 OS 回收，无需人工清理。
+    let lock_path = home.join("engine.lock");
+    // 下划线前缀：变量仅用于持有文件句柄（drop 时释放 OS 锁）。
+    let _engine_lock = fs::File::create(&lock_path)
+        .with_context(|| format!("failed to create engine lock {}", lock_path.display()))?;
+    fs2::FileExt::try_lock_exclusive(&_engine_lock).with_context(|| {
+        format!(
+            "another Coomi engine instance is already running for home {} (lock: {})",
+            home.display(),
+            lock_path.display()
+        )
+    })?;
+    println!(
+        "Coomi engine lock acquired: {}",
+        lock_path.display()
+    );
+
+    // 记录引擎二进制指纹（MD5 + 版本）：Android 侧 CoomiService 据此判断
+    // APK 更新后是否需要重启引擎进程（旧进程加载的还是旧代码，新旧 API 不匹配）。
+    let version_path = home.join("engine.version");
+    let fingerprint = engine_fingerprint()?;
+    fs::write(&version_path, &fingerprint).with_context(|| {
+        format!("failed to write engine fingerprint {}", version_path.display())
+    })?;
+
     let permission = Arc::new(RwLock::new(load_permission_mode(&home)));
     let state = AppState {
         home,
@@ -173,6 +321,9 @@ pub async fn serve(
         port,
         token,
         permission,
+        tasks: Arc::new(StdMutex::new(HashMap::new())),
+        vision_degraded: Arc::new(StdMutex::new(HashSet::new())),
+        vision_failures: Arc::new(StdMutex::new(HashMap::new())),
     };
     let index = static_dir.join("index.html");
     let files = ServeDir::new(static_dir).not_found_service(ServeFile::new(index));
@@ -202,8 +353,10 @@ pub async fn serve(
         .route("/api/catalog", get(catalog_index))
         .route("/api/catalog/mcp/install", post(install_mcp_catalog))
         .route("/api/catalog/mcp/{id}", delete(uninstall_mcp_catalog))
+        .route("/api/catalog/mcp/{id}/enabled", post(set_mcp_enabled_catalog))
         .route("/api/catalog/skills/install", post(install_skill_catalog))
         .route("/api/catalog/skills/{id}", delete(uninstall_skill_catalog))
+        .route("/api/catalog/skills/{id}/enabled", post(set_skill_enabled_catalog))
         .route("/ws/session/{session_id}", get(websocket_route))
         .fallback_service(files)
         // Local bridge: only allow same-origin browser access (the Android WebView and
@@ -408,13 +561,19 @@ async fn runtime_port(State(state): State<AppState>) -> Json<Value> {
 
 /// 引擎磁盘上的会话列表（权威源）。前端以此为唯一事实，localStorage 仅作缓存，
 /// 修复“会话记录消失/串会话”问题。
-async fn list_sessions(State(state): State<AppState>) -> Json<Value> {    let store = SessionStore::new(&state.home);
+async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
+    let store = SessionStore::new(&state.home);
     let summaries = store.list(None).unwrap_or_default();
+    let tasks = state
+        .tasks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut sessions = Vec::with_capacity(summaries.len());
     for summary in summaries {
         let full = store.load(summary.id).ok();
+        let id = summary.id.to_string();
         sessions.push(json!({
-            "id": summary.id,
+            "id": id,
             "provider_id": summary.provider_id,
             "model": summary.model,
             "cwd": summary.cwd.display().to_string(),
@@ -426,6 +585,8 @@ async fn list_sessions(State(state): State<AppState>) -> Json<Value> {    let st
                 "output_tokens": s.usage.output_tokens,
                 "total_tokens": s.usage.total_tokens(),
             })).unwrap_or_else(|| json!({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})),
+            // 会话是否正在后台执行（切走会话后任务继续跑，这里仍是 true）。
+            "running": tasks.get(&id).is_some_and(|task| task.running.load(Ordering::SeqCst)),
         }));
     }
     Json(json!({ "sessions": sessions }))
@@ -503,6 +664,13 @@ async fn catalog_index(State(state): State<AppState>) -> Result<Json<Value>, Api
         coomi_catalogs::builtin_skills().map_err(|e| ApiError::internal(e.to_string()))?;
     let installed_mcp = installed_mcp_enabled(&state.home);
     let installed_skills = installed_skill_ids(&state.home);
+    // 已启用的 skill id 集合（读 config/skills.json 的 enabled 字段）。
+    let enabled_skills: HashSet<String> = coomi_services::list_installed_skills(&state.home)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|skill| skill.enabled)
+        .map(|skill| skill.name)
+        .collect();
 
     let mcp = mcp_catalog
         .entries
@@ -523,13 +691,17 @@ async fn catalog_index(State(state): State<AppState>) -> Result<Json<Value>, Api
     let skills = skill_catalog
         .entries
         .iter()
-        .map(|entry| json!({
-            "id": entry.id,
-            "name": entry.name,
-            "description": entry.description,
-            "repository": entry.repository,
-            "installed": installed_skills.iter().any(|id| id == &entry.id),
-        }))
+        .map(|entry| {
+            let installed = installed_skills.iter().any(|id| id == &entry.id);
+            json!({
+                "id": entry.id,
+                "name": entry.name,
+                "description": entry.description,
+                "repository": entry.repository,
+                "installed": installed,
+                "enabled": installed && enabled_skills.contains(&entry.id),
+            })
+        })
         .collect::<Vec<_>>();
     Ok(Json(json!({ "mcp": mcp, "skills": skills })))
 }
@@ -639,7 +811,7 @@ async fn install_skill_catalog(
     Ok(Json(json!({ "ok": true, "id": id, "path": path.display().to_string() })))
 }
 
-/// 卸载 Skill：删除 skills/{id} 目录与 config/skills.json 条目。
+/// 卸载 Skill：删除 skills/{id} 目录与 config/skills.json 条目（彻底删除）。
 async fn uninstall_skill_catalog(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
@@ -654,6 +826,38 @@ async fn uninstall_skill_catalog(
     .map_err(|e| ApiError::internal(format!("Skill uninstall task failed: {e}")))?
     .map_err(|e| ApiError::internal(format!("failed to uninstall Skill {id}: {e:#}")))?;
     Ok(Json(json!({ "ok": true, "id": id, "path": path.display().to_string() })))
+}
+
+/// 停用/启用 MCP server：{ "enabled": true|false }。
+/// 只改 config/mcp_servers.json 的 enabled 字段，保留配置，可随时恢复。
+async fn set_mcp_enabled_catalog(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let enabled = body
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::bad_request("missing enabled: true|false"))?;
+    coomi_services::set_mcp_enabled(&state.home, &id, enabled)
+        .map_err(|e| ApiError::internal(format!("failed to set MCP enabled: {e:#}")))?;
+    Ok(Json(json!({ "ok": true, "id": id, "enabled": enabled })))
+}
+
+/// 停用/启用 Skill：{ "enabled": true|false }。
+/// 只改 config/skills.json 的 enabled 字段，目录与配置保留，可随时恢复。
+async fn set_skill_enabled_catalog(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let enabled = body
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::bad_request("missing enabled: true|false"))?;
+    coomi_services::set_skill_enabled(&state.home, &id, enabled)
+        .map_err(|e| ApiError::internal(format!("failed to set Skill enabled: {e:#}")))?;
+    Ok(Json(json!({ "ok": true, "id": id, "enabled": enabled })))
 }
 
 // ─────────────────────────── 会话 cwd ───────────────────────────
@@ -996,22 +1200,26 @@ async fn upsert_provider(
     if let Some(enabled) = input.get("supportsWebSearch").and_then(Value::as_bool) {
         settings.supports_web_search = enabled;
     }
+    if let Some(enabled) = input.get("supportsVision").and_then(Value::as_bool) {
+        settings.supports_vision = enabled;
+    }
     if settings.model.is_empty() {
-        return Err(ApiError::bad_request("at least one model is required"));
+        // 允许先保存配置（模型可稍后通过“检索模型”填入）。
+        // 注意：模型未填时不设为当前 provider，避免激活后对话报“无模型”。
     }
     if settings.base_url.is_empty() {
         return Err(ApiError::bad_request("base URL is required"));
     }
 
-    document.providers.insert(id.clone(), settings);
-    if document.active.is_empty()
+    let wants_activate = document.active.is_empty()
         || input
             .get("activate")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
-    {
-        document.active = id;
+            .unwrap_or(false);
+    if !settings.model.is_empty() && wants_activate {
+        document.active = id.clone();
     }
+    document.providers.insert(id.clone(), settings);
     document.save(&path).map_err(ApiError::from)?;
     Ok(Json(json!({"ok": true})))
 }
@@ -1204,7 +1412,14 @@ async fn websocket_route(
 async fn websocket_session(socket: WebSocket, state: AppState, session_id: String) {
     let (mut sink, mut source) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
-    let context = Arc::new(ConnectionContext::new(tx, Arc::clone(&state.permission)));
+    // 会话任务在连接生命周期内复用同一实例（含 conn_tx 事件通道），
+    // 避免任务结束后新建任务丢失 conn_tx 导致后续消息事件无法推送。
+    let task = state.task(&session_id);
+    let context = Arc::new(ConnectionContext::new(
+        tx.clone(),
+        Arc::clone(&state.permission),
+        Arc::clone(&task),
+    ));
     let writer = tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
             if sink.send(message).await.is_err() {
@@ -1212,6 +1427,13 @@ async fn websocket_session(socket: WebSocket, state: AppState, session_id: Strin
             }
         }
     });
+
+    // 注册为会话的活跃连接：任务侧 push_event 会推到这里；断线后
+    // 任务继续在后台执行，断线期间的事件缓存在 SessionTask 中。
+    *task
+        .conn_tx
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(tx.clone());
 
     // Push the persisted session state (usage totals) as soon as the socket opens,
     // so reopening a session never shows a stale zero counter.
@@ -1230,6 +1452,30 @@ async fn websocket_session(socket: WebSocket, state: AppState, session_id: Strin
         }
     }
 
+    // 补发断线期间的状态：会话是否仍在后台运行 + 缓存的交互/终态事件。
+    // 顺序很重要：任务已结束（terminal 有值）时不再发 running=true，
+    // 否则前端会先进入 thinking 又被 turn_end 拉回 idle，状态栏闪一下。
+    let terminal = task
+        .terminal_event
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    if terminal.is_none() && task.running.load(Ordering::SeqCst) {
+        context.send_event(json!({"event_type": "session_state", "running": true}));
+    }
+    let pending: Vec<Value> = task
+        .pending_events
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain(..)
+        .collect();
+    for event in pending {
+        context.send_event(event);
+    }
+    if let Some(terminal) = terminal {
+        context.send_event(terminal);
+    }
+
     while let Some(Ok(message)) = source.next().await {
         let Message::Text(text) = message else {
             continue;
@@ -1243,25 +1489,12 @@ async fn websocket_session(socket: WebSocket, state: AppState, session_id: Strin
         handle_command(&state, &session_id, Arc::clone(&context), id, payload).await;
     }
 
-    if let Some(handle) = context
-        .active_task
+    // 断线：只解除连接引用，不 abort 任务、不杀子进程——任务继续在后台执行，
+    // 断线期间的交互事件缓存在 SessionTask，重连后由上方补发。
+    *task
+        .conn_tx
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take()
-    {
-        handle.abort();
-    }
-    // Symmetric with `cancel`: kill any shell subprocesses the disconnected turn started.
-    let processes = {
-        let mut guard = context
-            .processes
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.take()
-    };
-    if let Some(processes) = processes {
-        processes.terminate_all().await;
-    }
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     writer.abort();
 }
 
@@ -1287,7 +1520,8 @@ async fn handle_command(
                 context.send_error(envelope_id, "message text is required");
                 return;
             }
-            if context.running.swap(true, Ordering::SeqCst) {
+            let task = Arc::clone(&context.task);
+            if task.running.swap(true, Ordering::SeqCst) {
                 context.send_error(envelope_id, "a turn is already running");
                 return;
             }
@@ -1302,61 +1536,70 @@ async fn handle_command(
                 prompt.to_owned()
             };
             let turn_context = Arc::clone(&context);
-            let cleanup_context = Arc::clone(&context);
-            let task = tokio::spawn(async move {
+            let turn_task = Arc::clone(&task);
+            let cleanup_state = state.clone();
+            let cleanup_session_id = session_id.to_owned();
+            let spawned = tokio::spawn(async move {
                 if let Err(error) = run_turn(
                     &turn_state,
                     &turn_session_id,
                     &turn_prompt,
                     Arc::clone(&turn_context),
+                    Arc::clone(&turn_task),
                 )
                 .await
                 {
-                    turn_context.send_event(json!({
+                    turn_task.push_event(json!({
                         "event_type": "agent_error",
                         "message": format!("{error:#}"),
                         "is_fatal": false,
                     }));
                 }
-                turn_context.send_event(json!({"event_type": "turn_end"}));
-                cleanup_context.running.store(false, Ordering::SeqCst);
-                cleanup_context
-                    .active_task
+                turn_task.push_event(json!({"event_type": "turn_end"}));
+                turn_task.running.store(false, Ordering::SeqCst);
+                turn_task
+                    .abort
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .take();
+                cleanup_state.remove_task(&cleanup_session_id);
             });
-            *context
-                .active_task
+            *task
+                .abort
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task.abort_handle());
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(spawned.abort_handle());
         }
         "cancel" => {
             // Abort the agent task first (synchronous), then kill any shell subprocesses
             // started by tools; killing first would let the still-running agent spawn new
             // processes that escape this cleanup round.
-            if let Some(handle) = context
-                .active_task
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take()
-            {
-                handle.abort();
-            }
-            context.running.store(false, Ordering::SeqCst);
-            let processes = {
-                let mut guard = context
+            let task = Arc::clone(&context.task);
+            if task.running.swap(false, Ordering::SeqCst) {
+                if let Some(handle) = task
+                    .abort
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    handle.abort();
+                }
+                let processes = task
                     .processes
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                guard.take()
-            };
-            if let Some(processes) = processes {
-                processes.terminate_all().await;
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                if let Some(processes) = processes {
+                    processes.terminate_all().await;
+                }
+                // 用户取消也算一次执行：记录「最后执行时间」，列表排序不受影响。
+                if let Ok(parsed) = Uuid::parse_str(session_id) {
+                    let _ = SessionStore::new(&state.home).touch_updated_at(parsed);
+                }
+                task.push_event(json!({"event_type": "agent_cancelled"}));
+                task.push_event(json!({"event_type": "turn_end"}));
             }
+            state.remove_task(session_id);
             context.send_ack(envelope_id);
-            context.send_event(json!({"event_type": "agent_cancelled"}));
-            context.send_event(json!({"event_type": "turn_end"}));
         }
         "jump_in" => {
             if let Some(text) = payload
@@ -1364,7 +1607,7 @@ async fn handle_command(
                 .and_then(Value::as_str)
                 .filter(|text| !text.trim().is_empty())
             {
-                context.input_queue.push(text.to_owned());
+                context.task.input_queue.push(text.to_owned());
             }
             context.send_ack(envelope_id);
         }
@@ -1378,6 +1621,7 @@ async fn handle_command(
                 Some("allow" | "always")
             );
             if let Some(sender) = context
+                .task
                 .approvals
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1398,6 +1642,7 @@ async fn handle_command(
                 .unwrap_or_default()
                 .to_owned();
             if let Some(sender) = context
+                .task
                 .questions
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1424,6 +1669,7 @@ async fn handle_command(
                 })
                 .unwrap_or_default();
             if let Some(sender) = context
+                .task
                 .file_requests
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1513,6 +1759,7 @@ async fn run_turn(
     session_id: &str,
     prompt: &str,
     context: Arc<ConnectionContext>,
+    task: Arc<SessionTask>,
 ) -> Result<()> {
     let registry = ProviderRegistry::load(&providers_path(&state.home))
         .context("configure a provider before starting a chat")?;
@@ -1556,13 +1803,20 @@ async fn run_turn(
         policy = policy.with_blocked(blocked_private_dirs(&state.home));
     }
     let instructions = coomi_engine::discover_project_instructions(&cwd)?;
-    let prompt_context = system_prompt(
+    let mut prompt_context = system_prompt(
         &state.home,
         &cwd,
         policy_mode,
         &instructions,
         global_memory,
     );
+    // 注入已配置 MCP 清单：agent 需要知道装了哪些 MCP、状态如何、能调哪些工具。
+    let mcp_runtime = Arc::new(McpRuntime::load(&state.home).await);
+    let mcp_inventory = mcp_runtime.inventory();
+    if !mcp_inventory.is_empty() {
+        prompt_context.push_str("\n\n");
+        prompt_context.push_str(&mcp_inventory);
+    }
     let scheduler = AgentScheduler::new(
         cwd.clone(),
         state.home.clone(),
@@ -1575,28 +1829,37 @@ async fn run_turn(
         .with_skills_directory(state.home.join("skills"))
         .with_config_home(state.home.clone())
         .with_session_state(session.plan.clone(), session.loop_state.clone())
-        .with_mcp_runtime(Arc::new(McpRuntime::load(&state.home).await))
+        .with_mcp_runtime(Arc::clone(&mcp_runtime))
         .with_hooks(Arc::new(HookRunner::load(&state.home)?))
         .with_agent_scheduler(scheduler, session.messages.clone());
     // Expose the turn's process manager so `cancel` can kill any shell started by tools.
-    *context
+    *task
         .processes
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(tools.process_manager());
     let provider = HttpModelProvider::new(provider_config)?;
     let approval = BrowserApproval {
-        context: Arc::clone(&context),
+        task: Arc::clone(&task),
+        permission: Arc::clone(&context.permission),
     };
     let observer = BrowserObserver::new(
-        Arc::clone(&context),
+        Arc::clone(&task),
         session.usage.input_tokens,
         session.usage.output_tokens,
     );
     let agent = Agent::new(prompt_context)
         .with_max_tool_rounds(96)
-        .with_input_queue(Arc::clone(&context.input_queue));
+        .with_input_queue(Arc::clone(&task.input_queue))
+        // 图片降级：请求曾因图片被上游拒绝的会话，不再重放历史图片
+        .with_vision_replay(!state
+            .vision_degraded
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(session_id));
     // 无论成败都先保存会话：报错/中断时本轮已产生的消息（用户提问、工具结果、
     // 部分回复）不丢失；否则下次继续时会话停留在旧历史（表现为「读不了上文」）。
+    // touch() 把 updated_at 刷成执行结束时间：会话列表按它排序（而非前端点击时间）。
+    session.touch();
     let turn_result = agent
         .run_turn(
             &mut session,
@@ -1607,6 +1870,12 @@ async fn run_turn(
             &observer,
         )
         .await;
+    // 图片降级检测：请求失败且会话含图片时标记该会话，后续轮次不再重放
+    // 历史图片（会话恢复可用）。命中关键词立即降级；否则连续失败 2 次也降级
+    // （兜住上游只回笼统错误、不包含图片相关措辞的情况）。
+    if let Err(error) = &turn_result {
+        maybe_degrade_vision(state, session_id, &session, error);
+    }
     store.save(&session)?;
     turn_result?;
 
@@ -1618,10 +1887,56 @@ async fn run_turn(
         let loop_result = agent
             .continue_loop(&mut session, &provider, &tools, &approval, &observer)
             .await;
+        if let Err(error) = &loop_result {
+            maybe_degrade_vision(state, session_id, &session, error);
+        }
+        session.touch();
         store.save(&session)?;
         loop_result?;
     }
     Ok(())
+}
+
+/// 图片降级：请求失败且会话含图片时，标记该会话后续不再重放图片。
+/// 错误文本命中图片相关关键词立即降级；否则连续失败 2 次也降级，
+/// 兜住上游只回笼统错误（如 Internal server error）不包含图片措辞的情况。
+fn maybe_degrade_vision(
+    state: &AppState,
+    session_id: &str,
+    session: &coomi_engine::Session,
+    error: &dyn std::fmt::Display,
+) {
+    let has_image_parts = session
+        .messages
+        .iter()
+        .any(|message| !message.images.is_empty());
+    if !has_image_parts {
+        return;
+    }
+    let mut degraded = state
+        .vision_degraded
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if degraded.contains(session_id) {
+        return;
+    }
+    let error_text = error.to_string().to_ascii_lowercase();
+    let keyword_hit = ["image", "vision", "multimodal", "media_type", "inline_data"]
+        .iter()
+        .any(|needle| error_text.contains(needle));
+    if keyword_hit {
+        degraded.insert(session_id.to_owned());
+        return;
+    }
+    let mut failures = state
+        .vision_failures
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let count = failures.entry(session_id.to_owned()).or_insert(0);
+    *count += 1;
+    if *count >= 2 {
+        degraded.insert(session_id.to_owned());
+    }
 }
 
 fn load_or_create_web_session(
@@ -1660,7 +1975,7 @@ fn load_or_create_web_session(
 }
 
 struct BrowserObserver {
-    context: Arc<ConnectionContext>,
+    task: Arc<SessionTask>,
     started: StdMutex<HashMap<String, Instant>>,
     usage: StdMutex<BrowserUsageState>,
 }
@@ -1674,9 +1989,9 @@ struct BrowserUsageState {
 }
 
 impl BrowserObserver {
-    fn new(context: Arc<ConnectionContext>, input_tokens: u64, output_tokens: u64) -> Self {
+    fn new(task: Arc<SessionTask>, input_tokens: u64, output_tokens: u64) -> Self {
         Self {
-            context,
+            task,
             started: StdMutex::new(HashMap::new()),
             usage: StdMutex::new(BrowserUsageState {
                 input_tokens,
@@ -1691,7 +2006,7 @@ impl BrowserObserver {
             .usage
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.context.send_event(browser_usage_event(state));
+        self.task.push_event(browser_usage_event(state));
     }
 }
 
@@ -1719,25 +2034,23 @@ impl AgentObserver for BrowserObserver {
     fn on_event(&self, event: &AgentEvent) {
         match event {
             AgentEvent::Text(content) | AgentEvent::TextDelta(content) => {
-                self.context
-                    .send_event(json!({"event_type": "text_chunk", "content": content}));
+                self.task.push_event(json!({"event_type": "text_chunk", "content": content}));
             }
             AgentEvent::ReasoningDelta(content) => {
-                self.context
-                    .send_event(json!({"event_type": "reasoning_chunk", "content": content}));
+                self.task.push_event(json!({"event_type": "reasoning_chunk", "content": content}));
             }
             AgentEvent::ToolStarted(call) => {
                 self.started
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .insert(call.id.clone(), Instant::now());
-                self.context.send_event(json!({
+                self.task.push_event(json!({
                     "event_type": "tool_start",
                     "call_id": call.id,
                     "tool_name": call.name,
                     "arguments": call.arguments,
                 }));
-                self.context.send_event(json!({
+                self.task.push_event(json!({
                     "event_type": "tool_running",
                     "call_id": call.id,
                     "tool_name": call.name,
@@ -1751,13 +2064,21 @@ impl AgentObserver for BrowserObserver {
                     .remove(&call.id)
                     .map(|started| started.elapsed().as_secs_f64())
                     .unwrap_or_default();
-                self.context.send_event(json!({
+                // 图片随 tool_done 推给前端（data URL），瀑布流渲染直接用；
+                // 历史恢复时由 /api/sessions/{id} 的 messages[].images 补回。
+                let images = result
+                    .images
+                    .iter()
+                    .map(|image| image.data_url())
+                    .collect::<Vec<_>>();
+                self.task.push_event(json!({
                     "event_type": "tool_done",
                     "call_id": call.id,
                     "tool_name": call.name,
                     "elapsed": elapsed,
                     "result_preview": preview(&result.output),
                     "is_error": !result.success,
+                    "images": images,
                 }));
             }
             AgentEvent::TurnCompleted(usage) => {
@@ -1772,7 +2093,7 @@ impl AgentObserver for BrowserObserver {
                 after_tokens,
                 ..
             } => {
-                self.context.send_event(json!({
+                self.task.push_event(json!({
                     "event_type": "compression",
                     "before": before_tokens,
                     "after": after_tokens,
@@ -1785,7 +2106,7 @@ impl AgentObserver for BrowserObserver {
                     .enumerate()
                     .find(|(_, step)| step.status == PlanStepStatus::InProgress)
                 {
-                    self.context.send_event(json!({
+                    self.task.push_event(json!({
                         "event_type": "loop_step_start",
                         "step_index": index + 1,
                         "step_description": step.step,
@@ -1794,7 +2115,7 @@ impl AgentObserver for BrowserObserver {
                 }
             }
             AgentEvent::LoopUpdated(loop_state) => {
-                self.context.send_event(json!({
+                self.task.push_event(json!({
                     "event_type": "loop_progress",
                     "current_step": loop_state.turns_completed,
                     "total_steps": loop_state.turns_completed + u64::from(loop_state.status == LoopStatus::Active),
@@ -1816,25 +2137,26 @@ impl AgentObserver for BrowserObserver {
 }
 
 struct BrowserApproval {
-    context: Arc<ConnectionContext>,
+    task: Arc<SessionTask>,
+    permission: Arc<RwLock<PermissionMode>>,
 }
 
 #[async_trait]
 impl ApprovalHandler for BrowserApproval {
     async fn approve(&self, call: &ToolCall, reason: &str) -> bool {
-        let mode = *self.context.permission.read().await;
+        let mode = *self.permission.read().await;
         if mode == PermissionMode::Full
             || (mode == PermissionMode::Auto && !reason.to_ascii_lowercase().contains("delete"))
         {
             return true;
         }
         let (sender, receiver) = oneshot::channel();
-        self.context
+        self.task
             .approvals
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(call.id.clone(), sender);
-        self.context.send_event(json!({
+        self.task.push_event(json!({
             "event_type": "tool_approval_request",
             "call_id": call.id,
             "tool_name": call.name,
@@ -1853,12 +2175,12 @@ impl ApprovalHandler for BrowserApproval {
         let question = request.questions.first()?;
         let call_id = format!("question-{}", Uuid::new_v4());
         let (sender, receiver) = oneshot::channel();
-        self.context
+        self.task
             .questions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(call_id.clone(), sender);
-        self.context.send_event(json!({
+        self.task.push_event(json!({
             "event_type": "user_question_request",
             "call_id": call_id,
             "question": question.question,
@@ -1878,12 +2200,12 @@ impl ApprovalHandler for BrowserApproval {
 
     async fn request_file_transfer(&self, request: &FileTransferRequest) -> Option<Vec<String>> {
         let (sender, receiver) = oneshot::channel();
-        self.context
+        self.task
             .file_requests
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(request.request_id.clone(), sender);
-        self.context.send_event(json!({
+        self.task.push_event(json!({
             "event_type": "file_transfer_request",
             "request_id": request.request_id,
             "operation": request.operation,
@@ -1967,6 +2289,7 @@ fn provider_json(id: &str, provider: &ProviderSettings, active: bool) -> Value {
         "toolProtocol": provider.tool_protocol,
         "contextWindow": provider.context_window.unwrap_or(256_000),
         "supportsWebSearch": provider.supports_web_search,
+        "supportsVision": provider.supports_vision,
         "active": active,
     })
 }
@@ -2234,5 +2557,53 @@ mod tests {
         assert!(serialized.contains("SECOND_SESSION_ONLY"));
         assert!(!serialized.contains("FIRST_SESSION_ONLY"));
         assert_eq!(loaded.id, second.id);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_reports_running_per_session() {
+        // 构造 AppState：临时 home，塞两个会话 + 一个 running 任务。
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let cwd = tmp.path().join("project");
+        std::fs::create_dir_all(&home).expect("create home");
+        std::fs::create_dir_all(&cwd).expect("create cwd");
+        let state = AppState {
+            home: home.clone(),
+            cwd: cwd.clone(),
+            port: 0,
+            token: "test-token".into(),
+            permission: Arc::new(RwLock::new(PermissionMode::Auto)),
+            tasks: Arc::new(StdMutex::new(HashMap::new())),
+            vision_degraded: Arc::new(StdMutex::new(HashSet::new())),
+            vision_failures: Arc::new(StdMutex::new(HashMap::new())),
+        };
+
+        let store = SessionStore::new(&home);
+        let running_session = Session::new("provider", "model", cwd.clone());
+        let idle_session = Session::new("provider", "model", cwd.clone());
+        store.save(&running_session).expect("save running session");
+        store.save(&idle_session).expect("save idle session");
+
+        // 只把 running_session 标记为执行中（模拟 send_message 后的任务表状态）。
+        let running_task = state.task(&running_session.id.to_string());
+        running_task.running.store(true, Ordering::SeqCst);
+
+        let response = list_sessions(axum::extract::State(state)).await;
+        let sessions = response.0["sessions"].as_array().expect("sessions array");
+        let mut found_running = false;
+        let mut found_idle = false;
+        for session in sessions {
+            let id = session["id"].as_str().expect("session id");
+            if id == running_session.id.to_string() {
+                assert_eq!(session["running"], json!(true), "running session should report running");
+                found_running = true;
+            }
+            if id == idle_session.id.to_string() {
+                assert_eq!(session["running"], json!(false), "idle session should not report running");
+                found_idle = true;
+            }
+        }
+        assert!(found_running, "running session present in list");
+        assert!(found_idle, "idle session present in list");
     }
 }

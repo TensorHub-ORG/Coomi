@@ -51,9 +51,9 @@ android {
         applicationId "com.coomi.android"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        // v1.2.1 终版：versionCode 17（引擎全局记忆默认关闭与前端一致；WebView 调试端口仅 debug 开启）
-        versionCode 17
-        versionName "1.2.1"
+        // v1.2.2：versionCode 18（大文件分段读取、问询窗口跳过、图片识别链路等一批优化）
+        versionCode 18
+        versionName "1.2.2"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

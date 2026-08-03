@@ -145,6 +145,7 @@ impl CoreTools {
             "web_search" => self.web_search(&call.arguments).await,
             "fetch" => self.fetch_url(&call.arguments).await,
             "view_image" => self.view_image(&call.arguments).await,
+            "show_image" => self.show_image(&call.arguments).await,
             "request_user_input" => self.request_user_input(&call.arguments, approval).await,
             "request_file_import" => self.request_file_transfer(call, approval, "import").await,
             "request_file_export" => self.request_file_transfer(call, approval, "export").await,
@@ -164,6 +165,8 @@ impl CoreTools {
             "memory_delete" => self.memory_delete(call, approval).await,
             "configure_mcp" => self.configure_mcp(call, approval).await,
             "install_skill" => self.install_skill(call, approval).await,
+            "uninstall_mcp" => self.uninstall_mcp(call, approval).await,
+            "uninstall_skill" => self.uninstall_skill(call, approval).await,
             _ => {
                 if let Some(runtime) = &self.mcp_runtime
                     && let Some(result) = runtime.call(&call.name, call.arguments.clone()).await
@@ -264,6 +267,58 @@ impl CoreTools {
         };
         match apply_auto_config(home, AutoConfigIntent::Skill(source.to_owned())).await {
             Ok(result) => ToolResult::success(result.message),
+            Err(error) => ToolResult::error(format!("{error:#}")),
+        }
+    }
+
+    /// 卸载 Skill（彻底删除：目录 + 配置记录）。与 install_skill 对应——
+    /// 需求：AI 自行卸载 = 彻底删除（管理页的卸载才是停用）。
+    async fn uninstall_skill(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
+        let Some(home) = &self.config_home else {
+            return ToolResult::error("Coomi configuration directory is not available");
+        };
+        if !approval
+            .approve(
+                call,
+                "uninstall_skill will permanently delete the Skill directory and its configuration",
+            )
+            .await
+        {
+            return ToolResult::error("Skill uninstall was not approved");
+        }
+        let Some(name) = string_arg(&call.arguments, "name") else {
+            return ToolResult::error("missing string argument: name");
+        };
+        match coomi_services::remove_installed_skill(home, name) {
+            Ok(()) => ToolResult::success(format!(
+                "Uninstalled Skill `{name}`: directory and configuration removed"
+            )),
+            Err(error) => ToolResult::error(format!("{error:#}")),
+        }
+    }
+
+    /// 卸载 MCP server（彻底删除：移除 config/mcp_servers.json 条目）。
+    /// 与 configure_mcp 对应——AI 自行卸载 = 彻底删除。
+    async fn uninstall_mcp(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
+        let Some(home) = &self.config_home else {
+            return ToolResult::error("Coomi configuration directory is not available");
+        };
+        if !approval
+            .approve(
+                call,
+                "uninstall_mcp will permanently remove the MCP server configuration",
+            )
+            .await
+        {
+            return ToolResult::error("MCP uninstall was not approved");
+        }
+        let Some(name) = string_arg(&call.arguments, "name") else {
+            return ToolResult::error("missing string argument: name");
+        };
+        match coomi_services::remove_configured_mcp(home, name) {
+            Ok(()) => ToolResult::success(format!(
+                "Uninstalled MCP server `{name}`: configuration removed"
+            )),
             Err(error) => ToolResult::error(format!("{error:#}")),
         }
     }
@@ -676,6 +731,44 @@ impl CoreTools {
         .with_image(media_type, BASE64_STANDARD.encode(bytes))
     }
 
+    /// 将本地图片展示给用户：在界面上渲染缩略图，用户可全屏预览/另存/模糊化。
+    /// 与 view_image 的区别：view_image 把图片注入给支持视觉的模型，供模型"看"；
+    /// show_image 仅为用户展示，不要求模型具备图像理解能力，界面默认展开图片。
+    async fn show_image(&self, arguments: &Value) -> ToolResult {
+        let Some(path) = string_arg(arguments, "path") else {
+            return ToolResult::error("missing string argument: path");
+        };
+        let path = match self.checked_path(path, false) {
+            Ok(path) => path,
+            Err(error) => return ToolResult::error(error),
+        };
+        let bytes = match tokio::fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(error) => return ToolResult::error(format!("failed to read image: {error}")),
+        };
+        let media_type = match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => return ToolResult::error("supported image formats: png, jpg, gif, webp"),
+        };
+        if bytes.len() > 10 * 1024 * 1024 {
+            return ToolResult::error("image exceeds the 10 MiB tool limit");
+        }
+        ToolResult::success(format!(
+            "path: {}\nmedia_type: {media_type}\nbytes: {}",
+            path.display(),
+            bytes.len()
+        ))
+        .with_image(media_type, BASE64_STANDARD.encode(bytes))
+    }
+
     async fn request_user_input(
         &self,
         arguments: &Value,
@@ -1026,39 +1119,169 @@ impl CoreTools {
             Ok(path) => path,
             Err(error) => return ToolResult::error(error),
         };
-        // 大文件只读头部：全量 read_to_string 会把超大文件（日志/导出等）整个读进
-        // 内存并做编码转换，导致工具长时间无结果。
-        const MAX_READ: u64 = 2 * 1024 * 1024; // 2 MiB
-        use tokio::io::AsyncReadExt;
+        let offset = usize_arg(arguments, "offset").unwrap_or(1).max(1);
+        let limit = usize_arg(arguments, "limit").unwrap_or(500).clamp(1, 2_000);
+
+        // 单行超长截断：避免单行巨行（压缩 JSON / 长日志）撑爆输出与上下文。
+        const MAX_LINE_CHARS: usize = 4_096;
+        // 小文件阈值：≤ 2 MiB 全量读入内存、按行索引。
+        const SMALL_FILE: u64 = 2 * 1024 * 1024;
+        // 大文件默认只读前 64 KiB（约 1.6 万字符 / 4k token），其余用 offset 分批读取。
+        const CHUNK: u64 = 64 * 1024;
+
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+
         let handle = match tokio::fs::File::open(&path).await {
             Ok(handle) => handle,
             Err(error) => {
                 return ToolResult::error(format!("failed to read {}: {error}", path.display()));
             }
         };
-        let mut bytes = Vec::new();
-        if let Err(error) = handle.take(MAX_READ + 1).read_to_end(&mut bytes).await {
-            return ToolResult::error(format!("failed to read {}: {error}", path.display()));
-        }
-        let truncated = bytes.len() as u64 > MAX_READ;
-        bytes.truncate(MAX_READ as usize);
-        let mut content = String::from_utf8_lossy(&bytes).into_owned();
-        if truncated {
-            content.push_str(&format!(
-                "\n…（文件超过 {MAX_READ} 字节，已截断，只显示开头部分）"
+        let total = match handle.metadata().await {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                return ToolResult::error(format!("failed to stat {}: {error}", path.display()));
+            }
+        };
+
+        let mut output = String::new();
+
+        if total <= SMALL_FILE {
+            // ---- 小文件：全量读入，行级 offset/limit ----
+            let mut bytes = Vec::new();
+            if let Err(error) = handle.take(total + 1).read_to_end(&mut bytes).await {
+                return ToolResult::error(format!("failed to read {}: {error}", path.display()));
+            }
+            let content = String::from_utf8_lossy(&bytes);
+            let total_lines = content.lines().count();
+            let mut shown = 0usize;
+            for (index, line) in content.lines().enumerate() {
+                let lineno = index + 1;
+                if lineno < offset {
+                    continue;
+                }
+                if shown >= limit {
+                    break;
+                }
+                output.push_str(&format!("{lineno:>6}  "));
+                if line.chars().count() > MAX_LINE_CHARS {
+                    let head: String = line.chars().take(MAX_LINE_CHARS).collect();
+                    output.push_str(&head);
+                    output.push_str(&format!(
+                        "…（本行共 {} 字符，已截断）",
+                        line.chars().count()
+                    ));
+                } else {
+                    output.push_str(line);
+                }
+                output.push('\n');
+                shown += 1;
+            }
+            let end = offset + shown - 1;
+            if total_lines > end {
+                output.push_str(&format!(
+                    "…（文件共 {total} 字节 · {total_lines} 行，已显示第 {offset}–{end} 行；继续用 offset={} 读取）",
+                    end + 1
+                ));
+            } else {
+                output.push_str(&format!(
+                    "（文件共 {total} 字节 · {total_lines} 行，已到末尾）"
+                ));
+            }
+        } else if offset == 1 {
+            // ---- 大文件：默认只读前 CHUNK 字节，绝不整读 ----
+            let mut bytes = Vec::new();
+            if let Err(error) = handle.take(CHUNK).read_to_end(&mut bytes).await {
+                return ToolResult::error(format!("failed to read {}: {error}", path.display()));
+            }
+            let content = String::from_utf8_lossy(&bytes);
+            let mut shown = 0usize;
+            for (index, line) in content.lines().enumerate() {
+                if shown >= limit {
+                    break;
+                }
+                output.push_str(&format!("{:>6}  ", index + 1));
+                if line.chars().count() > MAX_LINE_CHARS {
+                    let head: String = line.chars().take(MAX_LINE_CHARS).collect();
+                    output.push_str(&head);
+                    output.push_str(&format!(
+                        "…（本行共 {} 字符，已截断）",
+                        line.chars().count()
+                    ));
+                } else {
+                    output.push_str(line);
+                }
+                output.push('\n');
+                shown += 1;
+            }
+            output.push_str(&format!(
+                "…（大文件共 {total} 字节，已显示前 {shown} 行（前 {} KiB）；可用 offset/limit 继续分批读取）",
+                CHUNK / 1024
             ));
+        } else {
+            // ---- 大文件：按行跳转到 offset，再读 limit 行 ----
+            let mut reader = tokio::io::BufReader::new(handle);
+            let mut buf = Vec::new();
+            let mut skipped = 0usize;
+            while skipped < offset - 1 {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => {
+                        return ToolResult::error(format!(
+                            "offset {offset} 超出文件末尾（文件共 {total} 字节）"
+                        ));
+                    }
+                    Ok(_) => skipped += 1,
+                    Err(error) => {
+                        return ToolResult::error(format!(
+                            "failed to read {}: {error}",
+                            path.display()
+                        ));
+                    }
+                }
+            }
+            let mut shown = 0usize;
+            while shown < limit {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(error) => {
+                        return ToolResult::error(format!(
+                            "failed to read {}: {error}",
+                            path.display()
+                        ));
+                    }
+                }
+                let line = String::from_utf8_lossy(&buf);
+                let line = line.strip_suffix('\n').unwrap_or(line.as_ref());
+                let line = line.strip_suffix('\r').unwrap_or(line);
+                output.push_str(&format!("{:>6}  ", offset + shown));
+                if line.chars().count() > MAX_LINE_CHARS {
+                    let head: String = line.chars().take(MAX_LINE_CHARS).collect();
+                    output.push_str(&head);
+                    output.push_str(&format!(
+                        "…（本行共 {} 字符，已截断）",
+                        line.chars().count()
+                    ));
+                } else {
+                    output.push_str(line);
+                }
+                output.push('\n');
+                shown += 1;
+            }
+            if shown >= limit {
+                output.push_str(&format!(
+                    "…（文件共 {total} 字节，已显示第 {offset}–{} 行；继续用 offset={} 读取）",
+                    offset + shown - 1,
+                    offset + shown
+                ));
+            } else {
+                output.push_str(&format!("（文件共 {total} 字节，已到末尾）"));
+            }
         }
-        let offset = usize_arg(arguments, "offset").unwrap_or(1).max(1);
-        let limit = usize_arg(arguments, "limit").unwrap_or(500).clamp(1, 2_000);
-        let lines = content
-            .lines()
-            .enumerate()
-            .skip(offset - 1)
-            .take(limit)
-            .map(|(index, line)| format!("{:>6}  {line}", index + 1))
-            .collect::<Vec<_>>()
-            .join("\n");
-        ToolResult::success(self.truncate(lines))
+
+        ToolResult::success(self.truncate(output))
     }
 
     async fn write_file(&self, arguments: &Value) -> ToolResult {
@@ -1261,7 +1484,7 @@ impl ToolRuntime for CoreTools {
         let mut specs = vec![
             ToolSpec {
                 name: "read_file".into(),
-                description: "Read a UTF-8 text file with stable line numbers.".into(),
+                description: "Read a UTF-8 text file with stable line numbers. Files over 2 MiB are read in chunks: by default only the first 64 KiB is returned; pass offset (1-based line number) and limit to continue reading further chunks. Lines longer than 4096 chars are truncated. Use for log files, configs, and any large text file.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -1412,6 +1635,16 @@ impl ToolRuntime for CoreTools {
             ToolSpec {
                 name: "view_image".into(),
                 description: "Load a local PNG, JPEG, GIF, or WebP image for visual inspection.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolSpec {
+                name: "show_image".into(),
+                description: "Display a local PNG, JPEG, GIF, or WebP image to the user in the interface (renders a large preview; the user can open it full-screen or save it). Use this when the user asks to see, show, or preview an image. Unlike view_image, this does not require the model to have vision capabilities.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {"path": {"type": "string"}},
@@ -1577,6 +1810,30 @@ impl ToolRuntime for CoreTools {
                             "catalog_id": {"type": "string", "enum": ["frontend-design", "webapp-testing", "code-review", "security-review", "react-nextjs", "api-design", "git-workflow", "technical-writing"]},
                             "source": {"type": "string"}
                         },
+                        "additionalProperties": false
+                    }),
+                },
+                ToolSpec {
+                    name: "uninstall_skill".into(),
+                    description: "Permanently uninstall a Skill by name: deletes its directory under the Coomi skills folder and removes the config/skills.json entry. Cannot be undone.".into(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Installed Skill name, e.g. the name shown by list_skills"}
+                        },
+                        "required": ["name"],
+                        "additionalProperties": false
+                    }),
+                },
+                ToolSpec {
+                    name: "uninstall_mcp".into(),
+                    description: "Permanently uninstall an MCP server by name: removes its entry from config/mcp_servers.json. Cannot be undone.".into(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Configured MCP server name"}
+                        },
+                        "required": ["name"],
                         "additionalProperties": false
                     }),
                 },
@@ -2175,6 +2432,89 @@ mod tests {
             )
             .await;
         assert!(!result.success);
+    }
+
+    #[tokio::test]
+    async fn read_file_chunks_large_files_by_offset() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        // 每行约 70 字节，共 60_000 行 ≈ 4.2 MB > 2 MiB 阈值
+        let file = workspace.path().join("big.log");
+        let mut content = String::new();
+        for i in 1..=60_000 {
+            content.push_str(&format!(
+                "line-{i:>8}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+            ));
+        }
+        std::fs::write(&file, &content).expect("write fixture");
+        let policy =
+            SecurityPolicy::new(workspace.path(), AccessMode::ReadOnly).expect("security policy");
+        let tools = CoreTools::new(workspace.path().to_path_buf(), policy);
+        let call = |offset: Option<usize>| ToolCall {
+            id: "1".into(),
+            name: "read_file".into(),
+            arguments: json!({
+                "path": "big.log",
+                "offset": offset,
+                "limit": 5
+            }),
+        };
+
+        // 默认（offset=1）：只读前 64 KiB，返回开头几行 + 分段提示
+        let first = tools.call(&call(Some(1)), &Deny).await;
+        assert!(first.success, "{}", first.output);
+        assert!(first.output.contains("line-       1-"), "{}", first.output);
+        assert!(first.output.contains("大文件共"), "{}", first.output);
+        assert!(!first.output.contains("line-   30000-"), "{}", first.output);
+
+        // offset 跳转到中部：能读到第 30_000 行附近（旧实现 offset 无法越过 2 MiB）
+        let middle = tools.call(&call(Some(30_000)), &Deny).await;
+        assert!(middle.success, "{}", middle.output);
+        assert!(
+            middle.output.contains("line-   30000-"),
+            "{}",
+            middle.output
+        );
+        assert!(
+            middle.output.contains("offset=30005"),
+            "{}",
+            middle.output
+        );
+
+        // offset 恰好超出文件（第 60001 行不存在）：显示“已到末尾”
+        let tail = tools.call(&call(Some(60_001)), &Deny).await;
+        assert!(tail.success, "{}", tail.output);
+        assert!(tail.output.contains("已到末尾"), "{}", tail.output);
+
+        // offset 远超文件末尾：跳行中途遇 EOF，报错而不是静默返回空
+        let beyond = tools.call(&call(Some(60_002)), &Deny).await;
+        assert!(!beyond.success, "{}", beyond.output);
+        assert!(beyond.output.contains("超出文件末尾"), "{}", beyond.output);
+    }
+
+    #[tokio::test]
+    async fn read_file_truncates_overlong_single_lines() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        // 单行 200_000 字符（模拟压缩 JSON / 长日志行）
+        let file = workspace.path().join("huge_line.txt");
+        let long_line = "x".repeat(200_000);
+        std::fs::write(&file, format!("head\n{long_line}\ntail\n")).expect("write fixture");
+        let policy =
+            SecurityPolicy::new(workspace.path(), AccessMode::ReadOnly).expect("security policy");
+        let tools = CoreTools::new(workspace.path().to_path_buf(), policy);
+        let result = tools
+            .call(
+                &ToolCall {
+                    id: "1".into(),
+                    name: "read_file".into(),
+                    arguments: json!({"path": "huge_line.txt", "limit": 10}),
+                },
+                &Deny,
+            )
+            .await;
+        assert!(result.success, "{}", result.output);
+        assert!(result.output.contains("本行共 200000 字符，已截断"), "{}", result.output);
+        assert!(result.output.contains("head"), "{}", result.output);
+        assert!(result.output.contains("tail"), "{}", result.output);
     }
 
     #[tokio::test]

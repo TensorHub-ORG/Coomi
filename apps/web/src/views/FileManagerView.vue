@@ -195,11 +195,16 @@ function setAsSessionDir() {
 }
 
 onMounted(() => void load(path.value))
+// 从控制台进入：返回统一回控制台（浏览器环境回聊天主页）
+function goDashboard() {
+  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
+  else router.push('/')
+}
 </script>
 
 <template>
   <div class="page">
-    <PageHead title="文件管理" @back="router.push('/')" />
+    <PageHead title="文件管理" @back="goDashboard" />
     <main class="body">
       <!-- 路径导航 -->
       <div class="crumbs">

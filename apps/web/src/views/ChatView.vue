@@ -42,6 +42,15 @@ const config = useConfigStore()
 const scroller = ref<HTMLElement | null>(null)
 const content = ref<HTMLElement | null>(null)
 const drawerOpen = ref(false)
+/** 全局轮询「后台运行中」状态的定时器（会话列表转圈的数据源）。 */
+let runningPoll: ReturnType<typeof setInterval> | null = null
+
+/** 长会话动态加载：只渲染最近一段，顶部可「加载更早记录」。 */
+const RENDER_WINDOW = 60
+const windowSize = ref(RENDER_WINDOW)
+const hasMore = computed(() => session.timeline.length > windowSize.value)
+function loadMore() { windowSize.value += RENDER_WINDOW }
+// 新消息到达时 slice(-windowSize) 自动包含最新，无需额外 watch
 
 const { following, follow, jumpToBottom } = useAutoScroll(scroller)
 
@@ -49,7 +58,8 @@ function idOf(i: Timelineitem): string { return 'id' in i ? i.id : i.callId }
 
 const blocks = computed<Block[]>(() => {
   const out: Block[] = []
-  for (const item of session.timeline) {
+  const items = session.timeline.slice(-windowSize.value)
+  for (const item of items) {
     if (item.kind === 'tool') {
       const last = out[out.length - 1]
       if (last && last.t === 'tools') { last.cards.push(item); continue }
@@ -72,6 +82,12 @@ onMounted(() => {
   // 以引擎磁盘会话为权威源同步列表，修复“会话记录消失/串会话”。
   void sessions.syncFromEngine()
   if (config.providers.length === 0) void config.fetchProviders()
+  // 全局记忆开关以引擎为权威：启动即同步，避免「开关显示关、引擎实际开」的脱节。
+  void config.syncGlobalMemoryFromEngine()
+  // 全局轮询各会话的「后台运行中」状态：切走会话后任务在引擎侧继续跑，
+  // 抽屉/会话页据此显示转圈。轮询常驻（本地 API 开销极小），不依赖抽屉打开。
+  void sessions.refreshRunning()
+  runningPoll = setInterval(() => sessions.refreshRunning(), 2000)
   // 高度只要变就重新贴底（内部有 rAF 合并，不怕高频触发）
   if (typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => follow())
@@ -85,7 +101,10 @@ onMounted(() => {
   }
 })
 
-onBeforeUnmount(() => { ro?.disconnect(); ro = null })
+onBeforeUnmount(() => {
+  if (runningPoll) { clearInterval(runningPoll); runningPoll = null }
+  ro?.disconnect(); ro = null
+})
 
 /**
  * 无人值守演示（?demo=1&auto=1）：授权弹层和提问弹层过一会儿自己点掉。
@@ -122,6 +141,10 @@ function onAnswer(callId: string, text: string) { session.answerQuestion(callId,
       <main ref="scroller" class="stream">
         <div ref="content" class="inner">
           <EmptyState v-if="session.timeline.length === 0" />
+
+          <button v-if="hasMore" class="load-more" @click="loadMore">
+            加载更早记录（还有 {{ session.timeline.length - windowSize }} 条）
+          </button>
 
           <template v-for="b in blocks" :key="b.key">
             <ToolGroup v-if="b.t === 'tools'" :cards="b.cards" />
@@ -177,7 +200,11 @@ function onAnswer(callId: string, text: string) { session.answerQuestion(callId,
   display: flex; flex-direction: column; height: 100%; min-height: 0;
   background: var(--bg);
   transform-origin: left center;
-  transition: transform .3s cubic-bezier(.22, .68, .19, 1), border-radius .3s;
+  /* 只保留 transform 动画：Android WebView 里 transform+border-radius 同时
+     过渡会反复重建合成层，表现为打开侧边栏时主内容文字闪烁。
+     will-change 让合成层常驻，避免动画开始/结束时闪一下。 */
+  transition: transform .3s cubic-bezier(.22, .68, .19, 1);
+  will-change: transform;
 }
 .shell.pushed {
   /* origin 为 left center 时，scale(.94) 使右边缘内缩 6%；
@@ -206,6 +233,13 @@ function onAnswer(callId: string, text: string) { session.answerQuestion(callId,
   box-shadow: var(--shadow-2);
 }
 .to-bottom:active { background: var(--fill); }
+.load-more {
+  display: block; margin: 4px auto 12px; padding: 7px 16px;
+  border-radius: var(--r-pill); border: 1px dashed var(--border-strong);
+  background: transparent; color: var(--text-3);
+  font-size: 12.5px; font-weight: 550;
+}
+.load-more:active { background: var(--fill); }
 .pop-enter-active, .pop-leave-active { transition: opacity .18s ease, transform .18s ease; }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(8px) scale(.9); }
 

@@ -9,7 +9,6 @@ import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { formatSessionTime, useSessionsStore, type SessionMeta } from '@/stores/sessions'
 import CoomiIcon from './CoomiIcon.vue'
-import CoomiMark from './CoomiMark.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -24,8 +23,15 @@ const renameText = ref('')
 
 const isEmpty = computed(() => sessions.groups.length === 0)
 
-// 抽屉一关就把临时态清掉，下次打开是干净的。
-watch(() => props.open, v => { if (!v) { menuFor.value = null; renamingId.value = '' } })
+// 抽屉一关就把临时态清掉；打开时立即刷新一次各会话的「后台运行中」
+// 状态（常驻轮询由 ChatView 全局负责，这里只保证打开瞬间是最新的）。
+watch(() => props.open, v => {
+  if (!v) {
+    menuFor.value = null; renamingId.value = ''
+    return
+  }
+  sessions.refreshRunning()
+})
 
 function pick(id: string) {
   if (renamingId.value) return
@@ -92,8 +98,8 @@ function openDashboard() {
             <CoomiIcon name="close" :size="12" />
           </button>
         </div>
-        <button class="close-btn" aria-label="关闭" @click="emit('close')">
-          <CoomiIcon name="close" :size="19" />
+        <button class="close-btn" aria-label="设置" @click="go('/settings')">
+          <CoomiIcon name="settings" :size="19" />
         </button>
       </header>
 
@@ -132,6 +138,7 @@ function openDashboard() {
                 <template v-if="m.turns">
                   <span>·</span><span>{{ m.turns }} 轮</span>
                 </template>
+                <span v-if="sessions.isRunning(m.id)" class="rspin" aria-label="后台运行中" />
               </p>
             </div>
             <button class="rmore" aria-label="更多" @click.stop="menuFor = m">
@@ -146,11 +153,6 @@ function openDashboard() {
           <CoomiIcon name="terminal" :size="20" />
           <span class="fname">返回控制台</span>
           <CoomiIcon name="chevronRight" :size="17" class="fgear" />
-        </button>
-        <button class="frow" @click="go('/settings')">
-          <CoomiMark :size="26" />
-          <span class="fname">Coomi</span>
-          <CoomiIcon name="settings" :size="18" class="fgear" />
         </button>
       </footer>
     </aside>
@@ -243,6 +245,19 @@ function openDashboard() {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .row.cur .rtitle { color: var(--blue); font-weight: 600; }
+.rmeta {
+  display: flex; align-items: center; gap: 4px; margin-top: 3px;
+  font-size: 11.5px; color: var(--text-3);
+}
+/* 会话在后台执行中的小圈（放在时间/轮数之后，与 meta 文字同高） */
+.rspin {
+  flex: none;
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--blue-soft);
+  border-top-color: var(--blue);
+  animation: coomi-rspin 0.9s linear infinite;
+}
+@keyframes coomi-rspin { to { transform: rotate(360deg); } }
 .rmeta {
   display: flex; align-items: center; gap: 4px; margin-top: 3px;
   font-size: 11.5px; color: var(--text-3);

@@ -1,0 +1,2 @@
+[permissions]
+allow = ["Bash=Select-String -Path (Get-ChildItem -Recurse -Filter AndroidManifest.xml apps\\coomi-app | ForEach-Object FullName) -Pattern 'com\\.termux' | Select-Object -First 20"]

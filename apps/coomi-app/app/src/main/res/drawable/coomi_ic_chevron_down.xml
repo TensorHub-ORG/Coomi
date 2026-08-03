@@ -5,7 +5,7 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24"
-    android:tint="@color/coomi_text_2">
+    android:tint="?attr/coomiText2">
     <path android:pathData="M4.5,9l7.5,7.5 7.5,-7.5"
         android:strokeColor="#000000" android:strokeWidth="2.0"
         android:strokeLineCap="round" android:strokeLineJoin="round"/>

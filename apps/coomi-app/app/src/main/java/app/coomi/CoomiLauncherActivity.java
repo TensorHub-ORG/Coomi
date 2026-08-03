@@ -58,6 +58,7 @@ public class CoomiLauncherActivity extends Activity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        CoomiTheme.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_coomi_launcher);
 

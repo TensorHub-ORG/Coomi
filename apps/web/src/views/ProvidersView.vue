@@ -25,7 +25,7 @@ interface ProviderPreset {
 
 interface ProviderForm {
   preset: ProviderPresetId; id: string; name: string; apiKey: string; models: string
-  baseUrl: string; protocol: ProviderProtocol; contextWindow: number; supportsWebSearch: boolean
+  baseUrl: string; protocol: ProviderProtocol; contextWindow: number; supportsWebSearch: boolean; supportsVision: boolean
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -56,7 +56,7 @@ function formForPreset(id: ProviderPresetId): ProviderForm {
   const preset = PROVIDER_PRESETS.find(item => item.id === id) ?? PROVIDER_PRESETS[0]
   return {
     preset: preset.id, id: preset.providerId, name: preset.id === 'custom' ? '' : preset.name, apiKey: '', models: preset.model,
-    baseUrl: preset.baseUrl, protocol: preset.protocol, contextWindow: 256000, supportsWebSearch: false,
+    baseUrl: preset.baseUrl, protocol: preset.protocol, contextWindow: 256000, supportsWebSearch: false, supportsVision: false,
   }
 }
 
@@ -65,18 +65,20 @@ const isNew = ref(true)
 const saving = ref(false)
 const showingKey = ref(false)
 const discovering = ref(false)
+const savedNote = ref('')
 const pendingDelete = ref<ProviderConfig | null>(null)
 const form = ref<ProviderForm>(formForPreset('deepseek'))
 
 onMounted(() => { void config.fetchProviders() })
 
 const canSave = computed(() => Boolean(
-  form.value.id.trim() && form.value.name.trim() && form.value.models.trim() && form.value.baseUrl.trim(),
+  form.value.id.trim() && form.value.name.trim() && form.value.baseUrl.trim(),
 ))
 
 function startNew() {
   isNew.value = true
   showingKey.value = false
+  savedNote.value = ''
   form.value = formForPreset('deepseek')
   editing.value = true
 }
@@ -94,12 +96,13 @@ function startEdit(p: ProviderConfig) {
     preset, id: p.id, name: p.name, apiKey: '', models: p.models.join(', '), baseUrl: p.baseUrl ?? '',
     protocol: normalizeProtocol(p.toolProtocol ?? p.type), contextWindow: p.contextWindow ?? 256000,
     supportsWebSearch: !!p.supportsWebSearch,
+    supportsVision: !!p.supportsVision,
   }
   editing.value = true
 }
 
-async function save() {
-  if (!canSave.value) return
+async function save(): Promise<boolean> {
+  if (!canSave.value) return false
   const f = form.value
   saving.value = true
   const ok = await config.upsertProvider({
@@ -113,9 +116,18 @@ async function save() {
     contextWindow: f.contextWindow,
     activate: true,
     supportsWebSearch: f.supportsWebSearch,
+    supportsVision: f.supportsVision,
   })
   saving.value = false
-  if (ok) editing.value = false
+  if (!ok) return false
+  if (!form.value.models.trim()) {
+    // 模型未填：保存配置但留在编辑页，方便检索模型后补充再保存
+    savedNote.value = '已保存配置（尚未设为当前）。点击「检索」拉取模型列表，再点一次保存生效。'
+  } else {
+    savedNote.value = ''
+    editing.value = false
+  }
+  return true
 }
 
 async function copyProvider(p: ProviderConfig) {
@@ -134,13 +146,21 @@ async function toggleKey() {
 
 async function discoverModels() {
   if (isNew.value) {
-    config.lastError = '请先保存 Provider，再检索模型'
-    return
+    // 新 Provider：先保存配置（模型可空），再检索模型列表
+    const f = form.value
+    if (!f.id.trim() || !f.name.trim() || !f.baseUrl.trim()) {
+      config.lastError = '请先填写标识、名称和 Base URL 后再检索'
+      return
+    }
+    if (!(await save())) return
   }
   discovering.value = true
   const models = await config.discoverModels(form.value.id)
   discovering.value = false
-  if (models) form.value.models = models.join(', ')
+  if (models) {
+    form.value.models = models.join(', ')
+    savedNote.value = '模型列表已填入，点「保存并设为当前」完成配置。'
+  }
 }
 
 async function confirmDelete() {
@@ -150,8 +170,10 @@ async function confirmDelete() {
 }
 
 function back() {
-  if (editing.value) editing.value = false
-  else router.push('/settings')
+  if (editing.value) { editing.value = false; return }
+  // 从控制台进入：返回统一回控制台（浏览器环境回聊天主页）
+  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
+  else router.push('/')
 }
 </script>
 <template>
@@ -252,10 +274,15 @@ function back() {
           <input v-model="form.supportsWebSearch" type="checkbox" />
           <span>使用 Provider 原生 Web Search</span>
         </label>
+        <label class="toggle-row">
+          <input v-model="form.supportsVision" type="checkbox" />
+          <span class="v-hint">支持图像理解（view_image 会把图片上传给模型识别）<em>仅模型支持视觉时开启</em></span>
+        </label>
 
         <button class="btn btn-primary" type="submit" :disabled="!canSave || saving">
-          {{ saving ? '保存中…' : '保存并设为当前' }}
+          {{ saving ? '保存中…' : (form.models.trim() ? '保存并设为当前' : '保存配置') }}
         </button>
+        <p v-if="savedNote" class="note ok-note">{{ savedNote }}</p>
         <p v-if="config.lastError && !config.usingMock" class="err">保存失败：{{ config.lastError }}</p>
         <p class="note">Key 默认脱敏；只有主动点击“查看”时才读取完整值。</p>
       </form>
@@ -324,6 +351,7 @@ function back() {
 .act.danger { background: var(--danger-soft); color: var(--danger); }
 .act:active { transform: scale(.98); }
 .note { margin-top: 14px; padding: 0 4px; font-size: 12px; line-height: 1.7; color: var(--text-3); }
+.ok-note { color: var(--ok); }
 .err { margin-top: 10px; font-size: 12.5px; line-height: 1.6; color: var(--danger); }
 
 .form { display: flex; flex-direction: column; gap: 12px; }
@@ -344,6 +372,7 @@ function back() {
 .input-action button:disabled { color: var(--text-3); }
 .toggle-row { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 0 4px; color: var(--text-2); font-size: 13px; }
 .toggle-row input { width: 18px; height: 18px; accent-color: var(--blue); }
+.toggle-row em { font-style: normal; font-size: 11px; color: var(--text-3); margin-left: 2px; }
 .form .btn { margin-top: 4px; }
 
 .scrim {

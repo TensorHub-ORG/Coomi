@@ -5,7 +5,7 @@
  * 这里的两个 chip 都对应真实协议能力（enter/exit_plan_mode、set_permission_mode），
  * ⊕ 同时提供快捷指令和 Android SAF 文件导入。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PERMISSION_MODES, useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import CoomiIcon from './CoomiIcon.vue'
@@ -96,11 +96,45 @@ onMounted(() => {
   window.addEventListener('coomi:file-transfer-progress', onTransferProgress)
   window.addEventListener('coomi:files-imported', onFilesImported)
   window.addEventListener('coomi:file-exported', onFileExported)
+  loadDraft()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('coomi:file-transfer-progress', onTransferProgress)
   window.removeEventListener('coomi:files-imported', onFilesImported)
   window.removeEventListener('coomi:file-exported', onFileExported)
+  saveDraft()
+})
+
+// ── 草稿按会话持久化：每个会话（含新对话）各自保留输入框内容 ──
+const DRAFT_PREFIX = 'coomi.draft.'
+let draftTimer: ReturnType<typeof setTimeout> | null = null
+
+function draftKey(id: string) { return DRAFT_PREFIX + id }
+
+function loadDraft() {
+  let saved = ''
+  try { saved = localStorage.getItem(draftKey(session.sessionId)) ?? '' } catch { /* ignore */ }
+  text.value = saved
+  void nextTick(autoGrow)
+}
+
+function saveDraft() {
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null }
+  try { localStorage.setItem(draftKey(session.sessionId), text.value) } catch { /* ignore */ }
+}
+
+// 切会话（含新建会话）时：先把旧会话的草稿存回【旧】key，再加载新会话草稿。
+// 注意：watch 回调里 session.sessionId 已经是新值，保存必须用回调的 prev 参数，
+// 否则旧内容会被写进新会话的 key，导致所有会话显示同一个草稿。
+watch(() => session.sessionId, (next, prev) => {
+  if (prev && prev !== next) {
+    try { localStorage.setItem(draftKey(prev), text.value) } catch { /* ignore */ }
+  }
+  loadDraft()
+})
+watch(text, () => {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(saveDraft, 200)
 })
 </script>
 

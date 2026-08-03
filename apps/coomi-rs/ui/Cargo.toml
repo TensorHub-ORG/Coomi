@@ -24,7 +24,9 @@ coomi-services = { path = "../services" }
 coomi-tools = { path = "../tools" }
 crossterm.workspace = true
 dirs.workspace = true
+fs2.workspace = true
 futures-util.workspace = true
+md5.workspace = true
 ratatui.workspace = true
 pulldown-cmark.workspace = true
 reqwest.workspace = true

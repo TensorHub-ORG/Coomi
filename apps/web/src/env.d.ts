@@ -9,6 +9,8 @@ interface Window {
     exportFile?(path: string, suggestedName: string): void
     exportFileForRequest?(requestId: string, path: string, suggestedName: string): void
     openFile?(path: string): void
+    /** 保存图片（data URL）到相册或下载目录。 */
+    saveImageData?(dataUrl: string, fileName: string): void
   }
 }
 

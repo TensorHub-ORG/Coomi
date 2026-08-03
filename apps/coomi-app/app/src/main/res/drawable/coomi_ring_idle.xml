@@ -3,5 +3,5 @@
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
     <solid android:color="@color/coomi_transparent"/>
-    <stroke android:width="2dp" android:color="@color/coomi_border"/>
+    <stroke android:width="2dp" android:color="?attr/coomiBorder"/>
 </shape>

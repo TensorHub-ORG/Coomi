@@ -20,8 +20,34 @@ const manual = ref<boolean | null>(null)
 const full = ref(false)
 const copied = ref(false)
 
+// ── 图片瀑布流 + 全屏预览（点击放大 / 另存为）──
+const previewSrc = ref('')
+const previewName = ref('coomi-image.png')
+
+function openPreview(src: string) {
+  previewSrc.value = src
+  const mime = src.match(/^data:([^;]+)/)?.[1] ?? 'image/png'
+  const ext = (mime.split('/')[1] ?? 'png').replace('jpeg', 'jpg')
+  previewName.value = `coomi-${Date.now()}.${ext}`
+}
+
+function savePreview() {
+  if (!previewSrc.value) return
+  if (window.CoomiAndroid?.saveImageData) {
+    window.CoomiAndroid.saveImageData(previewSrc.value, previewName.value)
+  } else {
+    // 浏览器兜底：直接下载
+    const a = document.createElement('a')
+    a.href = previewSrc.value
+    a.download = previewName.value
+    a.click()
+  }
+}
+
 const meta = computed(() => toolMeta(props.card.toolName))
 const target = computed(() => toolTarget(props.card.arguments))
+const isShowImage = computed(() => props.card.toolName === 'show_image')
+const imgPath = computed(() => asStr(props.card.arguments?.path))
 const asStr = asText
 
 const st = computed(() => {
@@ -55,7 +81,7 @@ const diffLines = computed(() => {
   return out
 })
 
-const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(props.card.riskSummary))
+const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
 const open = computed(() => manual.value ?? props.card.expanded ?? false)
 const long = computed(() => output.value.length > 700 || output.value.split('\n').length > 14)
 
@@ -108,6 +134,28 @@ async function copy(text: string) {
     </div>
 
     <div v-if="open && hasBody" class="body">
+      <!-- 图片瀑布流：工具产生的图片平铺展示，点击全屏预览 -->
+      <div v-if="card.images && card.images.length" class="sec" :class="{ showimg: isShowImage }">
+        <p class="slabel">图片</p>
+        <div class="imgs" :class="{ showimg: isShowImage }">
+          <img
+            v-for="(src, i) in card.images"
+            :key="i"
+            class="thumb"
+            :class="{ showimg: isShowImage }"
+            :src="src"
+            :alt="`图片 ${i + 1}`"
+            loading="lazy"
+            @click.stop="openPreview(src)"
+          />
+        </div>
+        <p v-if="isShowImage && imgPath" class="ipath">{{ imgPath }}</p>
+      </div>
+      <div v-else-if="card.imageMissing" class="sec">
+        <p class="slabel">图片</p>
+        <p class="inone">找不到图片：图片数据不可用（可能已被上下文压缩清理）</p>
+      </div>
+
       <div v-if="argRows.length" class="sec">
         <p class="slabel">参数</p>
         <div class="args">
@@ -146,6 +194,21 @@ async function copy(text: string) {
         </button>
       </div>
     </div>
+
+    <!-- 全屏图片预览：点击放大 / 另存为 -->
+    <Teleport to="body">
+      <div v-if="previewSrc" class="iv-mask" @click.self="previewSrc = ''">
+        <img
+          :src="previewSrc"
+          class="iv-img"
+          @click.self="previewSrc = ''"
+        />
+        <div class="iv-bar">
+          <button class="iv-btn primary" @click.stop="savePreview">另存为</button>
+          <button class="iv-btn" @click.stop="previewSrc = ''">关闭</button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -277,5 +340,54 @@ async function copy(text: string) {
 .dl.add { background: #e9f7ef; color: #1c7a52; }
 .dsign { flex-shrink: 0; opacity: .55; }
 .dtext { flex: 1; white-space: pre-wrap; word-break: break-word; }
+
+/* ── 图片瀑布流（卡片内缩略图网格）── */
+.imgs {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px;
+}
+.thumb {
+  width: 96px; height: 96px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--border);
+  background: var(--fill);
+}
+.thumb:active { opacity: .8; }
+
+/* show_image：大图展示 + 底部路径 */
+.imgs.showimg {
+  flex-direction: column; align-items: stretch;
+}
+.thumb.showimg {
+  width: 100%; max-width: 340px; height: auto; max-height: 340px;
+  object-fit: contain; margin-inline: auto;
+}
+.ipath {
+  margin-top: 6px; font-family: var(--font-mono); font-size: 11.4px;
+  color: var(--text-3); word-break: break-all;
+}
+.inone {
+  margin-top: 4px; font-size: 12.5px; color: var(--text-3);
+}
+
+/* ── 全屏图片预览 ── */
+.iv-mask {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(4, 6, 10, .92);
+  padding: 18px 14px calc(var(--safe-bottom, 0px) + 18px);
+}
+.iv-img {
+  flex: 1; min-height: 0; max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.iv-bar {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+}
+.iv-btn {
+  min-width: 84px; height: 38px; padding: 0 16px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, .12); color: #fff;
+  font-size: 13.5px; font-weight: 600;
+}
+.iv-btn:active { background: rgba(255, 255, 255, .2); }
+.iv-btn.primary { background: var(--blue); }
 </style>
 
