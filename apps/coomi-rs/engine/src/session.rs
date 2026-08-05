@@ -250,49 +250,107 @@ fn derive_title(value: &str) -> String {
     }
 }
 
-/// 本地规则摘要：首条用户消息 + 末尾 assistant 回复（各截断），以 " → " 连接。
-/// 无 assistant 消息时退化为首条用户消息。
+/// 多轮采样摘要：遍历 (user, assistant) 轮次，每轮取 user 前 40 字符 +
+/// assistant 首尾各 48 字符，以 "；" 连接轮次。
+/// 总长超 `SUMMARY_MAX_CHARS` 时保留首末轮完整、中间轮退化为只留 user 问题，
+/// 保证多轮对话里中间轮次的核心主题（问题/结论）也能被检索命中。
 fn derive_summary(messages: &[ChatMessage]) -> String {
-    let first = first_user_content(messages)
-        .map(compact_preview)
-        .unwrap_or_default();
-    let last_assistant = messages
-        .iter()
-        .rev()
-        .find(|message| {
-            message.role == crate::Role::Assistant
-                && !message.content.trim().is_empty()
-                && !message.compaction_summary
-        })
-        .map(|message| summarize_assistant(&message.content))
-        .unwrap_or_default();
-    if first.is_empty() {
+    const ROUND_USER_CHARS: usize = 40;
+    const ROUND_ASSISTANT_CHARS: usize = 48;
+
+    struct Round {
+        user: String,
+        assistant: String,
+    }
+
+    let mut rounds: Vec<Round> = Vec::new();
+    let mut pending_user: Option<String> = None;
+    for message in messages {
+        if message.compaction_summary {
+            continue;
+        }
+        match message.role {
+            crate::Role::User if !message.internal => {
+                // 连续多条 user（旧会话/连续提问）：前一条作为“无回复”轮次保留，
+                // 避免被覆盖丢失。
+                if let Some(prev) = pending_user.take() {
+                    rounds.push(Round {
+                        user: prev,
+                        assistant: String::new(),
+                    });
+                }
+                pending_user = Some(
+                    compact_preview(&message.content)
+                        .chars()
+                        .take(ROUND_USER_CHARS)
+                        .collect(),
+                );
+            }
+            crate::Role::Assistant if !message.content.trim().is_empty() => {
+                if let Some(user) = pending_user.take() {
+                    rounds.push(Round {
+                        user,
+                        assistant: summarize_assistant(&message.content, ROUND_ASSISTANT_CHARS),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(user) = pending_user {
+        rounds.push(Round {
+            user,
+            assistant: String::new(),
+        });
+    }
+    rounds.retain(|round| !round.user.is_empty() || !round.assistant.is_empty());
+    if rounds.is_empty() {
         return String::new();
     }
-    if last_assistant.is_empty() {
-        first
-    } else {
-        format!("{first} → {last_assistant}")
+
+    let rendered: Vec<String> = rounds
+        .iter()
+        .map(|round| {
+            if round.assistant.is_empty() {
+                round.user.clone()
+            } else {
+                format!("{} → {}", round.user, round.assistant)
+            }
+        })
+        .collect();
+    let full = rendered.join("；");
+    if full.chars().count() <= SUMMARY_MAX_CHARS || rounds.len() <= 2 {
+        return full.chars().take(SUMMARY_MAX_CHARS).collect();
     }
+    // 超限：首末轮完整，中间轮只保留 user 问题；压缩后仍超限则整体截断。
+    let first = rendered.first().cloned().unwrap_or_default();
+    let last = rendered.last().cloned().unwrap_or_default();
+    let middle: Vec<String> = rounds[1..rounds.len() - 1]
+        .iter()
+        .map(|round| round.user.clone())
+        .collect();
+    let condensed = [first, middle.join("；"), last].join("；");
+    condensed.chars().take(SUMMARY_MAX_CHARS).collect()
 }
 
-/// 助手回复摘要：首尾双侧采样（各 `SUMMARY_TAIL_CHARS` 字符）。
+/// 摘要总长上限（字符）。
+const SUMMARY_MAX_CHARS: usize = 800;
+
+/// 助手回复摘要：首尾双侧采样（各 `head_tail` 字符）。
 /// 只取开头会把长回复中后段的关键信息（技术词、结论）漏掉，
 /// 导致检索命中不了——检索的价值正在于这些词。
-const SUMMARY_TAIL_CHARS: usize = 96;
-
-fn summarize_assistant(content: &str) -> String {
+fn summarize_assistant(content: &str, head_tail: usize) -> String {
     let single_line = content.split_whitespace().collect::<Vec<_>>().join(" ");
     let s = single_line.trim();
     let len = s.chars().count();
-    if len <= SUMMARY_TAIL_CHARS * 2 {
-        return s.chars().take(SUMMARY_TAIL_CHARS * 2).collect();
+    if len <= head_tail * 2 {
+        return s.chars().take(head_tail * 2).collect();
     }
-    let head: String = s.chars().take(SUMMARY_TAIL_CHARS).collect();
+    let head: String = s.chars().take(head_tail).collect();
     let tail: String = s
         .chars()
         .rev()
-        .take(SUMMARY_TAIL_CHARS)
+        .take(head_tail)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
@@ -368,10 +426,10 @@ mod tests {
         assert_eq!(listed[0].title.chars().count(), 43);
         assert!(listed[0].title.starts_with("first message"));
         assert!(listed[0].title.ends_with('…'));
-        // 摘要含首条 user 与末尾 assistant 回复。
+        // 多轮采样：首轮 user、末尾 assistant 回复、以及中间轮 user 问题都应进摘要。
         assert!(listed[0].summary.contains("first message"));
         assert!(listed[0].summary.contains("finished the migration"));
-        assert!(!listed[0].summary.contains("second user message"));
+        assert!(listed[0].summary.contains("second user message"));
     }
 
     #[test]
@@ -384,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_summary_links_first_user_and_last_assistant() {
+    fn derive_summary_links_every_user_assistant_round() {
         let messages = vec![
             ChatMessage::user("fix the parser"),
             ChatMessage::assistant("on it", Vec::new()),
@@ -392,10 +450,59 @@ mod tests {
             ChatMessage::assistant("tests updated", Vec::new()),
         ];
         let summary = derive_summary(&messages);
-        assert_eq!(summary, "fix the parser → tests updated");
+        assert_eq!(
+            summary,
+            "fix the parser → on it；also update tests → tests updated"
+        );
         // 无 assistant 时退化为首条 user。
         let only_user = vec![ChatMessage::user("just a note")];
         assert_eq!(derive_summary(&only_user), "just a note");
+    }
+
+    #[test]
+    fn derive_summary_covers_middle_round_keywords() {
+        // 3 轮对话：中间轮次的 user 问题必须进摘要，否则检索命中不了。
+        let messages = vec![
+            ChatMessage::user("Redis 缓存穿透是什么"),
+            ChatMessage::assistant("穿透：查不存在的 key，方案是布隆过滤器", Vec::new()),
+            ChatMessage::user("那缓存雪崩呢"),
+            ChatMessage::assistant("雪崩：一批 key 同时过期，方案是 TTL 随机化", Vec::new()),
+            ChatMessage::user("击穿和穿透怎么区分"),
+            ChatMessage::assistant("击穿：热 key 失效瞬间并发打爆，方案是互斥锁", Vec::new()),
+        ];
+        let summary = derive_summary(&messages);
+        assert!(
+            summary.contains("缓存雪崩"),
+            "中间轮 user 问题应进摘要，实际: {summary:?}"
+        );
+        assert!(
+            summary.contains("击穿"),
+            "末轮 user 问题应进摘要，实际: {summary:?}"
+        );
+        assert!(summary.contains("布隆过滤器"), "首轮 assistant 结论应进摘要");
+    }
+
+    #[test]
+    fn derive_summary_compresses_many_rounds_to_budget() {
+        // 很多轮 + 长回复：总长不能爆掉 SUMMARY_MAX_CHARS，且首末轮保留。
+        let mut messages = Vec::new();
+        for i in 0..12 {
+            messages.push(ChatMessage::user(format!("第 {i} 轮的问题是什么")));
+            messages.push(ChatMessage::assistant(
+                &format!("这是第 {i} 轮的回复，内容比较长，包含一些技术细节和结论。"),
+                Vec::new(),
+            ));
+        }
+        let summary = derive_summary(&messages);
+        assert!(
+            summary.chars().count() <= SUMMARY_MAX_CHARS,
+            "摘要超长: {} 字符",
+            summary.chars().count()
+        );
+        assert!(summary.contains("第 0 轮"), "首轮应保留");
+        assert!(summary.contains("第 11 轮"), "末轮应保留");
+        // 中间轮退化为 user 问题仍可检索。
+        assert!(summary.contains("第 5 轮"), "中间轮 user 问题应保留");
     }
 
     #[test]
