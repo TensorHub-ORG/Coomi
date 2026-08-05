@@ -3379,7 +3379,8 @@ fn model_matches(choice: &ModelChoice, query: &str) -> bool {
 
 /// 会话检索打分：查询拆词后按 title(×5)/summary(×3)/preview(×1)/model/id 加权求和。
 /// 分词与前端 sessions.ts 保持一致（Unicode 字母数字 + `_`/`-`/`+`/`.`/`#`，词长 ≥2）；
-/// 精确匹配不中时用“紧凑版”（去空白）兜底，弥补「B+ 树」与「B+树」这类空白差异。
+/// 命中次数加权：同一词出现多次分数更高；紧凑版（去空白）仅在精确未命中时兜底，
+/// 弥补「B+ 树」与「B+树」这类空白差异。
 fn session_search_score(session: &SessionSummary, query: &str) -> usize {
     let terms = query
         .split(|character: char| {
@@ -3405,16 +3406,16 @@ fn session_search_score(session: &SessionSummary, query: &str) -> usize {
     let compact_summary = summary.replace(char::is_whitespace, "");
     let compact_preview = preview.replace(char::is_whitespace, "");
     terms.iter().fold(0usize, |score, term| {
-        let title_exact = title.contains(term.as_str());
-        let summary_exact = summary.contains(term.as_str());
-        let preview_exact = preview.contains(term.as_str());
+        let title_hits = title.matches(term.as_str()).count();
+        let summary_hits = summary.matches(term.as_str()).count();
+        let preview_hits = preview.matches(term.as_str()).count();
         score
-            + usize::from(title_exact) * 5
-            + usize::from(!title_exact && compact_title.contains(term.as_str())) * 2
-            + usize::from(summary_exact) * 3
-            + usize::from(!summary_exact && compact_summary.contains(term.as_str()))
-            + usize::from(preview_exact)
-            + usize::from(!preview_exact && compact_preview.contains(term.as_str()))
+            + title_hits * 5
+            + usize::from(title_hits == 0) * compact_title.matches(term.as_str()).count() * 2
+            + summary_hits * 3
+            + usize::from(summary_hits == 0) * compact_summary.matches(term.as_str()).count()
+            + preview_hits
+            + usize::from(preview_hits == 0) * compact_preview.matches(term.as_str()).count()
             + usize::from(model.contains(term.as_str()))
             + usize::from(id.contains(term.as_str()))
     })
@@ -3445,6 +3446,43 @@ fn catalog_matches(id: &str, name: &str, query: &str) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// 与前端 apps/web/src/stores/sessions.ts scoreSession 的对拍测试。
+    /// 语料在 tests/session_search_cases.json（两端共用），前端侧用
+    /// tests/check_session_search.mjs 跑同一份语料。改打分逻辑必须同步两端 + 语料。
+    #[test]
+    fn session_search_score_matches_shared_corpus() {
+        let corpus: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/session_search_cases.json"
+        ))
+        .expect("parse shared corpus");
+        let cases = corpus["cases"].as_array().expect("cases array");
+        let mut checked = 0;
+        for case in cases {
+            let query = case["query"].as_str().expect("query");
+            for (i, session) in case["sessions"].as_array().expect("sessions").iter().enumerate() {
+                let summary = SessionSummary {
+                    id: uuid::Uuid::nil(),
+                    provider_id: "demo".to_string(),
+                    model: session["model"].as_str().expect("model").to_string(),
+                    cwd: std::path::PathBuf::from("/tmp/demo"),
+                    updated_at: chrono::Utc::now(),
+                    preview: session["preview"].as_str().expect("preview").to_string(),
+                    title: session["title"].as_str().expect("title").to_string(),
+                    summary: session["summary"].as_str().expect("summary").to_string(),
+                };
+                let got = session_search_score(&summary, query);
+                let expect = session["expect"].as_u64().expect("expect") as usize;
+                checked += 1;
+                assert_eq!(
+                    got, expect,
+                    "query={query:?} case#{i} title={:?}",
+                    summary.title
+                );
+            }
+        }
+        assert!(checked >= 6, "语料用例数异常: {checked}");
+    }
 
     fn test_state() -> (tempfile::TempDir, TuiState) {
         let home = tempfile::tempdir().expect("temporary home");

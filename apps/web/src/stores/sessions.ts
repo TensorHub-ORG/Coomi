@@ -189,26 +189,33 @@ export const useSessionsStore = defineStore('sessions', () => {
     return t.length > 42 ? t.slice(0, 42) + '…' : t || '新对话'
   }
 
-  /** 会话检索打分：拆词后按 title/summary/preview/model 加权求和（与 Rust 侧一致）。 */
+  /** 会话检索打分：拆词后按 title/summary/preview/model 加权求和（与 Rust 侧一致）。
+   *  命中次数加权：同一词出现多次分数更高；紧凑版仅在精确未命中时兜底（权重减半）。 */
   function scoreSession(m: SessionMeta, terms: string[]): number {
     const hay = (s?: string) => (s ?? '').toLowerCase()
     const title = hay(m.title)
     const summary = hay(m.summary)
     const preview = hay(m.preview)
     const model = hay(m.model)
+    const id = hay(m.id)
     // 紧凑版（去空白）兜底：弥补「B+ 树」与「B+树」这类空白差异，权重减半。
     const compactTitle = title.replace(/\s+/g, '')
     const compactSummary = summary.replace(/\s+/g, '')
     const compactPreview = preview.replace(/\s+/g, '')
+    const count = (s: string, t: string) => s.split(t).length - 1
     return terms.reduce((acc, t) => {
       let s = 0
-      if (title.includes(t)) s += 5
-      else if (compactTitle.includes(t)) s += 2
-      if (summary.includes(t)) s += 3
-      else if (compactSummary.includes(t)) s += 1
-      if (preview.includes(t)) s += 1
-      else if (compactPreview.includes(t)) s += 1
+      const th = count(title, t)
+      const sh = count(summary, t)
+      const ph = count(preview, t)
+      if (th > 0) s += th * 5
+      else s += count(compactTitle, t) * 2
+      if (sh > 0) s += sh * 3
+      else s += count(compactSummary, t)
+      if (ph > 0) s += ph
+      else s += count(compactPreview, t)
       if (model.includes(t)) s += 1
+      if (id.includes(t)) s += 1
       return acc + s
     }, 0)
   }
