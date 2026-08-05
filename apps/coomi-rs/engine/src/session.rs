@@ -264,7 +264,7 @@ fn derive_summary(messages: &[ChatMessage]) -> String {
                 && !message.content.trim().is_empty()
                 && !message.compaction_summary
         })
-        .map(|message| compact_preview(&message.content))
+        .map(|message| summarize_assistant(&message.content))
         .unwrap_or_default();
     if first.is_empty() {
         return String::new();
@@ -274,6 +274,30 @@ fn derive_summary(messages: &[ChatMessage]) -> String {
     } else {
         format!("{first} → {last_assistant}")
     }
+}
+
+/// 助手回复摘要：首尾双侧采样（各 `SUMMARY_TAIL_CHARS` 字符）。
+/// 只取开头会把长回复中后段的关键信息（技术词、结论）漏掉，
+/// 导致检索命中不了——检索的价值正在于这些词。
+const SUMMARY_TAIL_CHARS: usize = 96;
+
+fn summarize_assistant(content: &str) -> String {
+    let single_line = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    let s = single_line.trim();
+    let len = s.chars().count();
+    if len <= SUMMARY_TAIL_CHARS * 2 {
+        return s.chars().take(SUMMARY_TAIL_CHARS * 2).collect();
+    }
+    let head: String = s.chars().take(SUMMARY_TAIL_CHARS).collect();
+    let tail: String = s
+        .chars()
+        .rev()
+        .take(SUMMARY_TAIL_CHARS)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{head}…{tail}")
 }
 
 #[cfg(test)]
@@ -372,5 +396,25 @@ mod tests {
         // 无 assistant 时退化为首条 user。
         let only_user = vec![ChatMessage::user("just a note")];
         assert_eq!(derive_summary(&only_user), "just a note");
+    }
+
+    #[test]
+    fn derive_summary_captures_tail_keywords_of_long_reply() {
+        // 长回复：关键信息（多进程）只出现在尾部，只取开头会漏掉。
+        let mut long = String::from("GIL 全称 Global Interpreter Lock，它让 CPython 同一时刻只有一个线程执行字节码。");
+        long.push_str(&"a".repeat(2000));
+        long.push_str("需要的话我可以帮你写一个对比 GIL 影响、或用多进程/NumPy 加速的具体示例。");
+        let messages = vec![
+            ChatMessage::user("Python 的 GIL 是什么？影响什么场景"),
+            ChatMessage::assistant(&long, Vec::new()),
+        ];
+        let summary = derive_summary(&messages);
+        assert!(summary.contains("多进程"), "摘要应包含尾部关键词，实际: {summary:?}");
+        // 短回复双侧不重复、不截断过多。
+        let short = vec![
+            ChatMessage::user("hi"),
+            ChatMessage::assistant("hello world", Vec::new()),
+        ];
+        assert_eq!(derive_summary(&short), "hi → hello world");
     }
 }
