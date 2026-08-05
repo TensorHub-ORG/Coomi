@@ -634,6 +634,8 @@ async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
             "cwd": summary.cwd.display().to_string(),
             "updated_at": summary.updated_at,
             "preview": summary.preview,
+            "title": summary.title,
+            "summary": summary.summary,
             "created_at": full.as_ref().map(|s| s.created_at).unwrap_or(summary.updated_at),
             "usage": full.as_ref().map(|s| json!({
                 "input_tokens": s.usage.input_tokens,
@@ -2712,6 +2714,8 @@ mod tests {
         let mut found_idle = false;
         for session in sessions {
             let id = session["id"].as_str().expect("session id");
+            assert!(session["title"].is_string(), "session should expose title");
+            assert!(session["summary"].is_string(), "session should expose summary");
             if id == running_session.id.to_string() {
                 assert_eq!(session["running"], json!(true), "running session should report running");
                 found_running = true;

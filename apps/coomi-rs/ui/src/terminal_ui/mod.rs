@@ -2294,11 +2294,7 @@ fn overlay_item_count(app: &TuiState) -> usize {
             .iter()
             .filter(|item| model_matches(item, &query))
             .count(),
-        OverlayKind::History => app
-            .sessions
-            .iter()
-            .filter(|item| session_matches(item, &query))
-            .count(),
+        OverlayKind::History => ranked_sessions(&app.sessions, &query).len(),
         OverlayKind::Catalog => match overlay.catalog_tab {
             CatalogTab::Mcp => app
                 .mcp_entries
@@ -2357,10 +2353,8 @@ fn activate_overlay_selection(
             if !require_idle(app, "resume another session") {
                 return Ok(());
             }
-            if let Some(summary) = app
-                .sessions
-                .iter()
-                .filter(|item| session_matches(item, &query))
+            if let Some(summary) = ranked_sessions(&app.sessions, &query)
+                .into_iter()
                 .nth(selected)
                 .cloned()
             {
@@ -2518,12 +2512,7 @@ fn mark_selected_session_for_delete(app: &mut TuiState) {
         return;
     };
     let query = overlay.query.text().to_ascii_lowercase();
-    if let Some(summary) = app
-        .sessions
-        .iter()
-        .filter(|item| session_matches(item, &query))
-        .nth(overlay.selected)
-    {
+    if let Some(summary) = ranked_sessions(&app.sessions, &query).into_iter().nth(overlay.selected) {
         app.confirm_delete = Some(DeleteTarget::Session(summary.id));
     }
 }
@@ -3388,11 +3377,44 @@ fn model_matches(choice: &ModelChoice, query: &str) -> bool {
         || choice.provider_display.to_ascii_lowercase().contains(query)
 }
 
-fn session_matches(session: &SessionSummary, query: &str) -> bool {
-    query.is_empty()
-        || session.preview.to_ascii_lowercase().contains(query)
-        || session.model.to_ascii_lowercase().contains(query)
-        || session.id.to_string().contains(query)
+/// 会话检索打分：查询拆词后按 title(×5)/summary(×3)/preview(×1)/model/id 加权求和。
+fn session_search_score(session: &SessionSummary, query: &str) -> usize {
+    let terms = query
+        .split(|character: char| !character.is_alphanumeric() && character != '_' && character != '-')
+        .filter(|term| term.chars().count() >= 2)
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return 0;
+    }
+    let title = session.title.to_lowercase();
+    let summary = session.summary.to_lowercase();
+    let preview = session.preview.to_lowercase();
+    let model = session.model.to_lowercase();
+    let id = session.id.to_string();
+    terms.iter().fold(0usize, |score, term| {
+        score
+            + usize::from(title.contains(term.as_str())) * 5
+            + usize::from(summary.contains(term.as_str())) * 3
+            + usize::from(preview.contains(term.as_str()))
+            + usize::from(model.contains(term.as_str()))
+            + usize::from(id.contains(term.as_str()))
+    })
+}
+
+/// 按查询词对会话打分排序；空查询保持原序（updated_at 降序）。
+/// 渲染与选中/删除共用此函数，保证列表顺序与 nth(selected) 一致。
+fn ranked_sessions<'a>(sessions: &'a [SessionSummary], query: &str) -> Vec<&'a SessionSummary> {
+    if query.trim().is_empty() {
+        return sessions.iter().collect();
+    }
+    let mut scored = sessions
+        .iter()
+        .map(|session| (session, session_search_score(session, query)))
+        .collect::<Vec<_>>();
+    scored.retain(|(_, score)| *score > 0);
+    scored.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+    scored.into_iter().map(|(session, _)| session).collect()
 }
 
 fn catalog_matches(id: &str, name: &str, query: &str) -> bool {

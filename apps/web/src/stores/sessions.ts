@@ -30,6 +30,14 @@ export interface SessionMeta {
   pinned: boolean
   /** 创建该会话时的工作目录；用于把不同项目的会话隔离开。 */
   cwd?: string
+  /** 引擎侧一句话摘要（/api/sessions 的 summary），用于检索与展示。 */
+  summary?: string
+  /** 引擎侧首条消息预览。 */
+  preview?: string
+  /** 引擎侧模型名。 */
+  model?: string
+  /** 用户手动重命名过：true 时引擎推导的标题不再覆盖。 */
+  renamed?: boolean
 }
 
 export interface SessionGroup {
@@ -116,7 +124,14 @@ export const useSessionsStore = defineStore('sessions', () => {
   const filtered = computed(() => {
     const q = query.value.trim().toLowerCase()
     if (!q) return sorted.value
-    return sorted.value.filter(m => m.title.toLowerCase().includes(q))
+    // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
+    const terms = q.split(/[^a-z0-9_\-]+/).filter(t => t.length >= 2)
+    if (terms.length === 0) return sorted.value
+    return sorted.value
+      .map(m => ({ m, score: scoreSession(m, terms) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(x => x.m)
   })
 
   /** 置顶 / 今天 / 昨天 / 7 天内 / 更早 / 其它目录 —— 空组不出现。 */
@@ -172,6 +187,23 @@ export const useSessionsStore = defineStore('sessions', () => {
     return t.length > 42 ? t.slice(0, 42) + '…' : t || '新对话'
   }
 
+  /** 会话检索打分：拆词后按 title/summary/preview/model 加权求和（与 Rust 侧一致）。 */
+  function scoreSession(m: SessionMeta, terms: string[]): number {
+    const hay = (s?: string) => (s ?? '').toLowerCase()
+    const title = hay(m.title)
+    const summary = hay(m.summary)
+    const preview = hay(m.preview)
+    const model = hay(m.model)
+    return terms.reduce((acc, t) => {
+      let s = 0
+      if (title.includes(t)) s += 5
+      if (summary.includes(t)) s += 3
+      if (preview.includes(t)) s += 1
+      if (model.includes(t)) s += 1
+      return acc + s
+    }, 0)
+  }
+
   function ensure(id: string, title = '新对话'): SessionMeta {
     let m = find(id)
     if (!m) {
@@ -198,6 +230,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const m = find(id)
     if (!m) return
     m.title = title.trim() || m.title
+    m.renamed = true
     persist()
   }
 
@@ -308,6 +341,8 @@ export const useSessionsStore = defineStore('sessions', () => {
         cwd: string
         updated_at: string
         preview: string
+        title: string
+        summary: string
         created_at: string
       }>
       const localById = new Map(metas.value.map(m => [m.id, m]))
@@ -317,12 +352,17 @@ export const useSessionsStore = defineStore('sessions', () => {
         const createdAt = local?.createdAt ?? (Date.parse(r.created_at) || updatedAt)
         return {
           id: r.id,
-          title: local?.title ?? (r.preview ? deriveTitle(r.preview) : '新对话'),
+          // 用户重命名过（renamed）则保留用户标题；否则引擎 title 优先，本地推导兜底。
+          title: local?.renamed ? local.title : (r.title || local?.title || (r.preview ? deriveTitle(r.preview) : '新对话')),
           createdAt,
           updatedAt,
           turns: local?.turns ?? 0,
           pinned: local?.pinned ?? false,
           cwd: r.cwd || local?.cwd,
+          summary: r.summary || local?.summary,
+          preview: r.preview || local?.preview,
+          model: r.model || local?.model,
+          renamed: local?.renamed,
         }
       })
       // 本地有而引擎暂无的（旧迁移 ID 等）保留，避免吞掉用户数据

@@ -25,6 +25,12 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<ChatMessage>,
     pub usage: TokenUsage,
+    /// 会话标题：首条用户消息的本地推导，供会话列表/检索使用。
+    #[serde(default)]
+    pub title: String,
+    /// 会话一句话摘要：本地规则推导（首条 user + 末尾 assistant），供检索匹配。
+    #[serde(default)]
+    pub summary: String,
     #[serde(default)]
     pub context: ContextState,
     #[serde(default)]
@@ -47,6 +53,8 @@ impl Session {
             updated_at: now,
             messages: Vec::new(),
             usage: TokenUsage::default(),
+            title: String::new(),
+            summary: String::new(),
             context: ContextState::default(),
             plan: None,
             loop_state: None,
@@ -83,7 +91,12 @@ pub struct SessionSummary {
     pub model: String,
     pub cwd: PathBuf,
     pub updated_at: DateTime<Utc>,
+    /// 首条用户消息的短预览（向后兼容）。
     pub preview: String,
+    /// 会话标题：持久化的 Session.title，缺省时惰性推导。
+    pub title: String,
+    /// 会话摘要：持久化的 Session.summary，缺省时惰性推导。
+    pub summary: String,
 }
 
 pub struct SessionStore {
@@ -175,12 +188,22 @@ impl SessionStore {
             {
                 continue;
             }
-            let preview = session
-                .messages
-                .iter()
-                .find(|message| message.role == crate::Role::User)
-                .map(|message| compact_preview(&message.content))
+            let preview = first_user_content(&session.messages)
+                .map(compact_preview)
                 .unwrap_or_default();
+            // title/summary 为空的旧会话在这里惰性推导，无需迁移写盘。
+            let title = if session.title.trim().is_empty() {
+                first_user_content(&session.messages)
+                    .map(derive_title)
+                    .unwrap_or_default()
+            } else {
+                session.title.clone()
+            };
+            let summary = if session.summary.trim().is_empty() {
+                derive_summary(&session.messages)
+            } else {
+                session.summary.clone()
+            };
             summaries.push(SessionSummary {
                 id: session.id,
                 provider_id: session.provider_id,
@@ -188,6 +211,8 @@ impl SessionStore {
                 cwd: session.cwd,
                 updated_at: session.updated_at,
                 preview,
+                title,
+                summary,
             });
         }
         summaries.sort_by_key(|summary| Reverse(summary.updated_at));
@@ -204,6 +229,53 @@ fn compact_preview(value: &str) -> String {
     single_line.chars().take(72).collect()
 }
 
+/// 首条真实用户消息的原文（跳过 internal 消息，如自动注入的指令）。
+fn first_user_content(messages: &[ChatMessage]) -> Option<&str> {
+    messages
+        .iter()
+        .find(|message| message.role == crate::Role::User && !message.internal)
+        .map(|message| message.content.as_str())
+}
+
+/// 标题：首条用户消息压缩为一行，截断到 42 字符（与前端 deriveTitle 一致）。
+fn derive_title(value: &str) -> String {
+    let single_line = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = single_line.trim();
+    let mut chars = trimmed.chars();
+    let head: String = chars.by_ref().take(42).collect();
+    if chars.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
+/// 本地规则摘要：首条用户消息 + 末尾 assistant 回复（各截断），以 " → " 连接。
+/// 无 assistant 消息时退化为首条用户消息。
+fn derive_summary(messages: &[ChatMessage]) -> String {
+    let first = first_user_content(messages)
+        .map(compact_preview)
+        .unwrap_or_default();
+    let last_assistant = messages
+        .iter()
+        .rev()
+        .find(|message| {
+            message.role == crate::Role::Assistant
+                && !message.content.trim().is_empty()
+                && !message.compaction_summary
+        })
+        .map(|message| compact_preview(&message.content))
+        .unwrap_or_default();
+    if first.is_empty() {
+        return String::new();
+    }
+    if last_assistant.is_empty() {
+        first
+    } else {
+        format!("{first} → {last_assistant}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,13 +288,89 @@ mod tests {
         session
             .messages
             .push(ChatMessage::user("inspect this project"));
+        session
+            .messages
+            .push(ChatMessage::assistant("the build is green", Vec::new()));
         store.save(&session).expect("save session");
 
         let listed = store.list(Some(home.path())).expect("list sessions");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].preview, "inspect this project");
+        assert_eq!(listed[0].title, "inspect this project");
+        assert_eq!(listed[0].summary, "inspect this project → the build is green");
         assert_eq!(store.load(session.id).expect("load session").model, "model");
         assert!(store.delete(session.id).expect("delete session"));
         assert!(!store.delete(session.id).expect("delete missing session"));
+    }
+
+    #[test]
+    fn list_lazily_derives_title_and_summary_for_old_sessions() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let store = SessionStore::new(home.path());
+        // 模拟旧版本会话：无 title/summary 字段（serde default 兼容）。
+        let mut session = Session::new("provider", "model", home.path().to_path_buf());
+        session.title.clear();
+        session.summary.clear();
+        let long_first = format!("first message {}", "x".repeat(200));
+        session.messages.push(ChatMessage::user(long_first.clone()));
+        session
+            .messages
+            .push(ChatMessage::user("second user message, not the title"));
+        session
+            .messages
+            .push(ChatMessage::assistant("finished the migration", Vec::new()));
+        store.save(&session).expect("save session");
+
+        // 反序列化旧 JSON（无 title/summary 键）仍然成功。
+        let path = store.path(session.id);
+        let mut value = serde_json::to_value(&session).expect("serialize session");
+        value
+            .as_object_mut()
+            .expect("session object")
+            .remove("title");
+        value
+            .as_object_mut()
+            .expect("session object")
+            .remove("summary");
+        std::fs::write(&path, serde_json::to_vec_pretty(&value).expect("pretty json"))
+            .expect("write old-style json");
+        let loaded = store.load(session.id).expect("load old-style session");
+        assert!(loaded.title.is_empty());
+        assert!(loaded.summary.is_empty());
+
+        let listed = store.list(Some(home.path())).expect("list sessions");
+        assert_eq!(listed.len(), 1);
+        // 标题取首条 user 消息并截断到 42 字符 + 省略号。
+        assert_eq!(listed[0].title.chars().count(), 43);
+        assert!(listed[0].title.starts_with("first message"));
+        assert!(listed[0].title.ends_with('…'));
+        // 摘要含首条 user 与末尾 assistant 回复。
+        assert!(listed[0].summary.contains("first message"));
+        assert!(listed[0].summary.contains("finished the migration"));
+        assert!(!listed[0].summary.contains("second user message"));
+    }
+
+    #[test]
+    fn derive_title_compresses_and_truncates() {
+        assert_eq!(derive_title("  hello\n  world  "), "hello world");
+        let long = "a".repeat(100);
+        let title = derive_title(&long);
+        assert_eq!(title.chars().count(), 43);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn derive_summary_links_first_user_and_last_assistant() {
+        let messages = vec![
+            ChatMessage::user("fix the parser"),
+            ChatMessage::assistant("on it", Vec::new()),
+            ChatMessage::user("also update tests"),
+            ChatMessage::assistant("tests updated", Vec::new()),
+        ];
+        let summary = derive_summary(&messages);
+        assert_eq!(summary, "fix the parser → tests updated");
+        // 无 assistant 时退化为首条 user。
+        let only_user = vec![ChatMessage::user("just a note")];
+        assert_eq!(derive_summary(&only_user), "just a note");
     }
 }

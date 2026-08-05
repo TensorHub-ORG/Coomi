@@ -453,7 +453,7 @@ fn print_sessions(store: &SessionStore, cwd: Option<&Path>) -> Result<()> {
             session.updated_at.format("%Y-%m-%d %H:%M"),
             session.provider_id,
             session.model,
-            session.preview
+            if session.title.is_empty() { &session.preview } else { &session.title }
         );
     }
     Ok(())
