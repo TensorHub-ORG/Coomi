@@ -125,7 +125,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     const q = query.value.trim().toLowerCase()
     if (!q) return sorted.value
     // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
-    const terms = q.split(/[^a-z0-9_\-]+/).filter(t => t.length >= 2)
+    // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文），与 Rust 的 char::is_alphanumeric 对齐；
+    // 不能用 ASCII 正则 [a-z0-9]，否则中文查询词会被整体拆掉导致搜不到。
+    const terms = q.match(/[\p{L}\p{N}_-]{2,}/gu) ?? []
     if (terms.length === 0) return sorted.value
     return sorted.value
       .map(m => ({ m, score: scoreSession(m, terms) }))
