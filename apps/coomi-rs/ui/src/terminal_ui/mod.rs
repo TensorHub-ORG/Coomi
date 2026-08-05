@@ -3378,9 +3378,18 @@ fn model_matches(choice: &ModelChoice, query: &str) -> bool {
 }
 
 /// 会话检索打分：查询拆词后按 title(×5)/summary(×3)/preview(×1)/model/id 加权求和。
+/// 分词与前端 sessions.ts 保持一致（Unicode 字母数字 + `_`/`-`/`+`/`.`/`#`，词长 ≥2）；
+/// 精确匹配不中时用“紧凑版”（去空白）兜底，弥补「B+ 树」与「B+树」这类空白差异。
 fn session_search_score(session: &SessionSummary, query: &str) -> usize {
     let terms = query
-        .split(|character: char| !character.is_alphanumeric() && character != '_' && character != '-')
+        .split(|character: char| {
+            !character.is_alphanumeric()
+                && character != '_'
+                && character != '-'
+                && character != '+'
+                && character != '.'
+                && character != '#'
+        })
         .filter(|term| term.chars().count() >= 2)
         .map(str::to_lowercase)
         .collect::<Vec<_>>();
@@ -3392,11 +3401,20 @@ fn session_search_score(session: &SessionSummary, query: &str) -> usize {
     let preview = session.preview.to_lowercase();
     let model = session.model.to_lowercase();
     let id = session.id.to_string();
+    let compact_title = title.replace(char::is_whitespace, "");
+    let compact_summary = summary.replace(char::is_whitespace, "");
+    let compact_preview = preview.replace(char::is_whitespace, "");
     terms.iter().fold(0usize, |score, term| {
+        let title_exact = title.contains(term.as_str());
+        let summary_exact = summary.contains(term.as_str());
+        let preview_exact = preview.contains(term.as_str());
         score
-            + usize::from(title.contains(term.as_str())) * 5
-            + usize::from(summary.contains(term.as_str())) * 3
-            + usize::from(preview.contains(term.as_str()))
+            + usize::from(title_exact) * 5
+            + usize::from(!title_exact && compact_title.contains(term.as_str())) * 2
+            + usize::from(summary_exact) * 3
+            + usize::from(!summary_exact && compact_summary.contains(term.as_str()))
+            + usize::from(preview_exact)
+            + usize::from(!preview_exact && compact_preview.contains(term.as_str()))
             + usize::from(model.contains(term.as_str()))
             + usize::from(id.contains(term.as_str()))
     })

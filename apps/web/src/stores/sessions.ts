@@ -125,9 +125,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     const q = query.value.trim().toLowerCase()
     if (!q) return sorted.value
     // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
-    // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文），与 Rust 的 char::is_alphanumeric 对齐；
-    // 不能用 ASCII 正则 [a-z0-9]，否则中文查询词会被整体拆掉导致搜不到。
-    const terms = q.match(/[\p{L}\p{N}_-]{2,}/gu) ?? []
+    // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文 + 技术符号 +.#），与 Rust 的
+    // is_alphanumeric 谓词对齐；不能用 ASCII 正则 [a-z0-9]，否则中文查询词会被整体拆掉。
+    const terms = q.match(/[\p{L}\p{N}_+.#-]{2,}/gu) ?? []
     if (terms.length === 0) return sorted.value
     return sorted.value
       .map(m => ({ m, score: scoreSession(m, terms) }))
@@ -196,11 +196,18 @@ export const useSessionsStore = defineStore('sessions', () => {
     const summary = hay(m.summary)
     const preview = hay(m.preview)
     const model = hay(m.model)
+    // 紧凑版（去空白）兜底：弥补「B+ 树」与「B+树」这类空白差异，权重减半。
+    const compactTitle = title.replace(/\s+/g, '')
+    const compactSummary = summary.replace(/\s+/g, '')
+    const compactPreview = preview.replace(/\s+/g, '')
     return terms.reduce((acc, t) => {
       let s = 0
       if (title.includes(t)) s += 5
+      else if (compactTitle.includes(t)) s += 2
       if (summary.includes(t)) s += 3
+      else if (compactSummary.includes(t)) s += 1
       if (preview.includes(t)) s += 1
+      else if (compactPreview.includes(t)) s += 1
       if (model.includes(t)) s += 1
       return acc + s
     }, 0)
