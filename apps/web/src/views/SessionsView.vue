@@ -50,8 +50,12 @@ function doClear() {
   router.push('/')
 }
 
-// 进入页面时刷新各会话的后台运行状态。
-onMounted(() => { sessions.refreshRunning() })
+// 进入页面时先同步引擎磁盘会话（权威源），再刷新各会话的后台运行状态。
+// 只刷新 running 会导致直接从对话页跳进来时列表为空/无摘要。
+onMounted(() => {
+  void sessions.syncFromEngine()
+  sessions.refreshRunning()
+})
 </script>
 <template>
   <div class="page">
