@@ -322,15 +322,23 @@ fn derive_summary(messages: &[ChatMessage]) -> String {
     if full.chars().count() <= SUMMARY_MAX_CHARS || rounds.len() <= 2 {
         return full.chars().take(SUMMARY_MAX_CHARS).collect();
     }
-    // 超限：首末轮完整，中间轮只保留 user 问题；压缩后仍超限则整体截断。
+    // 超限：首末轮完整；中间轮只保留 user 问题（每轮最多 24 字符），
+    // 按预算从最早的中间轮开始装，**末轮永远完整**——保证最新意图的
+    // 尾部关键词不被硬截断（与「尾部关键词不漏检」的目标一致）。
     let first = rendered.first().cloned().unwrap_or_default();
     let last = rendered.last().cloned().unwrap_or_default();
-    let middle: Vec<String> = rounds[1..rounds.len() - 1]
-        .iter()
-        .map(|round| round.user.clone())
-        .collect();
-    let condensed = [first, middle.join("；"), last].join("；");
-    condensed.chars().take(SUMMARY_MAX_CHARS).collect()
+    let mut budget = SUMMARY_MAX_CHARS
+        .saturating_sub(first.chars().count() + last.chars().count());
+    let mut middle: Vec<String> = Vec::new();
+    for round in &rounds[1..rounds.len() - 1] {
+        let user: String = round.user.chars().take(24).collect();
+        let user_len = user.chars().count();
+        if !user.is_empty() && budget >= user_len {
+            budget -= user_len;
+            middle.push(user);
+        }
+    }
+    [first, middle.join("；"), last].join("；")
 }
 
 /// 摘要总长上限（字符）。
@@ -503,6 +511,32 @@ mod tests {
         assert!(summary.contains("第 11 轮"), "末轮应保留");
         // 中间轮退化为 user 问题仍可检索。
         assert!(summary.contains("第 5 轮"), "中间轮 user 问题应保留");
+    }
+
+    #[test]
+    fn derive_summary_keeps_last_round_tail_under_budget_pressure() {
+        // 20 轮 + 长回复：压缩预算吃紧时**末轮尾部关键词必须保留**（防硬截断漏检）。
+        const KEYWORD: &str = "末轮保留关键";
+        let mut messages = Vec::new();
+        for i in 0..20 {
+            messages.push(ChatMessage::user(format!("第 {i} 轮的问题")));
+            let reply = format!(
+                "第 {i} 轮回复：{}……最后结论关键字是{KEYWORD}",
+                "细节内容".repeat(30),
+            );
+            messages.push(ChatMessage::assistant(&reply, Vec::new()));
+        }
+        let summary = derive_summary(&messages);
+        assert!(
+            summary.chars().count() <= SUMMARY_MAX_CHARS,
+            "摘要超长: {} 字符",
+            summary.chars().count()
+        );
+        assert!(
+            summary.ends_with(&format!("{KEYWORD}")),
+            "末轮尾部关键词应保留（防硬截断），实际结尾: {:?}",
+            summary.chars().rev().take(12).collect::<String>()
+        );
     }
 
     #[test]

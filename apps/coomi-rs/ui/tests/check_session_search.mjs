@@ -36,7 +36,8 @@ function scoreSession(m, terms) {
     if (ph > 0) s += ph
     else s += count(compactPreview, t)
     if (model.includes(t)) s += 1
-    if (id.includes(t)) s += 1
+    // uuid 片段匹配要求 ≥6 字符，避免「ab」这类 2 字符词随机命中 uuid 造成误报。
+    if (t.length >= 6 && id.includes(t)) s += 1
     return acc + s
   }, 0)
 }

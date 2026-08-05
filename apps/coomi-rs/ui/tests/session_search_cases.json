@@ -78,6 +78,34 @@
           "expect": 1
         }
       ]
+    },
+    {
+      "_comment": "2 字符词不得命中 uuid（防误报）",
+      "query": "ab",
+      "sessions": [
+        {
+          "id": "ab000000-0000-0000-0000-000000000000",
+          "title": "测试标题",
+          "summary": "",
+          "preview": "",
+          "model": "deepseek-chat",
+          "expect": 0
+        }
+      ]
+    },
+    {
+      "_comment": "≥6 字符 uuid 片段允许命中（粘 ID 片段可搜）",
+      "query": "00000000",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "测试标题",
+          "summary": "",
+          "preview": "",
+          "model": "deepseek-chat",
+          "expect": 1
+        }
+      ]
     }
   ]
 }

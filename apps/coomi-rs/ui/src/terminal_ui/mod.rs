@@ -3417,7 +3417,8 @@ fn session_search_score(session: &SessionSummary, query: &str) -> usize {
             + preview_hits
             + usize::from(preview_hits == 0) * compact_preview.matches(term.as_str()).count()
             + usize::from(model.contains(term.as_str()))
-            + usize::from(id.contains(term.as_str()))
+            // uuid 片段匹配要求 ≥6 字符，避免「ab」这类 2 字符词随机命中 uuid 造成误报。
+            + usize::from(term.chars().count() >= 6 && id.contains(term.as_str()))
     })
 }
 
