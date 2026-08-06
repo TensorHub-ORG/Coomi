@@ -3,7 +3,7 @@
  * 输入区。
  * DeepSeek 的输入框是「一整块大圆角卡片」：文本在上，模式开关和发送在下一行。
  * 这里的两个 chip 都对应真实协议能力（enter/exit_plan_mode、set_permission_mode），
- * ⊕ 同时提供快捷指令和 Android SAF 文件导入。
+ * ⊕ 展开指令面板：Android SAF 文件导入 + 可滚动的斜杠指令列表。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PERMISSION_MODES, useConfigStore } from '@/stores/config'
@@ -13,12 +13,13 @@ import CoomiIcon from './CoomiIcon.vue'
 const session = useSessionStore()
 const config = useConfigStore()
 
-const QUICKS = [
-  { label: '继续', text: '继续' },
-  { label: '跑测试', text: '跑一下测试，把失败的用例列出来' },
-  { label: '解释代码', text: '解释一下这段代码的作用：\n' },
-  { label: '看报错', text: '这个报错是什么原因，怎么修：\n' },
-  { label: '写提交信息', text: '根据当前改动写一条 commit message' },
+/** 斜杠指令：点击后填入输入框，可编辑后发送。 */
+const SLASH_COMMANDS = [
+  { name: '/loop', desc: '循环执行直到完成' },
+  { name: '/plan', desc: '进入计划模式' },
+  { name: '/mcp', desc: '管理 MCP 服务器' },
+  { name: '/skills', desc: '查看可用技能' },
+  { name: '/memory', desc: '查看持久记忆' },
 ]
 
 const text = ref('')
@@ -71,6 +72,17 @@ async function insert(t: string) {
   autoGrow()
   textarea.value?.focus()
 }
+
+/** 斜杠指令：直接替换输入框内容，可继续编辑。 */
+async function insertSlash(cmd: string) {
+  text.value = cmd
+  quickOpen.value = false
+  await nextTick()
+  autoGrow()
+  textarea.value?.focus()
+}
+
+function toggleQuick() { quickOpen.value = !quickOpen.value }
 
 function importFiles() { quickOpen.value = false; window.CoomiAndroid?.importFiles?.() }
 function authorizeFolder() { quickOpen.value = false; window.CoomiAndroid?.authorizeFolder?.() }
@@ -145,13 +157,15 @@ watch(text, () => {
     </div>
     <div v-if="quickOpen" class="quick-scrim" @click="quickOpen = false" />
     <div v-if="quickOpen" class="quick">
-      <p class="qhead">快捷指令</p>
+      <p class="qhead">指令</p>
       <div v-if="hasNative" class="file-actions">
         <button class="qchip file" @click="importFiles"><CoomiIcon name="fileRead" :size="15" />选择文件</button>
         <button class="qchip file" @click="authorizeFolder"><CoomiIcon name="folder" :size="15" />授权目录</button>
       </div>
-      <div class="qgrid">
-        <button v-for="q in QUICKS" :key="q.label" class="qchip" @click="insert(q.text)">{{ q.label }}</button>
+      <div class="slash-list">
+        <button v-for="c in SLASH_COMMANDS" :key="c.name" class="slash-item" @click="insertSlash(c.name)">
+          <code>{{ c.name }}</code><span>{{ c.desc }}</span>
+        </button>
       </div>
     </div>
 
@@ -181,7 +195,7 @@ watch(text, () => {
 
         <span class="spacer" />
 
-        <button class="act" aria-label="快捷指令" @click="quickOpen = !quickOpen">
+        <button class="act" aria-label="快捷指令" @click="toggleQuick">
           <CoomiIcon name="plusCircle" :size="21" />
         </button>
 
@@ -252,17 +266,17 @@ watch(text, () => {
 .send:disabled { background: var(--border-strong); pointer-events: none; }
 .send:active { transform: scale(.92); }
 
-/* 快捷指令浮层 */
+/* 指令面板浮层：可滚动卡片 */
 .quick-scrim { position: fixed; inset: 0; z-index: 1; }
 .quick {
   position: absolute; z-index: 2; left: 10px; right: 10px; bottom: calc(100% - 6px);
+  max-height: min(56vh, 360px); overflow-y: auto;
   padding: 10px 12px 12px;
   border: 1px solid var(--border); border-radius: var(--r-card);
   background: var(--bg); box-shadow: var(--shadow-2);
   animation: coomi-cascade .18s ease both;
 }
 .qhead { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-3); }
-.qgrid { display: flex; flex-wrap: wrap; gap: 7px; }
 .file-actions { display: flex; gap: 7px; margin-bottom: 8px; }
 .qchip.file { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); }
 .qchip {
@@ -271,4 +285,15 @@ watch(text, () => {
   background: var(--bg); font-size: 13.5px; color: var(--text-2);
 }
 .qchip:active { background: var(--blue-soft); border-color: var(--blue-border); color: var(--blue); }
+
+/* 斜杠指令逐行列表 */
+.slash-list { display: flex; flex-direction: column; gap: 2px; }
+.slash-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 8px; border: 0; border-radius: 10px;
+  background: none; text-align: left; cursor: pointer;
+}
+.slash-item code { font-family: inherit; font-size: 13.5px; font-weight: 700; color: var(--blue); }
+.slash-item span { font-size: 12.5px; color: var(--text-2); }
+.slash-item:active { background: var(--blue-soft); }
 </style>

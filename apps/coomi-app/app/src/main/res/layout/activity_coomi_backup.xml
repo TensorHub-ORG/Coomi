@@ -1,0 +1,187 @@
+<!--
+    Coomi 备份与导入二级页面：CoomiBackupActivity。
+    提供「备份数据」与「导入备份」两个入口，风格与 Dashboard 一致。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?attr/coomiPage"
+    android:fitsSystemWindows="true"
+    tools:context="app.coomi.CoomiBackupActivity">
+
+    <!-- ── 顶栏 ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/coomi_gutter"
+        android:paddingEnd="@dimen/coomi_gutter">
+
+        <ImageButton
+            android:id="@+id/btn_backup_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/coomi_ic_back"
+            android:tint="?attr/coomiText"
+            android:contentDescription="@string/coomi_backup_back"/>
+
+        <TextView
+            style="@style/Coomi.Text.Heading"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/coomi_space_s"
+            android:text="@string/coomi_backup_title"/>
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/coomi_gutter"
+            android:paddingEnd="@dimen/coomi_gutter"
+            android:paddingTop="@dimen/coomi_space_xs"
+            android:paddingBottom="@dimen/coomi_space_xl">
+
+            <!-- ── 备份数据 ── -->
+            <LinearLayout
+                android:id="@+id/btn_backup_action"
+                style="@style/Coomi.Row"
+                android:background="@drawable/coomi_bg_card"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingTop="@dimen/coomi_space_l"
+                android:paddingBottom="@dimen/coomi_space_l"
+                android:layout_marginBottom="@dimen/coomi_space_s">
+
+                <FrameLayout
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="@drawable/coomi_bg_icon_tile">
+
+                    <ImageView
+                        android:layout_width="@dimen/coomi_icon_m"
+                        android:layout_height="@dimen/coomi_icon_m"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_cube"
+                        android:tint="?attr/coomiBlue"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:text="@string/coomi_backup_action"/>
+
+                    <TextView
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_backup_action_desc"/>
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="@dimen/coomi_icon_s"
+                    android:layout_height="@dimen/coomi_icon_s"
+                    android:src="@drawable/coomi_ic_chevron_right"
+                    android:tint="?attr/coomiText3"
+                    android:contentDescription="@null"/>
+            </LinearLayout>
+
+            <!-- ── 导入备份 ── -->
+            <LinearLayout
+                android:id="@+id/btn_backup_import"
+                style="@style/Coomi.Row"
+                android:background="@drawable/coomi_bg_card"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingTop="@dimen/coomi_space_l"
+                android:paddingBottom="@dimen/coomi_space_l"
+                android:layout_marginBottom="@dimen/coomi_space_s">
+
+                <FrameLayout
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="@drawable/coomi_bg_icon_tile">
+
+                    <ImageView
+                        android:layout_width="@dimen/coomi_icon_m"
+                        android:layout_height="@dimen/coomi_icon_m"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_download"
+                        android:tint="?attr/coomiBlue"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:text="@string/coomi_backup_import"/>
+
+                    <TextView
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_backup_import_desc"/>
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="@dimen/coomi_icon_s"
+                    android:layout_height="@dimen/coomi_icon_s"
+                    android:src="@drawable/coomi_ic_chevron_right"
+                    android:tint="?attr/coomiText3"
+                    android:contentDescription="@null"/>
+            </LinearLayout>
+
+            <!-- ── 提示 ── -->
+            <TextView
+                style="@style/Coomi.Text.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/coomi_space_s"
+                android:lineSpacingExtra="3dp"
+                android:text="@string/coomi_backup_hint"/>
+
+            <!-- ── 状态行 ── -->
+            <TextView
+                android:id="@+id/txt_backup_status"
+                style="@style/Coomi.Text.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/coomi_space_m"
+                android:visibility="gone"
+                tools:text="正在导入备份…"/>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

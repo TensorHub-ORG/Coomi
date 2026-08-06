@@ -589,6 +589,7 @@
                                 android:text="@string/coomi_dash_check_update"/>
 
                             <TextView
+                                android:id="@+id/txt_check_update_desc"
                                 style="@style/Coomi.Text.Caption"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"

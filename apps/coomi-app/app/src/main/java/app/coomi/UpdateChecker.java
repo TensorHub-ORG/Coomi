@@ -93,20 +93,37 @@ public final class UpdateChecker {
     private static void downloadAndInstall(Context context, String apkUrl, String version) {
         // 远端 version 拼入文件名前做净化，防路径穿越。
         String safeVersion = version.replaceAll("[^A-Za-z0-9._-]", "_");
-        File dir = new File(context.getFilesDir(), "downloads");
-        if (!dir.isDirectory()) dir.mkdirs();
-        File target = new File(dir, "coomi-update-" + safeVersion + ".apk");
-        if (target.isFile()) target.delete();
+        String fileName = "coomi-update-" + safeVersion + ".apk";
 
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkUrl));
         request.setTitle("Coomi " + version);
         request.setDescription("正在下载更新包…");
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationUri(Uri.fromFile(target));
         request.setMimeType("application/vnd.android.package-archive");
+        // 下载目标必须放在系统 DownloadManager 服务可写的目录：
+        // App 私有目录（files/downloads）会被它以 "Unsupported path" 拒绝（Android 10+）。
+        // 用 App 专属外部目录 Android/data/<pkg>/files/Download/。
+        File target;
+        File externalDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (externalDir != null) {
+            request.setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName);
+            target = new File(externalDir, fileName);
+        } else {
+            File dir = new File(context.getFilesDir(), "downloads");
+            if (!dir.isDirectory()) dir.mkdirs();
+            request.setDestinationUri(Uri.fromFile(new File(dir, fileName)));
+            target = new File(dir, fileName);
+        }
+        if (target.isFile()) target.delete();
 
         DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        final long downloadId = dm.enqueue(request);
+        final long downloadId;
+        try {
+            downloadId = dm.enqueue(request);
+        } catch (Exception e) {
+            Toast.makeText(context, "发起更新下载失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
 
         // 下载完成后触发安装
         DownloadManager manager = dm;
