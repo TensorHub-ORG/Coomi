@@ -50,8 +50,12 @@ function doClear() {
   router.push('/')
 }
 
-// 进入页面时刷新各会话的后台运行状态。
-onMounted(() => { sessions.refreshRunning() })
+// 进入页面时先同步引擎磁盘会话（权威源），再刷新各会话的后台运行状态。
+// 只刷新 running 会导致直接从对话页跳进来时列表为空/无摘要。
+onMounted(() => {
+  void sessions.syncFromEngine()
+  sessions.refreshRunning()
+})
 </script>
 <template>
   <div class="page">
@@ -89,6 +93,7 @@ onMounted(() => { sessions.refreshRunning() })
                   <CoomiIcon v-if="m.pinned" name="pin" :size="13" class="pin" />
                   <span class="ttext">{{ m.title }}</span>
                 </span>
+                <span v-if="m.summary" class="rsummary">{{ m.summary }}</span>
                 <span class="rmeta">
                   <span v-if="m.id === session.sessionId" class="badge">当前</span>
                   {{ formatSessionTime(m.updatedAt) }} · {{ m.turns }} 轮
@@ -185,6 +190,11 @@ onMounted(() => { sessions.refreshRunning() })
 @keyframes coomi-rspin { to { transform: rotate(360deg); } }
 .ttext {
   min-width: 0; font-size: 14.5px; font-weight: 550; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 会话摘要（引擎侧推导，供检索与快速识别内容） */
+.rsummary {
+  display: block; margin-top: 3px; font-size: 12px; line-height: 1.5; color: var(--text-3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .rmeta { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--text-3); }

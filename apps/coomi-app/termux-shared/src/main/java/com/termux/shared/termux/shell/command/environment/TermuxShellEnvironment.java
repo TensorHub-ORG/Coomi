@@ -86,9 +86,12 @@ public class TermuxShellEnvironment extends AndroidShellEnvironment {
                 environment.put(ENV_PATH, TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + ":" + TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/applets");
                 environment.put(ENV_LD_LIBRARY_PATH, TermuxConstants.TERMUX_LIB_PREFIX_DIR_PATH);
             } else {
-                // Termux binaries on Android 7+ rely on DT_RUNPATH, so LD_LIBRARY_PATH should be unset by default
+                // Termux binaries on Android 7+ rely on DT_RUNPATH, so LD_LIBRARY_PATH should be unset by default.
+                // Coomi 例外：官方 bootstrap 的 ELF 把 DT_RUNPATH 硬编码为 /data/data/com.termux/files/usr/lib，
+                // 本包（com.coomi.android）下该路径不存在 → linker 找不到 libandroid-support.so 等
+                // （CANNOT LINK EXECUTABLE）。LD_LIBRARY_PATH 优先级高于 DT_RUNPATH，注入 $PREFIX/lib 覆盖。
                 environment.put(ENV_PATH, TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH);
-                environment.remove(ENV_LD_LIBRARY_PATH);
+                environment.put(ENV_LD_LIBRARY_PATH, TermuxConstants.TERMUX_LIB_PREFIX_DIR_PATH);
             }
         }
 

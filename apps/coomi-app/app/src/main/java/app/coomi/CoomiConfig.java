@@ -81,7 +81,15 @@ public final class CoomiConfig {
             }
             if (models.length() > 0) provider.put("models", models);
             if (!provider.has("api_key")) provider.put("api_key", "");
-            if (!provider.has("base_url")) provider.put("base_url", defaultBaseUrl(providerId));
+            String resolvedBaseUrl = provider.optString("base_url", "");
+            if (TextUtils.isEmpty(resolvedBaseUrl)) resolvedBaseUrl = defaultBaseUrl(providerId);
+            if (TextUtils.isEmpty(resolvedBaseUrl)) {
+                // 自定义 provider 无默认 base_url 且未显式提供时拒绝保存：
+                // coomi 加载 providers.json 会对空 base_url 报 "provider `{id}` has no base_url"。
+                Logger.logError(LOG_TAG, "Cannot activate provider " + providerId + ": base_url is empty");
+                return false;
+            }
+            provider.put("base_url", resolvedBaseUrl);
             providers.put(providerId, provider);
             document.put("active", providerId);
             return writeConfig(document);
@@ -114,6 +122,11 @@ public final class CoomiConfig {
             }
             provider.put("api_key", apiKey.trim());
             String resolvedBaseUrl = TextUtils.isEmpty(baseUrl) ? defaultBaseUrl(providerId) : baseUrl.trim();
+            if (TextUtils.isEmpty(resolvedBaseUrl)) {
+                // 自定义 provider 无默认 base_url 且未显式提供时拒绝保存（同 setProvider）
+                Logger.logError(LOG_TAG, "Cannot save api key for " + providerId + ": base_url is empty");
+                return false;
+            }
             provider.put("base_url", resolvedBaseUrl);
             providers.put(providerId, provider);
             if (TextUtils.isEmpty(document.optString("active"))) document.put("active", providerId);

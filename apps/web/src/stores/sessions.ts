@@ -30,6 +30,14 @@ export interface SessionMeta {
   pinned: boolean
   /** 创建该会话时的工作目录；用于把不同项目的会话隔离开。 */
   cwd?: string
+  /** 引擎侧一句话摘要（/api/sessions 的 summary），用于检索与展示。 */
+  summary?: string
+  /** 引擎侧首条消息预览。 */
+  preview?: string
+  /** 引擎侧模型名。 */
+  model?: string
+  /** 用户手动重命名过：true 时引擎推导的标题不再覆盖。 */
+  renamed?: boolean
 }
 
 export interface SessionGroup {
@@ -116,7 +124,16 @@ export const useSessionsStore = defineStore('sessions', () => {
   const filtered = computed(() => {
     const q = query.value.trim().toLowerCase()
     if (!q) return sorted.value
-    return sorted.value.filter(m => m.title.toLowerCase().includes(q))
+    // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
+    // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文 + 技术符号 +.#），与 Rust 的
+    // is_alphanumeric 谓词对齐；不能用 ASCII 正则 [a-z0-9]，否则中文查询词会被整体拆掉。
+    const terms = q.match(/[\p{L}\p{N}_+.#-]{2,}/gu) ?? []
+    if (terms.length === 0) return sorted.value
+    return sorted.value
+      .map(m => ({ m, score: scoreSession(m, terms) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(x => x.m)
   })
 
   /** 置顶 / 今天 / 昨天 / 7 天内 / 更早 / 其它目录 —— 空组不出现。 */
@@ -172,6 +189,38 @@ export const useSessionsStore = defineStore('sessions', () => {
     return t.length > 42 ? t.slice(0, 42) + '…' : t || '新对话'
   }
 
+  /** 会话检索打分：拆词后按 title/summary/preview/model 加权求和（与 Rust 侧一致）。
+   *  命中次数加权：同一词出现多次分数更高；紧凑版仅在精确未命中时兜底（权重减半）。 */
+  function scoreSession(m: SessionMeta, terms: string[]): number {
+    const hay = (s?: string) => (s ?? '').toLowerCase()
+    const title = hay(m.title)
+    const summary = hay(m.summary)
+    const preview = hay(m.preview)
+    const model = hay(m.model)
+    const id = hay(m.id)
+    // 紧凑版（去空白）兜底：弥补「B+ 树」与「B+树」这类空白差异，权重减半。
+    const compactTitle = title.replace(/\s+/g, '')
+    const compactSummary = summary.replace(/\s+/g, '')
+    const compactPreview = preview.replace(/\s+/g, '')
+    const count = (s: string, t: string) => s.split(t).length - 1
+    return terms.reduce((acc, t) => {
+      let s = 0
+      const th = count(title, t)
+      const sh = count(summary, t)
+      const ph = count(preview, t)
+      if (th > 0) s += th * 5
+      else s += count(compactTitle, t) * 2
+      if (sh > 0) s += sh * 3
+      else s += count(compactSummary, t)
+      if (ph > 0) s += ph
+      else s += count(compactPreview, t)
+      if (model.includes(t)) s += 1
+      // uuid 片段匹配要求 ≥6 字符，避免「ab」这类 2 字符词随机命中 uuid 造成误报。
+      if (t.length >= 6 && id.includes(t)) s += 1
+      return acc + s
+    }, 0)
+  }
+
   function ensure(id: string, title = '新对话'): SessionMeta {
     let m = find(id)
     if (!m) {
@@ -198,6 +247,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const m = find(id)
     if (!m) return
     m.title = title.trim() || m.title
+    m.renamed = true
     persist()
   }
 
@@ -308,6 +358,8 @@ export const useSessionsStore = defineStore('sessions', () => {
         cwd: string
         updated_at: string
         preview: string
+        title: string
+        summary: string
         created_at: string
       }>
       const localById = new Map(metas.value.map(m => [m.id, m]))
@@ -317,12 +369,17 @@ export const useSessionsStore = defineStore('sessions', () => {
         const createdAt = local?.createdAt ?? (Date.parse(r.created_at) || updatedAt)
         return {
           id: r.id,
-          title: local?.title ?? (r.preview ? deriveTitle(r.preview) : '新对话'),
+          // 用户重命名过（renamed）则保留用户标题；否则引擎 title 优先，本地推导兜底。
+          title: local?.renamed ? local.title : (r.title || local?.title || (r.preview ? deriveTitle(r.preview) : '新对话')),
           createdAt,
           updatedAt,
           turns: local?.turns ?? 0,
           pinned: local?.pinned ?? false,
           cwd: r.cwd || local?.cwd,
+          summary: r.summary || local?.summary,
+          preview: r.preview || local?.preview,
+          model: r.model || local?.model,
+          renamed: local?.renamed,
         }
       })
       // 本地有而引擎暂无的（旧迁移 ID 等）保留，避免吞掉用户数据

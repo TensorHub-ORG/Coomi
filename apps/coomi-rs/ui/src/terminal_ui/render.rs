@@ -8,7 +8,7 @@ use super::ToolState;
 use super::TuiState;
 use super::catalog_matches;
 use super::model_matches;
-use super::session_matches;
+use super::ranked_sessions;
 use super::theme;
 use pulldown_cmark::Alignment as MarkdownAlignment;
 use pulldown_cmark::CodeBlockKind;
@@ -275,7 +275,10 @@ fn render_recent_sessions(frame: &mut Frame<'_>, area: Rect, app: &TuiState, div
                 Span::styled("● ", Style::default().fg(theme::MINT)),
                 Span::styled(format!("{date}  "), Style::default().fg(theme::MUTED)),
                 Span::styled(
-                    truncate_cells(&session.preview, preview_width),
+                    truncate_cells(
+                        if session.title.is_empty() { &session.preview } else { &session.title },
+                        preview_width,
+                    ),
                     Style::default().fg(theme::TEXT),
                 ),
             ]));
@@ -649,10 +652,8 @@ fn render_history(frame: &mut Frame<'_>, area: Rect, app: &TuiState) {
     let popup = popup_rect(area, 82, 23);
     let overlay = app.overlay.as_ref().expect("history overlay");
     let query = overlay.query.text();
-    let items = app
-        .sessions
-        .iter()
-        .filter(|session| session_matches(session, &query.to_ascii_lowercase()))
+    let items = ranked_sessions(&app.sessions, &query.to_ascii_lowercase())
+        .into_iter()
         .map(|session| {
             let active = session.id == app.session.id;
             ListItem::new(Line::from(vec![
@@ -669,7 +670,10 @@ fn render_history(frame: &mut Frame<'_>, area: Rect, app: &TuiState) {
                     Style::default().fg(theme::SKY),
                 ),
                 Span::styled(
-                    truncate_cells(&session.preview, 38),
+                    truncate_cells(
+                        if session.title.is_empty() { &session.preview } else { &session.title },
+                        38,
+                    ),
                     Style::default().fg(theme::TEXT),
                 ),
             ]))
