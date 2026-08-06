@@ -172,6 +172,35 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
+  /**
+   * 定制身份提示词：用户设置的专属身份/定位指令，保存后注入系统提示词，
+   * 让 AI 认知自己的身份与定位。引擎 settings.json 是权威值；
+   * localStorage 只做 UI 缓存。
+   */
+  const customPrompt = ref(localStorage.getItem('coomi.customPrompt') ?? '')
+  /** 从引擎拉取权威值（应用启动 / 进入设置页时调用）。 */
+  async function fetchCustomPrompt() {
+    try {
+      const data = await apiGet<{ text: string }>('/api/runtime/custom-prompt')
+      customPrompt.value = data?.text ?? ''
+      localStorage.setItem('coomi.customPrompt', customPrompt.value)
+      return true
+    } catch {
+      return false
+    }
+  }
+  /** 保存定制提示词；空文本表示清除。成功返回 true。 */
+  async function saveCustomPrompt(text: string): Promise<boolean> {
+    try {
+      const data = await apiSend<{ text: string }>('/api/runtime/custom-prompt', 'POST', { text })
+      customPrompt.value = data?.text ?? text
+      localStorage.setItem('coomi.customPrompt', customPrompt.value)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** 新增/更新 Provider。空 apiKey 表示沿用旧 key（后端语义）。 */
   async function upsertProvider(input: ProviderInput): Promise<boolean> {
     if (usingMock.value) {
@@ -266,10 +295,10 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   return {
-    permissionMode, planMode, themeMode, globalMemory, providers, activeId, loading, usingMock, lastError,
+    permissionMode, planMode, themeMode, globalMemory, customPrompt, providers, activeId, loading, usingMock, lastError,
     currentProviderId, currentModel, currentProvider,
     fetchProviders, selectModel, setPermissionMode, setThemeMode, cyclePermissionMode, togglePlanMode,
-    toggleGlobalMemory, syncGlobalMemoryFromEngine,
+    toggleGlobalMemory, syncGlobalMemoryFromEngine, fetchCustomPrompt, saveCustomPrompt,
     upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels,
   }
 })

@@ -3,7 +3,7 @@
  * 设置。分组白卡 + 行的结构，选中态用蓝勾而不是描边 ——
  * 和抽屉、空态里的选中语言保持一致。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useConfigStore, PERMISSION_MODES, THEME_MODES } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
@@ -42,6 +42,9 @@ const modelRows = computed(() =>
 function isCurrent(providerId: string, model: string): boolean {
   return config.currentProviderId === providerId && config.currentModel === model
 }
+
+/** 进入设置页时拉取定制提示词，保证入口副标题与引擎一致。 */
+onMounted(() => { void config.fetchCustomPrompt() })
 </script>
 <template>
   <div class="page">
@@ -78,6 +81,18 @@ function isCurrent(providerId: string, model: string): boolean {
             <span class="rsub" :class="{ err: !!gmError }">{{ gmError || '开启后 Coomi 可读取所有历史会话文件' }}</span>
           </span>
           <span class="sw" :class="{ on: config.globalMemory }" />
+        </button>
+      </div>
+
+      <p class="sec-label">身份定位</p>
+      <div class="group">
+        <button class="row" @click="router.push('/persona')">
+          <span class="ri" :class="{ on: config.customPrompt.trim() !== '' }"><CoomiIcon name="sparkle" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">定制身份定位</span>
+            <span class="rsub">{{ config.customPrompt.trim() ? '已配置，置于系统提示词最前生效' : '未设置。让 AI 认知自己的身份与定位' }}</span>
+          </span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
       </div>
 

@@ -1608,7 +1608,7 @@ impl ToolRuntime for CoreTools {
             },
             ToolSpec {
                 name: "web_search".into(),
-                description: "Search the web and return ranked result links with short snippets. Use the fetch tool to read the full content of a result page. If this tool reports unavailable, explain the failure once and do not replace it with shell commands such as curl or wget.".into(),
+                description: "Search the web and return ranked result links with short snippets. Use the fetch tool to read the full content of a result page. If this tool reports unavailable, report the failure once and do not loop command-line searches to replace it; direct downloads and known-URL access via shell tools remain allowed.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
