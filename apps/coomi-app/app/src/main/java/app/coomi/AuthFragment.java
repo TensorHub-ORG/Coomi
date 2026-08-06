@@ -252,6 +252,13 @@ public class AuthFragment extends Fragment implements CoomiSetupActivity.StepFra
 
         String baseUrl = mBaseUrlInput.getText().toString().trim();
 
+        // 自定义 provider 没有默认 base_url，必须显式填写，否则保存会产生
+        // coomi 无法加载的配置（"provider `custom` has no base_url"）。
+        if (TextUtils.isEmpty(baseUrl) && TextUtils.isEmpty(defaultBaseUrl(mSelectedProvider))) {
+            setStatus(R.string.coomi_auth_need_base_url, R.color.coomi_danger);
+            return;
+        }
+
         setStatus(R.string.coomi_auth_saving, R.color.coomi_text_2);
 
         // Save provider + model to config

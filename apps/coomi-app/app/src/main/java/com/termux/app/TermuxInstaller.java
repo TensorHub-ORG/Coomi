@@ -109,11 +109,18 @@ public final class TermuxInstaller {
         if (FileUtils.directoryFileExists(TERMUX_PREFIX_DIR_PATH, true)) {
             if (TermuxFileUtils.isTermuxPrefixDirectoryEmpty()) {
                 Logger.logInfo(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH + "\" exists but is empty or only contains specific unimportant files.");
-            } else {
+            } else if (isBootstrapComplete()) {
                 // Upgrade path: refresh the Coomi install script and shell environment.
                 createCoomiScripts(activity);
                 whenDone.run();
                 return;
+            } else {
+                // Bootstrap 解压中断（如安装过程中进程被杀/被系统回收）会留下残缺的 prefix：
+                // bin/ 等靠前的条目已解压，lib/ 等靠后的缺失 → bash/dpkg 因缺
+                // libandroid-support.so、libmd.so 等起不来（CANNOT LINK EXECUTABLE）。
+                // 不能只凭 usr/ 非空就跳过安装，必须走下方完整重装（安装线程会先删除残缺 prefix）。
+                Logger.logWarn(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH +
+                    "\" exists but bootstrap is incomplete (missing usr/bin/bash or usr/lib/libandroid-support.so); re-installing bootstrap.");
             }
         } else if (FileUtils.fileExists(TERMUX_PREFIX_DIR_PATH, false)) {
             Logger.logInfo(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH + "\" does not exist but another file exists at its destination.");
@@ -388,6 +395,17 @@ public final class TermuxInstaller {
         return FileUtils.createDirectoryFile(directory.getAbsolutePath());
     }
 
+    /**
+     * 判断已存在的 termux prefix 是否为完整可用的 bootstrap。
+     * 只检查目录存在/非空不可靠：解压中断会留下残缺 prefix（bin/ 在、lib/ 缺），
+     * 导致 bash/dpkg 因缺 libandroid-support.so 等起不来。
+     * 以核心 shell 与基础库同时存在作为完整标记。
+     */
+    private static boolean isBootstrapComplete() {
+        return new File(TERMUX_PREFIX_DIR_PATH + "/bin/bash").exists()
+            && new File(TERMUX_PREFIX_DIR_PATH + "/lib/libandroid-support.so").exists();
+    }
+
     public static byte[] loadZipBytes() {
         // Only load the shared library when necessary to save memory usage.
         System.loadLibrary("termux-bootstrap");
@@ -419,9 +437,48 @@ public final class TermuxInstaller {
             //noinspection OctalInteger
             Os.chmod(envScript.getAbsolutePath(), 0644);
 
+            // bootstrap 由官方 Termux 构建，login 等 shell 脚本把包路径硬编码为
+            // "/data/data/com.termux/files"，在本包名（如 com.coomi.android）下
+            // interpreter 不存在 → exec $PREFIX/bin/login 报 ENOENT（"No such file"）。
+            // 解压后把文本脚本中的包路径替换为本包路径（ELF 二进制不在此替换）。
+            patchBootstrapPackagePaths();
+
             Logger.logInfo(LOG_TAG, "Created coomi-rs shell environment");
         } catch (Exception e) {
             Logger.logStackTraceWithMessage(LOG_TAG, "Failed to create Coomi scripts", e);
+        }
+    }
+
+    /** 把官方 bootstrap 脚本里硬编码的 com.termux 包路径替换为本包路径。 */
+    private static void patchBootstrapPackagePaths() {
+        String legacyDataPath = "/data/data/com.termux/files";
+        String targetDataPath = TermuxConstants.TERMUX_FILES_DIR_PATH;
+        File[] scripts = {
+            new File(TERMUX_PREFIX_DIR_PATH + "/bin/login"),
+            new File(TERMUX_PREFIX_DIR_PATH + "/bin/sh"),
+            new File(TERMUX_PREFIX_DIR_PATH + "/etc/profile"),
+            new File(TERMUX_PREFIX_DIR_PATH + "/etc/bash.bashrc"),
+        };
+        for (File script : scripts) {
+            try {
+                if (!script.isFile()) continue;
+                byte[] raw = java.nio.file.Files.readAllBytes(script.toPath());
+                // 只处理文本脚本（无 NUL 字节）；ELF 二进制长度不符，替换会破坏文件。
+                boolean hasNul = false;
+                for (byte b : raw) {
+                    if (b == 0) { hasNul = true; break; }
+                }
+                if (hasNul) continue;
+                String content = new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+                String patched = content.replace(legacyDataPath, targetDataPath);
+                if (!patched.equals(content)) {
+                    java.nio.file.Files.write(
+                        script.toPath(), patched.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    Logger.logInfo(LOG_TAG, "Patched package path in " + script.getAbsolutePath());
+                }
+            } catch (Exception e) {
+                Logger.logWarn(LOG_TAG, "Failed to patch " + script.getAbsolutePath() + ": " + e.getMessage());
+            }
         }
     }
 

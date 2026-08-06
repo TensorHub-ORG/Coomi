@@ -116,8 +116,14 @@ public class CoomiService extends Service {
         super.onDestroy();
     }
 
+    /**
+     * bootstrap 是否已完整安装。只检查 bin/bash 不可靠：安装中断会留下残缺 prefix
+     * （bin/ 在、lib/ 缺）→ bash/dpkg 因缺 libandroid-support.so 等起不来
+     * （CANNOT LINK EXECUTABLE）。以核心 shell 与基础库同时存在为准。
+     */
     public static boolean isBootstrapInstalled() {
-        return new File(prefix() + "/bin/bash").isFile();
+        return new File(prefix() + "/bin/bash").isFile()
+            && new File(prefix() + "/lib/libandroid-support.so").isFile();
     }
 
     public static boolean isDeployComplete() {
