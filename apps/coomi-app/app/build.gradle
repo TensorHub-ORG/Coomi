@@ -51,9 +51,9 @@ android {
         applicationId "com.coomi.android"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        // v1.2.2：versionCode 18（大文件分段读取、问询窗口跳过、图片识别链路等一批优化）
-        versionCode 18
-        versionName "1.2.2"
+        // v1.2.3：versionCode 19（身份定位注入、联网放开、备份数据、删除会话修复、升级签名兼容）
+        versionCode 19
+        versionName "1.2.3"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -99,6 +99,11 @@ android {
                 throw new GradleException(
                     '签名口令缺失：请在 local.properties 配置 coomi.signing.storePassword 与 coomi.signing.keyPassword')
             }
+            // 双保险：同时启用 v1/v2 签名。
+            // v1 让 UpdateChecker 的 GET_SIGNATURES 回退路径在低版本 Android 上可用；
+            // v2/v3 是 AGP 8 默认，UpdateChecker 在 API 28+ 用 getSigningInfo 读取。
+            v1SigningEnabled true
+            v2SigningEnabled true
         }
     }
 
