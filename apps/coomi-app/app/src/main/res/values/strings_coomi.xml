@@ -108,6 +108,11 @@
     <string name="coomi_dash_env_settings_desc">运行状态与环境信息</string>
     <string name="coomi_dash_check_update">检查更新</string>
     <string name="coomi_dash_check_update_desc">从更新源获取新版本并下载安装</string>
+    <string name="coomi_dash_backup">备份数据</string>
+    <string name="coomi_dash_backup_desc">打包会话记录与环境配置到下载目录</string>
+    <string name="coomi_dash_backup_starting">正在备份…</string>
+    <string name="coomi_dash_backup_done">备份完成：%1$s</string>
+    <string name="coomi_dash_backup_failed">备份失败：%1$s</string>
     <string name="coomi_dash_checking">正在检查更新…</string>
     <string name="coomi_dash_engine_running">引擎运行中</string>
     <string name="coomi_dash_engine_stopped">引擎未启动</string>

@@ -22,10 +22,10 @@ const MODES = [
 ] as const
 
 const SUGGESTIONS = [
-  { icon: 'terminal', text: '看看这台手机的系统信息和磁盘占用' },
-  { icon: 'folder', text: 'clone 一个 GitHub 仓库，把测试跑通' },
-  { icon: 'fileWrite', text: '写个 Python 脚本整理下载目录里的文件' },
-  { icon: 'globe', text: '查一下这个报错怎么解决，然后帮我修掉' },
+  { icon: 'phone', text: '查看手机系统信息，包括型号、系统版本和磁盘占用' },
+  { icon: 'globe', text: '看看今天科技圈有哪些热点话题' },
+  { icon: 'folder', text: '整理手机下载目录，把文件按类型归类' },
+  { icon: 'sparkle', text: '查询最近一周 GitHub 上的热门开源项目' },
 ]
 
 const active = computed(() => (config.planMode ? 'plan' : config.permissionMode === 'ask' ? 'careful' : 'fast'))

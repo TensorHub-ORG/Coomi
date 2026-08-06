@@ -364,9 +364,18 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function deleteSession(id: string) {
+    // 先停掉待落盘的持久化定时器：被删会话不应再写回（否则会“复活”成空标题的新会话）。
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
+    if (id === sessionId.value) {
+      // 删除的是当前会话：先切到新会话并重连（关闭旧 id 的 WS 连接、清空时间线），
+      // 避免 flushPersistence 把已删会话写回，也避免引擎在文件删除后重建同 id 会话。
+      endAssistantStream(); timeline.value = []; usage.value = null
+      loop.value = { active: false, currentStep: 0, totalSteps: 0, status: '' }; runState.value = 'idle'
+      sessionId.value = createSessionId()
+      connect()
+    }
     sessions.remove(id)
     try { localStorage.removeItem(`coomi.draft.${id}`) } catch { /* ignore */ }
-    if (id === sessionId.value) newSession()
   }
 
   /** 更新当前会话的工作目录（会话标记路径）。成功后引擎后续 turn 都在该目录执行。 */

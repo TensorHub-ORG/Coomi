@@ -1,5 +1,6 @@
 package app.coomi;
 
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
@@ -7,8 +8,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
 import android.widget.Toast;
 
@@ -146,21 +149,33 @@ public final class UpdateChecker {
             new android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
     }
 
-    /** 校验下载的 APK 签名证书与当前安装一致（防 MITM/被篡改的更新包）。 */
+    /** 校验下载的 APK 签名证书与当前安装一致（防 MITM/被篡改的更新包）。
+     *  API 28+ 读 v2/v3 证书（getSigningInfo），低版本回退 v1（GET_SIGNATURES）。
+     *  之前只用 GET_SIGNATURES，而 AGP 8 默认关闭 v1 签名，导致校验恒失败、永远拒装。 */
     private static boolean signatureMatches(Context context, File apk) {
         try {
             PackageManager pm = context.getPackageManager();
-            PackageInfo current = pm.getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNATURES);
-            PackageInfo remote = pm.getPackageArchiveInfo(apk.getAbsolutePath(), PackageManager.GET_SIGNATURES);
-            if (current == null || remote == null
-                || current.signatures == null || remote.signatures == null
-                || current.signatures.length == 0 || remote.signatures.length == 0) {
-                return false;
-            }
-            return current.signatures[0].toCharsString().equals(remote.signatures[0].toCharsString());
+            int flags = Build.VERSION.SDK_INT >= 28
+                ? PackageManager.GET_SIGNING_CERTIFICATES
+                : PackageManager.GET_SIGNATURES;
+            PackageInfo current = pm.getPackageInfo(context.getPackageName(), flags);
+            PackageInfo remote = pm.getPackageArchiveInfo(apk.getAbsolutePath(), flags);
+            if (current == null || remote == null) return false;
+            Signature[] cur = signaturesOf(current);
+            Signature[] rem = signaturesOf(remote);
+            if (cur == null || rem == null || cur.length == 0 || rem.length == 0) return false;
+            return cur[0].toCharsString().equals(rem[0].toCharsString());
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @SuppressLint("NewApi")
+    private static Signature[] signaturesOf(PackageInfo info) {
+        if (Build.VERSION.SDK_INT >= 28 && info.signingInfo != null) {
+            return info.signingInfo.getApkContentsSigners();
+        }
+        return info.signatures;
     }
 
     /** 供 Dashboard 使用：弹结果对话框。 */
