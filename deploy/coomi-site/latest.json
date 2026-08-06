@@ -1,12 +1,12 @@
 {
-  "version": "1.2.3",
-  "versionCode": 19,
+  "version": "1.2.4",
+  "versionCode": 20,
   "platform": "android",
   "arch": "arm64-v8a",
   "minAndroid": "7.0",
-  "file": "Coomi-Android-arm64-v1.2.3.apk",
-  "size": 41220996,
-  "sha256": "94075d56769c62f1fa4a794ac81abdb378fb5c078a41c3022c1c78b82330d31d",
-  "publishedAt": "2026-08-06T11:33:46Z",
-  "notes": "v1.2.3 更新内容：\n• 身份定位（原「AI 身份」）：配置内容注入系统提示词最前，AI 每轮对话即时感知自身定位；设置页新增独立编辑入口\n• 联网能力放开：搜索首选 web_search / fetch；下载文件、调用 API、访问网络资源可直接使用 shell / curl / wget\n• 新增备份数据：控制面板一键打包全部会话记录 + 环境配置清单（MCP / Skill / Provider，密钥自动打码）到手机下载目录\n• 修复删除会话：处于当前会话时删除记录不再「删不掉、又复活」，真正删除\n• 修复内置升级：签名校验兼容 v1 / v2 / v3，1.2.2 → 1.2.3 软件内更新更可靠\n• 新对话示例更新：手机系统信息 / 科技热点 / 整理下载目录 / 热门开源项目"
+  "file": "Coomi-Android-arm64-v1.2.4.apk",
+  "size": 41253820,
+  "sha256": "645d9c538104c8b42cef998b6c8547073756db8b2a377fbc858ac943ea886bf5",
+  "publishedAt": "2026-08-07T00:50:00Z",
+  "notes": "v1.2.4 更新内容：\n• 备份与导入：「备份数据」升级为「备份与导入」，新增二级页面——一键备份会话记录 + 已安装 Skill 完整内容 + MCP 配置到手机下载目录；支持选择备份包自动恢复会话历史 / MCP / Skill，导入后提醒环境配置（Provider 密钥已打码需重新配置，环境依赖可让 AI 帮忙重新下载创建）\n• 输入框指令面板：⊕ 附件按钮展开为可滚动指令卡片，逐行显示 /loop /plan /mcp /skills /memory，点击即可填入输入框\n• Dashboard 显示当前版本：检查更新区域显示「当前版本 Coomi-Android v1.2.4」\n• 修复内置升级：下载目标目录调整为应用专属外部目录，升级包下载更可靠"
 }
