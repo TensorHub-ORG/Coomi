@@ -1,0 +1,61 @@
+{
+  "name": "@coomi/coomi-subagent-acp",
+  "description": "Out-of-process ACP subagent backend: drives a child agent in a spawned subprocess over the Agent Client Protocol",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/subagent/subagent-acp"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-subagent": "workspace:^",
+    "@coomi/coomi-subprocess": "workspace:^",
+    "@coomi/coomi-timeout": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "0.25.1",
+    "@coomi/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-loader-smoke": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-subagent": "workspace:^",
+    "@coomi/coomi-subprocess": "workspace:^",
+    "@coomi/coomi-subprocess-local": "workspace:^",
+    "@coomi/coomi-timeout": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

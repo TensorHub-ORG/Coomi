@@ -1,0 +1,64 @@
+{
+  "name": "@coomi/coomi-tool-workflow",
+  "description": "Model-facing workflow tool: run a JavaScript orchestration script over ctx.workflowEngine",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/workflow/tool-workflow"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-workflow": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-subagent": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-workflow": "workspace:^",
+    "@coomi/coomi-workflow-worker-thread": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

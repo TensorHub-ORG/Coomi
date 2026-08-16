@@ -1,0 +1,59 @@
+{
+  "name": "@coomi/coomi-schedule",
+  "description": "Agent-scoped durable after, at, and fixed-rate reminders over the session event log",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/schedule/schedule"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-brand": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-loop": "workspace:^",
+    "@coomi/coomi-agent-loop-testkit": "workspace:^",
+    "@coomi/coomi-brand": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-session-persistence-jsonl": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

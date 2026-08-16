@@ -1,0 +1,53 @@
+{
+  "name": "@coomi/coomi-host-directory-picker-native",
+  "description": "Native-OS-chooser backend of the directory-picker seam for the Coomi web GUI host",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/host/directory-picker-native"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./worker": {
+      "types": "./lib/types/win32-dialog-worker.d.ts",
+      "default": "./lib/worker.cjs"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/worker.cjs",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@coomi/coomi-host-directory-picker": "workspace:^",
+    "@coomi/coomi-native-command": "workspace:^",
+    "koffi": "^3.1.0"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/cordis": "workspace:^",
+    "tsx": "^4.19.2"
+  }
+}

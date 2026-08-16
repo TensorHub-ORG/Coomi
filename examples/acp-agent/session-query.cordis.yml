@@ -1,0 +1,12 @@
+# Explicit session-query tool opt-in for the dedicated spill scenario. The
+# nested filesystem overlay supplies private spill storage and its byte limit.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./fs.cordis.yml
+    patches:
+      - insert:
+          - id: tool-session-query
+            name: '@coomi/coomi-tool-session-query'
+          - id: timeout-policy
+            name: '@coomi/coomi-tool-call-timeout-policy'

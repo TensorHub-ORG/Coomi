@@ -1,0 +1,53 @@
+# Keyless session-title composition. Main-agent chunks derive from session.jsonl;
+# the auxiliary route consumes replay.override.json with pacing so its accepted
+# title commits only after the main turn has closed.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - id: acp-agent
+        name: '@coomi/coomi-acp-demo'
+        config:
+          provider: deepseek-official
+          model: deepseek-v4-flash
+          persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+          persistenceCompression: none
+          workspaceContext:
+            maxBytes: 65536
+          persona: |
+            You are a coding assistant powered by the {{model}} model. Your working directory is {{cwd}}. Your bash tool runs under a file sandbox — a `[sandbox: file access denied …]` result is policy, not a command bug.
+
+            Verify your work by running the code or tests. Keep answers brief and factual.
+      - insert:
+          - id: llm-replay-main
+            name: '@coomi/coomi-llm-replay'
+            config:
+              overrideFile: ./.missing-main-replay-override.json
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek
+                  models:
+                    - id: deepseek-v4-flash
+          - id: llm-replay-title
+            name: '@coomi/coomi-llm-replay'
+            config:
+              paceMs: 10
+              providers:
+                - id: title-replay
+                  name: Title replay
+                  models:
+                    - id: title-model
+          - id: session-title-provider
+            name: '@coomi/coomi-session-title-first-prompt-llm'
+            config:
+              targetWords: 5
+              targetCjkCharacters: 10
+              maxInputBytes: 4096
+              maxOutputTokens: 32
+              timeoutMs: 5000
+              provider: title-replay
+              model: title-model

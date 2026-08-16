@@ -1,0 +1,51 @@
+# Keyless counterpart to subagent-report-quiet.cordis.yml: replace the live
+# adapter with replay, keep report delivery quiet, and fence the child behind
+# the end of its parent's spawn turn so settlement opens the next turn.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - id: acp-agent
+        name: '@coomi/coomi-acp-demo'
+        config:
+          provider: deepseek-official
+          model: deepseek-v4-flash
+          persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+          persistenceCompression: none
+          workspaceContext:
+            maxBytes: 65536
+          persona: |
+            You are a coding assistant powered by the {{model}} model. Your working directory is {{cwd}}. Your bash tool runs under a file sandbox — a `[sandbox: file access denied …]` result is policy, not a command bug.
+
+            Verify your work by running the code or tests. Keep answers brief and factual.
+      - id: sandbox
+        name: '@coomi/coomi-sandbox-local'
+        config:
+          runnerCommand:
+            - bash
+            - -c
+            - while [ "$1" != "--" ]; do shift; done; shift; exec "$@"
+            - passthrough-runner
+          runnerFailureSignatures:
+            - 'passthrough-runner: profile rejected'
+      - id: tool-subagent-report
+        name: '@coomi/coomi-tool-subagent-report'
+        config:
+          reportDelivery: quiet
+      - insert:
+          - id: llm-replay
+            name: '@coomi/coomi-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek
+                  models:
+                    - id: deepseek-v4-flash
+                    - id: deepseek-v4-pro
+
+- id: report-fence
+  name: './tests/fixtures/subagent-report-fence.ts'

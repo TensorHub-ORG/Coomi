@@ -1,0 +1,121 @@
+{
+  "name": "@coomi/coomi-web-app",
+  "description": "The coomi browser-surface bundle: the web patch layer over coomi-base plus the runtime glue plugin (frontend dist serving, web-surface prompt, bash runtime variables, URL line)",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/bundle/web-app"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./startup": {
+      "types": "./lib/types/startup.d.ts",
+      "default": "./lib/startup.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/startup.js",
+    "cordis.patch.yml",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "coomi": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-app-boot": "workspace:^",
+    "@coomi/coomi-client-connection": "workspace:^",
+    "@coomi/coomi-client-hmr": "workspace:^",
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-modules": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-agent-preset": "workspace:^",
+    "@coomi/coomi-client-ui-commands": "workspace:^",
+    "@coomi/coomi-client-ui-conversation": "workspace:^",
+    "@coomi/coomi-client-ui-cordis": "workspace:^",
+    "@coomi/coomi-client-ui-deliverables": "workspace:^",
+    "@coomi/coomi-client-ui-directory-picker-browse": "workspace:^",
+    "@coomi/coomi-client-ui-directory-picker-native": "workspace:^",
+    "@coomi/coomi-client-ui-message-feedback": "workspace:^",
+    "@coomi/coomi-client-ui-goal": "workspace:^",
+    "@coomi/coomi-client-ui-layout": "workspace:^",
+    "@coomi/coomi-client-ui-model-selection": "workspace:^",
+    "@coomi/coomi-client-ui-settings-models": "workspace:^",
+    "@coomi/coomi-client-ui-settings-plugin-inventory": "workspace:^",
+    "@coomi/coomi-client-ui-permission-presets": "workspace:^",
+    "@coomi/coomi-client-ui-plan": "workspace:^",
+    "@coomi/coomi-client-ui-settings-plugins": "workspace:^",
+    "@coomi/coomi-client-ui-user-questions": "workspace:^",
+    "@coomi/coomi-client-ui-settings": "workspace:^",
+    "@coomi/coomi-client-ui-settings-general": "workspace:^",
+    "@coomi/coomi-client-ui-sidebar": "workspace:^",
+    "@coomi/coomi-client-ui-skill": "workspace:^",
+    "@coomi/coomi-client-ui-input-trigger": "workspace:^",
+    "@coomi/coomi-client-ui-subagent": "workspace:^",
+    "@coomi/coomi-client-ui-jobs": "workspace:^",
+    "@coomi/coomi-client-ui-theme": "workspace:^",
+    "@coomi/coomi-client-ui-tool": "workspace:^",
+    "@coomi/coomi-client-ui-workflow-run": "workspace:^",
+    "@coomi/coomi-client-ui-trajectory": "workspace:^",
+    "@coomi/coomi-client-ui-workspace": "workspace:^",
+    "@coomi/coomi-cmdline": "workspace:^",
+    "@coomi/coomi-code-runtime-worker-thread": "workspace:^",
+    "@coomi/coomi-cordis-client-runner": "workspace:^",
+    "@coomi/coomi-cordis-host-runner": "workspace:^",
+    "@coomi/coomi-web-frontend": "workspace:^",
+    "@coomi/coomi-host-frontend-static": "workspace:^",
+    "@coomi/coomi-host-apiproxy": "workspace:^",
+    "@coomi/coomi-host-directory-picker-auto": "workspace:^",
+    "@coomi/coomi-host-directory-picker-browse": "workspace:^",
+    "@coomi/coomi-host-directory-picker-native": "workspace:^",
+    "@coomi/coomi-host-plugin-inventory": "workspace:^",
+    "@coomi/coomi-host-webserver": "workspace:^",
+    "@coomi/coomi-message-feedback": "workspace:^",
+    "@coomi/coomi-session-projection-cache": "workspace:^",
+    "@coomi/coomi-session-log-export": "workspace:^",
+    "@coomi/coomi-session-stats": "workspace:^",
+    "@coomi/coomi-storage": "workspace:^",
+    "@coomi/coomi-storage-domain": "workspace:^",
+    "@coomi/coomi-storage-json": "workspace:^",
+    "@coomi/coomi-workspace": "workspace:^",
+    "@coomi/schemastery": "workspace:^",
+    "commander": "^15.0.0"
+  },
+  "peerDependencies": {
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-shell-env": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-shell-env": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

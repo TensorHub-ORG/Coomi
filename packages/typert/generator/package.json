@@ -1,0 +1,54 @@
+{
+  "name": "@coomi/coomi-typert-generator",
+  "description": "TypeScript project analyzer and model-driven Typert artifact generator",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/typert/generator"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./tsdown": {
+      "types": "./lib/types/tsdown-plugin.d.ts",
+      "default": "./lib/types/tsdown-plugin.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@jridgewell/gen-mapping": "^0.3.13",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-tool-cordis": "workspace:^",
+    "@coomi/coomi-typert-registry": "workspace:^",
+    "@coomi/cordis": "workspace:^",
+    "zod": "^4.4.3"
+  }
+}

@@ -1,0 +1,27 @@
+# Minimal tool-pwsh composition: real app boot path, real pwsh executor, real
+# foreground + background tool calls; driven by the package's loader.spec.ts.
+- id: system-prompt
+  name: '@coomi/coomi-system-prompt'
+
+- id: tools
+  name: '@coomi/coomi-tools'
+
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: bash
+  name: '@coomi/coomi-pwsh-local'
+  config:
+    graceMs: 200
+
+- id: shell-env
+  name: '@coomi/coomi-shell-env'
+
+- id: tasks
+  name: '@coomi/coomi-jobs-local'
+
+- id: tool-jobs
+  name: '@coomi/coomi-tool-jobs'
+
+- id: tool-pwsh
+  name: '@coomi/coomi-tool-pwsh'

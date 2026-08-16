@@ -1,0 +1,68 @@
+{
+  "name": "@coomi/coomi-tool-terminal",
+  "description": "Six model-facing persistent PTY tools with owner isolation and generic background-job integration",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/terminal/tool-terminal"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-terminal": "workspace:^",
+    "@coomi/coomi-output-retention": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-terminal": "workspace:^",
+    "@coomi/coomi-terminal-bash": "workspace:^",
+    "@coomi/coomi-output-retention": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-subprocess-local": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-jobs": "workspace:^",
+    "@coomi/coomi-jobs-local": "workspace:^",
+    "@coomi/coomi-tool-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

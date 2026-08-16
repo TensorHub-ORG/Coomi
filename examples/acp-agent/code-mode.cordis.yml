@@ -1,0 +1,28 @@
+# Code Mode adds `ctx.codeRuntime` and changes the registry to one wire tool,
+# `run_code`, plus its generated TypeScript SDK prompt. The app bin selects this
+# overlay for `demo:code-mode` and snapshot recording, and selects the sibling
+# replay overlay for `COOMI_SNAPSHOT=replay`. A config patch replaces the whole app
+# config, so unchanged base fields are restated below.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: acp-agent
+        name: '@coomi/coomi-acp-demo'
+        config:
+          provider: deepseek-official
+          model: deepseek-v4-pro
+          persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+          persistenceCompression: !!js "process.env.COOMI_SNAPSHOT === undefined ? 'zstd' : 'none'"
+          workspaceContext:
+            maxBytes: 65536
+          tools:
+            mode: code
+          persona: |
+            You are a coding assistant powered by the {{model}} model. Your working directory is {{cwd}}.
+
+            Verify your work by running the code or tests. Keep answers brief and factual.
+      - insert:
+          - id: code-runtime
+            name: '@coomi/coomi-code-runtime-worker-thread'

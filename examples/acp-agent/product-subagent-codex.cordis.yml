@@ -1,0 +1,18 @@
+# Add the native Codex product provider and its preset-shaped foreground tool to
+# the real ACP composition. The model is told not to call it; the scenario pins
+# the assembled request schema without starting Codex.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: subagent-codex
+            name: '@coomi/coomi-subagent-codex'
+          - id: tool-subagent-codex
+            name: '@coomi/coomi-tool-subagent'
+            config:
+              provider: codex
+              toolName: subagent_codex
+              enableRunInBackground: false
+              maxDepth: provider-managed

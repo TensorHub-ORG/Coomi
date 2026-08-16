@@ -1,0 +1,70 @@
+{
+  "name": "@coomi/coomi-tool-fs",
+  "description": "Model-facing filesystem tools (read, write, edit) over the Coomi filesystem seam (ctx.fs)",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/fs/tool-fs"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "diff": "^9.0.0",
+    "@coomi/schemastery": "workspace:^"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-attachment": "workspace:^",
+    "@coomi/coomi-fs": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-loop": "workspace:^",
+    "@coomi/coomi-agent-loop-testkit": "workspace:^",
+    "@coomi/coomi-attachment": "workspace:^",
+    "@coomi/coomi-fs": "workspace:^",
+    "@coomi/coomi-fs-local": "workspace:^",
+    "@coomi/coomi-fs-observation-policy": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-llm-deepseek": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

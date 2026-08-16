@@ -1,0 +1,24 @@
+appId: com.coomi.desktop
+productName: Coomi
+copyright: Copyright © 2026 Coomi
+directories:
+  output: release
+files:
+  - src/**
+  - resources/**
+# The server payload is staged by scripts/after-pack.cjs (extraResources
+# silently drops node_modules, so we copy after pack instead).
+afterPack: scripts/after-pack.cjs
+win:
+  target:
+    - nsis
+  icon: resources/coomi.ico
+  artifactName: Coomi-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Coomi
+  installerIcon: resources/coomi.ico
+  uninstallerIcon: resources/coomi.ico

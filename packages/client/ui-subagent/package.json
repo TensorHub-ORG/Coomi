@@ -1,0 +1,84 @@
+{
+  "name": "@coomi/coomi-client-ui-subagent",
+  "description": "Subagent conversation catalog, continuation routing UI, and '@' reference source",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/client/ui-subagent"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "coomi": {
+    "client": {
+      "inject": [
+        "@coomi/coomi-client-locale",
+        "@coomi/coomi-client-runtime",
+        "@coomi/coomi-client-ui-conversation",
+        "@coomi/coomi-client-ui-primitives",
+        "@coomi/coomi-client-ui-input-trigger"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "react": "^18.2.0"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-conversation": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-input-trigger": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-subagent": "workspace:^",
+    "@coomi/coomi-token-meter": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-test-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-conversation": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-input-trigger": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-subagent": "workspace:^",
+    "@coomi/coomi-token-meter": "workspace:^",
+    "@types/react": "~18.3.1",
+    "@coomi/cordis": "workspace:^"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts"
+  ]
+}

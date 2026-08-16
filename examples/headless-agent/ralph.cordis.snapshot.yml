@@ -1,0 +1,12 @@
+# Replay counterpart to cordis.yml for the shipped Ralph-loop snapshot.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: llm-replay
+            name: '@coomi/coomi-llm-replay'

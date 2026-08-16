@@ -1,0 +1,66 @@
+{
+  "name": "@coomi/coomi-app-boot",
+  "description": "Shared boot glue for the app bins: .env loading, fail-loud Loader guards, snapshot-aware config resolution, and the Loader boot sequence",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/boot/app-boot"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.2.0"
+  },
+  "peerDependencies": {
+    "@coomi/cordis-plugin-group": "workspace:^",
+    "@coomi/cordis-plugin-hmr": "workspace:^",
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-launch-environment": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-home-paths": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@coomi/cordis-plugin-hmr": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-group": "workspace:^",
+    "@coomi/cordis-plugin-hmr": "workspace:^",
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/cordis-plugin-timer": "workspace:^",
+    "@coomi/coomi-launch-environment": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-home-paths": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@types/js-yaml": "^4.0.9",
+    "@coomi/cordis": "workspace:^"
+  }
+}

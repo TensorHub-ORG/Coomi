@@ -1,0 +1,54 @@
+{
+  "name": "@coomi/coomi-command-feedback",
+  "description": "Log-only session feedback producer and human-facing slash command",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/feedback/command-feedback"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-telemetry": "workspace:^",
+    "@coomi/coomi-anonymous-user-id": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-telemetry": "workspace:^",
+    "@coomi/coomi-anonymous-user-id": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

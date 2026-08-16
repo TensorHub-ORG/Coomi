@@ -1,0 +1,57 @@
+{
+  "name": "@coomi/coomi-spill-policy",
+  "description": "Tool-result spill policy for the Coomi — replaces oversized plain-text tool results with a retained preview plus a spill-file path (no service API)",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/spill/spill-policy"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-output-retention": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-spill": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-code-runtime-worker-thread": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-output-retention": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-spill": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

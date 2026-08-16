@@ -1,0 +1,96 @@
+{
+  "name": "@coomi/coomi-api-remotes",
+  "description": "Remote BFF assembly and Host Agent/Session lookup policy",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/api/remotes"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "coomi": {
+    "client": {
+      "inject": [
+        "@coomi/coomi-api-gateway"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "license": "MIT",
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "dependencies": {
+    "@coomi/coomi-typert-protocol": "workspace:^"
+  },
+  "peerDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-api-gateway": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-credentials": "workspace:^",
+    "@coomi/coomi-goal": "workspace:^",
+    "@coomi/coomi-cordis-host-runner": "workspace:^",
+    "@coomi/coomi-host-plugin-inventory": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-message-feedback": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-typert-registry": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-api-gateway": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-credentials": "workspace:^",
+    "@coomi/coomi-goal": "workspace:^",
+    "@coomi/coomi-cordis-host-runner": "workspace:^",
+    "@coomi/coomi-host-plugin-inventory": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-message-feedback": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-typert-registry": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

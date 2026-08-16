@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "Coomi",
+  "short_name": "Coomi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "theme_color": "#2D61C6",
+  "background_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "975x975",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

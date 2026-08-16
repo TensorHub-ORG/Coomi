@@ -1,0 +1,27 @@
+# Add both native product providers and the same independent foreground tool
+# rows an Agent Preset may contribute. Loading the composition starts neither
+# product; the scenario pins both model-visible schemas.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: subagent-codex
+            name: '@coomi/coomi-subagent-codex'
+          - id: subagent-claude-code
+            name: '@coomi/coomi-subagent-claude-code'
+          - id: tool-subagent-codex
+            name: '@coomi/coomi-tool-subagent'
+            config:
+              provider: codex
+              toolName: subagent_codex
+              enableRunInBackground: false
+              maxDepth: provider-managed
+          - id: tool-subagent-claude-code
+            name: '@coomi/coomi-tool-subagent'
+            config:
+              provider: claude-code
+              toolName: subagent_claude_code
+              enableRunInBackground: false
+              maxDepth: provider-managed

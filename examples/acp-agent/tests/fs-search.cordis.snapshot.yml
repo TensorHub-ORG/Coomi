@@ -1,0 +1,35 @@
+# Minimal keyless composition: real app, bash, and search tool; replayed model.
+- id: llm-replay
+  name: '@coomi/coomi-llm-replay'
+  config:
+    providers:
+      - id: deepseek-official
+        name: DeepSeek
+        models:
+          - id: deepseek-v4-pro
+
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: bash
+  name: '@coomi/coomi-bash-local'
+
+- id: acp-agent
+  name: '@coomi/coomi-acp-demo'
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
+    persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+    persistenceCompression: none
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolJobs: false
+    goals: false
+    persona: You are a concise snapshot agent working in {{cwd}}.
+
+- id: tool-fs-search
+  name: '@coomi/coomi-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: true
+    globMaxResults: 4

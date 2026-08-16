@@ -1,0 +1,55 @@
+{
+  "name": "@coomi/coomi-code-runtime-worker-thread",
+  "description": "Worker-thread implementation of the Coomi code-execution seam",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/code-runtime/code-runtime-worker-thread"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./worker": {
+      "types": "./lib/types/worker.d.ts",
+      "default": "./lib/worker.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/worker.cjs",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-code-runtime": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-timeout": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-code-runtime": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-timeout": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

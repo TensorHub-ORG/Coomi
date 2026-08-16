@@ -1,0 +1,14 @@
+# Depth-limit snapshot overlay: keep the default composition and allow two
+# generations of spawn children before runtime enforcement rejects another.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: tool-subagent
+        name: '@coomi/coomi-tool-subagent'
+        config:
+          provider: spawn
+          toolName: subagent
+          backgroundMode: continuable
+          maxDepth: 2

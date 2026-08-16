@@ -1,0 +1,35 @@
+# Minimal live counterpart for the pwsh-tool-turn snapshot composition.
+- id: llm-deepseek
+  name: '@coomi/coomi-llm-deepseek'
+  config:
+    models:
+      - id: deepseek-v4-pro
+
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: bash
+  name: '@coomi/coomi-pwsh-local'
+
+- id: shell-env
+  name: '@coomi/coomi-shell-env'
+
+- id: acp-agent
+  name: '@coomi/coomi-acp-demo'
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
+    persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+    persistenceCompression: !!js "process.env.COOMI_SNAPSHOT === undefined ? 'zstd' : 'none'"
+    workspaceContext: false
+    skills:
+      enabled: false
+    # job_output/job_kill stay mounted (the bundle's toolJobs default) so
+    # background pwsh runs are readable and killable.
+    goals: false
+    # The pwsh tool replaces the bundle's bash tool in this composition.
+    toolBash: false
+    persona: You are a concise snapshot agent working in {{cwd}}.
+
+- id: tool-pwsh
+  name: '@coomi/coomi-tool-pwsh'

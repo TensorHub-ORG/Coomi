@@ -1,0 +1,80 @@
+{
+  "name": "@coomi/coomi-client-ui-directory-picker-browse",
+  "description": "In-app directory browsing surface: the workspace directory-flow owner rendering the host's listing and creation primitives",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/client/ui-directory-picker-browse"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "coomi": {
+    "client": {
+      "inject": [
+        "@coomi/coomi-client-runtime",
+        "@coomi/coomi-client-ui-workspace",
+        "@coomi/coomi-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "clsx": "^2.0.0"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-client-ui-workspace": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/cordis": "workspace:^",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-test-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-client-ui-workspace": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "~18.3.1",
+    "@coomi/cordis": "workspace:^",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts"
+  ]
+}

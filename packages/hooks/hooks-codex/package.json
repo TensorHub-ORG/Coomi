@@ -1,0 +1,63 @@
+{
+  "name": "@coomi/coomi-hooks-codex",
+  "description": "Bridge plugin: run a Codex hooks.json hook config on the Coomi interception seams",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/hooks/hooks-codex"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-hook-protocol": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-loop": "workspace:^",
+    "@coomi/coomi-agent-loop-testkit": "workspace:^",
+    "@coomi/coomi-shell": "workspace:^",
+    "@coomi/coomi-bash-local": "workspace:^",
+    "@coomi/coomi-subprocess-local": "workspace:^",
+    "@coomi/coomi-hook-protocol": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-session-persistence-jsonl": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

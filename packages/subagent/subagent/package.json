@@ -1,0 +1,106 @@
+{
+  "name": "@coomi/coomi-subagent",
+  "description": "Abstract subagent seam (ctx.subagents): named-provider registry for delegating to child agents",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/subagent/subagent"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client.d.ts",
+      "default": "./lib/types/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-brand": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-scope": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-session-projection": "workspace:^",
+    "@coomi/coomi-session-projection-cache": "workspace:^",
+    "@coomi/coomi-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@coomi/coomi-agent-presets": {
+      "optional": true
+    },
+    "@coomi/coomi-sandbox": {
+      "optional": true
+    },
+    "@coomi/coomi-sandbox-policy": {
+      "optional": true
+    },
+    "@coomi/coomi-session-persistence": {
+      "optional": true
+    },
+    "@coomi/coomi-session-projection": {
+      "optional": true
+    },
+    "@coomi/coomi-session-projection-cache": {
+      "optional": true
+    },
+    "@coomi/coomi-jobs": {
+      "optional": true
+    },
+    "@coomi/coomi-user-approval": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-brand": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-scope": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-session-projection": "workspace:^",
+    "@coomi/coomi-session-projection-cache": "workspace:^",
+    "@coomi/coomi-storage": "workspace:^",
+    "@coomi/coomi-storage-domain": "workspace:^",
+    "@coomi/coomi-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

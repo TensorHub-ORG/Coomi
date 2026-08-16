@@ -1,0 +1,11 @@
+# Opt-in reference for Memorix 1.3.0. Install the pinned `memorix` executable
+# first; coomi starts it but does not run a package manager.
+- insert:
+    - id: memory-memorix
+      name: '@coomi/coomi-mcp-client'
+      config:
+        serverName: memorix
+        transport: stdio
+        command: memorix
+        args: [serve]
+        cwd: !!js process.cwd()

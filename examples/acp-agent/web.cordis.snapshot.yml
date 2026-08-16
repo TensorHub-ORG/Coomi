@@ -1,0 +1,31 @@
+# Keyless replay counterpart to web.cordis.yml: the web stack and loopback
+# fixture server stay real (the tool call re-executes the actual HTTP fetch and
+# markdown rendering); only the model adapter is replaced by replay.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: web
+            name: '@coomi/coomi-web'
+          - id: web-fetch-http
+            name: '@coomi/coomi-web-fetch-http'
+          - id: web-fetch-fixture
+            name: './web-fetch-fixture-server.mjs'
+          - id: tool-web
+            name: '@coomi/coomi-tool-web'
+            config:
+              search: false
+          - id: llm-replay
+            name: '@coomi/coomi-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek
+                  models:
+                    - id: deepseek-v4-flash
+                    - id: deepseek-v4-pro

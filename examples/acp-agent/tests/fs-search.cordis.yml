@@ -1,0 +1,32 @@
+# Minimal live counterpart for the glob-sampling snapshot composition.
+- id: llm-deepseek
+  name: '@coomi/coomi-llm-deepseek'
+  config:
+    models:
+      - id: deepseek-v4-pro
+
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: bash
+  name: '@coomi/coomi-bash-local'
+
+- id: acp-agent
+  name: '@coomi/coomi-acp-demo'
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
+    persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+    persistenceCompression: !!js "process.env.COOMI_SNAPSHOT === undefined ? 'zstd' : 'none'"
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolJobs: false
+    goals: false
+    persona: You are a concise snapshot agent working in {{cwd}}.
+
+- id: tool-fs-search
+  name: '@coomi/coomi-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: true
+    globMaxResults: 4

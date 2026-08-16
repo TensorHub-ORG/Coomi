@@ -1,0 +1,71 @@
+{
+  "name": "@coomi/coomi-permission-presets",
+  "description": "User-facing permission presets (ctx.permissionPresets) for the Coomi: one product-level Permissions select bundling the sandbox-mode and approval-policy knobs, written through to their own session events",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/interaction/permission-presets"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
+    },
+    "./client": {
+      "types": "./lib/types/client.d.ts",
+      "default": "./lib/types/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/coomi-shell": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-projection": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@coomi/coomi-shell": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-sandbox": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-projection": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

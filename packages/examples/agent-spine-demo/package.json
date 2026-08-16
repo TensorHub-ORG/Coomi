@@ -1,0 +1,100 @@
+{
+  "name": "@coomi/coomi-agent-spine-demo",
+  "description": "The default executor-less/UI-less agent spine with fallback session titles, provider-routed retry, and optional persisted goals",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/examples/agent-spine-demo"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/cordis-plugin-timer": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-loop": "workspace:^",
+    "@coomi/coomi-goal": "workspace:^",
+    "@coomi/coomi-goal-round-driver": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-home-paths": "workspace:^",
+    "@coomi/coomi-llm-retry": "workspace:^",
+    "@coomi/coomi-scope": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-title": "workspace:^",
+    "@coomi/coomi-skill": "workspace:^",
+    "@coomi/coomi-skill-filesystem": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-jobs-local": "workspace:^",
+    "@coomi/coomi-shell-env": "workspace:^",
+    "@coomi/coomi-tool-bash": "workspace:^",
+    "@coomi/coomi-tool-goal": "workspace:^",
+    "@coomi/coomi-tool-skill": "workspace:^",
+    "@coomi/coomi-tool-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-agent-instructions": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-timer": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-loop": "workspace:^",
+    "@coomi/coomi-shell-env": "workspace:^",
+    "@coomi/coomi-bash-local": "workspace:^",
+    "@coomi/coomi-bash-sandbox": "workspace:^",
+    "@coomi/coomi-fs-local": "workspace:^",
+    "@coomi/coomi-fs-observation-policy": "workspace:^",
+    "@coomi/coomi-fs-sandbox": "workspace:^",
+    "@coomi/coomi-goal": "workspace:^",
+    "@coomi/coomi-goal-round-driver": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-home-paths": "workspace:^",
+    "@coomi/coomi-llm-retry": "workspace:^",
+    "@coomi/coomi-subprocess-local": "workspace:^",
+    "@coomi/coomi-sandbox-local": "workspace:^",
+    "@coomi/coomi-sandbox-policy": "workspace:^",
+    "@coomi/coomi-scope": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-title": "workspace:^",
+    "@coomi/coomi-skill": "workspace:^",
+    "@coomi/coomi-skill-filesystem": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-jobs": "workspace:^",
+    "@coomi/coomi-jobs-local": "workspace:^",
+    "@coomi/coomi-tool-bash": "workspace:^",
+    "@coomi/coomi-tool-fs": "workspace:^",
+    "@coomi/coomi-tool-goal": "workspace:^",
+    "@coomi/coomi-tool-skill": "workspace:^",
+    "@coomi/coomi-tool-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-agent-instructions": "workspace:^",
+    "@coomi/node-addon-landlock-run": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@coomi/schemastery": "workspace:^"
+  }
+}

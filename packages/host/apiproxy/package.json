@@ -1,0 +1,94 @@
+{
+  "name": "@coomi/coomi-host-apiproxy",
+  "description": "API gateway: the ApiProxy contract (api/), the fetch carrier pair (fetch/), and the host-side gateway plugin providing ctx.apiProxy",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/host/apiproxy"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json",
+    "./api": {
+      "types": "./lib/types/api/index.d.ts",
+      "default": "./lib/types/api/index.js"
+    },
+    "./api/*": {
+      "types": "./lib/types/api/*.d.ts",
+      "default": "./lib/types/api/*.js"
+    },
+    "./client": {
+      "types": "./lib/types/fetch/client.d.ts",
+      "default": "./lib/types/fetch/client.js"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@coomi/coomi-attachment": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-default-model": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-brand": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-credentials": "workspace:^",
+    "@coomi/coomi-goal": "workspace:^",
+    "@coomi/coomi-host-directory-picker": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-native-command": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-persistence": "workspace:^",
+    "@coomi/coomi-session-projection": "workspace:^",
+    "@coomi/coomi-session-projection-cache": "workspace:^",
+    "@coomi/coomi-session-query": "workspace:^",
+    "@coomi/coomi-session-title": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-skill": "workspace:^",
+    "@coomi/coomi-subagent": "workspace:^",
+    "@coomi/coomi-jobs": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-user-approval": "workspace:^",
+    "@coomi/coomi-user-questions": "workspace:^",
+    "@coomi/coomi-workspace": "workspace:^",
+    "@coomi/schemastery": "workspace:^",
+    "fflate": "^0.8.2",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-cordis-host-runner": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-agent-presets": "workspace:^",
+    "@coomi/coomi-cordis-host-runner": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-storage": "workspace:^",
+    "@coomi/coomi-storage-domain": "workspace:^",
+    "@coomi/coomi-typert-protocol": "workspace:^",
+    "@coomi/coomi-typert-registry": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

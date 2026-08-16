@@ -1,0 +1,27 @@
+# Keyless replay counterpart to pty.cordis.yml.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: pty
+            name: '@coomi/coomi-terminal'
+          - id: pty-snapshot-backend
+            name: './pty-snapshot-backend.mjs'
+          - id: tool-terminal
+            name: '@coomi/coomi-tool-terminal'
+            config:
+              maxResultBytes: 64
+          - id: llm-replay
+            name: '@coomi/coomi-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek
+                  models:
+                    - id: deepseek-v4-flash
+                    - id: deepseek-v4-pro

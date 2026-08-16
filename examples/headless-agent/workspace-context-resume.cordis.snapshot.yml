@@ -1,0 +1,37 @@
+# Keyless real-Loader composition for workspace-instruction resume
+# reconciliation. The test seeds one persisted baseline, changes AGENTS.md
+# while the session is offline, then resumes through the public agent service.
+
+- id: persistence
+  name: '@coomi/coomi-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+    compression: none
+
+- id: replay
+  name: '@coomi/coomi-llm-replay'
+  config:
+    file: !!js process.env.COOMI_SNAPSHOT_FILE
+    overrideFile: !!js process.env.COOMI_SNAPSHOT_OVERRIDE
+
+- id: fs-local
+  name: '@coomi/coomi-fs-local'
+  config:
+    cwd: !!js process.cwd()
+
+- id: agent
+  name: '@coomi/coomi-agent-spine-demo'
+  config:
+    agents: []
+    workspaceContext:
+      maxBytes: 65536
+      coomiHome: !!js process.cwd() + '/.coomi'
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+
+# Await the persisted resume before the headless driver inspects root agents.
+- id: resumed-agent
+  name: './tests/fixtures/workspace-context-resume-agent.ts'

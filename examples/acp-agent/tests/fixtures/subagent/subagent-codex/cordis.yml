@@ -1,0 +1,40 @@
+# Test-only composition of the public opt-in provider and foreground tool.
+# The owning e2e boots this tree but never invokes the model or Codex.
+- id: fixture
+  name: './fixture.ts'
+
+- id: subagent
+  name: '@coomi/coomi-subagent'
+
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: subagent-codex
+  name: '@coomi/coomi-subagent-codex'
+
+- id: tool-subagent-codex
+  name: '@coomi/coomi-tool-subagent'
+  config:
+    provider: codex
+    toolName: subagent_codex
+    enableRunInBackground: false
+    maxDepth: 'provider-managed'
+
+- id: agent-spine
+  name: '@coomi/coomi-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: mock
+        model: mock-delegate
+        cwd: !!js process.cwd()
+    persona: 'This composition test must not start a model turn.'
+    workspaceContext: false
+
+- id: persistence
+  name: '@coomi/coomi-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+
+- id: checkpoint-policy
+  name: '@coomi/coomi-session-checkpoint-policy'

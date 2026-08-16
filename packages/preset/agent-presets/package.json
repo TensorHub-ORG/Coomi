@@ -1,0 +1,73 @@
+{
+  "name": "@coomi/coomi-agent-presets",
+  "description": "Per-session agent composition from preset cordis.yml files for the Coomi",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/preset/agent-presets"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-atomic-write": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-home-paths": "workspace:^",
+    "@coomi/coomi-scope": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "@coomi/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-loop": "workspace:^",
+    "@coomi/coomi-atomic-write": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-home-paths": "workspace:^",
+    "@coomi/coomi-scope": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@coomi/coomi-settings-file": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "name": "@coomi/coomi-client-ui-settings",
+  "description": "Settings domain base plugin: the settings-namespace scope service and the canonical settings slot-type contract",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/client/ui-settings"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "coomi": {
+    "client": {
+      "inject": [
+        "@coomi/coomi-client-connection",
+        "@coomi/coomi-client-runtime",
+        "@coomi/coomi-api-remotes"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-client-connection": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-schema-form": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-schema-form": "workspace:^",
+    "@coomi/coomi-client-test-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-settings": "workspace:^",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts"
+  ]
+}

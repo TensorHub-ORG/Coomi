@@ -1,0 +1,83 @@
+{
+  "name": "@coomi/coomi-client-runtime",
+  "description": "Client core services: SlotRegistry, SessionRuntime (scope tree + object layer)",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/client/runtime"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "coomi": {
+    "client": {
+      "inject": [
+        "@coomi/coomi-client-connection",
+        "@coomi/coomi-typert-registry",
+        "@coomi/coomi-api-remotes"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-attachment": "workspace:^",
+    "@coomi/coomi-client-connection": "workspace:^",
+    "@coomi/coomi-commands": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-host-apiproxy": "workspace:^",
+    "@coomi/coomi-llm": "workspace:^",
+    "@coomi/coomi-llm-retry": "workspace:^",
+    "@coomi/coomi-session": "workspace:^",
+    "@coomi/coomi-session-projection": "workspace:^",
+    "@coomi/coomi-session-title": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "immer": "^10.1.1",
+    "react": "^18.2.0",
+    "zustand": "~4.4.7"
+  },
+  "peerDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-typert-protocol": "workspace:^",
+    "@coomi/coomi-typert-registry": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-timeout": "workspace:^",
+    "@coomi/coomi-typert-protocol": "workspace:^",
+    "@coomi/coomi-typert-registry": "workspace:^",
+    "@types/react": "~18.3.1"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts"
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "name": "@coomi/coomi-client-ui-permission-presets",
+  "description": "Permission surfaces: a new-session default in General settings and a current-session /permission popup over the permissions projection",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/client/ui-permission-presets"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "coomi": {
+    "client": {
+      "inject": [
+        "@coomi/coomi-client-connection",
+        "@coomi/coomi-client-locale",
+        "@coomi/coomi-client-runtime",
+        "@coomi/coomi-client-ui-commands",
+        "@coomi/coomi-api-remotes",
+        "@coomi/coomi-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-client-connection": "workspace:^",
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-schema-form": "workspace:^",
+    "@coomi/coomi-client-ui-commands": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-settings": "workspace:^",
+    "@coomi/coomi-client-ui-input-trigger": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-permission-presets": "workspace:^",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@coomi/cordis": "workspace:^",
+    "@coomi/coomi-api-remotes": "workspace:^",
+    "@coomi/coomi-client-connection": "workspace:^",
+    "@coomi/coomi-client-locale": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-schema-form": "workspace:^",
+    "@coomi/coomi-client-test-runtime": "workspace:^",
+    "@coomi/coomi-client-ui-commands": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-settings": "workspace:^",
+    "@coomi/coomi-client-ui-input-trigger": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-client-web-react": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-permission-presets": "workspace:^",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts"
+  ]
+}

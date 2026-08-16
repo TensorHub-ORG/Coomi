@@ -1,0 +1,11 @@
+# Add the persisted goal domain and its model-facing tools to the real one-shot app.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: goal
+            name: '@coomi/coomi-goal'
+          - id: tool-goal
+            name: '@coomi/coomi-tool-goal'

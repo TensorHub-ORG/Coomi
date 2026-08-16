@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling==1.30.1"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coomi-desktop-sdk"
+version = "0.0.0.dev0"
+description = "Python SDK for Coomi"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "DeepSeek" }]
+dependencies = [
+  "pydantic>=2.12,<3",
+  "coomi-desktop-runtime-bin==0.0.0.dev0",
+]
+
+[project.urls]
+Homepage = "https://github.com/coomi/coomi-desktop"
+Documentation = "https://github.com/coomi/coomi-desktop/blob/master/docs/user/guide/python-sdk.md"
+Issues = "https://github.com/coomi/coomi-desktop/issues"
+Source = "https://github.com/coomi/coomi-desktop"
+
+[dependency-groups]
+test = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coomi_harness"]
+
+# Editable installs see runtime executables injected after installation instead
+# of freezing a wheel snapshot.
+[tool.uv.sources]
+coomi-desktop-runtime-bin = { path = "../sdk-runtime", editable = true }

@@ -1,0 +1,76 @@
+{
+  "name": "@coomi/coomi-acp-demo",
+  "description": "ACP automation server app: agent spine + JSONL persistence + ACP transport, with a JSON-RPC stdio bin",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/examples/acp-demo"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "bin": {
+    "coomi-acp-demo": "lib/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./bin": {
+      "types": "./lib/types/bin.d.ts",
+      "default": "./lib/bin.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/bin.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-acp": "workspace:^",
+    "@coomi/coomi-agent-spine-demo": "workspace:^",
+    "@coomi/coomi-app-boot": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-session-checkpoint-policy": "workspace:^",
+    "@coomi/coomi-session-persistence-jsonl": "workspace:^",
+    "@coomi/coomi-session-query": "workspace:^",
+    "@coomi/coomi-session-query-sqlite": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-agent-instructions": "workspace:^",
+    "@coomi/cordis": "workspace:^",
+    "@coomi/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-include": "workspace:^",
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-acp": "workspace:^",
+    "@coomi/coomi-agent": "workspace:^",
+    "@coomi/coomi-agent-spine-demo": "workspace:^",
+    "@coomi/coomi-app-boot": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/coomi-session-checkpoint-policy": "workspace:^",
+    "@coomi/coomi-session-persistence-jsonl": "workspace:^",
+    "@coomi/coomi-session-query": "workspace:^",
+    "@coomi/coomi-session-query-sqlite": "workspace:^",
+    "@coomi/coomi-system-prompt": "workspace:^",
+    "@coomi/coomi-tools": "workspace:^",
+    "@coomi/coomi-agent-instructions": "workspace:^",
+    "@coomi/cordis": "workspace:^",
+    "@coomi/schemastery": "workspace:^"
+  }
+}

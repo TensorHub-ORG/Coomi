@@ -1,0 +1,42 @@
+{
+  "name": "@coomi/cordis-plugin-logger-console",
+  "description": "Console logger exporter for cordis",
+  "version": "1.0.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "vendor/logger-console"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/shared.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/shared.d.ts",
+      "node": "./lib/index.js",
+      "default": "./lib/browser.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/browser.js",
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.d.ts.map",
+    "src"
+  ],
+  "author": "Shigma <shigma10826@gmail.com>",
+  "license": "MIT",
+  "peerDependencies": {
+    "@coomi/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@coomi/cosmokit": "workspace:^",
+    "@coomi/schemastery": "workspace:^",
+    "supports-color": "^9.4.0"
+  }
+}

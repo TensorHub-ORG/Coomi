@@ -1,0 +1,41 @@
+# Keyless real-Loader composition for the semantic-checkpoint recovery snapshot.
+# The headless driver resumes the seeded interrupted session and emits its next
+# turn over stream-json; the replay adapter supplies the deterministic response.
+
+- id: persistence
+  name: '@coomi/coomi-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+    compression: none
+
+- id: checkpoint
+  name: '@coomi/coomi-session-checkpoint-policy'
+
+- id: replay
+  name: '@coomi/coomi-llm-replay'
+  config:
+    file: !!js process.env.COOMI_SNAPSHOT_FILE
+    overrideFile: !!js process.env.COOMI_SNAPSHOT_OVERRIDE
+
+# Managed child-process groups for the bash executor (spawn/kill/output plumbing).
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: bash
+  name: '@coomi/coomi-bash-local'
+  config:
+    timeoutMs: 60000
+
+- id: agent
+  name: '@coomi/coomi-agent-spine-demo'
+  config:
+    agents: []
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolJobs: false
+    goals: false
+
+# Await the persisted resume before the headless driver inspects root agents.
+- id: resumed-agent
+  name: './tests/fixtures/semantic-checkpoint-agent.ts'

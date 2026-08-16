@@ -1,0 +1,24 @@
+# Keyless opt-in PTY composition for the headless stream-json snapshot.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: sandbox-policy
+            name: '@coomi/coomi-sandbox-policy'
+            config:
+              mode: danger-full-access
+          - id: pty
+            name: '@coomi/coomi-terminal'
+          - id: pty-snapshot-backend
+            name: '../acp-agent/pty-snapshot-backend.mjs'
+          - id: tool-terminal
+            name: '@coomi/coomi-tool-terminal'
+            config:
+              maxResultBytes: 64
+          - id: llm-replay
+            name: '@coomi/coomi-llm-replay'

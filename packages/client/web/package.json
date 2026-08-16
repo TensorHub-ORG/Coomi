@@ -1,0 +1,60 @@
+{
+  "name": "@coomi/coomi-client-web",
+  "description": "Web shell kernel: bootWebShell (module system holding + seed table + two-stage boot + AppRoot gate + app-shell assembly entry), consumed by the apps/web vite entry",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coomi/coomi-desktop.git",
+    "directory": "packages/client/web"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@coomi/coomi-client-modules": "workspace:^",
+    "@coomi/coomi-client-schema-form": "workspace:^",
+    "@coomi/coomi-client-ui-attachment": "workspace:^",
+    "@coomi/coomi-client-ui-primitives": "workspace:^",
+    "@coomi/coomi-client-ui-slots": "workspace:^",
+    "@coomi/coomi-client-ui-theme": "workspace:^",
+    "@coomi/coomi-client-web-react": "workspace:^",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-client-runtime": "workspace:^",
+    "@coomi/coomi-client-test-runtime": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.0",
+    "@coomi/cordis": "workspace:^",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@coomi/cordis-plugin-loader": "workspace:^",
+    "@coomi/coomi-invariants": "workspace:^",
+    "@coomi/cordis": "workspace:^"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ]
+}

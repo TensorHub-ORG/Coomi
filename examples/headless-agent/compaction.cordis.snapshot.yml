@@ -1,0 +1,24 @@
+# Keyless context-overflow composition for the assembled compaction snapshot.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@coomi/coomi-llm-deepseek'
+        disabled: true
+      - id: compaction-basic
+        name: '@coomi/coomi-compaction-basic'
+        config:
+          thresholdRatio: 0.99
+          retainTokens: 20
+          maxTokens: 32
+      - insert:
+          - id: llm-replay
+            name: '@coomi/coomi-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  models:
+                    - id: deepseek-v4-flash
+                      contextWindow: 128000

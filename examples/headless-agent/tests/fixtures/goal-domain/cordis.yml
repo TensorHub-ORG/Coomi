@@ -1,0 +1,38 @@
+# Test-only composition: create one goal through a Loader-mounted step consumer.
+- id: cli-mock-llm
+  name: '../cli-mock-llm.ts'
+
+# Managed child-process groups for the bash executor (spawn/kill/output plumbing).
+- id: subprocess
+  name: '@coomi/coomi-subprocess-local'
+
+- id: bash
+  name: '@coomi/coomi-bash-local'
+
+- id: goal
+  name: '@coomi/coomi-goal'
+  config:
+    defaultMaxGoalRounds: 11
+
+- id: seed-goal
+  name: './seed-goal.ts'
+
+- id: agent-spine
+  name: '@coomi/coomi-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: cli-mock
+        model: cli-mock
+        cwd: !!js process.cwd()
+    persona: 'Test the persisted goal domain.'
+    workspaceContext: false
+
+- id: persistence
+  name: '@coomi/coomi-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+    compression: none
+
+- id: checkpoint-policy
+  name: '@coomi/coomi-session-checkpoint-policy'

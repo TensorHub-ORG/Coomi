@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling==1.30.1"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coomi-desktop-runtime-bin"
+version = "0.0.0.dev0"
+description = "Pinned Coomi runtime for the Python SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "DeepSeek" }]
+
+[project.urls]
+Homepage = "https://github.com/coomi/coomi-desktop"
+Documentation = "https://github.com/coomi/coomi-desktop/blob/master/python/sdk-runtime/README.md"
+Issues = "https://github.com/coomi/coomi-desktop/issues"
+Source = "https://github.com/coomi/coomi-desktop"
+
+# Include the injected executable and default config; exclude the dev-only node
+# closure from wheels and sdists.
+[tool.hatch.build]
+artifacts = ["src/coomi_harness_runtime/runtime/coomi-jsonrpc-agent-*"]
+exclude = ["src/coomi_harness_runtime/runtime/node"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coomi_harness_runtime"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+
+[tool.hatch.build.targets.sdist.hooks.custom]

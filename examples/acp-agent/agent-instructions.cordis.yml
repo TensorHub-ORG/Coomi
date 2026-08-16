@@ -1,0 +1,24 @@
+# Workspace-context snapshot overlay: keep project-root and user-global
+# discovery inside the scenario's temporary cwd. The app config patch replaces
+# the whole base config, so the base fields are restated verbatim.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: acp-agent
+        name: '@coomi/coomi-acp-demo'
+        config:
+          provider: deepseek-official
+          model: deepseek-v4-pro
+          persistenceRoot: !!js process.env.COOMI_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+          persistenceCompression: !!js "process.env.COOMI_SNAPSHOT === undefined ? 'zstd' : 'none'"
+          workspaceContext:
+            maxBytes: 65536
+            coomiHome: !!js process.cwd() + '/.coomi'
+            projectRootMarkers:
+              - .coomi-project
+          persona: |
+            You are a coding assistant powered by the {{model}} model. Your working directory is {{cwd}}.
+
+            Verify your work by running the code or tests. Keep answers brief and factual.

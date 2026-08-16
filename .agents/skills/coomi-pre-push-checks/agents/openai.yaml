@@ -1,0 +1,4 @@
+interface:
+  display_name: "coomi Pre-Push Checks"
+  short_description: "Run the relevant Coomi checks before push"
+  default_prompt: "Use $coomi-pre-push-checks before pushing this Coomi branch."

@@ -1,0 +1,38 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--coomi-alias-border-l2);
+  border-radius: 8px;
+  background: var(--coomi-alias-bg-layer-1);
+}
+
+.wrap:focus-within {
+  border-color: var(--coomi-alias-brand-primary);
+}
+
+.icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--coomi-alias-label-tertiary);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--coomi-alias-label-primary);
+}
+
+.input::placeholder {
+  color: var(--coomi-alias-label-dimmed);
+}

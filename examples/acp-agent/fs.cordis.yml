@@ -1,0 +1,17 @@
+# Filesystem-scenario overlay: the sandboxed filesystem stack already lives in
+# the base cordis.yml, so this overlay adds only the local tool-result spill
+# storage those scenarios exercise.
+- id: base
+  name: '@coomi/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: spill-local
+            name: '@coomi/coomi-spill-local'
+            config:
+              root: !!js process.env.COOMI_SNAPSHOT_SPILL_ROOT ?? './.spill'
+          - id: spill-policy
+            name: '@coomi/coomi-spill-policy'
+            config:
+              maxInlineBytes: !!js process.env.COOMI_SNAPSHOT && 800 || 50000
