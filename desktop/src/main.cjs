@@ -88,7 +88,11 @@ async function startServer() {
   serverProcess = spawn(
     process.execPath,
     [cliEntry, '--profile', 'web', '--port', String(port), '--host', '127.0.0.1'],
-    { cwd: root, env, stdio: 'ignore' },
+    {
+      cwd: root,
+      env,
+      stdio: ['ignore', logFd(), logFd()],
+    },
   )
   serverProcess.on('error', (error) => {
     if (!quitting) throw error // surfaced by the await below in most paths
@@ -96,6 +100,14 @@ async function startServer() {
   const url = `http://127.0.0.1:${port}`
   await waitForWeb(url)
   return url
+}
+
+/** Server stdout/stderr go to a rotating log under userData/logs. */
+function logFd() {
+  const { openSync, mkdirSync } = require('node:fs')
+  const logsDir = join(app.getPath('userData'), 'logs')
+  try { mkdirSync(logsDir, { recursive: true }) } catch { /* best effort */ }
+  return openSync(join(logsDir, 'server.log'), 'a')
 }
 
 function stopServer() {

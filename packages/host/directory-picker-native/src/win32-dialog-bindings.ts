@@ -30,15 +30,36 @@ interface Koffi {
 
 /**
  * Read a NUL-terminated UTF-16 string at a native address. koffi's
- * `_Out_ void **` out-params surface a raw address, and
- * `koffi.decode(addr, 'str16')` would dereference it as a pointer — crash
- * on real Windows — so view the memory directly instead.
+ * `_Out_ void **` out-params surface a raw address; `koffi.decode.string16`
+ * (koffi 3.1+) reads the UTF-16 string from that address directly. The
+ * previous implementation mapped a fixed 32768-byte window with
+ * `koffi.view`, which crosses unmapped pages on short CoTaskMemAlloc'd
+ * results and crashes the process.
  */
 function readUtf16(koffi: Koffi, address: unknown): string {
-  const bytes = Buffer.from(koffi.view(address, 32768))
-  let end = 0
-  while (end + 1 < bytes.length && bytes[end] !== 0) end += 2
-  return bytes.toString('utf16le', 0, end)
+  // koffi.decode.string16 is added in 3.1.0; runtime guard for older hosts.
+  const decoder = (koffi as Koffi & { decode?: { string16?: (ptr: unknown) => string } }).decode
+  const string16 = decoder?.string16
+  if (typeof string16 === 'function') return string16(address as never)
+  // Fallback for pre-3.1 koffi: read in 4 KiB windows (never map the full
+  // 32 KiB span at once, which crossed unmapped pages and crashed the worker).
+  const WINDOW = 4096
+  const chunks: Buffer[] = []
+  let offset = 0
+  while (offset < 32768) {
+    const bytes = Buffer.from(koffi.view(address as never, WINDOW))
+    chunks.push(bytes)
+    let end = -1
+    for (let i = 0; i + 1 < bytes.length && i < WINDOW; i += 2) {
+      if (bytes[i] === 0 && bytes[i + 1] === 0) { end = i; break }
+    }
+    if (end !== -1) {
+      chunks[chunks.length - 1] = bytes.subarray(0, end)
+      return Buffer.concat(chunks).toString('utf16le')
+    }
+    offset += WINDOW
+  }
+  return Buffer.concat(chunks).toString('utf16le')
 }
 
 const COINIT_APARTMENTTHREADED = 0x2
@@ -60,7 +81,7 @@ const SLOT_SHOW = 3
 const SLOT_SET_OPTIONS = 9
 const SLOT_SET_TITLE = 17
 const SLOT_GET_RESULT = 20
-/** IShellItem vtable slot for `GetDisplayName`. */
+/** IShellItem vtable slot for `GetDisplayName` (after IUnknown 0-2 and BindToHandler/GetParent, =5). */
 const SLOT_GET_DISPLAY_NAME = 5
 
 /**
