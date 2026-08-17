@@ -1,7 +1,7 @@
 {
   "name": "coomi-desktop",
   "productName": "Coomi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Coomi desktop app — Electron shell over the Coomi agent harness",
   "main": "src/main.cjs",

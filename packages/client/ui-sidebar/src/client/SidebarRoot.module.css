@@ -100,6 +100,35 @@
   overflow: hidden;
 }
 
+/* The desktop shell reserves the native title-bar height above the Web app.
+   Move the existing brand and sidebar toggle into that area, with the row
+   following the same width transition as the sidebar column. */
+:global(html.coomi-desktop) .logoRow {
+  position: fixed;
+  z-index: 31;
+  top: 0;
+  left: 0;
+  width: var(--coomi-sidebar-title-width);
+  height: var(--coomi-desktop-title-bar-height);
+  padding: 0 12px 0 16px;
+  margin: 0;
+  border-right: 1px solid var(--coomi-alias-border-l1);
+  border-bottom: 1px solid var(--coomi-alias-border-l1);
+  background: var(--coomi-specific-sidebar-fill);
+  transition: width var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+  -webkit-app-region: drag;
+}
+
+:global(html.coomi-desktop) .logoRow button {
+  -webkit-app-region: no-drag;
+}
+
+:global(html.coomi-desktop) .collapsed .logoRow {
+  height: var(--coomi-desktop-title-bar-height);
+  padding: 0 10px;
+  margin: 0;
+}
+
 .collapsed .logoRow {
   height: 36px;
   padding: 0;
@@ -148,18 +177,8 @@
   height: 36px;
 }
 
-/* Rail logo swap: collapsed, the toggle rests as the whale mark (brand ink,
-   no hover circle) and hovering reveals the panel icon — the expand
-   affordance (figma sidebar-hover flow). Expanded it is a plain panel icon. */
+/* The collapsed logo is the expand control; it does not swap glyphs on hover. */
 .collapsed .toggle .panelIcon {
-  display: none;
-}
-
-.collapsed .toggle:hover .panelIcon {
-  display: inline;
-}
-
-.collapsed .toggle:hover .railFish {
   display: none;
 }
 
@@ -272,6 +291,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :global(html.coomi-desktop) .logoRow,
   .wide,
   .fading > *,
   .railIn .iconButton,

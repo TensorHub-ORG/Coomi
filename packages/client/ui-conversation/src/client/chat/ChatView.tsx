@@ -22,6 +22,34 @@ import { formatRunDuration } from './message-chrome.ts'
 import css from './ChatView.module.css'
 
 const FOLLOW_THRESHOLD = 24
+const TURN_STATUS_ROTATION_MS = 4_000
+const TURN_STATUS_MESSAGES = [
+  'Coomi 正在海底捞针…',
+  'Coomi 数羊把自己数晕了…',
+  'Coomi 正在热身…',
+  'Coomi 被咖啡烫到了…',
+  'Coomi 正在猛猛翻字典…',
+  'Coomi 正在吵架…',
+  'Coomi 正在悄悄摸鱼…',
+  'Coomi 在假装思考中…',
+  'Coomi 正在翻记忆库…',
+  'Coomi 尝试计算宇宙终极答案中…',
+  'Coomi 在捣鼓中…',
+  'Coomi 在乖乖干活…',
+  'Coomi 想睡觉…',
+  'Coomi 眼巴巴等着你夸…',
+  'Coomi 正在码内容…',
+  'Coomi 的神经网络冒烟了…',
+  'Coomi 偷瞄了一眼隔壁GPT的答案…',
+  'Coomi 盘腿打坐中…',
+  'Coomi 打了个盹，然后被自己吓醒了…',
+] as const
+
+function randomStatusIndex(except?: number): number {
+  const count = except === undefined ? TURN_STATUS_MESSAGES.length : TURN_STATUS_MESSAGES.length - 1
+  const candidate = Math.floor(Math.random() * count)
+  return except === undefined || candidate < except ? candidate : candidate + 1
+}
 
 /** Active column host when present; otherwise the view-local scroller. */
 function scrollerOf(from: HTMLElement): HTMLElement {
@@ -112,6 +140,7 @@ function TurnStatus({ startTime, t }: {
   t: ChatViewSlotProps['t']
 }) {
   const [mountedAt] = useState(() => Date.now())
+  const [messageIndex, setMessageIndex] = useState(() => randomStatusIndex())
   // Anchored to turn/start so a mid-turn reload keeps the real
   // elapsed time and the final footer's Ran-for label matches this clock.
   const anchor = startTime ?? mountedAt
@@ -124,12 +153,18 @@ function TurnStatus({ startTime, t }: {
     const id = setInterval(tick, 1000)
     return () => { clearInterval(id) }
   }, [anchor])
+  useEffect(() => {
+    const id = setInterval(() => {
+      setMessageIndex(current => randomStatusIndex(current))
+    }, TURN_STATUS_ROTATION_MS)
+    return () => { clearInterval(id) }
+  }, [])
   // Short turns keep the plain label; the clock only appears once the turn
   // has clearly been running for a while.
   const showClock = elapsedMs >= 15_000
   return (
     <div className={css.turnStatus} role="status" aria-live="polite">
-      Deep diving...
+      {TURN_STATUS_MESSAGES[messageIndex]}
       {showClock && (
         <span className={css.turnStatusClock} aria-hidden>
           {formatRunDuration(elapsedMs, t)}

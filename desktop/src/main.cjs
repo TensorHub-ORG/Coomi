@@ -9,7 +9,7 @@
  * isolated from any CLI installation.
  */
 
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron')
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron')
 const { spawn } = require('node:child_process')
 const { createServer } = require('node:net')
 const { join } = require('node:path')
@@ -19,6 +19,10 @@ const APP_ID = 'com.coomi.desktop'
 const PRODUCT = 'Coomi'
 const STARTUP_TIMEOUT_MS = 90_000
 const POLL_INTERVAL_MS = 500
+const TITLE_BAR_HEIGHT = 38
+const TITLE_BAR_CHANNEL = 'coomi-desktop:titlebar-theme'
+const TITLE_BAR_DEFAULT = { color: '#FFFFFF', symbolColor: '#0F1115' }
+const CSS_COLOR = /^(?:#[0-9a-f]{6}|rgba?\(\s*\d+(?:\.\d+)?(?:\s*,\s*|\s+)\d+(?:\.\d+)?(?:\s*,\s*|\s+)\d+(?:\.\d+)?(?:\s*(?:,|\/)\s*(?:\d+(?:\.\d+)?|\d+(?:\.\d+)?%))?\s*\))$/i
 
 let mainWindow = null
 let serverProcess = null
@@ -131,6 +135,12 @@ function createWindow(url) {
     autoHideMenuBar: true,
     icon: appIcon(),
     title: PRODUCT,
+    ...(process.platform === 'win32'
+      ? {
+          titleBarStyle: 'hidden',
+          titleBarOverlay: { ...TITLE_BAR_DEFAULT, height: TITLE_BAR_HEIGHT },
+        }
+      : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -164,6 +174,15 @@ function createWindow(url) {
 
   mainWindow.loadURL(url)
 }
+
+ipcMain.on(TITLE_BAR_CHANNEL, (event, theme) => {
+  if (process.platform !== 'win32' || event.sender !== mainWindow?.webContents) return
+  const color = theme?.color
+  const symbolColor = theme?.symbolColor
+  if (typeof color !== 'string' || typeof symbolColor !== 'string'
+    || !CSS_COLOR.test(color) || !CSS_COLOR.test(symbolColor)) return
+  mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLE_BAR_HEIGHT })
+})
 
 /** Surface a fatal startup error in a native dialog. */
 function dialogError(error) {

@@ -31,11 +31,11 @@
 
 ## 品牌资产
 
-- 图标源文件:`Coomi-Android/assets/coomi-agent.png`(975×975,白底 + 品牌蓝 #2D61C6)
-- Web favicon:`apps/web/public/favicon.png`(index.html/manifest 引用)
-- UI 内 logo:`packages/client/ui-primitives/src/CoomiLogo.tsx` / `CoomiWordmark.tsx`(内联 base64,不依赖静态路由)
+- 图标源文件:`Coomi-Android/assets/coomi-agent.png`(品牌蓝 #2D61C6);桌面资源移除外部白底并保留图形内部白色区域
+- Web favicon:`apps/web/public/favicon.png`(透明背景,index.html/manifest 引用)
+- UI 内 logo:`packages/client/ui-primitives/src/CoomiLogo.tsx` / `CoomiWordmark.tsx`(透明背景内联 base64,不依赖静态路由)
 - 文档站 wordmark:`website/public/wordmark.svg`
-- 桌面应用图标:`desktop/resources/coomi-agent.png` + `coomi.ico`
+- 桌面应用图标:`desktop/resources/coomi-agent.png` + `coomi-256.png` + `coomi.ico`(透明背景、多尺寸 Windows 图标)
 - 品牌蓝色阶(design-platform.css):
   `50 #F4F8FD → 100 #E1E9F7 → 200 #C9DBF3 → 300 #92BBEF → 400 #5F8ADB → 450 #4472CC → 500 #2D61C6 → 600 #2652A8 → 700 #1E4187 → 800 #173368 → 900 #10244B`
 
@@ -43,5 +43,6 @@
 
 - 目录:`desktop/`(独立 npm 工程,不并入 pnpm workspaces)
 - 形态:主进程自选空闲端口 → spawn 内置 `coomi --profile web`(stdio ignore,轮询就绪)→ BrowserWindow 加载 `http://127.0.0.1:<port>`
+- Windows 标题栏:38px 原生 window-controls overlay,左侧承载侧栏品牌与收起按钮,颜色跟随 Web 主题且不随窗口焦点变化
 - 数据隔离:`COOMI_HOME = <userData>/home`(Windows: `%APPDATA%\Coomi\home`)
 - 打包:electron-builder NSIS(见 `desktop/electron-builder.yml`);注意 v1 将整个 `node_modules`(约 1.3GB)作为运行时资源带入,体积较大

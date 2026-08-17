@@ -16,6 +16,7 @@
  * pointing at carries no bar.
  */
 import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import clsx from 'clsx'
 import {
   CoomiLogo, CoomiWordmark,
@@ -120,7 +121,10 @@ export function SidebarRoot({
         css.root, !wide && css.collapsed, !wide && everWide.current && css.railIn,
         collapsed && wide && css.fading, !pointerInside && css.quietBars,
       )}
-      style={wide ? { width: collapsed ? lastWideWidth.current : width } : undefined}
+      style={{
+        ...(wide ? { width: collapsed ? lastWideWidth.current : width } : {}),
+        '--coomi-sidebar-title-width': `${width}px`,
+      } as CSSProperties}
       onPointerEnter={() => {
         cancelLinger()
         setPointerInside(true)
@@ -140,9 +144,9 @@ export function SidebarRoot({
             <CoomiWordmark />
           </button>
         )}
-        {/* Rail resting state is the whale mark; hovering swaps in the panel
-            icon (the expand affordance, figma sidebar-hover flow). */}
-        <Tooltip label={collapsed ? t('toggle.open') : t('toggle.collapse')} delayMs={500}>
+        {/* The collapsed Logo is the expand control; the panel glyph is only
+            needed beside the expanded wordmark. */}
+        <Tooltip label={t('toggle.collapse')} delayMs={500} disabled={collapsed}>
           <button
             type="button"
             className={clsx(css.iconButton, css.toggle)}
@@ -150,8 +154,7 @@ export function SidebarRoot({
             onClick={() => { toggleSidebar() }}
           >
             {!wide && <CoomiLogo className={css.railFish} size={24} />}
-            {/* Rail icons render at 18 (figma rail spec); expanded keeps the glyph-native sizes. */}
-            <IconPanelLeftOutline16 className={css.panelIcon} size={wide ? 16 : 18} />
+            {wide && <IconPanelLeftOutline16 className={css.panelIcon} size={16} />}
           </button>
         </Tooltip>
       </div>

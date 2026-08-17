@@ -36,6 +36,7 @@ import { chatSnapshotFixture } from './chat-snapshot-fixture.client.ts'
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 // Keyless create() persists under the bare declared key; clear between cases
@@ -875,7 +876,18 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     expect(view.getByTestId('tool-seat-r1')).toBeTruthy()
     expect(h.toolOwners[0]?.block).toMatchObject({ callId: 'r1', argsRaw: '{"command":"cmd-r1"}' })
-    expect(view.getByRole('status').textContent).toBe('Deep diving...')
+    expect(view.getByRole('status').textContent).toMatch(/^Coomi .+…$/)
+  })
+
+  it('rotates the running status without repeating the current message', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const h = makeHarness({ running: true })
+    const view = render(<h.ChatView {...h.props} />)
+    const status = view.getByRole('status')
+    expect(status.textContent).toBe('Coomi 正在海底捞针…')
+    act(() => { vi.advanceTimersByTime(4_000) })
+    expect(status.textContent).toBe('Coomi 数羊把自己数晕了…')
   })
 
   it('keeps the Tool renderer mounted when a running call settles into log order', () => {
@@ -935,7 +947,7 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     // Freshly mounted (as after a reload) yet already past the 15s gate.
     const status = view.getByRole('status')
-    expect(status.textContent).toMatch(/^Deep diving\.\.\.2分0\d秒$/)
+    expect(status.textContent).toMatch(/^Coomi .+…2分0\d秒$/)
     expect(status.querySelector('[aria-hidden="true"]')).not.toBeNull()
     act(() => {
       h.set({ queue: [{
@@ -947,7 +959,7 @@ describe('ChatView', () => {
         text: 'also',
       }] })
     })
-    expect(status.textContent).toMatch(/^Deep diving\.\.\.2分0\d秒$/)
+    expect(status.textContent).toMatch(/^Coomi .+…2分0\d秒$/)
   })
 
   it('hands each ordered root call to the keyed business-node slot', () => {

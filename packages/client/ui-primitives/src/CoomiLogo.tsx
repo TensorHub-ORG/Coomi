@@ -1,5 +1,5 @@
-// Coomi brand mark: the coomi-agent.png tile. Ink-independent raster so the
-// same white-and-blue tile reads on both light and dark surfaces.
+// Coomi brand mark: the transparent coomi-agent.png raster. The white regions
+// enclosed by the blue mark remain opaque on light and dark surfaces.
 
 import { COOMI_AGENT_DATA_URI } from './coomi-mark.ts'
 import type { IconProps } from './icons/props.ts'

@@ -63,4 +63,21 @@ describe('SidebarRoot.module.css', () => {
     expect(declarations('.collapsed .newSession')?.get('align-self')).toBe('flex-start')
     expect(declarations('.collapsed .newSession')?.get('width')).toBe('36px')
   })
+
+  it('places the desktop brand row in the native title-bar overlay', () => {
+    const titleRow = declarations(':global(html.coomi-desktop) .logoRow')
+    expect(titleRow?.get('position')).toBe('fixed')
+    expect(titleRow?.get('z-index')).toBe('31')
+    expect(titleRow?.get('width')).toBe('var(--coomi-sidebar-title-width)')
+    expect(titleRow?.get('height')).toBe('var(--coomi-desktop-title-bar-height)')
+    expect(titleRow?.get('border-bottom')).toBe('1px solid var(--coomi-alias-border-l1)')
+    expect(titleRow?.get('-webkit-app-region')).toBe('drag')
+    expect(declarations(':global(html.coomi-desktop) .logoRow button')?.get('-webkit-app-region')).toBe('no-drag')
+  })
+
+  it('keeps the collapsed Logo stable on hover', () => {
+    expect(declarations('.collapsed .toggle .panelIcon')?.get('display')).toBe('none')
+    expect(declarations('.collapsed .toggle:hover .panelIcon')).toBeUndefined()
+    expect(declarations('.collapsed .toggle:hover .railFish')).toBeUndefined()
+  })
 })

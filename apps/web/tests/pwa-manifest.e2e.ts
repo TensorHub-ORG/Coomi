@@ -13,23 +13,26 @@ it('ships install metadata with the built web application', async () => {
   expect(manifest).toEqual({
     id: '/',
     name: 'Coomi',
-    short_name: 'coomi',
+    short_name: 'Coomi',
     start_url: '/',
     scope: '/',
     display: 'fullscreen',
+    theme_color: '#2D61C6',
+    background_color: '#FFFFFF',
     icons: [{
-      src: '/favicon.svg',
-      sizes: 'any',
-      type: 'image/svg+xml',
+      src: '/favicon.png',
+      sizes: '1024x1024',
+      type: 'image/png',
       purpose: 'any',
     }],
   })
 })
 
-it('ships a favicon that switches to a light mark under dark color scheme', async () => {
-  const favicon = await readFile(join(DIST_ROOT, 'favicon.svg'), 'utf8')
-  // The light fill must live inside the dark-scheme media query, so the icon
-  // stays black in light mode and only turns white under a dark scheme.
-  expect(favicon).toMatch(/@media \(prefers-color-scheme: dark\)\s*{\s*path\s*{[^}]*fill:\s*#fff/i)
-  expect(favicon).toContain('fill="#000"')
+it('ships the transparent-capable 1024px Coomi favicon', async () => {
+  const favicon = await readFile(join(DIST_ROOT, 'favicon.png'))
+  expect(favicon.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  expect(favicon.readUInt32BE(16)).toBe(1024)
+  expect(favicon.readUInt32BE(20)).toBe(1024)
+  // PNG color type 6 stores red, green, blue, and alpha for every pixel.
+  expect(favicon[25]).toBe(6)
 })

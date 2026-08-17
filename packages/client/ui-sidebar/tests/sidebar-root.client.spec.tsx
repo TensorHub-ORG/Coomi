@@ -112,8 +112,13 @@ describe('SidebarRoot shell', () => {
   })
 
   it('renders statically collapsed on a cold start (no crossfade classes)', () => {
+    vi.useFakeTimers()
     const b = mountShell({ collapsed: true })
     expect(b.regionOwner().wide).toBe(false)
-    expect(screen.getByRole('button', { name: 'Open sidebar' })).toBeTruthy()
+    const open = screen.getByRole('button', { name: 'Open sidebar' })
+    expect(open.querySelector('[class*="panelIcon"]')).toBeNull()
+    fireEvent.mouseEnter(open)
+    vi.advanceTimersByTime(600)
+    expect(screen.queryByRole('tooltip')).toBeNull()
   })
 })

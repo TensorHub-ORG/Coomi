@@ -29,7 +29,9 @@ npm run dist
 
 `electron-builder.yml` 的 `afterPack: scripts/after-pack.cjs` 在打包阶段把
 `release-payload/server` 整体拷入 `win-unpacked/resources/server`(extraResources
-会静默丢弃 node_modules,故用 afterPack 直拷)。
+会静默丢弃 node_modules,故用 afterPack 直拷)。钩子随后用当前仓库的工作区
+`lib/`、CLI 配置和 Web `dist/` 覆盖 payload,并检查关键桌面界面标志,避免复用
+payload 时把旧客户端插件封装进安装包。
 
 ## 关键坑位(已踩平)
 
@@ -46,5 +48,5 @@ npm run dist
 ## 运行
 
 - 开发:`cd desktop; npm start`(源码形态,spawn 内置服务 + 窗口)
-- 打包版:`release/win-unpacked/Coomi.exe` 或安装 `Coomi-Setup-0.1.0.exe`
+- 打包版:`release/win-unpacked/Coomi.exe` 或安装 `Coomi-Setup-0.1.1.exe`
 - 数据目录:`%APPDATA%\Coomi\home`(COOMI_HOME,与 CLI 隔离)

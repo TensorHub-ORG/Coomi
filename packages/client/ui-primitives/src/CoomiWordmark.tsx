@@ -15,7 +15,7 @@ export function CoomiWordmark({ size = 24, className }: IconProps) {
   const style: CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: Math.round(size * 0.3),
+    gap: Math.round(size * 0.34),
     height: size,
     color: 'inherit',
   }
@@ -24,10 +24,11 @@ export function CoomiWordmark({ size = 24, className }: IconProps) {
       <CoomiLogo size={size} />
       <span
         style={{
-          fontSize: Math.round(size * 0.62),
-          fontWeight: 600,
+          fontFamily: '"Segoe UI Variable Display", "Segoe UI", sans-serif',
+          fontSize: Math.round(size * 0.7),
+          fontWeight: 700,
           lineHeight: 1,
-          letterSpacing: Math.round(size * 0.03),
+          letterSpacing: 0,
           whiteSpace: 'nowrap',
         }}
       >
