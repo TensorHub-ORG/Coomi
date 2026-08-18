@@ -7,12 +7,19 @@
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "sync:brand": "node scripts/sync-brand-assets.mjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
     "electron": "^37.0.0",
     "electron-builder": "^26.0.12",
-    "png-to-ico": "^3.0.2"
+    "png-to-ico": "^3.0.2",
+    "pngjs": "7.0.0"
+  },
+  "dependencies": {
+    "node": "22.23.0",
+    "pnpm": "11.7.0"
   }
 }

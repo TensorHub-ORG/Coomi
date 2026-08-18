@@ -66,4 +66,20 @@ contextBridge.exposeInMainWorld('coomiDesktop', {
   },
   platform: process.platform,
   titleBarHeight: TITLE_BAR_HEIGHT,
+  setup: {
+    getState: () => ipcRenderer.invoke('coomi-desktop:setup-get-state'),
+    selectExisting: () => ipcRenderer.invoke('coomi-desktop:setup-select-existing'),
+    installOfficial: () => ipcRenderer.invoke('coomi-desktop:setup-install-official'),
+    retry: () => ipcRenderer.invoke('coomi-desktop:setup-retry'),
+    onState: (listener) => {
+      const handler = (_event, state) => listener(state)
+      ipcRenderer.on('coomi-desktop:setup-state', handler)
+      return () => ipcRenderer.removeListener('coomi-desktop:setup-state', handler)
+    },
+  },
+  source: {
+    open: () => ipcRenderer.invoke('coomi-desktop:source-open'),
+    checkpoint: () => ipcRenderer.invoke('coomi-desktop:source-checkpoint'),
+    restart: () => ipcRenderer.invoke('coomi-desktop:source-restart'),
+  },
 })

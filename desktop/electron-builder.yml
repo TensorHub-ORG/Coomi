@@ -6,9 +6,10 @@ directories:
 files:
   - src/**
   - resources/**
-# The server payload is staged by scripts/after-pack.cjs (extraResources
-# silently drops node_modules, so we copy after pack instead).
-afterPack: scripts/after-pack.cjs
+asarUnpack:
+  - node_modules/node/bin/**
+  - node_modules/node/node_modules/node-win-x64/bin/**
+  - node_modules/pnpm/**
 win:
   target:
     - nsis

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+    <title>Coomi 源码</title>
+    <link rel="stylesheet" href="./setup.css">
+  </head>
+  <body>
+    <main class="setup-shell">
+      <header class="setup-header">
+        <img class="setup-logo" src="../resources/coomi-agent.png" alt="">
+        <div>
+          <h1>连接 Coomi 源码</h1>
+          <p>桌面壳从可写的 Git 工作区启动。</p>
+        </div>
+      </header>
+
+      <section class="runtime-status" aria-live="polite">
+        <span id="statusDot" class="status-dot"></span>
+        <div class="status-copy">
+          <strong id="statusMessage">正在检查…</strong>
+          <code id="sourcePath"></code>
+        </div>
+      </section>
+
+      <div class="setup-actions">
+        <button id="selectButton" class="button button-primary" type="button">选择现有源码</button>
+        <button id="installButton" class="button button-secondary" type="button">安装官方源码</button>
+        <button id="retryButton" class="button button-secondary" type="button" hidden>重试</button>
+      </div>
+
+      <section id="progressPanel" class="progress-panel" hidden>
+        <div class="progress-line"><span class="progress-spinner"></span><span id="progressLabel">正在准备源码</span></div>
+        <pre id="progressLog"></pre>
+      </section>
+    </main>
+    <script src="./setup.js"></script>
+  </body>
+</html>
