@@ -1569,7 +1569,11 @@ impl CoreTools {
         if output.len() <= self.max_output {
             return output;
         }
-        output.truncate(self.max_output);
+        // 修复（原 2.0.0 崩溃根因）：String::truncate 要求 new_len 是 UTF-8 字符边界，
+        // 多字节输出（中文等）超长时按字节切会触发 is_char_boundary 断言失败 panic
+        // （本机 coomi.log 反复出现的 tools\src\lib.rs:1557 panic）。
+        // floor_char_boundary 返回 ≤ max_output 的最大字符边界（Rust 1.73+ 稳定，rust-version=1.85 可用）。
+        output.truncate(output.floor_char_boundary(self.max_output));
         output.push_str("\n[output truncated]");
         output
     }
