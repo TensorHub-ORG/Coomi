@@ -74,11 +74,18 @@ public class CoomiEngineMonitor extends Service {
      * remains present solely to keep the engine alive.
      */
     public static void setTaskStatus(String status, String sessionId, boolean background) {
+        // 批次二 #23：前端 2 秒轮询会反复上报同一状态；未变化时直接返回，
+        // 不重新 notify（每次 notify 都会响铃/震动，这就是“只有一个任务也一直响”的根源）。
+        boolean nextBackground = background || !sAppForeground;
+        boolean unchanged = status != null && status.equals(sTaskStatus)
+            && nextBackground == sTaskBackground
+            && (sessionId == null || sessionId.isEmpty() || sessionId.equals(sTaskSessionId));
+        if (unchanged) return;
         int previousCount = runningTaskCount(sTaskStatus);
         boolean previousBackground = sTaskBackground;
         sTaskStatus = status;
         if (sessionId != null && !sessionId.isEmpty()) sTaskSessionId = sessionId;
-        sTaskBackground = background || !sAppForeground;
+        sTaskBackground = nextBackground;
         CoomiEngineMonitor instance = sInstance;
         if (instance != null) {
             instance.onTaskStateChanged(previousCount, runningTaskCount(status), previousBackground);
@@ -337,18 +344,13 @@ public class CoomiEngineMonitor extends Service {
         updateWakeLockForTask();
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
-        if (currentCount == 0 && previousCount > 0 && previousBackground && !sTaskBackground) {
+        // 批次二 #26：运行状态展示合并进常驻服务通知（1001 已内嵌「N 个任务执行中」），
+        // 1002 只承担一件事——后台任务结束时的一次性提醒，不再进入轮询更新循环。
+        if (previousCount > 0 && currentCount == 0 && sTaskBackground) {
             nm.notify(TASK_NOTIFICATION_ID, buildTaskNotification("后台任务已结束", false));
             sTaskNotificationActive = false;
-        } else if (currentCount > 0 && sTaskBackground) {
-            nm.notify(TASK_NOTIFICATION_ID, buildTaskNotification(
-                "后台任务执行中" + (currentCount > 1 ? "（" + currentCount + " 个）" : ""), true));
-            sTaskNotificationActive = true;
-        } else if (currentCount > 0) {
-            if (sTaskNotificationActive) nm.cancel(TASK_NOTIFICATION_ID);
-            sTaskNotificationActive = false;
-        } else if (previousCount > 0 && previousBackground) {
-            nm.notify(TASK_NOTIFICATION_ID, buildTaskNotification("后台任务已结束", false));
+        } else if (currentCount > 0 && sTaskNotificationActive) {
+            nm.cancel(TASK_NOTIFICATION_ID);
             sTaskNotificationActive = false;
         }
         updateStatus(mCurrentStatus);
@@ -401,6 +403,8 @@ public class CoomiEngineMonitor extends Service {
             .setContentIntent(buildContentIntent(true))
             .setOngoing(ongoing)
             .setAutoCancel(!ongoing)
+            // 批次二 #23：同一通知的重复更新（如轮询刷新）不再重复响铃。
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setShowWhen(true)
             .build();

@@ -400,6 +400,45 @@ impl TaskManager {
         records
     }
 
+    /// 批次二 #22：僵尸记录对账。非终态、无存活执行体（不在 live_ids 中）、
+    /// 超过 max_age_ms 未更新的记录就地转 Interrupted，返回被回收的记录。
+    /// Paused 是用户主动保留的状态，不参与回收（可随时手动恢复或强制结束）。
+    pub fn reap_stale(
+        &self,
+        live_ids: &std::collections::HashSet<String>,
+        max_age_ms: u64,
+        reason: &str,
+    ) -> Vec<TaskRecord> {
+        let now = now_ms();
+        let stale: Vec<TaskRecord> = {
+            let records = self
+                .records
+                .lock()
+                .unwrap_or_else(|value| value.into_inner());
+            records
+                .values()
+                .filter(|record| {
+                    !record.status.is_terminal()
+                        && !matches!(record.status, TaskStatus::Paused)
+                        && !live_ids.contains(&record.id)
+                        && now.saturating_sub(record.updated_at_ms) > max_age_ms
+                })
+                .cloned()
+                .collect()
+        };
+        let mut reaped = Vec::new();
+        for record in stale {
+            if self
+                .transition(&record.id, TaskStatus::Interrupted, Some(reason))
+                .is_ok()
+                && let Some(record) = self.get(&record.id)
+            {
+                reaped.push(record);
+            }
+        }
+        reaped
+    }
+
     pub fn get(&self, id: &str) -> Option<TaskRecord> {
         self.records
             .lock()
@@ -739,7 +778,8 @@ impl TaskManager {
             .filter(|record| {
                 matches!(
                     record.status,
-                    TaskStatus::Running
+                    TaskStatus::Queued
+                        | TaskStatus::Running
                         | TaskStatus::WaitingLock
                         | TaskStatus::PausePending
                         | TaskStatus::AwaitingApproval

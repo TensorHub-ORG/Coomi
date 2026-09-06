@@ -76,6 +76,7 @@ use coomi_tools::CoreTools;
 use coomi_tools::ProcessManager;
 use futures_util::SinkExt;
 use futures_util::StreamExt;
+use futures_util::FutureExt;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -221,6 +222,26 @@ fn load_task_checkpoints(home: &Path, manager: &TaskManager) -> HashMap<String, 
         tasks.insert(record.session_id, task);
     }
     tasks
+}
+
+/// 回合 panic → Err 兜底（批次二 #22）：spawn 出的回合若 panic，spawn 内
+/// 后续 finish()/persist 不会执行，内存里会留下 running=true 的孤儿任务，
+/// 任务页与通知计数永远清不掉。catch_unwind 把 panic 转成 Err，保证收尾
+/// 路径总是走到。
+async fn catch_turn_panic<T>(
+    future: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    std::panic::AssertUnwindSafe(future)
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|panic| {
+            let detail = panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panic.downcast_ref::<&str>().map(|value| value.to_string()))
+                .unwrap_or_else(|| "unknown panic".into());
+            Err(anyhow::anyhow!("turn panicked: {detail}"))
+        })
 }
 
 fn persist_task_checkpoints(state: &AppState) {
@@ -1911,6 +1932,28 @@ async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
 /// the lifetime of the engine so switching sessions cannot erase the outcome.
 async fn list_tasks(State(state): State<AppState>) -> Json<Value> {
     let store = SessionStore::new(&state.home);
+    // 批次二 #22：僵尸记录对账——非终态记录若无存活执行体且超过 10 分钟
+    // 未更新，就地转 Interrupted，避免“假性运行”永久占据任务页与通知计数。
+    {
+        let tasks = state
+            .tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let live_ids = tasks
+            .iter()
+            .filter(|(_, task)| task.running.load(Ordering::SeqCst))
+            .filter_map(|(_, task)| {
+                task.task_id
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone()
+            })
+            .collect::<HashSet<_>>();
+        drop(tasks);
+        state
+            .task_manager
+            .reap_stale(&live_ids, 10 * 60 * 1_000, "stale task reaped: no live executor");
+    }
     let tasks = state
         .tasks
         .lock()
@@ -2073,10 +2116,33 @@ async fn cancel_task_api(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(&session_id)
-        .cloned()
-        .ok_or_else(|| ApiError::bad_request("task not found"))?;
-    let cancelled = stop_session_task(&state, &session_id, &task).await;
-    Ok(Json(json!({"cancelled": cancelled})))
+        .cloned();
+    if let Some(task) = task {
+        let cancelled = stop_session_task(&state, &session_id, &task).await;
+        return Ok(Json(json!({"cancelled": cancelled})));
+    }
+    // 批次二 #22：无存活会话的僵尸记录强制结束——按任务记录 id 或其归属
+    // session_id 匹配，命中非终态记录直接转 Cancelled，杜绝“无法关闭”。
+    let record = state
+        .task_manager
+        .list()
+        .into_iter()
+        .find(|record| record.id == session_id || record.session_id == session_id);
+    let Some(record) = record else {
+        return Err(ApiError::bad_request("task not found"));
+    };
+    if record.status.is_terminal() {
+        return Ok(Json(json!({"cancelled": false, "forced": true})));
+    }
+    let cancelled = state
+        .task_manager
+        .transition(
+            &record.id,
+            TaskStatus::Cancelled,
+            Some("force cancelled: no live session"),
+        )
+        .is_ok();
+    Ok(Json(json!({"cancelled": cancelled, "forced": true})))
 }
 
 async fn task_detail(
@@ -5222,11 +5288,14 @@ async fn handle_command(
                 let compact_context = Arc::clone(&context);
                 let compact_task = Arc::clone(&task);
                 let spawned = tokio::spawn(async move {
-                    let result = compact_web_session(
-                        &compact_state,
-                        &compact_session_id,
-                        Arc::clone(&compact_context),
-                    )
+                    let result = catch_turn_panic(async {
+                        compact_web_session(
+                            &compact_state,
+                            &compact_session_id,
+                            Arc::clone(&compact_context),
+                        )
+                        .await
+                    })
                     .await;
                     let failed = result.is_err();
                     if let Err(error) = result {
@@ -5289,26 +5358,29 @@ async fn handle_command(
             let turn_task = Arc::clone(&task);
             let team_mode = *context.session_mode.read().await == SessionMode::Team;
             let spawned = tokio::spawn(async move {
-                let result = if team_mode {
-                    run_team_turn(
-                        &turn_state,
-                        &turn_session_id,
-                        &turn_prompt,
-                        Arc::clone(&turn_context),
-                        Arc::clone(&turn_task),
-                    )
-                    .await
-                } else {
-                    run_turn(
-                        &turn_state,
-                        &turn_session_id,
-                        &turn_prompt,
-                        false,
-                        Arc::clone(&turn_context),
-                        Arc::clone(&turn_task),
-                    )
-                    .await
-                };
+                let result = catch_turn_panic(async {
+                    if team_mode {
+                        run_team_turn(
+                            &turn_state,
+                            &turn_session_id,
+                            &turn_prompt,
+                            Arc::clone(&turn_context),
+                            Arc::clone(&turn_task),
+                        )
+                        .await
+                    } else {
+                        run_turn(
+                            &turn_state,
+                            &turn_session_id,
+                            &turn_prompt,
+                            false,
+                            Arc::clone(&turn_context),
+                            Arc::clone(&turn_task),
+                        )
+                        .await
+                    }
+                })
+                .await;
                 let failed = result.is_err();
                 if let Err(error) = result {
                     let message = format!("{error:#}");
@@ -5738,12 +5810,15 @@ async fn handle_command(
             let turn_context = Arc::clone(&context);
             let turn_task = Arc::clone(&task);
             let spawned = tokio::spawn(async move {
-                let result = retry_turn(
-                    &turn_state,
-                    &turn_session_id,
-                    Arc::clone(&turn_context),
-                    Arc::clone(&turn_task),
-                )
+                let result = catch_turn_panic(async {
+                    retry_turn(
+                        &turn_state,
+                        &turn_session_id,
+                        Arc::clone(&turn_context),
+                        Arc::clone(&turn_task),
+                    )
+                    .await
+                })
                 .await;
                 let failed = result.is_err();
                 if let Err(error) = result {
@@ -5794,13 +5869,16 @@ async fn handle_command(
             let turn_task = Arc::clone(&task);
             let turn_msg_id = msg_id.to_owned();
             let spawned = tokio::spawn(async move {
-                let result = regenerate_response(
-                    &turn_state,
-                    &turn_session_id,
-                    &turn_msg_id,
-                    Arc::clone(&turn_context),
-                    Arc::clone(&turn_task),
-                )
+                let result = catch_turn_panic(async {
+                    regenerate_response(
+                        &turn_state,
+                        &turn_session_id,
+                        &turn_msg_id,
+                        Arc::clone(&turn_context),
+                        Arc::clone(&turn_task),
+                    )
+                    .await
+                })
                 .await;
                 let failed = result.is_err();
                 if let Err(error) = result {
@@ -5851,14 +5929,17 @@ async fn handle_command(
             let turn_context = Arc::clone(&context);
             let turn_task = Arc::clone(&task);
             let spawned = tokio::spawn(async move {
-                let result = edit_turn(
-                    &turn_state,
-                    &turn_session_id,
-                    &turn_msg_id,
-                    &turn_text,
-                    Arc::clone(&turn_context),
-                    Arc::clone(&turn_task),
-                )
+                let result = catch_turn_panic(async {
+                    edit_turn(
+                        &turn_state,
+                        &turn_session_id,
+                        &turn_msg_id,
+                        &turn_text,
+                        Arc::clone(&turn_context),
+                        Arc::clone(&turn_task),
+                    )
+                    .await
+                })
                 .await;
                 let failed = result.is_err();
                 if let Err(error) = result {

@@ -56,6 +56,8 @@ public class CoomiDashboardActivity extends Activity {
     private static final String PREFS_NAME = "coomi_launcher";
 
     private static final String LOG_TAG = "CoomiDashboardActivity";
+    /** coomi TUI 的固定 Termux 会话名（配合 no-shell-with-name 复用会话，批次二 #25）。 */
+    private static final String COOMI_TUI_SESSION_NAME = "coomi";
     private static final int STATUS_REFRESH_MS = 5000;
     private static final int REQUEST_FEEDBACK_IMAGES = 8204;
 
@@ -405,7 +407,14 @@ public class CoomiDashboardActivity extends Activity {
                 new String[0]);
             intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_WORKDIR,
                 TermuxConstants.TERMUX_HOME_DIR_PATH);
-            // 0 = 切换到新会话并打开终端界面，前台执行命令
+            // 批次二 #25：固定会话名 + no-shell-with-name——已有 coomi TUI 会话直接
+            // 切换过去，没有才新建。否则每点一次就多一个 Termux 会话，通知栏
+            // sessions 计数随之暴涨且只增不减。
+            intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_SHELL_NAME,
+                COOMI_TUI_SESSION_NAME);
+            intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_SHELL_CREATE_MODE,
+                "no-shell-with-name");
+            // 0 = 切换到该会话并打开终端界面，前台执行命令
             intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_SESSION_ACTION,
                 String.valueOf(TermuxConstants.TERMUX_APP.TERMUX_SERVICE.VALUE_EXTRA_SESSION_ACTION_SWITCH_TO_NEW_SESSION_AND_OPEN_ACTIVITY));
             startService(intent);

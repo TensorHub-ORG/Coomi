@@ -1277,7 +1277,7 @@ mod tests {
         assert!(joined.contains(":/opt/coomi-dev"));
         assert!(joined.contains(":/usr/local/bin/proot"));
         assert!(
-            joined.contains("PATH=/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin")
+            joined.contains("PATH=/home/coomi/.local/bin:/home/coomi/bin:/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin")
         );
         assert!(command.environment.contains_key("PROOT_TMP_DIR"));
         assert!(!joined.contains("/storage/emulated"));
