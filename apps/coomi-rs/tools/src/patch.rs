@@ -256,14 +256,22 @@ fn find_sequence(haystack: &[String], needle: &[String]) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
     }
+    let normalized_needle: Vec<String> = needle
+        .iter()
+        .map(|line| crate::normalize_ws_text(line))
+        .collect();
     for start in 0..=haystack.len().saturating_sub(needle.len()) {
         let candidate = &haystack[start..start + needle.len()];
-        if candidate == needle
-            || candidate
-                .iter()
-                .zip(needle)
-                .all(|(left, right)| left.trim_end() == right.trim_end())
-        {
+        let matched = candidate
+            .iter()
+            .zip(needle)
+            .enumerate()
+            .all(|(index, (left, right))| {
+                left == right
+                    || left.trim_end() == right.trim_end()
+                    || crate::normalize_ws_text(left) == normalized_needle[index]
+            });
+        if matched {
             return Some(start);
         }
     }

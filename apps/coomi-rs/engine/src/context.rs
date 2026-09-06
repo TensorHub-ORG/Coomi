@@ -12,11 +12,15 @@ use uuid::Uuid;
 
 const BASELINE_TOKENS: u64 = 12_000;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: u64 = 20_000;
+// 压缩后保留的"最近用户指令"条数与"最近工具活动"消息数：
+// 摘要之后依次跟随工具活动尾部与最近用户指令，保证模型最后读到的是最新指令与工作现场。
+const COMPACT_RECENT_USER_MESSAGES: usize = 3;
+const COMPACT_RECENT_TOOL_MESSAGES: usize = 5;
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT: &str =
     "Output exceeded the available model context and was truncated";
 
-pub const SUMMARIZATION_PROMPT: &str = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\n\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\n\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.";
-pub const SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
+pub const SUMMARIZATION_PROMPT: &str = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\n\nRespond with the following sections, in this order:\n1. TASK GOAL - the user's original task and the desired outcome.\n2. COMPLETED - work already done, with key decisions and important file/artifact paths.\n3. IN PROGRESS - the exact step underway when this summary was created.\n4. NEXT STEPS - ordered actions that remain.\n5. ACTIVE USER INSTRUCTIONS - every constraint and instruction the user has given. Honor recency: when a later user instruction conflicts with an earlier one or with the original task, the LATER instruction wins, and the override must be recorded here.\n\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work instead of restarting it.";
+pub const SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. Recent working messages and the latest user instructions follow this summary. Build on the work that has already been done, avoid duplicating it, and when a recent user instruction conflicts with the summary, follow the user instruction. Here is the summary:";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ContextState {
@@ -216,9 +220,81 @@ pub fn estimate_request_tokens(
 }
 
 pub fn compacted_history(messages: &[ChatMessage], summary: &str) -> Vec<ChatMessage> {
-    let mut compacted = retained_user_history(messages);
-    compacted.push(ChatMessage::summary(format!("{SUMMARY_PREFIX}\n{summary}")));
-    compacted
+    let user_positions: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| {
+            message.role == Role::User && !message.compaction_summary && !message.internal
+        })
+        .map(|(index, _)| index)
+        .collect();
+    let recent_count = COMPACT_RECENT_USER_MESSAGES.min(user_positions.len());
+    let older = &user_positions[..user_positions.len() - recent_count];
+    let recent = &user_positions[user_positions.len() - recent_count..];
+
+    // 早期用户消息：新者优先占用预算，超预算时从更早的消息开始丢弃/截断。
+    let mut retained = Vec::new();
+    let mut budget = COMPACT_USER_MESSAGE_MAX_TOKENS;
+    for position in older.iter().rev() {
+        if budget == 0 {
+            break;
+        }
+        let message = &messages[*position];
+        let tokens = estimate_text_tokens(&message.content);
+        if tokens <= budget {
+            retained.push(message.clone());
+            budget -= tokens;
+        } else {
+            let mut truncated = message.clone();
+            truncated.content = truncate_text_to_tokens(&message.content, budget);
+            retained.push(truncated);
+            break;
+        }
+    }
+    retained.reverse();
+
+    // 最近工具活动尾部：保留最近几条 assistant/tool 消息作为工作现场；
+    // 窗口切断造成的悬空 tool 输出由 normalize_history 丢弃/补齐。
+    let tail: Vec<ChatMessage> = messages
+        .iter()
+        .rev()
+        .filter(|message| message.role != Role::User)
+        .take(COMPACT_RECENT_TOOL_MESSAGES)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let tail = normalize_history(&tail);
+
+    // 最近用户指令：置于历史最末，保证模型最后读到的是最新指令；
+    // 同样受预算约束（新者优先），单条超预算截断，预算耗尽后更早的最近消息跳过。
+    let mut recent_messages = Vec::new();
+    let mut recent_budget = COMPACT_USER_MESSAGE_MAX_TOKENS;
+    for position in recent.iter().rev() {
+        if recent_budget == 0 {
+            break;
+        }
+        let message = &messages[*position];
+        let tokens = estimate_text_tokens(&message.content);
+        if tokens <= recent_budget {
+            recent_messages.push(message.clone());
+            recent_budget -= tokens;
+        } else {
+            let mut truncated = message.clone();
+            truncated.content = truncate_text_to_tokens(&message.content, recent_budget);
+            recent_messages.push(truncated);
+            recent_budget = 0;
+        }
+    }
+    recent_messages.reverse();
+
+    // 结构：早期用户消息 → 摘要 → 最近工具活动 → 最近用户指令
+    let mut output = retained;
+    output.push(ChatMessage::summary(format!("{SUMMARY_PREFIX}\n{summary}")));
+    output.extend(tail);
+    output.extend(recent_messages);
+    output
 }
 
 pub fn retained_user_history(messages: &[ChatMessage]) -> Vec<ChatMessage> {
@@ -265,10 +341,16 @@ pub fn trim_history_to_fit(
             rewritten += 1;
         }
     }
+    // 逐条删除最旧消息以塞进预算；首条真实用户消息（原始任务目标）必须保住——
+    // 否则摘要模型看不到任务，产出的摘要丢失进度，压缩后 Agent 会"重新开始"。
     while messages.len() > 1
         && estimate_request_tokens(system_prompt, messages, tools) > token_limit
     {
-        messages.remove(0);
+        let front_is_protected_user = messages.first().is_some_and(|message| {
+            message.role == Role::User && !message.internal && !message.compaction_summary
+        });
+        let remove_index = if front_is_protected_user { 1 } else { 0 };
+        messages.remove(remove_index);
         *messages = normalize_history(messages);
     }
     if estimate_request_tokens(system_prompt, messages, tools) > token_limit
@@ -336,8 +418,12 @@ mod tests {
             ChatMessage::user("second"),
         ];
         let compacted = compacted_history(&messages, "new");
-        assert_eq!(compacted.len(), 3);
-        assert!(compacted[2].compaction_summary);
+        // 结构：摘要 → 工具活动尾部 → 最近用户指令
+        assert_eq!(compacted.len(), 4);
+        assert!(compacted[0].compaction_summary);
+        assert_eq!(compacted[1].role, Role::Assistant);
+        assert_eq!(compacted[2].content, "first");
+        assert_eq!(compacted[3].content, "second");
     }
 
     #[test]
@@ -345,7 +431,64 @@ mod tests {
         let messages = vec![ChatMessage::user("x".repeat(100_000))];
         let compacted = compacted_history(&messages, "summary");
         assert_eq!(compacted.len(), 2);
-        assert!(estimate_text_tokens(&compacted[0].content) <= COMPACT_USER_MESSAGE_MAX_TOKENS);
+        assert!(compacted[0].compaction_summary);
+        assert!(estimate_text_tokens(&compacted[1].content) <= COMPACT_USER_MESSAGE_MAX_TOKENS);
+    }
+
+    #[test]
+    fn compaction_moves_recent_user_instructions_after_summary() {
+        let messages = vec![
+            ChatMessage::user("goal"),
+            ChatMessage::user("pivot-a"),
+            ChatMessage::user("pivot-b"),
+            ChatMessage::user("latest-instruction"),
+        ];
+        let compacted = compacted_history(&messages, "summary");
+        // 最近 3 条用户指令移到摘要之后，早期消息保留在摘要之前
+        assert_eq!(compacted[0].content, "goal");
+        assert!(compacted[1].compaction_summary);
+        assert_eq!(compacted[2].content, "pivot-a");
+        assert_eq!(compacted[3].content, "pivot-b");
+        assert_eq!(compacted[4].content, "latest-instruction");
+    }
+
+    #[test]
+    fn compaction_keeps_recent_tool_activity_tail() {
+        let messages = vec![
+            ChatMessage::user("goal"),
+            ChatMessage::assistant(
+                "",
+                vec![ToolCall {
+                    id: "one".into(),
+                    name: "edit_file".into(),
+                    arguments: json!({}),
+                }],
+            ),
+            ChatMessage::tool("one", "edited"),
+            ChatMessage::user("latest"),
+        ];
+        let compacted = compacted_history(&messages, "summary");
+        assert!(compacted[0].compaction_summary);
+        assert_eq!(compacted[1].role, Role::Assistant);
+        assert_eq!(compacted[2].role, Role::Tool);
+        assert_eq!(compacted[3].content, "goal");
+        assert_eq!(compacted[4].content, "latest");
+    }
+
+    #[test]
+    fn trim_history_protects_first_real_user_message() {
+        let system = "system";
+        let tools: Vec<ToolSpec> = Vec::new();
+        let mut messages = vec![
+            ChatMessage::user("original task"),
+            ChatMessage::assistant("working", Vec::new()),
+            ChatMessage::user("recent instruction"),
+        ];
+        // 预算压到只够容纳首条用户消息，验证删除时保护的是它而不是后续消息
+        let limit = estimate_request_tokens(system, &[ChatMessage::user("original task")], &tools);
+        trim_history_to_fit(system, &mut messages, &tools, limit);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "original task");
     }
 
     #[test]

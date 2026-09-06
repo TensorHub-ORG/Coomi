@@ -1692,11 +1692,14 @@ impl CoreTools {
                     }
                 };
             }
-            return ToolResult::error(
+            let hint = nearest_fragment_hint(&content, old_string)
+                .map(|hint| format!("\n{hint}"))
+                .unwrap_or_default();
+            return ToolResult::error(format!(
                 "old_string was not found. 文件可能已变化：请先 use read_file 读取当前内容，\
                  复制与文件完全一致的片段（包含换行与缩进）后再调用 edit_file；\
-                 若只需行级修改请改用 apply_patch",
-            );
+                 若只需行级修改请改用 apply_patch{hint}"
+            ));
         }
         let replace_all = arguments
             .get("replace_all")
@@ -2502,46 +2505,151 @@ fn string_arg<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
-/// edit_file 的规范化匹配：把 `\r` 与行尾空白折叠后再找 needle，
-/// 命中后返回原文件中对应的字节区间。找不到返回 None。
-fn fuzzy_normalized_range(haystack: &str, needle: &str) -> Option<(usize, usize)> {
-    fn normalize(input: &str) -> (String, Vec<usize>) {
-        let bytes = input.as_bytes();
-        let mut norm = Vec::with_capacity(bytes.len());
-        let mut map = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            let b = bytes[i];
-            if b == b'\r' {
-                i += 1;
+/// 空白归一化（供编辑匹配使用）：
+/// - 删除 `\r`（CRLF 兼容）与行尾空白（换行前及 EOF 前的空格/tab 串）；
+/// - 行首缩进逐字符保留（第一期刻意不做缩进容错，避免静默错位修改）；
+/// - 行内连续空白折叠为单个空格（空格/tab 等价）。
+/// 返回归一化文本与"归一化位置 → 原文字节位置"映射；折叠 run 映射到 run 末字节。
+fn normalize_with_map(input: &str) -> (String, Vec<usize>) {
+    let bytes = input.as_bytes();
+    let mut norm = Vec::with_capacity(bytes.len());
+    let mut map = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut at_line_start = true;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\r' {
+            i += 1;
+            continue;
+        }
+        if b == b' ' || b == b'\t' {
+            let mut j = i;
+            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                j += 1;
+            }
+            let trailing = j >= bytes.len() || bytes[j] == b'\n';
+            if trailing {
+                i = j;
                 continue;
             }
-            if b == b' ' || b == b'\t' {
-                let mut j = i;
-                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
-                    j += 1;
+            if at_line_start {
+                for k in i..j {
+                    norm.push(bytes[k]);
+                    map.push(k);
                 }
-                if j < bytes.len() && bytes[j] == b'\n' {
-                    i = j;
-                    continue;
-                }
+            } else {
+                norm.push(b' ');
+                map.push(j - 1);
             }
-            norm.push(b);
-            map.push(i);
-            i += 1;
+            i = j;
+            at_line_start = false;
+            continue;
         }
-        (String::from_utf8_lossy(&norm).into_owned(), map)
+        at_line_start = b == b'\n';
+        norm.push(b);
+        map.push(i);
+        i += 1;
     }
-    let (norm_content, content_map) = normalize(haystack);
-    let (norm_needle, _) = normalize(needle);
+    (String::from_utf8_lossy(&norm).into_owned(), map)
+}
+
+/// 单行/整段文本的空白归一化（无位置映射），供 apply_patch 行比较等场景复用。
+pub(crate) fn normalize_ws_text(input: &str) -> String {
+    normalize_with_map(input).0
+}
+
+/// edit_file 的规范化匹配：按 `normalize_with_map` 归一化后查找 needle，
+/// 命中后返回原文件中对应的字节区间。找不到返回 None。
+fn fuzzy_normalized_range(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+    let (norm_content, content_map) = normalize_with_map(haystack);
+    let (norm_needle, _) = normalize_with_map(needle);
     if norm_needle.is_empty() {
         return None;
     }
     let found = norm_content.find(&norm_needle)?;
-    let from = *content_map.get(found)?;
+    let mut from = *content_map.get(found)?;
     let last = found + norm_needle.len() - 1;
     let to = content_map.get(last).map(|value| *value + 1)?;
+    // 匹配起点落在被折叠的行内空白 run 上时，把起点扩展到完整 run 边界，
+    // 否则替换后会残留半截空白。行首缩进（run 左侧是换行或文本开头）不扩展。
+    if norm_needle.as_bytes()[0] == b' ' && from > 0 {
+        let bytes = haystack.as_bytes();
+        if matches!(bytes[from - 1], b' ' | b'\t' | b'\r') {
+            let mut start = from - 1;
+            while start > 0 && matches!(bytes[start - 1], b' ' | b'\t' | b'\r') {
+                start -= 1;
+            }
+            let leading = start == 0 || bytes[start - 1] == b'\n';
+            if !leading {
+                from = start;
+            }
+        }
+    }
     Some((from, to))
+}
+
+const NEAREST_HINT_MIN_SIMILARITY: f64 = 0.5;
+const NEAREST_HINT_MAX_LINES: usize = 20_000;
+const NEAREST_HINT_MIN_ANCHOR_CHARS: usize = 4;
+
+fn bigram_counts(value: &str) -> std::collections::HashMap<[char; 2], usize> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut counts = std::collections::HashMap::new();
+    for pair in chars.windows(2) {
+        *counts.entry([pair[0], pair[1]]).or_insert(0usize) += 1;
+    }
+    counts
+}
+
+fn dice_similarity(a: &str, b: &str) -> f64 {
+    if a.chars().count() < 2 || b.chars().count() < 2 {
+        return if a == b { 1.0 } else { 0.0 };
+    }
+    let left = bigram_counts(a);
+    let right = bigram_counts(b);
+    let intersection: usize = left
+        .iter()
+        .map(|(gram, count)| (*count).min(right.get(gram).copied().unwrap_or(0)))
+        .sum();
+    let total: usize = left.values().sum::<usize>() + right.values().sum::<usize>();
+    if total == 0 {
+        0.0
+    } else {
+        2.0 * intersection as f64 / total as f64
+    }
+}
+
+/// 编辑匹配彻底失败时，用 old_string 首个非空行在文件中找最相似的行，
+/// 生成一条可操作的提示（行号 + 内容 + 相似度），帮助模型一次修正而不是盲目重试。
+fn nearest_fragment_hint(content: &str, old_string: &str) -> Option<String> {
+    let anchor = old_string
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    if anchor.chars().count() < NEAREST_HINT_MIN_ANCHOR_CHARS {
+        return None;
+    }
+    let anchor_normalized = normalize_ws_text(anchor);
+    let mut best: Option<(usize, f64, &str)> = None;
+    for (index, line) in content.lines().enumerate().take(NEAREST_HINT_MAX_LINES) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let similarity = dice_similarity(&anchor_normalized, &normalize_ws_text(trimmed));
+        if best.is_none_or(|(_, best_score, _)| similarity > best_score) {
+            best = Some((index + 1, similarity, trimmed));
+        }
+    }
+    let (line_number, similarity, line) = best?;
+    if similarity < NEAREST_HINT_MIN_SIMILARITY {
+        return None;
+    }
+    let display: String = line.chars().take(120).collect();
+    Some(format!(
+        "最接近的候选在第 {line_number} 行：`{display}`（相似度 {:.0}%），请核对该处的空白/缩进差异",
+        similarity * 100.0
+    ))
 }
 
 fn string_namespace(value: &str) -> Option<PathNamespace> {
@@ -3248,5 +3356,65 @@ mod tests {
             let ip: std::net::IpAddr = value.parse().expect("valid IP");
             assert!(!ip_is_blocked(&ip), "{value} must be allowed");
         }
+    }
+    #[test]
+    fn fuzzy_matches_collapsed_internal_whitespace_runs() {
+        // 行内连续空格折叠：old_string 用单空格，文件里是多空格
+        let content = "function call(  a, b ) {\n    return a + b;\n}";
+        let needle = "function call( a, b ) {";
+        let (from, to) = fuzzy_normalized_range(content, needle).expect("must match");
+        assert_eq!(&content[from..to], "function call(  a, b ) {");
+        // tab 与空格等价
+        let content_tab = "if\t(x) {\n}";
+        let (from, to) = fuzzy_normalized_range(content_tab, "if (x) {").expect("tab as space");
+        assert_eq!(&content_tab[from..to], "if\t(x) {");
+    }
+
+    #[test]
+    fn fuzzy_does_not_forgive_leading_indent() {
+        // 第一期刻意不容忍行首缩进差异：跨行 old_string 的续行缩进不一致时必须失败
+        let content = "fn main() {\n    if a > 0 {\n        println!(\"pos\");\n    }\n}\n";
+        let needle = "if a > 0 {\n    println!(\"pos\");\n}";
+        assert!(fuzzy_normalized_range(content, needle).is_none());
+    }
+
+    #[test]
+    fn fuzzy_still_handles_crlf_and_trailing_whitespace() {
+        // CRLF 兼容与行尾空白折叠各自成立
+        let content_lf = "first line \nsecond\n";
+        let (from, to) = fuzzy_normalized_range(content_lf, "first line\nsecond").expect("lf match");
+        assert_eq!(&content_lf[from..to], "first line \nsecond");
+        let content_crlf = "first line\r\nsecond\r\n";
+        let (from, to) =
+            fuzzy_normalized_range(content_crlf, "first line\nsecond").expect("crlf match");
+        assert_eq!(&content_crlf[from..to], "first line\r\nsecond");
+    }
+
+    #[test]
+    fn fuzzy_replacement_spans_the_full_collapsed_run() {
+        // 匹配起点落在被折叠的多空格 run 上时，替换区间必须覆盖整个 run
+        let content = "total     = 10;\n";
+        let needle = " = 10;";
+        let (from, to) = fuzzy_normalized_range(content, needle).expect("match");
+        let replaced = format!("{}NEW{}", &content[..from], &content[to..]);
+        assert_eq!(replaced, "totalNEW\n");
+    }
+
+    #[test]
+    fn nearest_fragment_hint_reports_best_line() {
+        let content = "fn alpha(x: i32) -> i32 {\n    x + 1\n}\n\nfn beta(y: i32) -> i32 {\n    y * 2\n}\n";
+        let hint = nearest_fragment_hint(content, "fn beta(z: i32) -> i32 {")
+            .expect("hint for near-miss anchor");
+        assert!(hint.contains("第 5 行"), "hint should point at line 5, got: {hint}");
+        assert!(hint.contains("fn beta"), "hint should quote the candidate line");
+        // 差异过大时不给误导性提示
+        assert!(nearest_fragment_hint(content, "totally unrelated content here").is_none());
+    }
+
+    #[test]
+    fn normalize_ws_text_matches_fuzzy_semantics() {
+        assert_eq!(normalize_ws_text("a  \t b  "), "a b");
+        assert_eq!(normalize_ws_text("  indented"), "  indented");
+        assert_eq!(normalize_ws_text("crlf\r\n"), "crlf\n");
     }
 }
