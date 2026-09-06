@@ -17,6 +17,7 @@ const RUNTIME_ENVIRONMENT_SKILL: &str = include_str!("../runtime-environments.md
 const SKILL_CREATOR_SKILL: &str = include_str!("../skill-creator.md");
 const UI_DESIGNER_SKILL: &str = include_str!("../ui-designer.md");
 const ENV_TEMPLATES_SKILL: &str = include_str!("../env-templates.md");
+const ENV_EXPERIENCE_SKILL: &str = include_str!("../env-experience.md");
 const COOMIDEV_ENV: &str = include_str!("../../../../tools/mobile-build/coomidev-env.sh");
 const COOMIDEV_DOCTOR: &str = include_str!("../../../../tools/mobile-build/coomidev-doctor.sh");
 const COOMIDEV_BUILD: &str = include_str!("../../../../tools/mobile-build/build-coomidev.sh");
@@ -195,6 +196,26 @@ impl CatalogInstaller {
                     repository: "Coomi/bundled".into(),
                     git_ref: "1.4.6".into(),
                     subdir: "env-templates".into(),
+                },
+                &destination,
+                "bundled",
+            )?;
+            return Ok(destination);
+        }
+        if id.eq_ignore_ascii_case("env-experience") {
+            // 内置经验 Skill：沉淀 guest 环境避坑经验，降低环境类报错率。
+            let destination = self.home.join("skills").join("env-experience");
+            fs::create_dir_all(&destination)?;
+            fs::write(destination.join("SKILL.md"), ENV_EXPERIENCE_SKILL)?;
+            save_skill_metadata(
+                &self.home,
+                &SkillEntry {
+                    id: "env-experience".into(),
+                    name: "Env Experience".into(),
+                    description: "Coomi guest 环境实战经验与避坑清单：缺命令/权限/超时/路径的规避与自纠流程。".into(),
+                    repository: "Coomi/bundled".into(),
+                    git_ref: "1.4.6".into(),
+                    subdir: "env-experience".into(),
                 },
                 &destination,
                 "bundled",

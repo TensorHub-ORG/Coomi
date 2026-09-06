@@ -1,17 +1,17 @@
 ---
 name: Runtime Environments
-description: The single Agent execution environment (ProotLinux Debian guest) — paths, package manager, and capabilities.
+description: The single Agent execution environment (ProotLinux Ubuntu 24.04 guest) — paths, package manager, and capabilities.
 keywords: [proot, prootlinux, runtime, environment, path, workspace, github, ssh, build, apt]
 tools: [shell, local_shell, read_file, write_file, edit_file, search]
 ---
 
 # Runtime Environments
 
-The Agent executes in **one unified environment**: a Debian ProotLinux guest. All shell commands run there; paths are Linux paths. There is no model-facing Termux/host execution environment — do not guess or switch.
+The Agent executes in **one unified environment**: an Ubuntu 24.04 (noble) ProotLinux guest. All shell commands run there; paths are Linux paths. There is no model-facing Termux/host execution environment — do not guess or switch.
 
 ## Environment facts
 
-- OS: Debian (glibc, ARM64) via proot; shell commands run inside this guest.
+- OS: Ubuntu 24.04 LTS (glibc, ARM64) via proot; shell commands run inside this guest.
 - Package manager: `apt` (国内镜像源已预配). Missing command → `apt install <package>`, then retry.
 - Toolchain: Git, Python3 (+pip/venv), Node.js, curl/wget, and common utilities (unzip/zip/jq/patch/procps/openssh-client…). Heavy build chains may still need one `apt install`.
 - Working directories: `/workspace`, `/home/coomi`, `/tmp`. `/home/coomi/.local/bin` is on PATH (pip `--user` scripts work). The guest runs as root: system paths like `/etc` are writable inside the guest image — changes affect only the guest, never Android, so modify with care.

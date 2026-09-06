@@ -90,6 +90,9 @@ pub(crate) fn shell_failure_hint(code: i32, output: &str) -> String {
             None => "自纠提示：exit 127 表示命令在环境中不存在。可 `apt install -y <包名>` 安装后重试，或改用已预装工具。".into(),
         },
         126 => "自纠提示：exit 126 表示命令存在但不可执行——检查执行权限（chmod +x），或确认二进制架构与 guest（glibc/ARM64）匹配；不要在 guest 内运行 Android/Bionic 二进制。".into(),
+        _ if output.to_lowercase().contains("externally-managed-environment") => {
+            "自纠提示：Ubuntu 24.04 禁止直接向系统 Python 安装包（PEP 668）。改用虚拟环境：`python3 -m venv .venv && . .venv/bin/activate && pip install <包>`；或安装 apt 包（python3-xxx）。".into()
+        }
         _ if output.to_lowercase().contains("permission denied") => {
             "自纠提示：Permission denied——优先使用 /workspace、/home/coomi、/tmp；脚本类文件可先 `chmod +x`。注意 guest 内是 root 视角，仍遇拒绝通常是宿主 SELinux/挂载权限限制，换到上述可写目录重试。".into()
         }
@@ -222,6 +225,8 @@ impl CoreTools {
         let _ = CatalogInstaller::new(&home).install_skill("ui-designer");
         // 批次八 3.3：环境初始化模板 Skill 默认安装。
         let _ = CatalogInstaller::new(&home).install_skill("env-templates");
+        // 内置经验 Skill 默认安装：降低环境类报错率。
+        let _ = CatalogInstaller::new(&home).install_skill("env-experience");
         let legacy = LegacyTermuxBackend::from_coomi_home(&home);
         self.policy = self.policy.clone().with_allowed_roots([
             home.join("runtime-v2").join("home"),

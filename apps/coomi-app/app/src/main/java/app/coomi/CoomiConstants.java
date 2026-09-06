@@ -41,10 +41,10 @@ public final class CoomiConstants {
     public static final String RUNTIME_V2_MANIFEST_ASSET = "runtime-v2-manifest.json";
     public static final String RUNTIME_V2_MANIFEST_PATH = COOMI_CONFIG_DIR + "/config/runtime-v2-manifest.json";
     public static final String RUNTIME_V2_HOST_ASSET = "runtime-v2/proot-host-arm64.tgz";
-    public static final String RUNTIME_V2_ROOTFS_ASSET = "runtime-v2/debian-bookworm-arm64.tgz";
+    public static final String RUNTIME_V2_ROOTFS_ASSET = "runtime-v2/ubuntu-noble-arm64.tgz";
     public static final String RUNTIME_V2_DOWNLOAD_DIR = COOMI_CONFIG_DIR + "/runtime-v2/downloads";
     public static final String RUNTIME_V2_HOST_PATH = RUNTIME_V2_DOWNLOAD_DIR + "/proot-host-arm64.tar.gz";
-    public static final String RUNTIME_V2_ROOTFS_PATH = RUNTIME_V2_DOWNLOAD_DIR + "/debian-rootfs-arm64.tar.gz";
+    public static final String RUNTIME_V2_ROOTFS_PATH = RUNTIME_V2_DOWNLOAD_DIR + "/ubuntu-rootfs-arm64.tar.gz";
     public static final String NATIVE_BINARY_NAME = "libcoomi.so";
     public static final String COOMI_SHARED_ROOT = TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/share/coomi";
     public static final String COOMI_OFFLINE_ROOT = COOMI_SHARED_ROOT + "/offline";

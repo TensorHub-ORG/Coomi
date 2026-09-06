@@ -1,7 +1,7 @@
 # Coomi 环境契约（单一事实源）
 
 > 批次八 2.2 产物。本文档是 Coomi Android 环境行为的**唯一权威描述**：代码（backend 实现、PathMapper）与提示词（engine 模板、Skill）均以此为准。修改任何环境行为必须先改本文档。
-> 最后核对：2026-09-07（v1.4.6-test.3 时代，main 分支）。
+> 最后核对：2026-09-07（v1.4.6-test.4 时代，main 分支；底座已切换为 Ubuntu 24.04 noble）。
 
 ## 一、环境清单
 
@@ -27,11 +27,12 @@
 - Agent shell 一律用 guest 路径；内置文件工具/导出用宿主绝对路径。两者经 `RuntimePathMap` 自动转换，禁止手工猜测（如拼 `/workspace/.coomi/...`）。
 - 工具结果同时携带 `host_path`/`guest_path` 时（`paths_guest`），shell 用 guest 路径、文件工具用宿主路径。
 
-## 三、guest 能力基线（base 档）
+## 三、guest 能力基线（完整 Ubuntu 档，批次八 ①）
 
-- 发行版：Debian bookworm（glibc, ARM64），proot 运行，guest 内 root 视角。
-- 包管理：`apt`，运行时源为清华 TUNA（构建期 snapshot 保证可复现）；缺命令 `apt install <pkg>`。
-- 预装：git、python3(+pip/venv)、nodejs、curl/wget、openssh-client、unzip/zip/tar/xz/bzip2、jq、patch、diffutils、gawk、procps、findutils、file、less、iputils-ping、iproute2、locales(en_US/zh_CN UTF-8)、python3-aiohttp/numpy。
+- 发行版：**Ubuntu 24.04 LTS (noble)**（glibc, ARM64），proot 运行，guest 内 root 视角；important 变体（常规 Ubuntu 用户空间，对齐 Operit 的完整发行版模式）。
+- 包管理：`apt`，universe 组件已启用，运行时源为清华 TUNA ubuntu-ports；缺命令 `apt install <pkg>`。
+- 预装：git、curl/wget、nodejs+npm、python3(+pip/venv)+aiohttp/numpy、**build-essential/cmake/pkg-config**（C/C++ 工具链开箱即用）、openssh-client、iputils-ping、iproute2、net-tools、sqlite3、unzip/zip/tar/xz/bzip2、jq、patch、diffutils、gawk、procps、findutils、file、less、tree、htop、tmux、rsync、nano/vim-tiny、man-db、bash-completion、sudo、locales(en_US/zh_CN UTF-8)。
+- JDK 等重型专用链不进 base（体积控制），由 env-templates Skill 按需 `apt install`。
 - PATH（guest 内固定注入，不依赖 .profile）：`/home/coomi/.local/bin:/home/coomi/bin:/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`。
 - 可写：整个 guest 文件树（root 视角，含 /etc——改动只影响 guest 镜像，不影响 Android）；宿主侧挂载以上表为准。
 - 网络：直连 HTTP(S)；guest DNS 预配 223.5.5.5 / 119.29.29.29 / 8.8.8.8。

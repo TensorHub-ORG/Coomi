@@ -2290,9 +2290,32 @@ async fn clear_session_data(
     if let Some(task) = active_task {
         let _ = stop_session_task(&state, &id, &task).await;
     }
-    let session = SessionStore::new(&state.home)
-        .clear_data(session_id)
-        .map_err(|error| ApiError::internal(format!("failed to clear session {id}: {error:#}")))?;
+    // 批次四 #14 修复补充：常驻会话文件缺失/损坏时（自愈只在引擎启动时跑一次），
+    // clear 的 load 会失败 → 前端"清空失败"。此处就地自愈：隔离损坏文件、
+    // 重建空会话后再清空，保证常驻会话的"清空"永远可达。
+    let store = SessionStore::new(&state.home);
+    let session = match store.clear_data(session_id) {
+        Ok(session) => session,
+        Err(clear_error) => {
+            let global_id = uuid::Uuid::parse_str(crate::life::GLOBAL_SESSION_ID)
+                .expect("GLOBAL_SESSION_ID is a valid uuid");
+            if session_id != global_id {
+                return Err(ApiError::internal(format!(
+                    "failed to clear session {id}: {clear_error:#}"
+                )));
+            }
+            crate::life::ensure_global_session(&state.home, &state.cwd).map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to heal global session before clear: {error:#}"
+                ))
+            })?;
+            store.clear_data(session_id).map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to clear session {id} after heal: {error:#}"
+                ))
+            })?
+        }
+    };
     Ok(Json(json!({
         "cleared": true,
         "id": id,
@@ -4185,7 +4208,7 @@ async fn runtime_v2_state(State(state): State<AppState>) -> Result<Json<Value>, 
     let downloads = manifest.as_ref().map(|value| {
         json!({
             "proot-host-arm64.tar.gz": manager.download_progress("proot-host-arm64.tar.gz", &value.host),
-            "debian-rootfs-arm64.tar.gz": manager.download_progress("debian-rootfs-arm64.tar.gz", &value.rootfs),
+            "ubuntu-rootfs-arm64.tar.gz": manager.download_progress("ubuntu-rootfs-arm64.tar.gz", &value.rootfs),
         })
     });
     Ok(Json(json!({
@@ -4265,7 +4288,7 @@ async fn runtime_v2_action(
                         access: ResourceAccess::Write,
                     },
                     ResourceRequest {
-                        key: ResourceKey::new(ResourceKind::PackageManager, "debian-apt"),
+                        key: ResourceKey::new(ResourceKind::PackageManager, "guest-apt"),
                         access: ResourceAccess::Write,
                     },
                 ],
@@ -4298,7 +4321,7 @@ async fn runtime_v2_action(
                     .download_artifact("proot-host-arm64.tar.gz", &manifest.host)
                     .await?;
                 let rootfs = runtime_manager
-                    .download_artifact("debian-rootfs-arm64.tar.gz", &manifest.rootfs)
+                    .download_artifact("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
                     .await?;
                 runtime_manager.install(&manifest, &host, &rootfs)?;
                 // 安装后执行级冒烟：proot 必须真正跑起 guest 二进制（含解释器/符号链接）才算成功，
@@ -4487,7 +4510,7 @@ async fn cognitive_install(State(state): State<AppState>) -> Result<Json<Value>,
                     access: ResourceAccess::Write,
                 },
                 ResourceRequest {
-                    key: ResourceKey::new(ResourceKind::PackageManager, "debian-python"),
+                    key: ResourceKey::new(ResourceKind::PackageManager, "guest-python"),
                     access: ResourceAccess::Write,
                 },
             ],
@@ -4506,7 +4529,7 @@ async fn cognitive_install(State(state): State<AppState>) -> Result<Json<Value>,
     let result: Result<()> = async {
         state.task_manager.append_output(
             &record.id,
-            b"Installing Debian Python dependencies: python3-aiohttp python3-numpy\n",
+            b"Installing guest Python dependencies: python3-aiohttp python3-numpy\n",
         )?;
         let legacy = coomi_services::LegacyTermuxBackend::from_coomi_home(&state.home);
         let backend = manager.backend(legacy.prefix, legacy.home)?;
@@ -4529,7 +4552,7 @@ async fn cognitive_install(State(state): State<AppState>) -> Result<Json<Value>,
         state.task_manager.append_output(&record.id, &output.stderr)?;
         anyhow::ensure!(
             output.status.success(),
-            "Debian dependency installation exited with {}",
+            "Guest dependency installation exited with {}",
             output.status
         );
         write_embedded_file(&root.join("sidecar.py"), COOMI_LIFE_SIDECAR.as_bytes())?;
@@ -7770,7 +7793,7 @@ Access policy: {policy}",
         policy = policy.label(),
     ));
     prompt.push_str(
-        "\n\nRuntime routing: shell/local_shell accept environment=auto|proot. The Agent execution environment is unified to the proot Debian guest — use auto (or proot) everywhere; there is no model-facing termux/host environment. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
+        "\n\nRuntime routing: shell/local_shell accept environment=auto|proot. The Agent execution environment is unified to the proot Ubuntu guest — use auto (or proot) everywhere; there is no model-facing termux/host environment. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
         Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text. When a tool result provides paths_guest, use those /workspace/... paths inside shell commands, and the corresponding host absolute paths with built-in file tools.",
     );
     prompt.push_str(
@@ -7778,7 +7801,7 @@ Access policy: {policy}",
 - apps/coomi-app: native Android shell, dashboard, lifecycle, APK assets and Gradle packaging\n\
 - apps/coomi-rs: Rust engine, provider bridge, tools, Skills/MCP catalogs, runtime manager and local Web API\n\
 - apps/web: Vue conversation UI and console secondary pages\n\
-- runtime-v2-dist: pinned ARM64 PRoot host, Debian rootfs and signed manifest used for offline APK bundling\n\
+- runtime-v2-dist: pinned ARM64 PRoot host, Ubuntu rootfs and signed manifest used for offline APK bundling\n\
 - assets: shared product/developer artwork\n\
 - references: pinned third-party bootstrap/reference payloads\n\
 - Gradle wrapper and root build files: Android orchestration; never edit generated build or target directories as source.\n\
@@ -7789,7 +7812,7 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
             && runtime.status == coomi_services::RuntimeInstallStatus::Ready
         {
             prompt.push_str(
-                "\n\nRuntime: shell commands run inside the active Debian ProotLinux guest. The verified PRoot launcher is available as `/usr/local/bin/proot` and `COOMI_PROOT_HOST=/usr/local/bin/proot`; do not infer the backend from legacy Termux paths.",
+                "\n\nRuntime: shell commands run inside the active Ubuntu 24.04 ProotLinux guest. The verified PRoot launcher is available as `/usr/local/bin/proot` and `COOMI_PROOT_HOST=/usr/local/bin/proot`; do not infer the backend from legacy Termux paths.",
             );
             // 环境事实块（批次八 1.2）：按 Runtime 版本缓存的真实探测结果，
             // 注入单一事实源，替代每回合重跑的无缓存 live probe。

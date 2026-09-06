@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUTPUT="${RUNTIME_V2_OUTPUT:-$ROOT/runtime-v2-dist}"
 BASE_URL="${RUNTIME_V2_BASE_URL:?set RUNTIME_V2_BASE_URL to the immutable release asset base URL}"
-RUNTIME_VERSION="${RUNTIME_V2_VERSION:-debian-bookworm-20260803-proot-5.1.107.91}"
+RUNTIME_VERSION="${RUNTIME_V2_VERSION:-ubuntu-noble-20260907-proot-5.1.107.91}"
 PROOT_COMMIT="61681c6481197e3c0cec6726075053adb740f235"
 
 for command in jq sha256sum stat; do
@@ -12,7 +12,7 @@ for command in jq sha256sum stat; do
 done
 
 HOST="$OUTPUT/proot-host-arm64.tar.gz"
-ROOTFS="$OUTPUT/debian-bookworm-arm64.tar.gz"
+ROOTFS="$OUTPUT/ubuntu-noble-arm64.tar.gz"
 test -f "$HOST" && test -f "$ROOTFS"
 HOST_SHA="$(sha256sum "$HOST" | cut -d' ' -f1)"
 ROOTFS_SHA="$(sha256sum "$ROOTFS" | cut -d' ' -f1)"
@@ -38,7 +38,7 @@ jq -n \
     rootfs: {url: $rootfs_url, sha256: $rootfs_sha, size: $rootfs_size},
     environment: {
       HOME: "/home/coomi",
-      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      PATH: "/home/coomi/.local/bin:/home/coomi/bin:/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       TMPDIR: "/tmp",
       LANG: "C.UTF-8",
       SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt"

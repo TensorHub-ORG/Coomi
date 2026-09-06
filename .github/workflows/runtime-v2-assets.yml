@@ -37,7 +37,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: debian-rootfs
-          path: runtime-v2-dist/debian-bookworm-arm64.tar.gz
+          path: runtime-v2-dist/ubuntu-noble-arm64.tar.gz
           if-no-files-found: error
 
   manifest:
@@ -59,6 +59,6 @@ jobs:
           name: runtime-v2-release-assets
           path: |
             runtime-v2-dist/proot-host-arm64.tar.gz
-            runtime-v2-dist/debian-bookworm-arm64.tar.gz
+            runtime-v2-dist/ubuntu-noble-arm64.tar.gz
             runtime-v2-dist/runtime-v2-manifest.json
           if-no-files-found: error

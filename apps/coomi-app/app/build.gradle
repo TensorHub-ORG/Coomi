@@ -72,8 +72,8 @@ android {
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion coomiTargetSdk
         // Keep the executable Termux bootstrap security domain for v1.4.0.
-        versionCode 46
-        versionName "1.4.6-test.3"
+        versionCode 47
+        versionName "1.4.6-test.4"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -333,16 +333,16 @@ tasks.register("stageCoomiRustAndroid", Copy) {
 
 tasks.register("stageCoomiRuntimeV2", Copy) {
     group = "coomi build"
-    description = "Bundle the verified ARM64 PRoot host and Debian rootfs for offline installation."
+    description = "Bundle the verified ARM64 PRoot host and Ubuntu rootfs for offline installation."
     from(coomiRuntimeDist) {
-        include "proot-host-arm64.tar.gz", "debian-bookworm-arm64.tar.gz"
+        include "proot-host-arm64.tar.gz", "ubuntu-noble-arm64.tar.gz"
         into "runtime-v2"
         rename { name -> name.replace(".tar.gz", ".tgz") }
     }
     into coomiRuntimeAssetsDir
     doFirst {
         delete coomiRuntimeAssetsDir
-        ["proot-host-arm64.tar.gz", "debian-bookworm-arm64.tar.gz"].each { name ->
+        ["proot-host-arm64.tar.gz", "ubuntu-noble-arm64.tar.gz"].each { name ->
             def artifact = new File(coomiRuntimeDist, name)
             if (!artifact.isFile() || artifact.length() == 0) {
                 throw new GradleException("Runtime V2 artifact is missing: ${artifact}")
