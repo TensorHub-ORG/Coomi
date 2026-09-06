@@ -48,7 +48,7 @@ def category(message):
         return "工具轮次上限"
     if "context compaction" in text or "prompt exceeds max" in text:
         return "上下文/压缩"
-    if any(key in text for key in ("401 unauthorized", "invalid api key", "authentication fails")):
+    if "401 unauthorized" in text or "invalid api key" in text or "authentication fails" in text:
         return "鉴权失败"
     if "429 too many" in text or "rpm exhausted" in text:
         return "限流/模型繁忙"
@@ -62,6 +62,24 @@ def category(message):
         return "余额不足"
     if "400 bad request" in text or "invalid params" in text:
         return "其他请求参数错误"
+    return environment_category(text)
+
+
+def environment_category(text):
+    """批次八 3.5：环境类故障细分——衡量环境重构（base/full 镜像、错误自纠、
+    超时分级）的北极星指标：exit 127 率、超时误杀率、权限拒绝率、路径错乱率。"""
+    if "exit code: 127" in text or "exit 127" in text or "not found" in text and "command" in text:
+        return "环境·缺命令(127)"
+    if "shell timed out" in text or "连环超时" in text or ("timed out" in text and "shell" in text):
+        return "环境·超时误杀"
+    if "permission denied" in text and ("/workspace" in text or "guest" in text or "chmod" in text):
+        return "环境·权限拒绝"
+    if "termux" in text and ("path" in text or "路径" in text) or "$prefix" in text:
+        return "环境·跨环境路径错乱"
+    if "apt install" in text or "pip install" in text:
+        return "环境·包安装"
+    if "environment is not ready" in text or "runtime not ready" in text:
+        return "环境·runtime未就绪"
     return "其他"
 
 

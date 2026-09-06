@@ -220,6 +220,8 @@ impl CoreTools {
         let _ = CatalogInstaller::new(&home).install_skill("skill-creator");
         // 批次七 #1：UI 设计师内置 Skill 默认安装（用户可停用）。
         let _ = CatalogInstaller::new(&home).install_skill("ui-designer");
+        // 批次八 3.3：环境初始化模板 Skill 默认安装。
+        let _ = CatalogInstaller::new(&home).install_skill("env-templates");
         let legacy = LegacyTermuxBackend::from_coomi_home(&home);
         self.policy = self.policy.clone().with_allowed_roots([
             home.join("runtime-v2").join("home"),

@@ -16,6 +16,7 @@ const CUSTOM_ITERATION_SKILL: &str = include_str!("../coomi-custom-iteration.md"
 const RUNTIME_ENVIRONMENT_SKILL: &str = include_str!("../runtime-environments.md");
 const SKILL_CREATOR_SKILL: &str = include_str!("../skill-creator.md");
 const UI_DESIGNER_SKILL: &str = include_str!("../ui-designer.md");
+const ENV_TEMPLATES_SKILL: &str = include_str!("../env-templates.md");
 const COOMIDEV_ENV: &str = include_str!("../../../../tools/mobile-build/coomidev-env.sh");
 const COOMIDEV_DOCTOR: &str = include_str!("../../../../tools/mobile-build/coomidev-doctor.sh");
 const COOMIDEV_BUILD: &str = include_str!("../../../../tools/mobile-build/build-coomidev.sh");
@@ -174,6 +175,26 @@ impl CatalogInstaller {
                     repository: "Coomi/bundled".into(),
                     git_ref: "1.4.6".into(),
                     subdir: "ui-designer".into(),
+                },
+                &destination,
+                "bundled",
+            )?;
+            return Ok(destination);
+        }
+        if id.eq_ignore_ascii_case("env-templates") {
+            // 批次八 3.3：环境初始化模板资产，固化 proot 兼容性 workaround。
+            let destination = self.home.join("skills").join("env-templates");
+            fs::create_dir_all(&destination)?;
+            fs::write(destination.join("SKILL.md"), ENV_TEMPLATES_SKILL)?;
+            save_skill_metadata(
+                &self.home,
+                &SkillEntry {
+                    id: "env-templates".into(),
+                    name: "Env Templates".into(),
+                    description: "python-web / node-web / android-build 三套环境初始化模板，内置 proot 兼容适配。".into(),
+                    repository: "Coomi/bundled".into(),
+                    git_ref: "1.4.6".into(),
+                    subdir: "env-templates".into(),
                 },
                 &destination,
                 "bundled",

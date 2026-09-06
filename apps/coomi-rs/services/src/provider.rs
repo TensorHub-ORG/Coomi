@@ -1613,10 +1613,49 @@ fn safe_http_error_detail(status: u16, body: &str) -> String {
             })
             .map(ToOwned::to_owned)
     });
-    match code {
-        Some(code) => format!("{summary} (code={code})"),
-        None => summary.to_owned(),
+    // 报错细化（批次八收尾）：保留上游 error.message 原文（脱敏后）——它才是
+    // 判断欠费/限流/参数错误的真实依据，只有短码用户没法归因。
+    let upstream_message = serde_json::from_str::<Value>(body).ok().and_then(|value| {
+        value
+            .pointer("/error/message")
+            .or_else(|| value.pointer("/message"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(redact_upstream_message)
+    });
+    match (code, upstream_message) {
+        (Some(code), Some(message)) => format!("{summary} (code={code}) {message}"),
+        (Some(code), None) => format!("{summary} (code={code})"),
+        (None, Some(message)) => format!("{summary}: {message}"),
+        (None, None) => summary.to_owned(),
     }
+}
+
+/// 上游错误消息脱敏：截断到 400 字符；sk- 开头的密钥、含 token=/key= 的参数
+/// 整词替换为占位符，其余保留（用户需要看到欠费/限流的真实描述）。
+fn redact_upstream_message(message: &str) -> String {
+    let truncated: String = message.chars().take(400).collect();
+    let mut output = String::with_capacity(truncated.len());
+    for (index, word) in truncated
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ';' | '"' | '(' | ')'))
+        .enumerate()
+    {
+        if index > 0 {
+            output.push(' ');
+        }
+        let lower = word.to_ascii_lowercase();
+        if (lower.starts_with("sk-") && word.len() > 6)
+            || lower.contains("token=")
+            || lower.contains("key=")
+            || lower.contains("apikey=")
+        {
+            output.push_str("[已脱敏]");
+        } else {
+            output.push_str(word);
+        }
+    }
+    output
 }
 
 fn stream_event_error(phase: &'static str, value: &Value) -> anyhow::Error {

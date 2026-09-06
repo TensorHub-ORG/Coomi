@@ -6192,51 +6192,127 @@ async fn compact_web_session(
     Ok(())
 }
 
-/// B3：Provider 错误的用户可读化——把常见 HTTP 错误映射为"中文原因 + 下一步
-/// 动作"，原始错误附在末尾供诊断。未命中的错误原样返回。
+/// 报错归因分类（批次八收尾 + 9/4 清单 B3 深化）：把错误分为
+/// 【网络问题】【上游供应商问题】【请求参数问题】三类并给出可执行建议，
+/// 引用上游 error.code/message 原文（已在 provider 层脱敏），未命中原样返回。
+/// 原则：上游的问题明确说"不是 Coomi 的故障"，不让用户误以为软件坏了。
 fn humanize_provider_error(message: &str) -> String {
     let lower = message.to_ascii_lowercase();
-    let hint: &str = if lower.contains("401")
+
+    // ── 网络链路（本地 → 上游）：transport 层错误 ──
+    let network = lower.contains("error sending request")
+        || lower.contains("dns error")
+        || lower.contains("failed to lookup")
+        || lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("connection closed")
+        || lower.contains("broken pipe")
+        || lower.contains("unreachable")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("request_send:");
+    if network {
+        return format!(
+            "【网络问题】连接模型服务失败——设备到上游服务之间的链路异常，不是 Coomi 软件故障。
+可能原因：设备网络波动、上游服务临时不可用、代理/VPN 干扰、上游域名无法直连。
+建议：确认网络后重试；持续失败可稍后再试、切换网络，或在「供应商」页切换其他供应商。
+原始错误：{message}"
+        );
+    }
+
+    // ── 上游业务错误（按 code/status 细分；注意顺序：quota 常伴随 429，须先判）──
+    let has_status = |code: &str| lower.contains(&format!("status={code}"));
+    let (title, advice): (&str, &str) = if lower.contains("insufficient_quota")
+        || lower.contains("insufficient quota")
+        || lower.contains("quota exceeded")
+        || lower.contains("exceeded your current quota")
+        || lower.contains("arrears")
+        || lower.contains("欠费")
+        || has_status("402")
+    {
+        (
+            "账户额度已用尽或已欠费（上游供应商返回）",
+            "登录供应商控制台充值或购买额度；或在「供应商」页切换其他有余额的模型/供应商。",
+        )
+    } else if lower.contains("invalid_api_key")
         || lower.contains("invalid api key")
-        || lower.contains("invalid_api_key")
         || lower.contains("authenticationerror")
         || lower.contains("authentication error")
         || lower.contains("unauthorized")
+        || has_status("401")
     {
-        "API Key 无效或未生效。请到「供应商」页检查 Key 是否完整、有无多余空格，必要时重新生成。"
-    } else if lower.contains("402")
-        || lower.contains("insufficient_balance")
-        || lower.contains("insufficient balance")
-        || lower.contains("quota")
-        || lower.contains("billing")
-    {
-        "供应商账户余额或额度不足。请前往供应商控制台充值，或更换模型/供应商。"
+        (
+            "API Key 无效或未生效（上游供应商拒绝鉴权）",
+            "到「供应商」页检查 Key 是否完整、有无多余空格、是否已过期或被删除；必要时重新生成。",
+        )
     } else if lower.contains("429")
+        || lower.contains("rate_limit")
         || lower.contains("rate limit")
-        || lower.contains("ratelimit")
         || lower.contains("too many requests")
+        || lower.contains(" tpm ")
+        || lower.contains(" rpm ")
     {
-        "触发供应商限流。请稍等片刻重试，或在对话页切换其他模型。"
-    } else if lower.contains("404")
-        || lower.contains("model_not_found")
+        (
+            "触发上游限流（请求过于频繁或超出用量档位）",
+            "稍等片刻重试；频繁出现可降低并发、减少请求频率，或切换其他模型。",
+        )
+    } else if lower.contains("model_not_found")
         || lower.contains("model not found")
         || lower.contains("does not exist")
+        || lower.contains("decommissioned")
+        || has_status("404")
     {
-        "模型或接口地址不存在。请检查模型名拼写，以及 Base URL 与协议类型是否匹配（如 /v1 后缀）。"
-    } else if lower.contains("context length")
+        (
+            "模型或接口地址不存在（上游返回 404）",
+            "检查模型名拼写是否正确、Base URL 与协议类型是否匹配（OpenAI 系通常需要 /v1 后缀）、该模型是否已下线。",
+        )
+    } else if lower.contains("content_window_exceeded")
+        || lower.contains("context_window_exceeded")
+        || lower.contains("context length")
         || lower.contains("maximum context")
-        || lower.contains("too long")
+        || lower.contains("too many tokens")
     {
-        "上下文超过模型窗口限制。可发送 /compact 压缩上下文，或新建会话继续。"
+        (
+            "上下文超过模型窗口限制",
+            "发送 /compact 压缩当前上下文，或新建会话继续。",
+        )
+    } else if lower.contains("403")
+        || lower.contains("forbidden")
+        || lower.contains("permission_denied")
+        || lower.contains("not allowed")
+        || lower.contains("permission")
+    {
+        (
+            "上游拒绝访问（权限或地区限制）",
+            "确认账号是否有该模型访问权限、是否需要实名/企业认证，或该模型在当前地区不可用；可切换模型。",
+        )
+    } else if lower.contains("status=500")
+        || lower.contains("status=502")
+        || lower.contains("status=503")
+        || lower.contains("status=504")
+        || lower.contains("overloaded")
+        || lower.contains("internal server error")
+        || lower.contains("temporarily unavailable")
+        || lower.contains("service unavailable")
+    {
+        (
+            "上游服务临时异常（服务端错误）",
+            "上游服务端问题，非 Coomi 故障。稍后重试；持续出现可查看供应商状态页或切换模型。",
+        )
     } else if lower.contains("400")
         || lower.contains("invalid_request_error")
         || lower.contains("invalid request")
     {
-        "请求被供应商拒绝（参数与该模型不兼容）。可尝试切换模型重试；若反复出现请反馈。"
+        (
+            "请求被上游拒绝（参数与该模型不兼容）",
+            "尝试切换模型重试；若反复出现，请连同下方原始错误一起反馈。",
+        )
     } else {
         return message.to_owned();
     };
-    format!("{hint}\n原始错误：{message}")
+    format!("【上游供应商问题】{title}。
+建议：{advice}
+原始错误：{message}")
 }
 
 fn is_retryable_error_text(message: &str) -> bool {
