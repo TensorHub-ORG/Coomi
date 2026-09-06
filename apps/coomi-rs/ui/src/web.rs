@@ -781,6 +781,8 @@ pub async fn serve(
     crate::life::start_background(state.home.clone());
     // 引擎启动时补发上次会话遗留的未上报事件（如进程被系统杀掉前没来得及 flush）。
     Telemetry::new(&state.home).flush_background();
+    // 内置环境自动升级：APK 内嵌新版 Runtime 与 active 不一致时后台静默升级。
+    auto_runtime_upgrade(&state);
     let index = static_dir.join("index.html");
     let files = ServeDir::new(static_dir).not_found_service(ServeFile::new(index));
     let app = Router::new()
@@ -4230,24 +4232,169 @@ struct RuntimeV2Action {
     action: String,
 }
 
+fn load_runtime_manifest(state: &AppState) -> Result<coomi_services::RuntimeManifest, ApiError> {
+    let manifest_path = state.home.join("config").join("runtime-v2-manifest.json");
+    let bytes = fs::read(&manifest_path).map_err(|error| {
+        ApiError::bad_request(format!(
+            "runtime manifest is not available at {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let manifest: coomi_services::RuntimeManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| ApiError::bad_request(format!("invalid runtime manifest: {error}")))?;
+    manifest
+        .validate()
+        .map_err(|error| ApiError::bad_request(format!("invalid runtime manifest: {error:#}")))?;
+    Ok(manifest)
+}
+
+/// 启动自动升级（内置环境免手动安装）：APK 内嵌的新版 Runtime 清单与本地
+/// seed artifact 就绪、且与 active 版本不一致时，后台直接安装升级，无需用户
+/// 进「系统环境」页手动点按钮。只使用本地已有 artifact（绝不静默下载流量）。
+fn auto_runtime_upgrade(state: &AppState) {
+    let result = (|| -> Result<()> {
+        let manager = RuntimeManager::open(&state.home)?;
+        let current = manager.state()?;
+        if matches!(
+            current.status,
+            coomi_services::RuntimeInstallStatus::Downloading
+                | coomi_services::RuntimeInstallStatus::Initializing
+        ) {
+            return Ok(()); // 已在安装流程中
+        }
+        let manifest_path = state.home.join("config").join("runtime-v2-manifest.json");
+        let bytes = fs::read(&manifest_path)?;
+        let manifest: coomi_services::RuntimeManifest = serde_json::from_slice(&bytes)?;
+        manifest.validate()?;
+        if current.active_version.as_deref() == Some(manifest.runtime_version.as_str()) {
+            return Ok(()); // 已是目标版本
+        }
+        let host_ready = manager
+            .download_progress("proot-host-arm64.tar.gz", &manifest.host)
+            .status
+            == "completed";
+        let rootfs_ready = manager
+            .download_progress("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
+            .status
+            == "completed";
+        anyhow::ensure!(
+            host_ready && rootfs_ready,
+            "seed artifacts not staged; leaving upgrade to the user"
+        );
+        spawn_runtime_install(state, manifest).map_err(|error| anyhow::anyhow!(error.message))?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => eprintln!(
+            "[runtime] auto upgrade started: bundled runtime differs from active version"
+        ),
+        Err(error) => eprintln!("[runtime] auto upgrade skipped: {error:#}"),
+    }
+}
+
+fn spawn_runtime_install(
+    state: &AppState,
+    manifest: coomi_services::RuntimeManifest,
+) -> Result<Json<Value>, ApiError> {
+    let manager = RuntimeManager::open(&state.home).map_err(ApiError::from)?;
+    let current = manager.state().map_err(ApiError::from)?;
+    if matches!(
+        current.status,
+        coomi_services::RuntimeInstallStatus::Downloading
+            | coomi_services::RuntimeInstallStatus::Initializing
+    ) {
+        return Ok(Json(
+            json!({"runtime": current, "already_installing": true}),
+        ));
+    }
+    let record = state
+        .task_manager
+        .create(
+            "runtime",
+            "runtime_install",
+            TaskPriority::High,
+            vec![
+                ResourceRequest {
+                    key: ResourceKey::new(ResourceKind::RuntimeInstall, "proot-linux"),
+                    access: ResourceAccess::Write,
+                },
+                ResourceRequest {
+                    key: ResourceKey::new(ResourceKind::PackageManager, "guest-apt"),
+                    access: ResourceAccess::Write,
+                },
+            ],
+        )
+        .map_err(ApiError::from)?;
+    let runtime_manager = manager.clone();
+    let task_manager = Arc::clone(&state.task_manager);
+    let task_id = record.id.clone();
+    let runtime_home = state.home.clone();
+    tokio::spawn(async move {
+        let _ = task_manager.transition(
+            &task_id,
+            TaskStatus::WaitingLock,
+            Some("waiting for runtime installation resources"),
+        );
+        let result: Result<()> = async {
+            let lease = loop {
+                if let Some(lease) = task_manager.acquire(&task_id)? {
+                    break lease;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            };
+            task_manager.transition(
+                &task_id,
+                TaskStatus::Running,
+                Some("downloading verified runtime artifacts"),
+            )?;
+            runtime_manager.begin_install()?;
+            let host = runtime_manager
+                .download_artifact("proot-host-arm64.tar.gz", &manifest.host)
+                .await?;
+            let rootfs = runtime_manager
+                .download_artifact("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
+                .await?;
+            runtime_manager.install(&manifest, &host, &rootfs)?;
+            // 安装后执行级冒烟：proot 必须真正跑起 guest 二进制（含解释器/符号链接）才算成功，
+            // 避免残缺 rootfs 被标记为 Ready。
+            {
+                let backend = coomi_services::ProotLinuxBackend {
+                    runtime_root: runtime_home.join("runtime-v2"),
+                    version: manifest.runtime_version.clone(),
+                };
+                coomi_services::RuntimeBackend::health_check(&backend)
+                    .await
+                    .context("post-install guest health check failed")?;
+            }
+            drop(lease);
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => {
+                let _ = task_manager.transition(
+                    &task_id,
+                    TaskStatus::Completed,
+                    Some("runtime installed and activated"),
+                );
+            }
+            Err(error) => {
+                let summary = format!("{error:#}");
+                let _ = runtime_manager.fail_install(&summary);
+                let _ = task_manager.transition(&task_id, TaskStatus::Failed, Some(&summary));
+            }
+        }
+    });
+    Ok(Json(json!({"task": record})))
+}
+
 async fn runtime_v2_action(
     State(state): State<AppState>,
     Json(request): Json<RuntimeV2Action>,
 ) -> Result<Json<Value>, ApiError> {
     let manager = RuntimeManager::open(&state.home).map_err(ApiError::from)?;
     if matches!(request.action.as_str(), "install" | "update") {
-        let manifest_path = state.home.join("config").join("runtime-v2-manifest.json");
-        let bytes = fs::read(&manifest_path).map_err(|error| {
-            ApiError::bad_request(format!(
-                "runtime manifest is not available at {}: {error}",
-                manifest_path.display()
-            ))
-        })?;
-        let manifest: coomi_services::RuntimeManifest = serde_json::from_slice(&bytes)
-            .map_err(|error| ApiError::bad_request(format!("invalid runtime manifest: {error}")))?;
-        manifest.validate().map_err(|error| {
-            ApiError::bad_request(format!("invalid runtime manifest: {error:#}"))
-        })?;
+        let manifest = load_runtime_manifest(&state)?;
         let current = manager.state().map_err(ApiError::from)?;
         if current.status == coomi_services::RuntimeInstallStatus::Ready
             && current.active_version.as_deref() == Some(manifest.runtime_version.as_str())
@@ -4276,85 +4423,7 @@ async fn runtime_v2_action(
                 json!({"runtime": current, "already_installing": true}),
             ));
         }
-        let record = state
-            .task_manager
-            .create(
-                "runtime",
-                "runtime_install",
-                TaskPriority::High,
-                vec![
-                    ResourceRequest {
-                        key: ResourceKey::new(ResourceKind::RuntimeInstall, "proot-linux"),
-                        access: ResourceAccess::Write,
-                    },
-                    ResourceRequest {
-                        key: ResourceKey::new(ResourceKind::PackageManager, "guest-apt"),
-                        access: ResourceAccess::Write,
-                    },
-                ],
-            )
-            .map_err(ApiError::from)?;
-        let runtime_manager = manager.clone();
-        let task_manager = Arc::clone(&state.task_manager);
-        let task_id = record.id.clone();
-        let runtime_home = state.home.clone();
-        tokio::spawn(async move {
-            let _ = task_manager.transition(
-                &task_id,
-                TaskStatus::WaitingLock,
-                Some("waiting for runtime installation resources"),
-            );
-            let result: Result<()> = async {
-                let lease = loop {
-                    if let Some(lease) = task_manager.acquire(&task_id)? {
-                        break lease;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                };
-                task_manager.transition(
-                    &task_id,
-                    TaskStatus::Running,
-                    Some("downloading verified runtime artifacts"),
-                )?;
-                runtime_manager.begin_install()?;
-                let host = runtime_manager
-                    .download_artifact("proot-host-arm64.tar.gz", &manifest.host)
-                    .await?;
-                let rootfs = runtime_manager
-                    .download_artifact("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
-                    .await?;
-                runtime_manager.install(&manifest, &host, &rootfs)?;
-                // 安装后执行级冒烟：proot 必须真正跑起 guest 二进制（含解释器/符号链接）才算成功，
-                // 避免残缺 rootfs 被标记为 Ready。
-                {
-                    let backend = coomi_services::ProotLinuxBackend {
-                        runtime_root: runtime_home.join("runtime-v2"),
-                        version: manifest.runtime_version.clone(),
-                    };
-                    coomi_services::RuntimeBackend::health_check(&backend)
-                        .await
-                        .context("post-install guest health check failed")?;
-                }
-                drop(lease);
-                Ok(())
-            }
-            .await;
-            match result {
-                Ok(()) => {
-                    let _ = task_manager.transition(
-                        &task_id,
-                        TaskStatus::Completed,
-                        Some("runtime installed and activated"),
-                    );
-                }
-                Err(error) => {
-                    let summary = format!("{error:#}");
-                    let _ = runtime_manager.fail_install(&summary);
-                    let _ = task_manager.transition(&task_id, TaskStatus::Failed, Some(&summary));
-                }
-            }
-        });
-        return Ok(Json(json!({"task": record})));
+        return spawn_runtime_install(&state, manifest);
     }
     let runtime = match request.action.as_str() {
         "rollback" => manager.rollback(),

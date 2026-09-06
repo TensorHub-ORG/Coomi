@@ -109,6 +109,20 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(value >= 100 * 1024 * 1024 ? 0 : 1)} MB`
 }
 
+// 内置环境升级：APK 内嵌清单版本与当前 active 不一致即可升级（引擎启动也会自动升级，此处是手动入口）。
+const upgradeAvailable = computed(() => {
+  const v2 = runtimeV2.value
+  if (!v2?.manifest_available || !v2.manifest) return false
+  const active = v2.runtime.active_version
+  if (!active || v2.manifest.runtime_version === active) return false
+  return ['ready', 'update_available'].includes(v2.runtime.status)
+})
+
+const backendLabel = computed(() => {
+  const backend = runtimeV2.value?.runtime.backend
+  return backend === 'proot_linux' ? '系统环境（Ubuntu 24.04）' : backend === 'legacy_termux' ? 'Termux 域（内部引导）' : backend || '—'
+})
+
 const runtimeDownload = computed(() => {
   const downloads = runtimeV2.value?.downloads
   if (!downloads) return null
@@ -138,7 +152,7 @@ function goDashboard() {
 }
 </script><template>
   <div class="page">
-    <PageHead title="ProotLinux 环境" @back="goDashboard">
+    <PageHead title="系统环境" @back="goDashboard">
       <template #right>
         <button class="icon-btn" aria-label="刷新" @click="load(true)">
           <CoomiIcon name="refresh" :class="{ spin: refreshing }" />
@@ -164,13 +178,16 @@ function goDashboard() {
       </div>
 
       <template v-if="runtimeV2">
-        <p class="sec-label">ProotLinux</p>
+        <p class="sec-label">系统环境</p>
         <div class="group runtime-v2">
-          <div class="kv"><span class="k">后端</span><span class="v mono">{{ runtimeV2.runtime.backend }}</span></div>
+          <div class="kv"><span class="k">后端</span><span class="v mono">{{ backendLabel }}</span></div>
           <div class="kv"><span class="k">状态</span><span class="v">{{ runtimeStatusLabel }}</span></div>
           <div class="kv"><span class="k">当前版本</span><span class="v mono">{{ runtimeV2.runtime.active_version || '未安装' }}</span></div>
           <div v-if="runtimeV2.manifest" class="kv"><span class="k">可用版本</span><span class="v mono">{{ runtimeV2.manifest.runtime_version }}</span></div>
           <div class="runtime-actions">
+            <button v-if="upgradeAvailable" :disabled="!!runtimeAction" @click="runRuntimeAction('update')">
+              {{ runtimeAction === 'update' ? '正在升级…' : '升级到 ' + (runtimeV2?.manifest?.runtime_version || '') }}
+            </button>
             <button v-if="runtimeV2.manifest_available && runtimeV2.runtime.status === 'update_available'" :disabled="!!runtimeAction" @click="runRuntimeAction('update')">更新</button>
             <button v-if="runtimeV2.runtime.status === 'needs_repair'" :disabled="!!runtimeAction" @click="runRuntimeAction('install')">重新部署</button>
             <button v-if="runtimeV2.runtime.previous_version" :disabled="!!runtimeAction" @click="runRuntimeAction('rollback')">回滚</button>
@@ -193,8 +210,8 @@ function goDashboard() {
       </button>
 
       <p class="note">
-        ProotLinux 是 Coomi 的必备内置环境，由 Runtime V2 在 App 私有存储中自动校验和初始化，
-        无需手动安装或联网下载。首次解包会花一点时间，后续更新、修复和回滚均保留持久状态。
+        系统环境是 Coomi 内置的完整 Ubuntu 24.04 运行环境，随 App 分发、自动校验初始化，并在新版本内嵌时后台自动升级，无需手动安装或联网下载。
+        首次解包会花一点时间；更新、修复和回滚均保留持久状态。
       </p>
     </main>
   </div>
