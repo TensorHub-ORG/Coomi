@@ -52,8 +52,30 @@ public final class UpdateChecker {
         }
     }
 
+    /**
+     * 是否测试版构建：debug/demo 构建类型，或 semver 预发布版本号
+     * （versionName 含 '-'，如 1.5.0-beta.1；正式版 versionName 永远不含 '-'）。
+     * 测试版不参与静默更新提醒，只有正式版才显示红点。
+     */
+    public static boolean isTestBuild(Context context) {
+        if (com.termux.BuildConfig.DEBUG) return true;
+        try {
+            String versionName = context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0).versionName;
+            return versionName != null && versionName.contains("-");
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
     /** 静默检查：只查询是否有新版本（用于「检查更新」红点提示），不自动下载。 */
     public static void checkSilent(final Context context, final Callback callback) {
+        // 测试版不亮更新红点：debug/demo 构建、或 semver 预发布版本号
+        // （如 1.5.0-beta.1）都视为测试版。手动进「检查更新」页面仍可正常检查下载。
+        if (isTestBuild(context)) {
+            callback.onResult(false, null, null, null);
+            return;
+        }
         new Thread(() -> {
             try {
                 URL url = new URL(UPDATE_URL);

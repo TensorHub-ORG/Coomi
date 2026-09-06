@@ -6,7 +6,7 @@
  * 状态是有语义色的：运行中蓝 + 左侧流光，成功绿勾，失败红叉且输出染红，
  * 待授权橙（真正的确认交给底部 ApprovalSheet，卡片只说明原因），缓存命中灰闪电。
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { ToolCard } from '@/stores/viewModel'
 import { asText, toolMeta, toolTarget } from '@/utils/toolMeta'
 import CoomiIcon from './CoomiIcon.vue'
@@ -187,6 +187,14 @@ const newStr = computed(() => asStr(props.card.arguments?.new_string))
 const isDiff = computed(() => Boolean(oldStr.value || newStr.value))
 const output = computed(() => props.card.resultPreview ?? '')
 
+// ── Agent 执行实时输出（批次三 #31）：增量流展示 + 自动滚到底 ──
+const liveEl = ref<HTMLElement | null>(null)
+const liveOutput = computed(() => props.card.liveOutput ?? '')
+watch(liveOutput, async () => {
+  await nextTick()
+  if (liveEl.value) liveEl.value.scrollTop = liveEl.value.scrollHeight
+})
+
 const diffLines = computed(() => {
   const out: { sign: '-' | '+'; text: string }[] = []
   if (oldStr.value) for (const t of oldStr.value.split('\n')) out.push({ sign: '-', text: t })
@@ -194,7 +202,7 @@ const diffLines = computed(() => {
   return out
 })
 
-const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
+const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(liveOutput.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
 const open = computed(() => manual.value ?? props.card.expanded ?? false)
 const long = computed(() => output.value.length > 700 || output.value.split('\n').length > 14)
 
@@ -295,6 +303,14 @@ async function copy(text: string) {
           <button class="mini" @click.stop="copy(contentArg)">{{ copied ? '已复制' : '复制' }}</button>
         </div>
         <pre class="mono">{{ contentArg }}</pre>
+      </div>
+
+      <!-- Agent 执行实时输出：执行中增量滚动，done 后由 resultPreview 取代 -->
+      <div v-if="liveOutput" class="sec">
+        <div class="sbar">
+          <p class="slabel live-label">实时输出</p>
+        </div>
+        <pre ref="liveEl" class="mono live">{{ liveOutput }}</pre>
       </div>
 
       <div v-if="output" class="sec">
@@ -442,6 +458,12 @@ async function copy(text: string) {
   overflow-x: auto;
 }
 .out.err { background: var(--danger-soft); color: #9b3a2c; }
+.live {
+  max-height: 190px; overflow-y: auto;
+  border-left: 2px solid var(--blue);
+  scrollbar-width: thin;
+}
+.live-label { color: var(--blue); }
 .out.clip { max-height: 210px; overflow: hidden; mask-image: linear-gradient(180deg, #000 72%, transparent); }
 .more {
   width: 100%; margin-top: 6px; padding: 7px 0;

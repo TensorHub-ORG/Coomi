@@ -209,12 +209,23 @@ export const useSessionStore = defineStore('session', () => {
         runState.value = 'executing'
         break
       case 'tool_running': patchTool(ev.call_id, c => c.status = 'running'); runState.value = 'executing'; break
+      case 'tool_output':
+        // Agent 执行实时流（批次三 #31）：shell/local_shell 增量输出追加到卡片。
+        patchTool(ev.call_id, c => {
+          if (c.expanded === undefined) c.expanded = true
+          // 上限 24KB：超长丢头部，保尾部（最新输出最有信息量）。
+          const merged = (c.liveOutput ?? '') + ev.chunk
+          c.liveOutput = merged.length > 24_000 ? '…（前段已截断）\n' + merged.slice(-24_000) : merged
+        })
+        runState.value = 'executing'
+        break
       case 'tool_done':
         patchTool(ev.call_id, c => {
           c.status = ev.is_error ? 'error' : 'success'
           c.elapsed = ev.elapsed
           c.resultPreview = ev.result_preview
           c.isError = ev.is_error
+          c.liveOutput = undefined
           // 工具产生的图片：瀑布流渲染（历史恢复时由 messages.images 补回）
           if (Array.isArray(ev.images) && ev.images.length > 0) c.images = ev.images
         })
@@ -354,6 +365,8 @@ export const useSessionStore = defineStore('session', () => {
         break
       case 'turn_end':
         endAssistantStream(); cancelRunningTools(); connection.setRetry(null); runState.value = 'idle'
+        // 收尾清理：去掉空白思考块（部分供应商会发空的 reasoning 分片）。
+        timeline.value = timeline.value.filter(item => !(item.kind === 'reasoning' && !item.content.trim()))
         {
           const failures = turnToolTrace.filter(item => item.status === 'error').length
           if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
@@ -823,9 +836,19 @@ export const useSessionStore = defineStore('session', () => {
   }
   function endAssistantStream() { if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null } }
   function appendReasoning(content: string) {
-    const last = timeline.value[timeline.value.length - 1]
-    if (last && last.kind === 'reasoning') { (last as ReasoningBlock).content += content }
-    else { timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false }) }
+    // 就近合并：从末尾向前找最近的思考块；途中允许跳过工具/问题/通知卡和
+    // 还没产出文字的助手消息 —— 部分供应商（如 deepseek）的 reasoning 与
+    // text 交错发送，否则思考过程会被拆成多条碎片。
+    const items = timeline.value
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i]
+      if (item.kind === 'reasoning') { (item as ReasoningBlock).content += content; return }
+      if (item.kind === 'assistant' && item.content.trim() !== '') break
+      if (item.kind === 'user' || item.kind === 'question') break
+    }
+    // 没有可合并目标时，纯空白的思考分片不值得新建一个「0 字」块。
+    if (!content.trim()) return
+    timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false })
   }
   function patchTool(callId: string, fn: (c: ToolCard) => void): boolean {
     for (let i = timeline.value.length - 1; i >= 0; i--) { const t = timeline.value[i]; if (t.kind === 'tool' && t.callId === callId) { fn(t); return true } }

@@ -157,12 +157,13 @@ async function copyAll() {
     <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" />
     <FileInline v-if="filePaths.length" :paths="filePaths" />
     <span v-if="streaming" class="stream-caret" />
-    <div v-if="!streaming" class="acts">
+    <div class="acts">
       <button class="act" @click="copyAll">
         <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
         <span>{{ copied ? '已复制' : '复制' }}</span>
       </button>
-      <button v-if="isLastAssistant" class="act" @click="undoAssistant">
+      <!-- 回撤会清空整轮执行：只在输出完成后提供，流式中不出现。 -->
+      <button v-if="isLastAssistant && !streaming" class="act" @click="undoAssistant">
         <CoomiIcon name="arrowLeft" :size="15" />
         <span>回撤</span>
       </button>

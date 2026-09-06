@@ -1,3 +1,5 @@
+use crate::ToolProgressContext;
+use crate::shell_failure_hint;
 use coomi_engine::ToolResult;
 use coomi_services::RuntimeBackend;
 use coomi_services::RuntimeBackendKind;
@@ -124,13 +126,18 @@ impl ProcessManager {
         ))
     }
 
-    pub async fn execute(&self, cwd: &std::path::Path, arguments: &Value) -> ToolResult {
+    pub async fn execute(
+        &self,
+        cwd: &std::path::Path,
+        arguments: &Value,
+        progress: Option<&ToolProgressContext>,
+    ) -> ToolResult {
         let action = arguments
             .get("action")
             .and_then(Value::as_str)
             .unwrap_or("exec");
         match action {
-            "exec" => self.start(cwd, arguments).await,
+            "exec" => self.start(cwd, arguments, progress).await,
             "write" => self.write(arguments).await,
             "wait" => self.wait(arguments).await,
             "terminate" => self.terminate(arguments).await,
@@ -138,7 +145,12 @@ impl ProcessManager {
         }
     }
 
-    async fn start(&self, cwd: &std::path::Path, arguments: &Value) -> ToolResult {
+    async fn start(
+        &self,
+        cwd: &std::path::Path,
+        arguments: &Value,
+        progress: Option<&ToolProgressContext>,
+    ) -> ToolResult {
         let Some(command) = arguments.get("command").and_then(Value::as_str) else {
             return ToolResult::error("missing string argument: command");
         };
@@ -248,11 +260,7 @@ impl ProcessManager {
                         Ok(Some(status)) => {
                             tokio::time::sleep(Duration::from_millis(20)).await;
                             let output = read_delta(&mut process).await;
-                            return if status.success() {
-                                ToolResult::success(format!("{output}\nexit: {status}"))
-                            } else {
-                                ToolResult::error(format!("{output}\nexit: {status}"))
-                            };
+                            return format_exit(status, output);
                         }
                         Ok(None) => {}
                         Err(error) => {
@@ -269,7 +277,12 @@ impl ProcessManager {
         registry()
             .lock()
             .expect("process registry lock")
-            .insert(session_id.clone(), managed);
+            .insert(session_id.clone(), managed.clone());
+        // 会话流式输出（批次三 #31）：独立 watcher 以自身偏移量轮询缓冲区，
+        // 把增量输出推给对话页；不消费模型 read_delta 的偏移。
+        if let Some(progress) = progress {
+            spawn_output_watcher(managed, session_id.clone(), progress.call_id.clone(), Arc::clone(&progress.sink));
+        }
         ToolResult::success(format!("process running\nsession_id: {session_id}"))
     }
 
@@ -352,11 +365,7 @@ impl ProcessManager {
                     let output = read_delta(&mut process).await;
                     drop(process);
                     registry().lock().expect("process registry lock").remove(id);
-                    return if status.success() {
-                        ToolResult::success(format!("{output}\nexit: {status}"))
-                    } else {
-                        ToolResult::error(format!("{output}\nexit: {status}"))
-                    };
+                    return format_exit(status, output);
                 }
                 Ok(None) => {
                     let output = read_delta(&mut process).await;
@@ -400,8 +409,87 @@ impl ProcessManager {
     }
 }
 
-async fn read_delta(process: &mut ManagedProcess) -> String {
-    let stdout = process.stdout.lock().await;
+/// 统一退出渲染：成功 → success；失败 → error + 结构化自纠提示（批次八 1.3）。
+fn format_exit(status: std::process::ExitStatus, output: String) -> ToolResult {
+    if status.success() {
+        return ToolResult::success(format!("{output}\nexit: {status}"));
+    }
+    let code = status.code().unwrap_or(-1);
+    let hint = shell_failure_hint(code, &output);
+    let mut text = format!("{output}\nexit: {status}");
+    if !hint.is_empty() {
+        text.push('\n');
+        text.push_str(&hint);
+    }
+    ToolResult::error(text)
+}
+
+/// 会话流式输出 watcher（批次三 #31）：以自身偏移量轮询输出缓冲，把增量推给
+/// 对话页；不消费模型 read_delta 的偏移。进程退出且增量排干后结束。
+fn spawn_output_watcher(
+    process: Arc<AsyncMutex<ManagedProcess>>,
+    session_id: String,
+    call_id: String,
+    sink: crate::ToolProgressSink,
+) {
+    tokio::spawn(async move {
+        const MAX_CHUNK: usize = 16 * 1024;
+        let mut out_offset = 0usize;
+        let mut err_offset = 0usize;
+        loop {
+            let (exited, text) = {
+                let mut process = process.lock().await;
+                let exited = process
+                    .child
+                    .try_wait()
+                    .map(|status| status.is_some())
+                    .unwrap_or(true);
+                let stdout = process.stdout.lock().await;
+                let out_delta = stdout[out_offset.min(stdout.len())..].to_vec();
+                out_offset = stdout.len();
+                drop(stdout);
+                let stderr = process.stderr.lock().await;
+                let err_delta = stderr[err_offset.min(stderr.len())..].to_vec();
+                err_offset = stderr.len();
+                drop(stderr);
+                let mut text = String::new();
+                if !out_delta.is_empty() {
+                    text.push_str(&String::from_utf8_lossy(&out_delta));
+                }
+                if !err_delta.is_empty() {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str("[stderr]\n");
+                    text.push_str(&String::from_utf8_lossy(&err_delta));
+                }
+                (exited, text)
+            };
+            if !text.trim().is_empty() {
+                let text = if text.len() > MAX_CHUNK {
+                    let mut start = text.len() - MAX_CHUNK;
+                    while !text.is_char_boundary(start) {
+                        start += 1;
+                    }
+                    format!("[...]\n{}", &text[start..])
+                } else {
+                    text
+                };
+                sink(&call_id, text);
+            }
+            let registered = registry()
+                .lock()
+                .expect("process registry lock")
+                .contains_key(&session_id);
+            if exited || !registered {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+    });
+}
+
+async fn read_delta(process: &mut ManagedProcess) -> String {    let stdout = process.stdout.lock().await;
     let stdout_delta = &stdout[process.stdout_offset.min(stdout.len())..];
     let stdout_text = String::from_utf8_lossy(stdout_delta).into_owned();
     process.stdout_offset = stdout.len();

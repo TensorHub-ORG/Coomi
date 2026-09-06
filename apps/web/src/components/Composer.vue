@@ -245,7 +245,7 @@ watch(text, () => {
           <CoomiIcon name="target" :size="14" />
           <span>计划</span>
         </button>
-        <button class="pill" :class="{ on: session.mode === 'team' }" title="切换改码审查协作模式" @click="cycleSessionMode">
+        <button class="pill" :class="{ on: session.mode === 'team' }" title="切换协同审查协作模式" @click="cycleSessionMode">
           <CoomiIcon name="subtask" :size="14" />
           <span>{{ session.mode === 'team' ? '协作' : '单模型' }}</span>
         </button>

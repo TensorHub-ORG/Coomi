@@ -16,6 +16,8 @@ export interface ToolCard {
   expanded?: boolean
   /** 工具产生的图片（data URL），瀑布流渲染用。 */
   images?: string[]
+  /** 执行中的实时输出流（shell/local_shell 增量回传），done 后清空并入 resultPreview。 */
+  liveOutput?: string
   /** show_image 历史恢复但图片数据不可用（如已被上下文压缩清理）。 */
   imageMissing?: boolean
 }

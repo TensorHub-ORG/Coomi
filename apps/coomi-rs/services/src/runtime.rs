@@ -456,7 +456,9 @@ impl RuntimeBackend for ProotLinuxBackend {
             "/usr/bin/env".into(),
             "-i".into(),
             "HOME=/home/coomi".into(),
-            "PATH=/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into(),
+            // /home/coomi/.local/bin：pip install --user 与用户脚本的位置，
+            // 不依赖 .profile 是否被加载（shell 工具用非交互 shell 启动）。
+            "PATH=/home/coomi/.local/bin:/home/coomi/bin:/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into(),
             "TMPDIR=/tmp".into(),
             "COOMI_RUNTIME_BACKEND=proot_linux".into(),
             "COOMI_BUILD_KIT=/opt/coomi-dev".into(),
@@ -526,6 +528,7 @@ impl RuntimeBackend for ProotLinuxBackend {
 pub struct GuestFacts {
     pub backend: String,
     pub sh: bool,
+    pub os: Option<String>,
     pub python: Option<String>,
     pub git: Option<String>,
     pub node: Option<String>,
@@ -543,6 +546,7 @@ pub async fn probe_guest_facts(
 ) -> Result<GuestFacts> {
     let script = r#"
 echo "__sh__ok"
+. /etc/os-release 2>/dev/null && echo "__os__${PRETTY_NAME:-}" || echo "__os__"
 test -d /workspace && echo "__workspace__ok" || echo "__workspace__missing"
 test -w /tmp && echo "__tmp__ok" || echo "__tmp__no"
 if command -v python3 >/dev/null 2>&1; then echo "__python__$(python3 --version 2>&1 | head -1)"; fi
@@ -573,6 +577,11 @@ if command -v curl >/dev/null 2>&1; then echo "__curl__$(curl --version 2>&1 | h
                 let line = line.trim();
                 if let Some(_) = line.strip_prefix("__sh__ok") {
                     facts.sh = true;
+                } else if let Some(value) = line.strip_prefix("__os__") {
+                    let value = value.trim();
+                    if !value.is_empty() {
+                        facts.os = Some(value.to_owned());
+                    }
                 } else if line == "__workspace__ok" {
                     facts.workspace = true;
                 } else if line == "__tmp__ok" {

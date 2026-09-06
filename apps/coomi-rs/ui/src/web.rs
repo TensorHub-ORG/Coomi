@@ -5010,6 +5010,13 @@ async fn fetch_provider_models(provider: &ProviderSettings) -> Result<Vec<String
         ApiError::bad_gateway(format!("failed to read model discovery response: {error}"))
     })?;
     if !status.is_success() {
+        // 火山引擎 /api/plan/v3 等 plan 类端点只实现对话接口，不提供 /models
+        // （实测 404），模型本身可正常调用。这种情况给可行动指引而非裸 404。
+        if status.as_u16() == 404 || status.as_u16() == 405 {
+            return Err(ApiError::bad_gateway(
+                "该端点未提供模型列表接口（HTTP 404）：部分供应商（如火山引擎 /api/plan/v3）只实现了对话接口。请切换到「模型」标签页手动添加模型 ID（例如 deepseek-v4-flash），保存后即可正常对话。",
+            ));
+        }
         return Err(ApiError::bad_gateway(format!(
             "model discovery returned HTTP {status}: {}",
             preview(&body)
@@ -6070,7 +6077,16 @@ async fn compact_web_session(
     )
     .await;
     let mcp_runtime = Arc::new(McpRuntime::load(&state.home).await);
+    // shell/local_shell 增量输出 → tool_output WS 事件（批次三 #31 对话页实时可见）。
+    let progress_task = Arc::clone(&context.task);
     let tools = CoreTools::new(cwd.clone(), policy)
+        .with_progress_sink(Arc::new(move |call_id: &str, chunk: String| {
+            progress_task.push_event(json!({
+                "event_type": "tool_output",
+                "call_id": call_id,
+                "chunk": chunk,
+            }));
+        }))
         .with_skills_directory(state.home.join("skills"))
         .with_config_home(state.home.clone())
         .with_session_state(session.plan.clone(), session.loop_state.clone())
@@ -6346,7 +6362,16 @@ async fn run_turn(
     )
     .with_sub_agents(sub_agents, fallback_sub_agent_id)
     .without_persistent_memory();
+    // shell/local_shell 增量输出 → tool_output WS 事件（批次三 #31 对话页实时可见）。
+    let progress_task = Arc::clone(&task);
     let tools = CoreTools::new(cwd.clone(), policy)
+        .with_progress_sink(Arc::new(move |call_id: &str, chunk: String| {
+            progress_task.push_event(json!({
+                "event_type": "tool_output",
+                "call_id": call_id,
+                "chunk": chunk,
+            }));
+        }))
         .with_skills_directory(state.home.join("skills"))
         .with_config_home(state.home.clone())
         .with_session_state(session.plan.clone(), session.loop_state.clone())
@@ -6496,7 +6521,7 @@ async fn run_team_turn(
     let settings = read_collaboration_settings(&state.home);
     anyhow::ensure!(
         !settings.reviewer_selector.is_empty(),
-        "改码审查模式未配置审查模型，请在设置中选择 reviewerSelector"
+        "协同审查模式未配置审查模型，请在设置中选择 reviewerSelector"
     );
     let cycles = settings.max_cycles.clamp(1, 3);
     task.push_event(json!({
@@ -7536,8 +7561,8 @@ Access policy: {policy}",
         policy = policy.label(),
     ));
     prompt.push_str(
-        "\n\nRuntime routing: shell/local_shell accept environment=auto|host|termux|proot. Use proot for Linux userland tools, termux for Android-native tools, and host for file APIs/exports. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
-        Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text. When a tool result provides paths_guest, use those /workspace/... paths inside shell commands (they resolve in both Termux and ProotLinux), and the corresponding host absolute paths with built-in file tools.",
+        "\n\nRuntime routing: shell/local_shell accept environment=auto|proot. The Agent execution environment is unified to the proot Debian guest — use auto (or proot) everywhere; there is no model-facing termux/host environment. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
+        Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text. When a tool result provides paths_guest, use those /workspace/... paths inside shell commands, and the corresponding host absolute paths with built-in file tools.",
     );
     prompt.push_str(
         "\n\nCoomi source checkout architecture (when the current repository is Coomi):\n\
@@ -7557,27 +7582,11 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
             prompt.push_str(
                 "\n\nRuntime: shell commands run inside the active Debian ProotLinux guest. The verified PRoot launcher is available as `/usr/local/bin/proot` and `COOMI_PROOT_HOST=/usr/local/bin/proot`; do not infer the backend from legacy Termux paths.",
             );
-            // 环境事实卡：真实执行一次探测，给出当前 guest 的工具链与挂载健康状态。
-            if let Some(version) = runtime.active_version.clone() {
-                let backend = coomi_services::ProotLinuxBackend {
-                    runtime_root: home.join("runtime-v2"),
-                    version,
-                };
-                if let Ok(facts) =
-                    coomi_services::probe_guest_facts(&backend, cwd).await
-                {
-                    prompt.push_str(&format!(
-                        "\nRuntime facts (live probe): shell={}, python={}, git={}, node={}, curl={}, network={}, workspace={}, tmp={}.",
-                        if facts.sh { "ok" } else { "BROKEN" },
-                        facts.python.as_deref().unwrap_or("-"),
-                        facts.git.as_deref().unwrap_or("-"),
-                        facts.node.as_deref().unwrap_or("-"),
-                        facts.curl.as_deref().unwrap_or("-"),
-                        facts.network.as_deref().unwrap_or("-"),
-                        if facts.workspace { "ok" } else { "missing" },
-                        if facts.tmp_writable { "writable" } else { "unwritable" },
-                    ));
-                }
+            // 环境事实块（批次八 1.2）：按 Runtime 版本缓存的真实探测结果，
+            // 注入单一事实源，替代每回合重跑的无缓存 live probe。
+            if let Some(facts_block) = coomi_tools::environment_facts_block(home, cwd).await {
+                prompt.push_str("\n\n");
+                prompt.push_str(&facts_block);
             }
         }
     }

@@ -142,7 +142,7 @@ async function saveCollaboration() {
     return
   }
   loadCollaboration()
-  collaborationMessage.value = '改码审查配置已保存'
+  collaborationMessage.value = '协同审查配置已保存'
 }
 
 function selectorParts(selector: string) {
@@ -189,7 +189,7 @@ function backToDashboard() {
       <div class="tabs" role="tablist">
         <button :class="{ on: tab === 'providers' }" @click="tab = 'providers'">主模型</button>
         <button :class="{ on: tab === 'subagents' }" @click="tab = 'subagents'">子代理 <span>{{ subAgents.length }}/{{ subAgentLimit }}</span></button>
-        <button :class="{ on: tab === 'collaboration' }" @click="tab = 'collaboration'">改码审查</button>
+        <button :class="{ on: tab === 'collaboration' }" @click="tab = 'collaboration'">协同审查</button>
       </div>
       <p v-if="config.usingMock" class="banner">
         <CoomiIcon name="alert" :size="15" />

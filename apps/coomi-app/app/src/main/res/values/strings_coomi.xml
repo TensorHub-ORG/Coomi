@@ -111,10 +111,10 @@
     <string name="coomi_dash_restart">重启引擎</string>
     <string name="coomi_dash_stop">停止引擎</string>
     <string name="coomi_dash_runtime">运行时</string>
-    <string name="coomi_dash_terminal">终端</string>
-    <string name="coomi_dash_terminal_desc">打开 Termux shell</string>
-    <string name="coomi_dash_tui">终端版 Coomi</string>
-    <string name="coomi_dash_tui_desc">在终端里运行原生 coomi</string>
+    <string name="coomi_dash_terminal">终端（Termux 域）</string>
+    <string name="coomi_dash_terminal_desc">打开 Termux 用户域终端</string>
+    <string name="coomi_dash_tui">终端版 Coomi（Termux 域）</string>
+    <string name="coomi_dash_tui_desc">在 Termux 终端里运行 coomi CLI</string>
     <string name="coomi_dash_browser">在浏览器打开</string>
     <string name="coomi_dash_browser_desc">用系统浏览器访问本机引擎</string>
     <string name="coomi_dash_catalog">拓展管理</string>
