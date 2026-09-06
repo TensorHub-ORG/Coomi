@@ -333,22 +333,10 @@ public class CoomiDashboardActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // 需求：控制台返回 = 退出 app，且退出后终止所有由 coomi 启动的进程。
-        // 先异步停引擎（Rust 侧收到终止信号会清理全部工具子进程），
-        // 再停前台保活服务与引擎宿主，最后退出。
-        if (mBound && mCoomiService != null) {
-            mCoomiService.stopEngine(result -> runOnUiThread(this::shutdownApp));
-        } else {
-            shutdownApp();
-        }
-    }
-
-    private void shutdownApp() {
-        try {
-            stopService(new Intent(this, CoomiEngineMonitor.class));
-            stopService(new Intent(this, CoomiService.class));
-        } catch (Exception ignored) { /* 服务可能未启动 */ }
-        finishAffinity();
+        // 批次七 #12：返回键 = 退到桌面并保持后台运行。引擎、常驻通知与运行中
+        // 任务不受影响（引擎本身按常驻设计；旧行为"返回即停引擎退出"会杀掉
+        // 后台任务，按反馈调整）。需要彻底退出时从最近任务划掉即可。
+        moveTaskToBack(true);
     }
 
     private void restartEngine() {

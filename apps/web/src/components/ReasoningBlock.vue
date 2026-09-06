@@ -41,7 +41,8 @@ const tick = computed(() => {
       </template>
       <CoomiIcon name="chevronRight" :size="13" class="chev" :class="{ open }" />
     </button>
-    <div v-if="open" class="body">{{ block.content }}</div>
+    <!-- 批次五 #28：展开态双击内容区即可收起 -->
+    <div v-if="open" class="body" @dblclick="open = false">{{ block.content }}</div>
   </div>
 </template>
 

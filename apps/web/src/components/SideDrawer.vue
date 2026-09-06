@@ -23,6 +23,11 @@ const config = useConfigStore()
 const menuFor = ref<SessionMeta | null>(null)
 const renamingId = ref('')
 const renameText = ref('')
+// 批次四 #14：WebView 里 window.confirm 被静默吞掉（无 WebChromeClient），
+// 「清空会话数据」此前永远走不到请求——改为两次点击确认 + 行内失败提示。
+const clearArmed = ref(false)
+const clearError = ref(false)
+let clearArmTimer: ReturnType<typeof setTimeout> | undefined
 
 const isEmpty = computed(() => sessions.groups.length === 0)
 
@@ -62,7 +67,12 @@ function startNew() {
   emit('close')
 }
 
-function closeMenu() { menuFor.value = null }
+function closeMenu() {
+  menuFor.value = null
+  clearArmed.value = false
+  clearError.value = false
+  if (clearArmTimer) clearTimeout(clearArmTimer)
+}
 
 /** WebView 里 window.prompt 默认被吞掉，所以重命名走行内输入框。 */
 async function beginRename() {
@@ -90,7 +100,21 @@ async function doPin() {
 
 async function doClear() {
   if (!menuFor.value) return
-  if (await session.clearSessionData(menuFor.value.id)) closeMenu()
+  if (!clearArmed.value) {
+    clearArmed.value = true
+    clearError.value = false
+    if (clearArmTimer) clearTimeout(clearArmTimer)
+    clearArmTimer = setTimeout(() => { clearArmed.value = false }, 4000)
+    return
+  }
+  clearArmed.value = false
+  if (clearArmTimer) clearTimeout(clearArmTimer)
+  const id = menuFor.value.id
+  if (await session.clearSessionData(id)) {
+    closeMenu()
+  } else {
+    clearError.value = true
+  }
 }
 
 function doDelete() {
@@ -208,8 +232,9 @@ function openDashboard() {
           </button>
           <template v-if="isGlobalMeta(menuFor)">
             <button class="sheet-item danger" @click="doClear">
-              <CoomiIcon name="trash" :size="18" /><span>清空会话数据</span>
+              <CoomiIcon name="trash" :size="18" /><span>{{ clearArmed ? '再点一次确认清空' : '清空会话数据' }}</span>
             </button>
+            <p v-if="clearError" class="sheet-hint danger-text">清空失败，请重试；若反复失败请反馈。</p>
             <p class="sheet-hint">全局常驻会话：可清空数据，不可删除</p>
           </template>
           <template v-else>
@@ -325,6 +350,7 @@ function openDashboard() {
   font-size: 10.5px; font-weight: 650; line-height: 1;
 }
 .sheet-hint { margin: 0; padding: 12px 14px; color: var(--text-3); font-size: 12px; }
+.danger-text { color: var(--danger, #b3261e); }
 .rmeta {
   display: flex; align-items: center; gap: 4px; margin-top: 3px;
   font-size: 11.5px; color: var(--text-3);

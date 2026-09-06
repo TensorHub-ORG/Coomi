@@ -111,6 +111,30 @@ function rebuild() {
   blocks.value = splitBlocks(src.value).map(renderMarkdown)
 }
 
+/** 批次五 #6：代码块「复制」按钮的事件委托（v-html 内容不带 Vue 绑定）。 */
+async function onBlockClick(event: Event) {
+  const target = event.target as HTMLElement
+  const button = target.closest('button[data-copy-code]')
+  if (!button) return
+  const pre = button.closest('.code-wrap')?.querySelector('pre')
+  if (!pre) return
+  const text = pre.textContent ?? ''
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy') } catch { /* 放弃 */ }
+    document.body.removeChild(ta)
+  }
+  button.textContent = '已复制'
+  setTimeout(() => { button.textContent = '复制' }, 1400)
+}
+
 function schedule() {
   if (props.msg.kind !== 'assistant') return
   if (!props.msg.streaming) {
@@ -154,7 +178,7 @@ async function copyAll() {
 
   <div v-else class="assistant" :class="{ life: isLife }">
     <div v-if="isLife" class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
-    <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" />
+    <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" @click="onBlockClick" />
     <FileInline v-if="filePaths.length" :paths="filePaths" />
     <span v-if="streaming" class="stream-caret" />
     <div class="acts">
@@ -185,6 +209,16 @@ async function copyAll() {
 
 .assistant { max-width: 100%; color: var(--text); }
 .blk + .blk { margin-top: 10px; }
+
+/* 批次五 #6：代码块复制按钮（v-html 内容需 :deep 穿透） */
+.blk :deep(.code-wrap) { position: relative; }
+.blk :deep(.code-copy) {
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  padding: 3px 10px; border: 0; border-radius: var(--r-sm, 6px);
+  background: var(--fill-strong, rgba(127,127,127,.18));
+  color: var(--text-2); font-size: 11px; font-weight: 600;
+}
+.blk :deep(.code-copy):active { background: var(--blue-soft); color: var(--blue); }
 
 /* 生命体主动消息：左侧渐变边条 + 柔和底色，弱化“这是一条系统消息”的距离感。 */
 .assistant.life { padding: 2px 0 4px; }

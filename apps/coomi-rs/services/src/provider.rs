@@ -1,5 +1,7 @@
+use crate::EndpointResolver;
 use crate::ProviderConfig;
 use crate::ProviderKind;
+use crate::ProviderProtocol;
 use crate::RemoteCompactionMode;
 use anyhow::Context;
 use anyhow::Result;
@@ -168,7 +170,7 @@ impl HttpModelProvider {
         &self,
         request: CompactionRequest,
     ) -> Result<CompactionResponse> {
-        let endpoint = endpoint(&self.config.base_url, "responses/compact");
+        let endpoint = responses_compact_endpoint(&self.config.base_url);
         let body = json!({
             "model": request.model,
             "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
@@ -244,7 +246,7 @@ impl HttpModelProvider {
         &self,
         request: CompactionRequest,
     ) -> Result<CompactionResponse> {
-        let endpoint = endpoint(&self.config.base_url, "responses");
+        let endpoint = responses_endpoint(&self.config.base_url);
         let body = remote_compaction_v2_body(
             &request,
             self.config.capabilities.supports_web_search,
@@ -272,7 +274,7 @@ impl HttpModelProvider {
     }
 
     async fn openai_responses(&self, request: ModelRequest) -> Result<ModelResponse> {
-        let endpoint = endpoint(&self.config.base_url, "responses");
+        let endpoint = responses_endpoint(&self.config.base_url);
         let mut body = json!({
             "model": request.model,
             "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
@@ -348,7 +350,7 @@ impl HttpModelProvider {
         request: ModelRequest,
         observer: &dyn ModelStreamObserver,
     ) -> Result<ModelResponse> {
-        let endpoint = endpoint(&self.config.base_url, "responses");
+        let endpoint = responses_endpoint(&self.config.base_url);
         let mut body = json!({
             "model": request.model,
             "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
@@ -685,6 +687,19 @@ impl HttpModelProvider {
                 remove_json_field(&mut value, "top_k");
                 remove_json_field(&mut value, "parallel_tool_calls");
                 remove_optional_capability_fields(&mut value);
+                value
+            },
+            &mut steps,
+        );
+        // #8：gpt-5 系模型拒绝 temperature，且该错误是持久 400——加入阶梯兜底。
+        push_step(
+            {
+                let mut value = body.clone();
+                remove_reasoning_fields(&mut value);
+                remove_json_field(&mut value, "top_k");
+                remove_json_field(&mut value, "parallel_tool_calls");
+                remove_optional_capability_fields(&mut value);
+                remove_json_field(&mut value, "temperature");
                 value
             },
             &mut steps,
@@ -1355,6 +1370,10 @@ impl CompactionStreamState {
 struct ResponsesStreamState {
     content: String,
     tools: BTreeMap<String, PartialToolCall>,
+    /// item_id（fc_…）→ call_id（call_…）别名：output_item.added 两个都带，
+    /// 而 function_call_arguments.delta 只带 item_id——不归一会让同一工具调用
+    /// 分裂成两条（call_id 条目有名无参、item_id 条目有参无名）。（#8）
+    item_aliases: BTreeMap<String, String>,
     usage: TokenUsage,
 }
 
@@ -1382,6 +1401,12 @@ impl ResponsesStreamState {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_owned();
+                    if let Some(item_id) = item.get("id").and_then(Value::as_str)
+                        && item_id != id
+                        && !id.is_empty()
+                    {
+                        self.item_aliases.insert(item_id.to_owned(), id.clone());
+                    }
                     let target = self.tools.entry(id.clone()).or_default();
                     target.id = id;
                     if let Some(name) = item.get("name").and_then(Value::as_str) {
@@ -1393,12 +1418,13 @@ impl ResponsesStreamState {
                 }
             }
             Some("response.function_call_arguments.delta") => {
-                let id = value
+                let raw = value
                     .get("call_id")
                     .or_else(|| value.get("item_id"))
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
+                let id = self.item_aliases.get(&raw).cloned().unwrap_or(raw);
                 if let Some(delta) = value.get("delta").and_then(Value::as_str) {
                     self.tools.entry(id).or_default().arguments.push_str(delta);
                 }
@@ -1462,6 +1488,17 @@ fn endpoint(base_url: &str, suffix: &str) -> String {
     } else {
         format!("{base_url}/{suffix}")
     }
+}
+
+/// #8：Responses 端点统一走 EndpointResolver——base_url 不带版本段时自动补
+/// `v1`（如 https://api.openai.com → /v1/responses），与能力探测路径一致。
+/// 之前的 endpoint() 直接拼 `/responses`，造成"检测通过、对话 404"。
+fn responses_endpoint(base_url: &str) -> String {
+    EndpointResolver::new(base_url, ProviderProtocol::OpenAiResponses).inference("")
+}
+
+fn responses_compact_endpoint(base_url: &str) -> String {
+    format!("{}/compact", responses_endpoint(base_url))
 }
 
 async fn checked_json(response: Response, phase: &'static str) -> Result<Value> {
@@ -1708,13 +1745,16 @@ fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
                 let output = if message.images.is_empty() || !supports_vision {
                     Value::String(message.content.clone())
                 } else {
+                    // #8：Responses API 的 function_call_output 内容项类型是
+                    // output_text/output_image（input_* 只用于 user 消息），
+                    // 用错会被 400 拒绝。
                     let mut items = vec![json!({
-                        "type": "input_text",
+                        "type": "output_text",
                         "text": message.content
                     })];
                     items.extend(message.images.iter().map(|image| {
                         json!({
-                            "type": "input_image",
+                            "type": "output_image",
                             "image_url": image.data_url()
                         })
                     }));
@@ -2487,7 +2527,7 @@ mod tests {
         let history = vec![ChatMessage::assistant("", vec![call]), output];
 
         let responses = responses_input(&history, true).expect("Responses history");
-        assert_eq!(responses[1]["output"][1]["type"], "input_image");
+        assert_eq!(responses[1]["output"][1]["type"], "output_image");
         assert_eq!(
             responses[1]["output"][1]["image_url"],
             "data:image/png;base64,BASE64"

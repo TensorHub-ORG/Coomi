@@ -5299,7 +5299,7 @@ async fn handle_command(
                     .await;
                     let failed = result.is_err();
                     if let Err(error) = result {
-                        compact_context.task.push_event(json!({"event_type":"agent_error","message":format!("上下文压缩失败：{error:#}"),"is_fatal":false}));
+                        compact_context.task.push_event(json!({"event_type":"agent_error","message":format!("上下文压缩失败：{}", humanize_provider_error(&format!("{error:#}"))),"is_fatal":false}));
                     }
                     compact_context
                         .task
@@ -5399,7 +5399,7 @@ async fn handle_command(
                     } else {
                         turn_task.push_event(json!({
                             "event_type": "agent_error",
-                            "message": message,
+                            "message": humanize_provider_error(&message),
                             "is_fatal": false,
                         }));
                     }
@@ -5822,7 +5822,7 @@ async fn handle_command(
                 .await;
                 let failed = result.is_err();
                 if let Err(error) = result {
-                    turn_task.push_event(json!({"event_type":"agent_error","message":format!("{error:#}"),"is_fatal":false}));
+                    turn_task.push_event(json!({"event_type":"agent_error","message":humanize_provider_error(&format!("{error:#}")),"is_fatal":false}));
                 }
                 turn_task.push_event(json!({"event_type":"turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
@@ -5882,7 +5882,7 @@ async fn handle_command(
                 .await;
                 let failed = result.is_err();
                 if let Err(error) = result {
-                    turn_task.push_event(json!({"event_type":"agent_error","message":format!("{error:#}"),"is_fatal":false}));
+                    turn_task.push_event(json!({"event_type":"agent_error","message":humanize_provider_error(&format!("{error:#}")),"is_fatal":false}));
                 }
                 turn_task.push_event(json!({"event_type":"turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
@@ -5943,7 +5943,7 @@ async fn handle_command(
                 .await;
                 let failed = result.is_err();
                 if let Err(error) = result {
-                    turn_task.push_event(json!({"event_type":"agent_error","message":format!("{error:#}"),"is_fatal":false}));
+                    turn_task.push_event(json!({"event_type":"agent_error","message":humanize_provider_error(&format!("{error:#}")),"is_fatal":false}));
                 }
                 turn_task.push_event(json!({"event_type":"turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
@@ -6190,6 +6190,53 @@ async fn compact_web_session(
         .await?;
     store.save(&session)?;
     Ok(())
+}
+
+/// B3：Provider 错误的用户可读化——把常见 HTTP 错误映射为"中文原因 + 下一步
+/// 动作"，原始错误附在末尾供诊断。未命中的错误原样返回。
+fn humanize_provider_error(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    let hint: &str = if lower.contains("401")
+        || lower.contains("invalid api key")
+        || lower.contains("invalid_api_key")
+        || lower.contains("authenticationerror")
+        || lower.contains("authentication error")
+        || lower.contains("unauthorized")
+    {
+        "API Key 无效或未生效。请到「供应商」页检查 Key 是否完整、有无多余空格，必要时重新生成。"
+    } else if lower.contains("402")
+        || lower.contains("insufficient_balance")
+        || lower.contains("insufficient balance")
+        || lower.contains("quota")
+        || lower.contains("billing")
+    {
+        "供应商账户余额或额度不足。请前往供应商控制台充值，或更换模型/供应商。"
+    } else if lower.contains("429")
+        || lower.contains("rate limit")
+        || lower.contains("ratelimit")
+        || lower.contains("too many requests")
+    {
+        "触发供应商限流。请稍等片刻重试，或在对话页切换其他模型。"
+    } else if lower.contains("404")
+        || lower.contains("model_not_found")
+        || lower.contains("model not found")
+        || lower.contains("does not exist")
+    {
+        "模型或接口地址不存在。请检查模型名拼写，以及 Base URL 与协议类型是否匹配（如 /v1 后缀）。"
+    } else if lower.contains("context length")
+        || lower.contains("maximum context")
+        || lower.contains("too long")
+    {
+        "上下文超过模型窗口限制。可发送 /compact 压缩上下文，或新建会话继续。"
+    } else if lower.contains("400")
+        || lower.contains("invalid_request_error")
+        || lower.contains("invalid request")
+    {
+        "请求被供应商拒绝（参数与该模型不兼容）。可尝试切换模型重试；若反复出现请反馈。"
+    } else {
+        return message.to_owned();
+    };
+    format!("{hint}\n原始错误：{message}")
 }
 
 fn is_retryable_error_text(message: &str) -> bool {
@@ -7605,6 +7652,11 @@ async fn system_prompt_with_cognitive(
     );
     prompt.push_str(
         "\n\nCommunication: lead with results, avoid restating the request or narrating obvious steps, and keep progress updates to meaningful milestones, blockers, or decisions. Final responses start with the outcome and verification. Be concise without hiding failures, risks, or unfinished work. Tool recovery: never repeat an unchanged failing call more than once; for permission, policy, invalid-argument, or missing-path errors, change the parameters or approach before retrying.",
+    );
+    prompt.push_str(
+        "
+
+Defect feedback (批次七 #5): when you clearly hit a defect of Coomi itself (crash, engine/UI bug, feature that silently does nothing — not user error, not provider-side API failures), after helping the user recover ask ONCE: 「这看起来是 Coomi 本身的缺陷。需要我帮你总结一份给官方开发组织的反馈建议吗？也可以加入 QQ 交流群 950691124 反馈。」 If the user agrees, produce a concise feedback summary (现象、复现步骤、相关日志/诊断信息，不含对话隐私内容) and offer request_file_export if a diagnostic file was produced. Never raise this more than once per defect per session, and never for ordinary tool errors that already carry actionable guidance.",
     );
     prompt.push_str(
         "\n\nDownloads: when a tool or dependency must be downloaded, start it through local_shell exec with yield-time_ms 0, continue independent todo items while it runs, then call local_shell wait before the first dependent step. Never assume a download succeeded without checking its final exit result.",

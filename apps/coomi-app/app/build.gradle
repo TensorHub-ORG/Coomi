@@ -72,8 +72,8 @@ android {
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion coomiTargetSdk
         // Keep the executable Termux bootstrap security domain for v1.4.0.
-        versionCode 44
-        versionName "1.4.6-test.1"
+        versionCode 45
+        versionName "1.4.6-test.2"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

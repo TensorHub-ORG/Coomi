@@ -93,9 +93,18 @@ async function insert(t: string) {
   textarea.value?.focus()
 }
 
-/** 斜杠指令：直接替换输入框内容，可继续编辑。 */
+/** 斜杠指令插入（批次五 #20）：不覆盖已输入内容——
+ * 无输入 → `cmd `；已有普通输入 → `cmd <原输入>`；已是别的指令 → 只替换指令头。 */
 async function insertSlash(cmd: string) {
-  text.value = cmd
+  const existing = text.value.replace(/^\s+/, '')
+  if (!existing) {
+    text.value = cmd + ' '
+  } else if (existing.startsWith('/')) {
+    const rest = existing.replace(/^\/\S+\s*/, '')
+    text.value = rest ? `${cmd} ${rest}` : cmd + ' '
+  } else {
+    text.value = `${cmd} ${existing}`
+  }
   quickOpen.value = false
   await nextTick()
   autoGrow()
@@ -369,7 +378,8 @@ watch(text, () => {
 .quick-scrim { position: fixed; inset: 0; z-index: 1; }
 .quick {
   position: absolute; z-index: 2; left: 10px; right: 10px; bottom: calc(100% + 4px);
-  max-height: min(56vh, 360px); overflow-y: auto;
+  /* 批次五 #18：放宽到 70vh，推理强度 + 全部斜杠命令默认一屏可见，不再藏在滚动下面 */
+  max-height: min(70vh, 480px); overflow-y: auto;
   padding: 10px 12px 12px;
   border: 1px solid var(--border); border-radius: var(--r-card);
   background: var(--bg); box-shadow: var(--shadow-2);

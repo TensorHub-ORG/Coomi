@@ -367,6 +367,11 @@ export const useSessionStore = defineStore('session', () => {
         endAssistantStream(); cancelRunningTools(); connection.setRetry(null); runState.value = 'idle'
         // 收尾清理：去掉空白思考块（部分供应商会发空的 reasoning 分片）。
         timeline.value = timeline.value.filter(item => !(item.kind === 'reasoning' && !item.content.trim()))
+        // 批次五 #7：任务结束后执行过程自动折叠——收起全部已展开的工具卡，
+        // 最终总结（最后一条助手消息）保持醒目；用户手动点开的（manual）不受影响。
+        timeline.value.forEach(item => {
+          if (item.kind === 'tool' && item.status !== 'awaiting_approval') item.expanded = false
+        })
         {
           const failures = turnToolTrace.filter(item => item.status === 'error').length
           if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {

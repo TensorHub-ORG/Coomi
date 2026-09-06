@@ -15,6 +15,7 @@ const SKILL_CATALOG: &str = include_str!("../skills.json");
 const CUSTOM_ITERATION_SKILL: &str = include_str!("../coomi-custom-iteration.md");
 const RUNTIME_ENVIRONMENT_SKILL: &str = include_str!("../runtime-environments.md");
 const SKILL_CREATOR_SKILL: &str = include_str!("../skill-creator.md");
+const UI_DESIGNER_SKILL: &str = include_str!("../ui-designer.md");
 const COOMIDEV_ENV: &str = include_str!("../../../../tools/mobile-build/coomidev-env.sh");
 const COOMIDEV_DOCTOR: &str = include_str!("../../../../tools/mobile-build/coomidev-doctor.sh");
 const COOMIDEV_BUILD: &str = include_str!("../../../../tools/mobile-build/build-coomidev.sh");
@@ -153,6 +154,26 @@ impl CatalogInstaller {
                     repository: "Coomi/bundled".into(),
                     git_ref: "1.4.5".into(),
                     subdir: "skill-creator".into(),
+                },
+                &destination,
+                "bundled",
+            )?;
+            return Ok(destination);
+        }
+        if id.eq_ignore_ascii_case("ui-designer") {
+            // 批次七 #1：UI 设计师为内置 Skill，随包分发、默认安装、可在管理页停用。
+            let destination = self.home.join("skills").join("ui-designer");
+            fs::create_dir_all(&destination)?;
+            fs::write(destination.join("SKILL.md"), UI_DESIGNER_SKILL)?;
+            save_skill_metadata(
+                &self.home,
+                &SkillEntry {
+                    id: "ui-designer".into(),
+                    name: "UI Designer".into(),
+                    description: "按 Coomi 前端设计语言设计或修改界面（配色、间距、组件与交互规范）。".into(),
+                    repository: "Coomi/bundled".into(),
+                    git_ref: "1.4.6".into(),
+                    subdir: "ui-designer".into(),
                 },
                 &destination,
                 "bundled",

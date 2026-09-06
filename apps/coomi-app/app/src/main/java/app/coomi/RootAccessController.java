@@ -17,7 +17,9 @@ import java.io.File;
  */
 public final class RootAccessController {
 
-    private static final long TIMEOUT_MILLIS = 10_000L;
+    private static final long TIMEOUT_MILLIS = 25_000L;
+    // 批次七 #29：10s 赶不上 Magisk/KernelSU 的授权弹窗（弹窗期被当作超时，
+    // 随后 30s 冷却里重试都返回缓存失败 → "已授权却显示未授权"）。放宽到 25s。
     private static final long FAILURE_COOLDOWN_MILLIS = 30_000L;
     private static final String[] SU_CANDIDATES = {
         "/system_ext/bin/su",
@@ -33,7 +35,6 @@ public final class RootAccessController {
     private static volatile Result cachedGranted;
     private static volatile Result cachedFailure;
     private static volatile long failureCooldownUntil;
-    private static volatile String resolvedCandidate;
 
     public enum Status {
         GRANTED,
@@ -67,8 +68,17 @@ public final class RootAccessController {
         void onComplete(Result result);
     }
 
-    /** Starts one user-requested check. A second check is ignored while active. */
+    /** Starts one user-requested check (bypasses failure cooldown; user initiated). */
     public void check(Callback callback) {
+        check(callback, true);
+    }
+
+    /** 用户主动点「重试」时传 forceRetry=true：跳过失败冷却与缓存，立即重新探测。 */
+    public void check(Callback callback, boolean forceRetry) {
+        if (forceRetry) {
+            cachedFailure = null;
+            failureCooldownUntil = 0L;
+        }
         Result granted = cachedGranted;
         if (granted != null) {
             if (callback != null) mainHandler.post(() -> callback.onComplete(granted));
@@ -121,31 +131,37 @@ public final class RootAccessController {
     }
 
     private Result runCheck() {
-        String su = resolveCandidate();
-        CandidateResult candidate = runCandidate(su);
-        return candidate == null
-            ? Result.failed(Status.UNAVAILABLE, -1, "Unable to start Root shell")
-            : candidate.result;
+        // 批次七 #29：遍历所有 su 候选，而不是永久缓存第一个存在的——
+        // 首个候选可能是失效包装脚本，另一个才是真正可授权的。
+        for (String su : candidatePaths()) {
+            CandidateResult candidate = runCandidate(su);
+            if (candidate == null) continue;
+            if (candidate.result.status == Status.GRANTED) return candidate.result;
+            // 候选存在但被明确拒绝：不必再试其他路径，这就是最终答案。
+            if (candidate.result.status == Status.DENIED) return candidate.result;
+        }
+        return Result.failed(Status.UNAVAILABLE, -1, "Unable to start Root shell");
     }
 
-    /** Selects one canonical candidate without invoking su or opening an authorization dialog. */
-    private static String resolveCandidate() {
-        String cached = resolvedCandidate;
-        if (cached != null) return cached;
+    /** 现存可执行的 su 候选；一个都没有时回退 PATH 查找，再回退裸 "su"。 */
+    private static java.util.List<String> candidatePaths() {
+        java.util.List<String> candidates = new java.util.ArrayList<>();
         for (String candidate : SU_CANDIDATES) {
-            if (!candidate.startsWith("/")) continue;
             File file = new File(candidate);
             if (file.isFile() && file.canExecute()) {
                 try {
-                    resolvedCandidate = file.getCanonicalPath();
+                    candidates.add(file.getCanonicalPath());
                 } catch (IOException ignored) {
-                    resolvedCandidate = file.getAbsolutePath();
+                    candidates.add(file.getAbsolutePath());
                 }
-                return resolvedCandidate;
             }
         }
-        resolvedCandidate = "su";
-        return resolvedCandidate;
+        if (candidates.isEmpty()) {
+            String path = System.getenv("PATH");
+            File onPath = findExecutableOnPath(path, "su");
+            candidates.add(onPath != null ? onPath.getAbsolutePath() : "su");
+        }
+        return candidates;
     }
 
     static File findExecutableOnPath(String path, String executable) {
@@ -206,7 +222,9 @@ public final class RootAccessController {
 
             joinReader(reader, 500L);
             String text = output.toString().trim();
-            if (exitCode == 0 && hasRootIdentity(text)) {
+            // 批次七 #29：uid=0 是唯一事实源——部分 ROM 的 su 包装脚本即使成功
+            // 也会带 permission/not allowed 字样，不能据此判为拒绝。
+            if (hasRootIdentity(text)) {
                 return new CandidateResult(Result.granted(exitCode, text));
             }
             if (exitCode != 0 && containsDenial(text)) {

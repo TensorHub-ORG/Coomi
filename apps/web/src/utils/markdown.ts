@@ -95,11 +95,21 @@ const cache = new Map<string, string>()
 export function renderMarkdown(src: string): string {
   const hit = cache.get(src)
   if (hit !== undefined) return hit
-  const html = sanitize(marked.parse(src, { async: false }) as string)
+  const html = decorateCodeBlocks(sanitize(marked.parse(src, { async: false }) as string))
   if (cache.size >= CACHE_MAX) {
     const oldest = cache.keys().next().value
     if (oldest !== undefined) cache.delete(oldest)
   }
   cache.set(src, html)
   return html
+}
+
+/**
+ * 批次五 #6：给每个代码块包一层带「复制」按钮的容器。注入发生在 sanitize
+ * 之后（只注入我们自己的固定标记，无注入风险）；点击通过 MessageBubble 里的
+ * 事件委托处理（v-html 内容不经过 Vue 事件绑定）。
+ */
+function decorateCodeBlocks(html: string): string {
+  if (!html.includes('<pre>')) return html
+  return html.replace(/<pre>/g, '<div class="code-wrap"><button type="button" class="code-copy" data-copy-code>复制</button><pre>')
 }

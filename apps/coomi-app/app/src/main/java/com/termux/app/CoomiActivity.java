@@ -617,6 +617,16 @@ public class CoomiActivity extends Activity {
             return app.coomi.UpdateChecker.currentVersionCode(CoomiActivity.this);
         }
 
+        /** 当前安装的 versionName（检查更新页展示用，批次七 #9）。 */
+        @JavascriptInterface
+        public String getAppVersionName() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
         /** 从 web 检查更新页发起下载并安装（复用更新源的签名校验流程）。 */
         @JavascriptInterface
         public void installApk(String url, String version) {

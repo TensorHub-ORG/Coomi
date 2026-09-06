@@ -260,6 +260,7 @@ public class CoomiLauncherActivity extends Activity {
         // Root authorization is deliberately user initiated. Re-running `su` from
         // onResume can reopen a manager prompt or race Activity teardown after the
         // user returns from the Root app, which was the v1.4.x startup regression.
+        // 批次七 #29：按钮触发的都是用户主动重试，绕过失败冷却缓存。
         mRootAccessController.check(result -> {
             mRootCheckInFlight = false;
             if (generation != mRootCheckGeneration || isFinishing()
@@ -449,11 +450,12 @@ public class CoomiLauncherActivity extends Activity {
             return;
         }
 
-        // 控制台是 app 的主界面：打开 app 先进控制台（引擎状态 + 各功能入口），
-        // 从控制台再进入对话，符合安卓用户「回到主界面」的交互习惯。
-        Logger.logInfo(LOG_TAG, "All ready, routing to dashboard");
+        // 批次七 #21：尊重「启动到对话页」设置（CoomiHomePreference.home_route）——
+        // 设为 chat 的设备冷启动直达对话页；默认仍进控制台。
+        boolean chatHome = CoomiHomePreference.isChatHome(this);
+        Logger.logInfo(LOG_TAG, "All ready, routing to " + (chatHome ? "chat" : "dashboard"));
         mStatusText.setText(R.string.coomi_starting);
-        Intent intent = new Intent(this, CoomiDashboardActivity.class);
+        Intent intent = new Intent(this, chatHome ? com.termux.app.CoomiActivity.class : CoomiDashboardActivity.class);
         startActivity(intent);
         finish();
     }
