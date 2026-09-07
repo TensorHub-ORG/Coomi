@@ -165,6 +165,7 @@ function browseInFileManager() {
       <CoomiIcon name="chevronDown" :size="13" class="caret" />
     </button>
 
+    <Teleport to="body">
     <button v-if="modelOpen" class="model-scrim" aria-label="关闭模型选择" @click="modelOpen = false" />
     <div v-if="modelOpen" class="model-menu">
       <div v-if="modelGroups.length" class="model-tabs" role="tablist" aria-label="按供应商选择模型">
@@ -189,6 +190,7 @@ function browseInFileManager() {
         <p v-if="activeModelGroup.items.length === 0" class="model-empty">{{ modelGroups.length ? '该供应商暂无可用模型' : '暂无已配置供应商' }}</p>
       </section>
     </div>
+    </Teleport>
 
     <button class="usage-button" :aria-expanded="usageOpen" aria-label="上下文用量" @click="toggleUsage">
       <svg class="usage-ring" viewBox="0 0 36 36" aria-hidden="true">
@@ -197,6 +199,7 @@ function browseInFileManager() {
       </svg>
     </button>
 
+    <Teleport to="body">
     <button v-if="usageOpen" class="usage-scrim" aria-label="关闭上下文数据" @click="usageOpen = false" />
     <div v-if="usageOpen" class="usage-menu">
       <p class="usage-title">上下文用量</p>
@@ -239,6 +242,8 @@ function browseInFileManager() {
       </div>
     </div>
 
+    </Teleport>
+
     <div v-if="pathPickerOpen" class="path-mask" @click="pathPickerOpen = false">
       <div class="path-sheet" @click.stop>
         <p class="path-title">会话标记路径</p>
@@ -263,15 +268,15 @@ function browseInFileManager() {
 <style scoped>
 .topbar {
   position: relative;
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; justify-content: space-between;
   min-height: 52px; padding: calc(var(--safe-top) + 6px) 8px 6px;
   background: var(--bg);
 }
-.model-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: transparent; }
+.model-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: rgba(0,0,0,0.3); }
 .model-menu {
-  position: absolute; z-index: 20; top: calc(var(--safe-top) + 49px); left: 50%;
-  width: min(78vw, 300px); max-height: min(52vh, 380px); overflow-y: auto;
-  transform: translateX(-50%); padding: 6px; border: 1px solid var(--border);
+  position: fixed; z-index: 20; top: 50%; left: 50%;
+  width: min(78vw, 300px); max-height: min(70vh, 420px); overflow-y: auto;
+  transform: translate(-50%, -50%); padding: 6px; border: 1px solid var(--border);
   border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-2);
 }
 .model-tabs {
@@ -393,9 +398,9 @@ function browseInFileManager() {
 .usage-value { stroke: var(--blue); stroke-linecap: round; transition: stroke-dasharray .22s ease; }
 
 .center {
-  flex: 1; min-width: 0;
+  position: absolute; left: 50%; transform: translateX(-50%);
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  height: 36px; padding: 0 10px;
+  height: 36px; padding: 0 10px; max-width: 60%;
   border: 0; border-radius: var(--r-pill); background: none; color: var(--text);
 }
 .center:active { background: var(--fill); }
