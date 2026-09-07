@@ -129,8 +129,8 @@
     <string name="coomi_dash_life_desc">安装、觉醒并启用 Coomi Life</string>
     <string name="coomi_dash_files">文件管理</string>
     <string name="coomi_dash_files_desc">浏览独立环境，管理项目文件</string>
-    <string name="coomi_dash_env_settings">ProotLinux 环境</string>
-    <string name="coomi_dash_env_settings_desc">内置并自动管理隔离 Linux 运行时</string>
+    <string name="coomi_dash_env_settings">系统环境</string>
+    <string name="coomi_dash_env_settings_desc">内置 Ubuntu 24.04 完整环境，自动管理升级</string>
     <string name="coomi_dash_check_update">检查更新</string>
     <string name="coomi_dash_check_update_desc">当前版本 Coomi-Android %1$s</string>
     <string name="coomi_dash_custom_iteration">自定义迭代（实验）</string>

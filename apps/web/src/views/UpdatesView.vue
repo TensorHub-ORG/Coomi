@@ -61,6 +61,7 @@ async function refresh() {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
+    void refreshDots()
   }
 }
 
@@ -79,10 +80,40 @@ function install() {
 
 const currentCode = ref(0)
 const currentVersionName = ref('')
+// 批次七红点策略：两通道各自有可更新版本时，在标签文字右侧亮小红点；
+// 测试通道的红点提醒可由用户开关（默认关）。
+const channelHasUpdate = ref<Record<Channel, boolean>>({ stable: false, test: false })
+const testDotEnabled = ref(false)
+const canToggleTestDot = computed(() => Boolean(window.CoomiAndroid?.setTestUpdateDotEnabled))
+
+async function refreshDots() {
+  const code = currentCode.value
+  if (!code) return
+  for (const key of ['stable', 'test'] as Channel[]) {
+    try {
+      const response = await fetch(`${CHANNELS[key].dir}/latest.json`, { cache: 'no-store' })
+      if (!response.ok) continue
+      const data = await response.json()
+      channelHasUpdate.value[key] = (Number(data.versionCode) || 0) > code
+    } catch { /* 单通道失败不影响另一个 */ }
+  }
+}
+
+function loadTestDot() {
+  testDotEnabled.value = window.CoomiAndroid?.getTestUpdateDotEnabled?.() ?? false
+}
+
+function setTestDot(event: Event) {
+  const enabled = (event.target as HTMLInputElement).checked
+  testDotEnabled.value = enabled
+  window.CoomiAndroid?.setTestUpdateDotEnabled?.(enabled)
+}
 
 onMounted(() => {
   currentCode.value = window.CoomiAndroid?.getAppVersionCode?.() ?? 0
   currentVersionName.value = window.CoomiAndroid?.getAppVersionName?.() ?? ''
+  loadTestDot()
+  void refreshDots()
   void refresh()
 })
 </script>
@@ -99,9 +130,14 @@ onMounted(() => {
           :class="{ selected: channel === key }"
           @click="switchChannel(key)"
         >
-          {{ item.label }}
+          <span class="tab-label">{{ item.label }}<i v-if="channelHasUpdate[key]" class="tab-dot" /></span>
         </button>
       </div>
+
+      <label v-if="canToggleTestDot" class="test-dot-toggle">
+        <span>测试通道有更新时也亮红点提醒</span>
+        <input type="checkbox" :checked="testDotEnabled" @change="setTestDot" />
+      </label>
 
       <p v-if="error" class="notice error">{{ error }}</p>
       <p v-if="loading" class="notice">正在获取更新信息…</p>
@@ -133,9 +169,23 @@ onMounted(() => {
 .body { flex: 1; overflow: auto; padding: 14px 12px calc(var(--safe-bottom) + 24px); }
 .channel-tabs { display: flex; gap: 8px; margin-bottom: 22px; }
 .channel-tabs button {
-  flex: 1; height: 38px; border-radius: 8px;
+  position: relative; flex: 1; height: 38px; border-radius: 8px;
   background: var(--fill); color: var(--text-2); font-size: 13px;
 }
+.tab-label { position: relative; display: inline-block; }
+.tab-dot {
+  position: absolute; top: -4px; right: -11px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--danger, #e5534b);
+  box-shadow: 0 0 0 2px var(--page, #fff);
+}
+.test-dot-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 0 0 14px; padding: 10px 12px;
+  border-radius: 8px; background: var(--fill);
+  color: var(--text-2); font-size: 12.5px;
+}
+.test-dot-toggle input { width: 18px; height: 18px; accent-color: var(--blue); }
 .channel-tabs button.selected { background: var(--blue); color: #fff; }
 .notice { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--blue-soft); color: var(--blue); font-size: 12.5px; }
 .fresh { color: var(--focus, #b4690e); }

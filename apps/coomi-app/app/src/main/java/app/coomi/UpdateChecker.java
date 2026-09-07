@@ -35,6 +35,10 @@ public final class UpdateChecker {
 
     private static final String UPDATE_URL =
         "https://updates.septemc.com/coomi/android/latest.json";
+    private static final String TEST_UPDATE_URL =
+        "https://updates.septemc.com/coomi/android_test/latest.json";
+    private static final String PREFS_NAME = "coomi_settings";
+    private static final String KEY_TEST_UPDATE_DOT = "test_update_dot_enabled";
     private static final String TAG = "UpdateChecker";
 
     public interface Callback {
@@ -52,57 +56,58 @@ public final class UpdateChecker {
         }
     }
 
-    /**
-     * 是否测试版构建：debug/demo 构建类型，或 semver 预发布版本号
-     * （versionName 含 '-'，如 1.5.0-beta.1；正式版 versionName 永远不含 '-'）。
-     * 测试版不参与静默更新提醒，只有正式版才显示红点。
-     */
-    public static boolean isTestBuild(Context context) {
-        if (com.termux.BuildConfig.DEBUG) return true;
+
+    /** 测试通道更新是否也亮红点（用户可选，默认关）。 */
+    public static boolean isTestUpdateDotEnabled(Context context) {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_TEST_UPDATE_DOT, false);
+    }
+
+    public static void setTestUpdateDotEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_TEST_UPDATE_DOT, enabled).apply();
+    }
+
+    /** 拉取单个通道 latest.json；任何失败返回 null（不阻断另一通道的判断）。 */
+    private static JSONObject fetchLatest(String url, int currentVersionCode) {
         try {
-            String versionName = context.getPackageManager()
-                .getPackageInfo(context.getPackageName(), 0).versionName;
-            return versionName != null && versionName.contains("-");
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
+            URL target = new URL(url);
+            HttpURLConnection conn = (HttpURLConnection) target.openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            conn.setRequestProperty("User-Agent", "Coomi-Android/" + currentVersionCode);
+            int code = conn.getResponseCode();
+            if (code != 200) return null;
+            try (InputStream in = conn.getInputStream()) {
+                java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = in.read(chunk)) >= 0) buffer.write(chunk, 0, n);
+                return new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8));
+            }
+        } catch (Exception e) {
+            return null;
         }
     }
 
-    /** 静默检查：只查询是否有新版本（用于「检查更新」红点提示），不自动下载。 */
+    /**
+     * 静默红点检查（双通道策略）：
+     * - 正式通道有更新 → 必亮红点；
+     * - 测试通道有更新 → 仅当用户开启「测试更新提醒」时亮红点。
+     * 手动进「检查更新」页面不受开关影响，两通道均可检查与下载。
+     */
     public static void checkSilent(final Context context, final Callback callback) {
-        // 测试版不亮更新红点：debug/demo 构建、或 semver 预发布版本号
-        // （如 1.5.0-beta.1）都视为测试版。手动进「检查更新」页面仍可正常检查下载。
-        if (isTestBuild(context)) {
-            callback.onResult(false, null, null, null);
-            return;
-        }
+        final int current = currentVersionCode(context);
         new Thread(() -> {
-            try {
-                URL url = new URL(UPDATE_URL);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(8000);
-                conn.setRequestProperty("User-Agent", "Coomi-Android/" + currentVersionCode(context));
-                int code = conn.getResponseCode();
-                if (code != 200) {
-                    callback.onResult(false, null, null, "更新源返回 HTTP " + code);
-                    return;
-                }
-                try (InputStream in = conn.getInputStream()) {
-                    java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
-                    byte[] chunk = new byte[8192];
-                    int n;
-                    while ((n = in.read(chunk)) >= 0) buffer.write(chunk, 0, n);
-                    JSONObject json = new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8));
-                    int remoteCode = json.optInt("versionCode", 0);
-                    String version = json.optString("version", "");
-                    String notes = json.optString("notes", "");
-                    int current = currentVersionCode(context);
-                    callback.onResult(remoteCode > current, version, notes, null);
-                }
-            } catch (Exception e) {
-                callback.onResult(false, null, null, "检查失败：" + e.getMessage());
-            }
+            JSONObject stable = fetchLatest(UPDATE_URL, current);
+            JSONObject test = fetchLatest(TEST_UPDATE_URL, current);
+            boolean stableUpdate = stable != null && stable.optInt("versionCode", 0) > current;
+            boolean testUpdate = test != null && test.optInt("versionCode", 0) > current;
+            boolean dot = stableUpdate || (testUpdate && isTestUpdateDotEnabled(context));
+            JSONObject chosen = stableUpdate ? stable : (testUpdate ? test : null);
+            String version = chosen == null ? null : chosen.optString("version", "");
+            String notes = chosen == null ? null : chosen.optString("notes", "");
+            callback.onResult(dot, version, notes, null);
         }).start();
     }
 

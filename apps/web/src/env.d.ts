@@ -32,6 +32,9 @@ interface Window {
     getAppVersionName?(): string
     /** 下载并安装更新 APK（url 为 APK 直链，version 用于文件名/提示）。 */
     installApk?(url: string, version: string): void
+    /** 测试通道更新红点开关（默认关）。 */
+    getTestUpdateDotEnabled?(): boolean
+    setTestUpdateDotEnabled?(enabled: boolean): void
   }
 }
 

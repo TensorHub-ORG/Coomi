@@ -633,6 +633,17 @@ public class CoomiActivity extends Activity {
             app.coomi.UpdateChecker.downloadAndInstall(CoomiActivity.this, url, version);
         }
 
+        /** 测试通道更新红点开关（用户可选，批次七红点策略）。 */
+        @JavascriptInterface
+        public boolean getTestUpdateDotEnabled() {
+            return app.coomi.UpdateChecker.isTestUpdateDotEnabled(CoomiActivity.this);
+        }
+
+        @JavascriptInterface
+        public void setTestUpdateDotEnabled(boolean enabled) {
+            app.coomi.UpdateChecker.setTestUpdateDotEnabled(CoomiActivity.this, enabled);
+        }
+
         /**
          * 保存图片（data URL）到相册或下载目录。
          * Android 10+（API 29+）：MediaStore 免权限直写，弹二选一；
