@@ -14,6 +14,8 @@ pub enum ProviderKind {
     OpenAiResponses,
     AnthropicMessages,
     GeminiNative,
+    /// DeepSeek 账号登录（官方 chat.deepseek.com 私有协议，非 OpenAI 兼容）。
+    DeepSeekAccount,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -39,6 +41,9 @@ impl ProviderKind {
             "openai_responses" | "responses" => Ok(Self::OpenAiResponses),
             "anthropic" | "anthropic_messages" => Ok(Self::AnthropicMessages),
             "gemini" | "gemini_native" => Ok(Self::GeminiNative),
+            "deepseek_account" | "deep_seek_account" | "deepseek_account_login" => {
+                Ok(Self::DeepSeekAccount)
+            }
             other => anyhow::bail!("unsupported provider protocol: {other}"),
         }
     }
@@ -464,9 +469,62 @@ impl Default for ProviderSettings {
     }
 }
 
+/// DeepSeek 账号专用 Provider 配置构造函数。
+/// 固定 base_url 为 `https://chat.deepseek.com`，协议 deepseek_account（私有协议），
+/// 模型列表为 `["deepseek-chat", "deepseek-reasoner"]`，上下文窗口 128k。
+pub fn deepseek_account_settings(api_key: &str, model: &str) -> ProviderSettings {
+    let mut settings = ProviderSettings {
+        provider_type: "deepseek_account".into(),
+        tool_protocol: Some("deepseek_account".into()),
+        display: "DeepSeek 账号".into(),
+        api_key: api_key.to_string(),
+        base_url: "https://chat.deepseek.com".into(),
+        model: model.to_string(),
+        fast_model: Some("deepseek-chat".into()),
+        context_window: Some(128_000),
+        ..Default::default()
+    };
+    // 显式声明模型列表，确保前端可展示 Chat/Reasoner 选择
+    settings.extra.insert(
+        "models".into(),
+        serde_json::json!(["deepseek-chat", "deepseek-reasoner"]),
+    );
+    settings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deepseek_account_provider_has_fixed_models() {
+        let settings = deepseek_account_settings("test-token", "deepseek-chat");
+        assert_eq!(settings.base_url, "https://chat.deepseek.com");
+        assert_eq!(settings.model, "deepseek-chat");
+        assert_eq!(settings.context_window, Some(128_000));
+        assert_eq!(settings.provider_type, "deepseek_account");
+        assert_eq!(
+            settings.tool_protocol,
+            Some("deepseek_account".to_string())
+        );
+        assert!(!settings.api_key.is_empty());
+        let models = settings
+            .extra
+            .get("models")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert!(models.contains(&"deepseek-chat".to_string()));
+        assert!(models.contains(&"deepseek-reasoner".to_string()));
+        assert_eq!(
+            ProviderKind::from_config(&settings.provider_type, settings.tool_protocol.as_deref())
+                .expect("deepseek_account parses"),
+            ProviderKind::DeepSeekAccount
+        );
+    }
 
     #[test]
     fn choices_only_include_models_declared_by_providers() {

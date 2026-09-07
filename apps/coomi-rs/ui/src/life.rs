@@ -340,6 +340,7 @@ pub fn ensure_global_session(home: &Path, cwd: &Path) -> Result<()> {
     }
     let mut session = coomi_engine::Session::new(String::new(), String::new(), cwd.to_path_buf());
     session.id = id;
+    session.title = "常驻会话".to_owned();
     store.save(&session)?;
     Ok(())
 }

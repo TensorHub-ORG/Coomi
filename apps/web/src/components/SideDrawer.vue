@@ -25,8 +25,8 @@ const renamingId = ref('')
 const renameText = ref('')
 // 批次四 #14：WebView 里 window.confirm 被静默吞掉（无 WebChromeClient），
 // 「清空会话数据」此前永远走不到请求——改为两次点击确认 + 行内失败提示。
-const clearArmed = ref(false)
-const clearError = ref(false)
+const clearArmed = ref<'context' | 'all' | null>(null)
+const clearError = ref('')
 let clearArmTimer: ReturnType<typeof setTimeout> | undefined
 
 const isEmpty = computed(() => sessions.groups.length === 0)
@@ -69,8 +69,8 @@ function startNew() {
 
 function closeMenu() {
   menuFor.value = null
-  clearArmed.value = false
-  clearError.value = false
+  clearArmed.value = null
+  clearError.value = ''
   if (clearArmTimer) clearTimeout(clearArmTimer)
 }
 
@@ -98,22 +98,23 @@ async function doPin() {
   if (await sessions.togglePin(menuFor.value.id)) closeMenu()
 }
 
-async function doClear() {
+async function doClear(mode: 'context' | 'all') {
   if (!menuFor.value) return
-  if (!clearArmed.value) {
-    clearArmed.value = true
-    clearError.value = false
+  if (clearArmed.value !== mode) {
+    clearArmed.value = mode
+    clearError.value = ''
     if (clearArmTimer) clearTimeout(clearArmTimer)
-    clearArmTimer = setTimeout(() => { clearArmed.value = false }, 4000)
+    clearArmTimer = setTimeout(() => { clearArmed.value = null }, 4000)
     return
   }
-  clearArmed.value = false
+  clearArmed.value = null
   if (clearArmTimer) clearTimeout(clearArmTimer)
   const id = menuFor.value.id
-  if (await session.clearSessionData(id)) {
+  const result = await session.clearSessionData(id, mode)
+  if (result.ok) {
     closeMenu()
   } else {
-    clearError.value = true
+    clearError.value = result.error || '清空失败，请重试'
   }
 }
 
@@ -227,17 +228,22 @@ function openDashboard() {
     <div v-if="menuFor" class="sheet-wrap" @click.self="closeMenu">
       <div class="sheet">
         <p class="sheet-title">{{ menuFor.title }}</p>
-          <button class="sheet-item" @click="beginRename">
-            <CoomiIcon name="pencil" :size="18" /><span>重命名</span>
-          </button>
           <template v-if="isGlobalMeta(menuFor)">
-            <button class="sheet-item danger" @click="doClear">
-              <CoomiIcon name="trash" :size="18" /><span>{{ clearArmed ? '再点一次确认清空' : '清空会话数据' }}</span>
+            <button class="sheet-item danger" @click="doClear('context')">
+              <CoomiIcon name="refresh" :size="18" />
+              <span>{{ clearArmed === 'context' ? '再点一次确认：全新记忆开始' : '清空上下文（全新记忆开始）' }}</span>
             </button>
-            <p v-if="clearError" class="sheet-hint danger-text">清空失败，请重试；若反复失败请反馈。</p>
-            <p class="sheet-hint">全局常驻会话：可清空数据，不可删除</p>
+            <button class="sheet-item danger" @click="doClear('all')">
+              <CoomiIcon name="trash" :size="18" />
+              <span>{{ clearArmed === 'all' ? '再点一次确认：彻底全部清除' : '全部清除（含历史与记忆）' }}</span>
+            </button>
+            <p v-if="clearError" class="sheet-hint danger-text">清空失败：{{ clearError }}</p>
+            <p class="sheet-hint">全局常驻会话：可清空数据，不可删除、不可重命名</p>
           </template>
           <template v-else>
+            <button class="sheet-item" @click="beginRename">
+              <CoomiIcon name="pencil" :size="18" /><span>重命名</span>
+            </button>
             <button class="sheet-item" @click="doPin">
               <CoomiIcon name="pin" :size="18" /><span>{{ menuFor.pinned ? '取消置顶' : '置顶' }}</span>
             </button>

@@ -191,6 +191,11 @@ pub struct SessionSummary {
     pub summary: String,
 }
 
+/// 全局常驻会话 id（与 ui 侧 life::GLOBAL_SESSION_ID 一致）。
+/// 标题强制为「常驻会话」，任何自动命名/保存路径都不得覆盖。
+pub const GLOBAL_SESSION_ID: &str = "50a1b732-5f3e-4b7d-8c2a-b9f4e6d1a001";
+pub const GLOBAL_SESSION_TITLE: &str = "常驻会话";
+
 pub struct SessionStore {
     directory: PathBuf,
 }
@@ -217,6 +222,11 @@ impl SessionStore {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // 常驻会话强制命名：自动命名（首条用户输入）不得覆盖。
+        let mut session = std::clone::Clone::clone(session);
+        if session.id.to_string() == GLOBAL_SESSION_ID {
+            session.title = GLOBAL_SESSION_TITLE.to_owned();
+        }
         fs::create_dir_all(&self.directory).with_context(|| {
             format!(
                 "failed to create session directory {}",
@@ -240,8 +250,13 @@ impl SessionStore {
             && let Ok(existing) = serde_json::from_slice::<Session>(&bytes)
         {
             if existing.title_manually_set {
-                persisted.title = existing.title;
-                persisted.title_manually_set = true;
+                if persisted.id.to_string() == GLOBAL_SESSION_ID {
+                    // 常驻会话强制命名：历史上被改过的名字也不恢复。
+                    persisted.title = GLOBAL_SESSION_TITLE.to_owned();
+                } else {
+                    persisted.title = existing.title;
+                    persisted.title_manually_set = true;
+                }
             }
             persisted.pinned = existing.pinned;
             // Model selection can change while an older in-memory turn is
@@ -310,6 +325,9 @@ impl SessionStore {
             .with_context(|| format!("failed to read session {}", path.display()))?;
         let mut session: Session = serde_json::from_slice(&bytes)
             .with_context(|| format!("invalid session file {}", path.display()))?;
+        if session.id.to_string() == GLOBAL_SESSION_ID && title.is_some() {
+            anyhow::bail!("常驻会话不可重命名");
+        }
         if let Some(title) = title {
             session.title = title.to_owned();
             session.title_manually_set = true;

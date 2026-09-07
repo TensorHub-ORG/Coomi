@@ -311,7 +311,7 @@ watch(text, () => {
   border: 1px solid var(--border);
   border-radius: 26px;
   background: var(--fill);
-  transition: border-color .16s;
+  transition: border-color .18s, box-shadow .28s ease;
 }
 .life-orbit {
   position: absolute; z-index: 2; top: -13px; left: 50%;
@@ -337,6 +337,11 @@ watch(text, () => {
   .orbit.outer, .orbit.inner { animation-duration: 6s; }
 }
 .field:focus-within { border-color: var(--blue-border); background: var(--bg); }
+.field:focus-within {
+  border-color: color-mix(in srgb, var(--blue) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent),
+    0 0 14px color-mix(in srgb, var(--blue) 22%, transparent);
+}
 .field.busy { border-color: var(--border-strong); }
 
 .input-clip { overflow: hidden; border-radius: 18px 18px 8px 8px; }

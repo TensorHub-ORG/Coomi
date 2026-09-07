@@ -108,6 +108,8 @@
     <string name="coomi_dash_section_tools">工具</string>
     <string name="coomi_dash_open_chat">进入对话</string>
     <string name="coomi_dash_open_chat_desc">Coomi 的主界面</string>
+    <string name="coomi_dash_ai_studio">AI 工作室</string>
+    <string name="coomi_dash_ai_studio_desc">多智能体协作工作台（实验）</string>
     <string name="coomi_dash_restart">重启引擎</string>
     <string name="coomi_dash_stop">停止引擎</string>
     <string name="coomi_dash_runtime">运行时</string>

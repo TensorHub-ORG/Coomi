@@ -3,6 +3,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use axum::Json;
 use axum::Router;
+use axum::body::Body;
+use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path as AxumPath;
 use axum::extract::Query;
@@ -43,8 +45,12 @@ use coomi_engine::UserInputResponse;
 use coomi_security::AccessMode;
 use coomi_security::HookRunner;
 use coomi_security::SecurityPolicy;
+use coomi_services::LoginResult;
 use coomi_services::CognitiveRuntime;
 use coomi_services::CognitiveTurnContext;
+use coomi_services::deepseek_login;
+use coomi_services::deepseek_login_by_mobile_sms;
+use coomi_services::deepseek_send_sms_code;
 use coomi_services::EndpointResolver;
 use coomi_services::HttpModelProvider;
 use coomi_services::McpRuntime;
@@ -64,6 +70,7 @@ use coomi_services::RuntimeManager;
 use coomi_services::SkillRouteContext;
 use coomi_services::SkillRouter;
 use coomi_services::StdioCognitiveRuntime;
+use coomi_services::{Studio, StudioMessage, StudioStore, ToolPermission, WorkItem, record_user_message};
 use coomi_services::TaskManager;
 use coomi_services::TaskPriority;
 use coomi_services::TaskStatus;
@@ -85,6 +92,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -144,6 +152,10 @@ struct AppState {
     registry_cache: Arc<StdMutex<Option<RegistryCache>>>,
     /// 工作流服务：cron 定时调度器（P1），API 层经它触发运行。
     workflow_scheduler: Arc<crate::workflow::WorkflowScheduler>,
+    /// AI 工作室（实验）：待审批的工具调用回调表 call_id -> oneshot 发送端。
+    studio_approvals: Arc<StdMutex<HashMap<String, oneshot::Sender<bool>>>>,
+    /// AI 工作室（实验）：进行中的成员调度任务 studio_id -> abort 句柄。
+    studio_runs: Arc<StdMutex<HashMap<String, AbortHandle>>>,
 }
 
 /// 社区注册表缓存条目。
@@ -775,6 +787,8 @@ pub async fn serve(
         vision_degraded: Arc::new(StdMutex::new(HashSet::new())),
         registry_cache: Arc::new(StdMutex::new(registry_cache)),
         workflow_scheduler,
+        studio_approvals: Arc::new(StdMutex::new(HashMap::new())),
+        studio_runs: Arc::new(StdMutex::new(HashMap::new())),
     };
     state.workflow_scheduler.start();
     refresh_registry_cache_background(state.clone());
@@ -792,6 +806,13 @@ pub async fn serve(
         .route("/api/runtime/health", get(runtime_health))
         .route("/api/runtime/doctor", get(runtime_doctor))
         .route("/api/runtime/port", get(runtime_port))
+        .route("/api/deepseek/login", post(deepseek_login_handler))
+        .route("/api/deepseek/sms/send", post(deepseek_sms_send_handler))
+        .route("/api/deepseek/sms/login", post(deepseek_sms_login_handler))
+        .route("/api/deepseek/status", get(deepseek_status_handler))
+        .route("/api/deepseek/logout", post(deepseek_logout_handler))
+        .route("/api/deepseek/provider", post(deepseek_provider_handler))
+        .route("/api/deepseek/model", post(deepseek_model_handler))
         .route(
             "/api/runtime/global-memory",
             get(get_global_memory).post(set_global_memory),
@@ -919,6 +940,13 @@ pub async fn serve(
             "/api/tool-failure-analysis",
             post(analyze_tool_failures).layer(DefaultBodyLimit::max(32 * 1024)),
         )
+        // AI 工作室（实验）
+        .route("/api/studios", get(studio_list).post(studio_create))
+        .route("/api/studios/{id}", get(studio_get).put(studio_update).delete(studio_delete))
+        .route("/api/studios/{id}/messages", get(studio_messages).post(studio_send_message))
+        .route("/api/studios/{id}/stop", post(studio_stop))
+        .route("/api/studios/{id}/approve", post(studio_approve))
+        .route("/api/studios/{id}/work-items", get(studio_work_items).put(studio_save_work_items))
         .route("/ws/session/{session_id}", get(websocket_route))
         .fallback_service(files)
         // Local bridge: only allow same-origin browser access (the Android WebView and
@@ -1580,6 +1608,226 @@ async fn set_global_memory(
     settings["global_memory"] = json!(enabled);
     write_settings(&state.home, &settings)?;
     Ok(Json(json!({ "enabled": enabled })))
+}
+
+// ---------------------------------------------------------------------------
+// AI 工作室（实验性功能）：多智能体协作工作台。
+// 成员按 @提及/主持人 路由，逐个调用各自模型完成发言；工具调用按成员权限
+// （Ask/Auto/Full）决定是否需要用户在 SSE 事件流上审批。
+// ---------------------------------------------------------------------------
+
+async fn studio_list(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let studios = StudioStore::new(state.home.join("studios")).list()
+        .map_err(|e| ApiError::internal(format!("list studios: {e}")))?;
+    let studios = studios.into_iter().map(|studio| json!({
+        "id": studio.id, "name": studio.name, "description": studio.description,
+        "memberCount": studio.members.len(), "running": false, "lastActive": studio.updated_at
+    })).collect::<Vec<_>>();
+    Ok(Json(json!({ "studios": studios })))
+}
+
+async fn studio_create(
+    State(state): State<AppState>,
+    Json(mut studio): Json<Studio>,
+) -> Result<Json<Value>, ApiError> {
+    if studio.id.trim().is_empty() { studio.id = uuid::Uuid::new_v4().to_string(); }
+    let saved = StudioStore::new(state.home.join("studios")).save(studio)
+        .map_err(|e| ApiError::bad_request(format!("invalid studio: {e}")))?;
+    Ok(Json(json!({ "studio": saved })))
+}
+
+async fn studio_get(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let store = StudioStore::new(state.home.join("studios"));
+    let studio = store.load(&id).map_err(|e| ApiError::not_found(format!("studio not found: {e}")))?;
+    let messages = store.messages(&id).map_err(|e| ApiError::internal(format!("read messages: {e}")))?;
+    let work_items = store.work_items(&id).map_err(|e| ApiError::internal(format!("read work items: {e}")))?;
+    Ok(Json(json!({ "studio": studio, "messages": messages, "workItems": work_items })))
+}
+
+async fn studio_update(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(mut studio): Json<Studio>,
+) -> Result<Json<Value>, ApiError> {
+    studio.id = id;
+    let saved = StudioStore::new(state.home.join("studios")).save(studio)
+        .map_err(|e| ApiError::bad_request(format!("invalid studio: {e}")))?;
+    Ok(Json(json!({ "studio": saved })))
+}
+
+async fn studio_delete(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    StudioStore::new(state.home.join("studios")).delete(&id)
+        .map_err(|e| ApiError::internal(format!("delete studio: {e}")))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn studio_messages(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let messages = StudioStore::new(state.home.join("studios")).messages(&id)
+        .map_err(|e| ApiError::internal(format!("read messages: {e}")))?;
+    Ok(Json(json!({ "messages": messages })))
+}
+
+async fn studio_stop(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>,
+) -> Json<Value> {
+    if let Some(handle) = state.studio_runs.lock().unwrap_or_else(|p| p.into_inner()).remove(&id) {
+        handle.abort();
+    }
+    Json(json!({"ok": true}))
+}
+
+async fn studio_approve(
+    State(state): State<AppState>, AxumPath(_id): AxumPath<String>, Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let call_id = body.get("callId").and_then(Value::as_str).unwrap_or_default();
+    let allow = body.get("decision").and_then(Value::as_str).is_some_and(|v| matches!(v, "allow" | "always"));
+    let sender = state.studio_approvals.lock().unwrap_or_else(|p| p.into_inner()).remove(call_id)
+        .ok_or_else(|| ApiError::not_found("approval request not found"))?;
+    let _ = sender.send(allow);
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn studio_send_message(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>,
+) -> Result<axum::response::Response, ApiError> {
+    let text = body.get("content").and_then(Value::as_str).unwrap_or("").trim().to_owned();
+    if text.is_empty() { return Err(ApiError::bad_request("message is required")); }
+    let store = StudioStore::new(state.home.join("studios"));
+    let studio = store.load(&id).map_err(|e| ApiError::not_found(format!("studio not found: {e}")))?;
+    let route = record_user_message(&store, &studio, &text)
+        .map_err(|e| ApiError::bad_request(format!("route message: {e}")))?;
+    let registry = ProviderRegistry::load(&providers_path(&state.home))
+        .map_err(|e| ApiError::bad_request(format!("provider unavailable: {e}")))?;
+    let studio_store_root = state.home.join("studios");
+    let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
+    let emit_now = |event: Value| {
+        let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event))));
+    };
+    emit_now(json!({"event_type":"studio_user_message","content":text}));
+    emit_now(json!({"event_type":"studio_start","member_ids":route.member_ids,"direct":route.direct}));
+    let members = studio.members.clone();
+    let targets = route.member_ids.into_iter().take(4).collect::<Vec<_>>();
+    let approvals = Arc::clone(&state.studio_approvals);
+    let home = state.home.clone();
+    let studio_id = studio.id.clone();
+    let workspace = studio.shared_dir.clone();
+    let run_key = studio.id.clone();
+    let run_registry = Arc::clone(&state.studio_runs);
+    let spawned = tokio::spawn(async move {
+        let mut prior = String::new();
+        let mut queue = targets.into_iter().map(|id|(id, 0usize)).collect::<VecDeque<_>>();
+        let mut dispatches = 0usize;
+        while let Some((target_id, depth)) = queue.pop_front() {
+            if dispatches >= 24 { break; }
+            dispatches += 1;
+            let Some(member) = members.iter().find(|member| member.id == target_id).cloned() else { continue };
+            let emit = |event: Value| { let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event)))); };
+            emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"thinking"}));
+            let selector = format!("{}:{}", member.provider_id, member.model);
+            let provider_config = match registry.resolve(Some(&selector)) {
+                Ok(value) => value,
+                Err(error) => { emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","message":format!("成员模型不可用：{error}")})); continue; }
+            };
+            let provider = match HttpModelProvider::new(provider_config) {
+                Ok(value) => value,
+                Err(error) => { emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","message":format!("成员模型初始化失败：{error}")})); continue; }
+            };
+            emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"executing"}));
+            let system = format!("你是 AI 工作室成员“{}”。职责：{}\n{}\n共享工作目录：{}。你和其他成员共同解决用户目标。请直接给出本角色的工作成果；如已有成员发言，请在其基础上协作，不要重复。", member.name, member.role, member.system_prompt, workspace);
+            let user = if prior.is_empty() { text.clone() } else { format!("用户目标：{}\n\n已有成员成果：\n{}", text, prior) };
+            let policy_mode = match member.tool_permission { ToolPermission::Ask => AccessMode::WorkspaceWrite, ToolPermission::Auto | ToolPermission::Full => AccessMode::FullAccess };
+            let cwd = PathBuf::from(&workspace);
+            let policy = match SecurityPolicy::new(&cwd, policy_mode) { Ok(value) => value, Err(error) => { emit(json!({"event_type":"studio_error","message":format!("工作目录不可用：{error}")})); continue; } };
+            let instructions = coomi_engine::discover_project_instructions(&cwd).unwrap_or_default();
+            let mut agent_prompt = system_prompt(&home, &cwd, policy_mode, &instructions, false).await;
+            agent_prompt.push_str("\n\n"); agent_prompt.push_str(&system);
+            let mcp_runtime = Arc::new(McpRuntime::load(&home).await);
+            let tools = CoreTools::new(cwd.clone(), policy).with_skills_directory(home.join("skills")).with_config_home(home.clone()).with_mcp_runtime(mcp_runtime).with_memory(Arc::new(MemoryManager::new(&home, &cwd)));
+            let mut session = Session::new(member.provider_id.clone(), member.model.clone(), cwd);
+            let observer = StudioAgentObserver { sender: tx.clone(), member_id: member.id.clone() };
+            let approval = StudioApproval { sender:tx.clone(), approvals:Arc::clone(&approvals), member_id:member.id.clone(), member_name:member.name.clone(), permission:member.tool_permission };
+            match Agent::new(agent_prompt).with_max_tool_rounds(64).with_reasoning_effort("medium").run_turn(&mut session, user, &provider, &tools, &approval, &observer).await {
+                Ok(response) => {
+                    let mentions = members.iter().filter(|other| other.id != member.id && (response.contains(&format!("@{}", other.name)) || response.contains(&format!("@{}", other.id)))).map(|other|other.id.clone()).collect::<Vec<_>>();
+                    let reply = StudioMessage::new(member.id.clone(), member.name.clone(), response.clone(), mentions.clone());
+                    if let Err(error) = StudioStore::new(studio_store_root.clone()).append_message(&studio_id, &reply) { emit(json!({"event_type":"studio_error","message":format!("保存成员回复失败：{error}")})); }
+                    else { prior.push_str(&format!("{}：{}\n", member.name, response)); emit(json!({"event_type":"studio_message","message":reply})); }
+                    if depth < 3 { for mentioned in mentions { queue.push_back((mentioned, depth + 1)); } }
+                    emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"done"}));
+                }
+                Err(error) => { emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","member_id":member.id,"message":format!("成员回复失败：{error:#}")})); }
+            }
+        }
+        let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", json!({"event_type":"studio_end"})))));
+        run_registry.lock().unwrap_or_else(|p| p.into_inner()).remove(&run_key);
+    });
+    state.studio_runs.lock().unwrap_or_else(|p| p.into_inner()).insert(id, spawned.abort_handle());
+    let body = Body::from_stream(futures_util::stream::unfold(rx, |mut receiver| async { receiver.recv().await.map(|item| (item, receiver)) }));
+    axum::response::Response::builder().status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-cache, no-transform")
+        .header(header::CONNECTION, "keep-alive")
+        .body(body).map_err(|error| ApiError::internal(format!("build studio stream: {error}")))
+}
+
+struct StudioAgentObserver {
+    sender: mpsc::UnboundedSender<Result<Bytes, Infallible>>,
+    member_id: String,
+}
+
+impl AgentObserver for StudioAgentObserver {
+    fn on_event(&self, event: &AgentEvent) {
+        let payload = match event {
+            AgentEvent::Text(text) | AgentEvent::TextDelta(text) => json!({"event_type":"studio_text_delta","member_id":self.member_id,"content":text}),
+            AgentEvent::ReasoningDelta(text) => json!({"event_type":"studio_reasoning_delta","member_id":self.member_id,"content":text}),
+            AgentEvent::ToolStarted(call) => json!({"event_type":"studio_tool_start","member_id":self.member_id,"call_id":call.id,"tool_name":call.name,"arguments":call.arguments}),
+            AgentEvent::ToolFinished { call, result } => json!({"event_type":"studio_tool_done","member_id":self.member_id,"call_id":call.id,"tool_name":call.name,"result_preview":preview(&result.output),"is_error":!result.success,"images":result.images.iter().map(|image|image.data_url()).collect::<Vec<_>>()}),
+            AgentEvent::StreamReset => json!({"event_type":"studio_stream_reset","member_id":self.member_id}),
+            _ => return,
+        };
+        let _ = self.sender.send(Ok(Bytes::from(format!("data: {}\n\n", payload))));
+    }
+}
+
+struct StudioApproval {
+    sender: mpsc::UnboundedSender<Result<Bytes, Infallible>>,
+    approvals: Arc<StdMutex<HashMap<String, oneshot::Sender<bool>>>>,
+    member_id: String,
+    member_name: String,
+    permission: ToolPermission,
+}
+
+#[async_trait]
+impl ApprovalHandler for StudioApproval {
+    async fn approve(&self, call: &ToolCall, reason: &str) -> bool {
+        if self.permission == ToolPermission::Full
+            || (self.permission == ToolPermission::Auto && !reason.to_ascii_lowercase().contains("delete")) { return true; }
+        let (sender, receiver) = oneshot::channel();
+        self.approvals.lock().unwrap_or_else(|p|p.into_inner()).insert(call.id.clone(), sender);
+        let payload = json!({"event_type":"studio_tool_approval","member_id":self.member_id,"member_name":self.member_name,"call_id":call.id,"tool_name":call.name,"arguments":call.arguments,"risk_summary":reason});
+        let _ = self.sender.send(Ok(Bytes::from(format!("data: {}\n\n", payload))));
+        tokio::time::timeout(Duration::from_secs(300), receiver).await.ok().and_then(Result::ok).unwrap_or(false)
+    }
+}
+
+async fn studio_work_items(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let items = StudioStore::new(state.home.join("studios")).work_items(&id)
+        .map_err(|e| ApiError::internal(format!("read work items: {e}")))?;
+    Ok(Json(json!({ "workItems": items })))
+}
+
+async fn studio_save_work_items(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(items): Json<Vec<WorkItem>>,
+) -> Result<Json<Value>, ApiError> {
+    StudioStore::new(state.home.join("studios")).save_work_items(&id, &items)
+        .map_err(|e| ApiError::internal(format!("save work items: {e}")))?;
+    Ok(Json(json!({ "workItems": items })))
 }
 
 async fn get_custom_prompt(State(state): State<AppState>) -> Json<Value> {
@@ -2277,12 +2525,27 @@ async fn delete_session(
     Ok(Json(json!({ "deleted": deleted })))
 }
 
+#[derive(Deserialize)]
+struct ClearSessionRequest {
+    /// "context"（默认）：清消息/工具记录/上下文，全新记忆开始；
+    /// "all"：极简彻底清除——删除会话文件与常驻记忆/日记后重建。
+    mode: Option<String>,
+}
+
 async fn clear_session_data(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
+    body: Option<Json<ClearSessionRequest>>,
 ) -> Result<Json<Value>, ApiError> {
     let session_id =
         Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?;
+    let mode = body
+        .as_ref()
+        .and_then(|Json(request)| request.mode.as_deref())
+        .unwrap_or("context");
+    if mode != "context" && mode != "all" {
+        return Err(ApiError::bad_request("mode must be context or all"));
+    }
     // Clearing while a turn is running would allow its completion handler to
     // persist the old transcript again. Stop the in-memory task first, then
     // clear and save the authoritative session record.
@@ -2321,6 +2584,27 @@ async fn clear_session_data(
             })?
         }
     };
+    // mode=all（仅常驻会话提供）：极为干净的彻底清除——删除会话文件并
+    // 清空常驻记忆/日记后重建，不留任何历史痕迹。
+    if mode == "all" {
+        let global_id = uuid::Uuid::parse_str(crate::life::GLOBAL_SESSION_ID)
+            .expect("GLOBAL_SESSION_ID is a valid uuid");
+        if session_id != global_id {
+            return Err(ApiError::bad_request(
+                "full wipe is only available for the global session",
+            ));
+        }
+        store.delete(global_id).map_err(|error| {
+            ApiError::internal(format!("failed to wipe session {id}: {error:#}"))
+        })?;
+        let _ = std::fs::remove_file(crate::life::life_root(&state.home)
+            .join("primary")
+            .join("memory.jsonl"));
+        let _ = std::fs::remove_file(crate::life::life_root(&state.home).join("journal.jsonl"));
+        crate::life::ensure_global_session(&state.home, &state.cwd).map_err(|error| {
+            ApiError::internal(format!("failed to rebuild global session: {error:#}"))
+        })?;
+    }
     Ok(Json(json!({
         "cleared": true,
         "id": id,
@@ -4066,7 +4350,13 @@ async fn activate_provider(
         .cloned()
         .ok_or_else(|| ApiError::not_found("provider not found"))?;
     validate_provider_activation(&provider)?;
-    verify_provider_credentials(&provider).await?;
+    if provider.base_url.contains("chat.deepseek.com") && id == "deepseek-login" {
+        if provider.api_key.trim().is_empty() {
+            return Err(ApiError::bad_request("DeepSeek 账号尚未登录"));
+        }
+    } else {
+        verify_provider_credentials(&provider).await?;
+    }
     document.active = id;
     document.save(&path).map_err(ApiError::from)?;
     Ok(Json(json!({"ok": true})))
@@ -7934,6 +8224,222 @@ fn project_types_for(cwd: &Path) -> Vec<String> {
     types
 }
 
+// ========== DeepSeek 账号登录 ==========
+fn deepseek_settings_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("config").join("deepseek.json")
+}
+
+fn read_deepseek_state(home: &std::path::Path) -> Value {
+    let Ok(bytes) = std::fs::read(deepseek_settings_path(home)) else {
+        return json!({});
+    };
+    serde_json::from_slice::<Value>(&bytes).unwrap_or_else(|_| json!({}))
+}
+
+fn write_deepseek_state(home: &std::path::Path, state: &Value) -> Result<(), ApiError> {
+    let path = deepseek_settings_path(home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ApiError::internal(format!("failed to create config dir: {e}")))?;
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(state)
+            .map_err(|e| ApiError::internal(format!("serialize: {e}")))?,
+    )
+    .map_err(|e| ApiError::internal(format!("write deepseek state: {e}")))
+}
+
+fn persist_deepseek_login(home: &std::path::Path, result: &LoginResult) -> Result<(), ApiError> {
+    let mut ds = read_deepseek_state(home);
+    ds["token"] = json!(result.token);
+    ds["user"] = serde_json::to_value(&result.user).unwrap_or(json!({}));
+    write_deepseek_state(home, &ds)
+}
+
+fn deepseek_http_client() -> Result<reqwest::Client, ApiError> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| ApiError::internal(format!("http client: {e}")))
+}
+
+async fn deepseek_login_handler(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let account = body
+        .get("account")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if account.is_empty() || password.is_empty() {
+        return Err(ApiError::bad_request("账号和密码不能为空"));
+    }
+    let client = deepseek_http_client()?;
+    let result = deepseek_login(&client, &account, &password)
+        .await
+        .map_err(|e| ApiError::bad_gateway(format!("DeepSeek 登录失败: {e}")))?;
+    persist_deepseek_login(&state.home, &result)?;
+    Ok(Json(json!({ "token": result.token, "user": result.user })))
+}
+
+async fn deepseek_sms_send_handler(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let mobile = body
+        .get("mobile")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let area_code = body
+        .get("areaCode")
+        .and_then(Value::as_str)
+        .unwrap_or("+86")
+        .trim();
+    if mobile.is_empty() {
+        return Err(ApiError::bad_request("手机号不能为空"));
+    }
+    let client = deepseek_http_client()?;
+    deepseek_send_sms_code(&client, mobile, area_code)
+        .await
+        .map_err(|e| ApiError::bad_gateway(format!("DeepSeek 验证码发送失败: {e}")))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn deepseek_sms_login_handler(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let mobile = body
+        .get("mobile")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let area_code = body
+        .get("areaCode")
+        .and_then(Value::as_str)
+        .unwrap_or("+86")
+        .trim();
+    let code = body.get("code").and_then(Value::as_str).unwrap_or("").trim();
+    if mobile.is_empty() || code.is_empty() {
+        return Err(ApiError::bad_request("手机号和验证码不能为空"));
+    }
+    let client = deepseek_http_client()?;
+    let result = deepseek_login_by_mobile_sms(&client, mobile, area_code, code)
+        .await
+        .map_err(|e| ApiError::bad_gateway(format!("DeepSeek 验证码登录失败: {e}")))?;
+    persist_deepseek_login(&state.home, &result)?;
+    Ok(Json(json!({ "token": result.token, "user": result.user })))
+}
+
+async fn deepseek_status_handler(State(state): State<AppState>) -> Json<Value> {
+    let ds = read_deepseek_state(&state.home);
+    let token = ds.get("token").and_then(Value::as_str).unwrap_or("");
+    Json(json!({
+        "logged": !token.is_empty(),
+        "user": ds.get("user").cloned().unwrap_or(json!({})),
+    }))
+}
+
+async fn deepseek_logout_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiError> {
+    let path = deepseek_settings_path(&state.home);
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| ApiError::internal(format!("remove deepseek state: {e}")))?;
+    }
+    Ok(Json(json!({"ok": true})))
+}
+
+/// 保存并激活 DeepSeek 账号专用 Provider。
+/// 登录成功后调用，固定模型列表，不触发通用模型发现。
+async fn deepseek_provider_handler(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("deepseek-chat")
+        .trim()
+        .to_string();
+    if model != "deepseek-chat" && model != "deepseek-reasoner" {
+        return Err(ApiError::bad_request("无效的 DeepSeek 模型"));
+    }
+    let ds = read_deepseek_state(&state.home);
+    let token = ds
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if token.is_empty() {
+        return Err(ApiError::bad_request("未登录 DeepSeek 账号"));
+    }
+    let provider_id = "deepseek-login".to_string();
+    let provider_settings = coomi_services::deepseek_account_settings(&token, &model);
+    let path = providers_path(&state.home);
+    let mut document =
+        read_provider_document(&state.home).unwrap_or_else(|_| empty_provider_document());
+    document
+        .providers
+        .insert(provider_id.clone(), provider_settings);
+    document.active = provider_id.clone();
+    document.save(&path).map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "provider": provider_json(&provider_id, &document.providers[&provider_id], true),
+        "active": provider_id,
+        "model": model,
+    })))
+}
+
+/// 切换 DeepSeek 账号专用 Provider 的模型。
+async fn deepseek_model_handler(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("deepseek-chat")
+        .trim()
+        .to_string();
+    if model != "deepseek-chat" && model != "deepseek-reasoner" {
+        return Err(ApiError::bad_request("无效的 DeepSeek 模型"));
+    }
+    let ds = read_deepseek_state(&state.home);
+    let token = ds
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if token.is_empty() {
+        return Err(ApiError::bad_request("未登录 DeepSeek 账号"));
+    }
+    let provider_id = "deepseek-login".to_string();
+    let path = providers_path(&state.home);
+    let mut document = read_provider_document(&state.home).map_err(ApiError::from)?;
+    if document.providers.get(&provider_id).is_none() {
+        // Provider 不存在，自动创建
+        let provider_settings = coomi_services::deepseek_account_settings(&token, &model);
+        document
+            .providers
+            .insert(provider_id.clone(), provider_settings);
+    } else {
+        let provider = document.providers.get_mut(&provider_id).unwrap();
+        provider.model = model.clone();
+    }
+    document.active = provider_id;
+    document.save(&path).map_err(ApiError::from)?;
+    Ok(Json(json!({ "model": model })))
+}
+
 fn providers_path(home: &Path) -> PathBuf {
     home.join("config").join("providers.json")
 }
@@ -8761,7 +9267,9 @@ mod tests {
             vision_degraded: Arc::new(StdMutex::new(HashSet::new())),
             registry_cache: Arc::new(StdMutex::new(None)),
         workflow_scheduler: crate::workflow::WorkflowScheduler::new(&PathBuf::from(("test"))),
-        };
+        studio_approvals: Arc::new(StdMutex::new(HashMap::new())),
+        studio_runs: Arc::new(StdMutex::new(HashMap::new())),
+    };
 
         let store = SessionStore::new(&home);
         let mut running_session = Session::new("provider", "model", cwd.clone());

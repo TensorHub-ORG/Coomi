@@ -107,6 +107,61 @@
                     android:contentDescription="@null"/>
             </LinearLayout>
 
+            <!-- 实验性功能：AI 工作室（多智能体协作工作台） -->
+            <LinearLayout
+                android:id="@+id/btn_ai_studio"
+                style="@style/Coomi.Row"
+                android:layout_marginTop="@dimen/coomi_space_m"
+                android:background="@drawable/coomi_bg_card"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingTop="@dimen/coomi_space_l"
+                android:paddingBottom="@dimen/coomi_space_l">
+
+                <FrameLayout
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="@drawable/coomi_bg_icon_tile">
+
+                    <ImageView
+                        android:layout_width="@dimen/coomi_icon_m"
+                        android:layout_height="@dimen/coomi_icon_m"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_cube"
+                        android:tint="?attr/coomiBlue"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:text="@string/coomi_dash_ai_studio"/>
+
+                    <TextView
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_dash_ai_studio_desc"/>
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="@dimen/coomi_icon_s"
+                    android:layout_height="@dimen/coomi_icon_s"
+                    android:src="@drawable/coomi_ic_chevron_right"
+                    android:tint="?attr/coomiText3"
+                    android:contentDescription="@null"/>
+            </LinearLayout>
+
             <!-- 鈹€鈹€ 寮曟搸 鈹€鈹€ -->
             <TextView
                 style="@style/Coomi.Text.SectionLabel"

@@ -198,6 +198,14 @@ function backToDashboard() {
       <p v-if="config.loading" class="hint">加载中...</p>
 
       <div v-if="tab === 'providers'" class="group">
+        <button class="provider-row deepseek-entry" @click="router.push('/deepseek-login')">
+          <span class="tile blue"><CoomiIcon name="sparkle" :size="18" /></span>
+          <span class="row-text">
+            <span class="name">DeepSeek 账号登录</span>
+            <span class="meta">deepseek-login · 账号登录对话模型</span>
+          </span>
+          <CoomiIcon name="chevronRight" :size="16" class="arrow" />
+        </button>
         <button
           v-for="provider in providers"
           :key="provider.id"

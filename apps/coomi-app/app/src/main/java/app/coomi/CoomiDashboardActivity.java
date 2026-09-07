@@ -65,6 +65,7 @@ public class CoomiDashboardActivity extends Activity {
     private TextView mStatusText;
     private TextView mRuntimeVersionText;
     private View mOpenChatButton;
+    private View mAiStudioButton;
     private Button mRestartButton;
     private Button mStopButton;
     private View mOpenTerminalButton;
@@ -133,6 +134,7 @@ public class CoomiDashboardActivity extends Activity {
         mStatusText = findViewById(R.id.dashboard_status_text);
         mRuntimeVersionText = findViewById(R.id.dashboard_runtime_version);
         mOpenChatButton = findViewById(R.id.btn_open_chat);
+        mAiStudioButton = findViewById(R.id.btn_ai_studio);
         mRestartButton = findViewById(R.id.btn_restart);
         mStopButton = findViewById(R.id.btn_stop);
         mOpenTerminalButton = findViewById(R.id.btn_open_terminal);
@@ -161,6 +163,7 @@ public class CoomiDashboardActivity extends Activity {
         mAppearanceButton = findViewById(R.id.btn_appearance);
 
         mOpenChatButton.setOnClickListener(v -> openChat());
+        mAiStudioButton.setOnClickListener(v -> openCoomiRoute("#/studio"));
         mRestartButton.setOnClickListener(v -> restartEngine());
         mStopButton.setOnClickListener(v -> stopEngine());
         mOpenTuiButton.setOnClickListener(v -> openTui());

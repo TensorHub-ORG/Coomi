@@ -52,6 +52,9 @@ impl HttpModelProvider {
     }
 
     async fn openai_compatible(&self, request: ModelRequest) -> Result<ModelResponse> {
+        if self.config.base_url.contains("chat.deepseek.com") {
+            return self.deepseek_account(request, None).await;
+        }
         let endpoint = endpoint(&self.config.base_url, "chat/completions");
         let mut body = json!({
             "model": request.model,
@@ -112,6 +115,9 @@ impl HttpModelProvider {
         request: ModelRequest,
         observer: &dyn ModelStreamObserver,
     ) -> Result<ModelResponse> {
+        if self.config.base_url.contains("chat.deepseek.com") {
+            return self.deepseek_account(request, Some(observer)).await;
+        }
         let endpoint = endpoint(&self.config.base_url, "chat/completions");
         let mut body = json!({
             "model": request.model,
@@ -164,6 +170,114 @@ impl HttpModelProvider {
         })
         .await?;
         state.finish()
+    }
+
+    /// DeepSeek 账号端点不是 OpenAI 协议。这里把 Coomi 历史折叠成官方 prompt，
+    /// 自动创建会话、计算 PoW，并读取官方 SSE；工具定义以文本协议附在 prompt 中，
+    /// 模型仍可按 Coomi 的工具调用约定返回 JSON。
+    async fn deepseek_account(
+        &self,
+        request: ModelRequest,
+        observer: Option<&dyn ModelStreamObserver>,
+    ) -> Result<ModelResponse> {
+        use crate::deepseek::client::{chat_completion, create_session};
+
+        if self.config.api_key.trim().is_empty() {
+            anyhow::bail!("DeepSeek 账号尚未登录");
+        }
+        let mut prompt = String::new();
+        for message in &request.messages {
+            let role = match message.role {
+                Role::System => "系统",
+                Role::User => "用户",
+                Role::Assistant => "助手",
+                Role::Tool => "工具结果",
+            };
+            if !message.content.trim().is_empty() {
+                prompt.push_str(role);
+                prompt.push_str("：");
+                prompt.push_str(&message.content);
+                prompt.push_str("\n\n");
+            }
+        }
+        if !request.tools.is_empty() {
+            prompt.push_str("你可以调用以下工具。需要调用时，只输出一个 JSON 对象：{\"tool\":\"工具名\",\"arguments\":{...}}。工具清单：\n");
+            for tool in &request.tools {
+                prompt.push_str("- ");
+                prompt.push_str(&tool.name);
+                prompt.push_str(": ");
+                prompt.push_str(&tool.description);
+                prompt.push_str("\n");
+            }
+        }
+        let session = create_session(&self.client, &self.config.api_key).await?;
+        let thinking = request.model.contains("reasoner")
+            || request.reasoning_effort.as_deref().is_some_and(|v| v != "low");
+        let response = chat_completion(
+            &self.client,
+            &self.config.api_key,
+            session.chat_session_id,
+            &request.model,
+            &prompt,
+            thinking,
+        )
+        .await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("DeepSeek 对话失败 HTTP {status}: {body}");
+        }
+        let mut stream = response.bytes_stream();
+        let mut pending = String::new();
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        while let Some(chunk) = stream.next().await {
+            pending.push_str(&String::from_utf8_lossy(&chunk?));
+            while let Some(pos) = pending.find('\n') {
+                let line = pending[..pos].trim().to_string();
+                pending.drain(..=pos);
+                let Some(data) = line.strip_prefix("data:") else { continue; };
+                let data = data.trim();
+                if data.is_empty() || data == "[DONE]" { continue; }
+                let Ok(value) = serde_json::from_str::<Value>(data) else { continue; };
+                let delta = value.get("text_delta")
+                    .or_else(|| value.pointer("/choices/0/delta/content"))
+                    .or_else(|| value.get("content"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !delta.is_empty() {
+                    content.push_str(delta);
+                    if let Some(obs) = observer { obs.on_text_delta(delta); }
+                }
+                let think = value.get("reasoning_delta")
+                    .or_else(|| value.pointer("/choices/0/delta/reasoning_content"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !think.is_empty() {
+                    reasoning.push_str(think);
+                    if let Some(obs) = observer { obs.on_reasoning_delta(think); }
+                }
+            }
+        }
+        if content.is_empty() {
+            if !reasoning.is_empty() {
+                return Ok(ModelResponse {
+                    content: reasoning,
+                    tool_calls: Vec::new(),
+                    invalid_tool_calls: Vec::new(),
+                    usage: TokenUsage::default(),
+                    streamed: observer.is_some(),
+                });
+            }
+            anyhow::bail!("DeepSeek 响应没有文本内容");
+        }
+        Ok(ModelResponse {
+            content,
+            tool_calls: Vec::new(),
+            invalid_tool_calls: Vec::new(),
+            usage: TokenUsage::default(),
+            streamed: observer.is_some(),
+        })
     }
 
     async fn openai_remote_compaction(
@@ -961,6 +1075,7 @@ impl ModelProvider for HttpModelProvider {
             ProviderKind::OpenAiResponses => self.openai_responses(request).await,
             ProviderKind::AnthropicMessages => self.anthropic_messages(request).await,
             ProviderKind::GeminiNative => self.gemini_native(request).await,
+            ProviderKind::DeepSeekAccount => self.deepseek_account(request, None).await,
         }
     }
 
@@ -976,6 +1091,9 @@ impl ModelProvider for HttpModelProvider {
             ProviderKind::OpenAiResponses => self.openai_responses_stream(request, observer).await,
             ProviderKind::AnthropicMessages | ProviderKind::GeminiNative => {
                 self.complete(request).await
+            }
+            ProviderKind::DeepSeekAccount => {
+                self.deepseek_account(request, Some(observer)).await
             }
         }
     }

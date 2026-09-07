@@ -24,19 +24,28 @@ const pathInput = ref('')
 const pathNotice = ref('')
 const activeModelCategory = ref('')
 const pathQuickOptions = computed(() => session.cwd ? [session.cwd] : [])
+// 按能力三分类（文本/图像理解/图像生成），恢复 v1.4.4 的模型选择卡片；
+// DeepSeek 账号模型归入文本模型。行内保留供应商标注。
 const modelGroups = computed(() => {
-  return [...config.providers]
-    .sort((a, b) => Number(b.id === config.activeId) - Number(a.id === config.activeId))
-    .map(provider => ({
-      id: provider.id,
-      label: provider.name,
-      items: [...new Set([...(provider.models ?? []), provider.model].filter(Boolean))]
-        .map(model => ({ providerId: provider.id, provider: provider.name, model: model! })),
-    }))
+  const groups: Record<'text' | 'vision' | 'image', Array<{ providerId: string; provider: string; model: string }>> = { text: [], vision: [], image: [] }
+  for (const provider of [...config.providers].sort((a, b) => Number(b.id === config.activeId) - Number(a.id === config.activeId))) {
+    for (const model of new Set([...(provider.models ?? []), provider.model].filter(Boolean))) {
+      const capabilities = provider.capabilityOverrides?.[model!]
+      const item = { providerId: provider.id, provider: provider.name, model: model! }
+      if (capabilities?.text ?? true) groups.text.push(item)
+      if (capabilities?.vision ?? false) groups.vision.push(item)
+      if (capabilities?.image_generation ?? false) groups.image.push(item)
+    }
+  }
+  return [
+    { id: 'text' as const, label: '文本模型', items: groups.text },
+    { id: 'vision' as const, label: '图像理解', items: groups.vision },
+    { id: 'image' as const, label: '图像生成', items: groups.image },
+  ]
 })
 const activeModelGroup = computed(() => modelGroups.value.find(group => group.id === activeModelCategory.value) ?? {
   id: '__empty__',
-  label: '供应商',
+  label: '分类',
   items: [] as Array<{ providerId: string; provider: string; model: string }>,
 })
 const usagePercent = computed(() => Math.min(100, Math.max(0, Math.round((session.usage?.contextRatio ?? 0) * 100))))
@@ -168,7 +177,7 @@ function browseInFileManager() {
     <Teleport to="body">
     <button v-if="modelOpen" class="model-scrim" aria-label="关闭模型选择" @click="modelOpen = false" />
     <div v-if="modelOpen" class="model-menu">
-      <div v-if="modelGroups.length" class="model-tabs" role="tablist" aria-label="按供应商选择模型">
+      <div v-if="modelGroups.length" class="model-tabs" role="tablist" aria-label="按模型能力分类">
         <button
           v-for="group in modelGroups"
           :key="group.id"
@@ -187,7 +196,7 @@ function browseInFileManager() {
           <span><b>{{ item.model }}</b><small>{{ item.provider }}</small></span>
           <CoomiIcon v-if="item.providerId === config.currentProviderId && item.model === config.currentModel" name="check" :size="15" />
         </button>
-        <p v-if="activeModelGroup.items.length === 0" class="model-empty">{{ modelGroups.length ? '该供应商暂无可用模型' : '暂无已配置供应商' }}</p>
+        <p v-if="activeModelGroup.items.length === 0" class="model-empty">{{ modelGroups.length ? '该分类暂无可用模型' : '暂无已配置供应商' }}</p>
       </section>
     </div>
     </Teleport>
@@ -278,6 +287,11 @@ function browseInFileManager() {
   width: min(78vw, 300px); max-height: min(70vh, 420px); overflow-y: auto;
   transform: translate(-50%, -50%); padding: 6px; border: 1px solid var(--border);
   border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-2);
+  animation: menu-pop .2s cubic-bezier(.2, .9, .3, 1.2) both;
+}
+@keyframes menu-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.9); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 .model-tabs {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
@@ -300,6 +314,11 @@ function browseInFileManager() {
   width: min(92vw, 390px); max-height: min(72vh, 560px); overflow-y: auto; padding: 12px 13px;
   border: 1px solid var(--border); border-radius: var(--r-card);
   background: var(--bg); box-shadow: var(--shadow-2);
+  transform-origin: top right; animation: usage-pop .2s cubic-bezier(.2, .9, .3, 1.15) both;
+}
+@keyframes usage-pop {
+  from { opacity: 0; transform: scale(.92) translateY(-6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .usage-title { margin: 0 0 9px; font-size: 12px; font-weight: 650; color: var(--text-2); }
 .usage-stats { display: grid; gap: 8px; }

@@ -90,7 +90,11 @@ function pick(key: 'fast' | 'plan' | 'careful') {
   display: flex; flex-direction: column; align-items: center;
   text-align: center;
 }
-.logo { margin-bottom: 14px; }
+.logo { margin-bottom: 14px; animation: coomi-breathe 3.4s ease-in-out infinite; }
+@keyframes coomi-breathe {
+  0%, 100% { transform: scale(1); opacity: .88; filter: drop-shadow(0 0 0 transparent); }
+  50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 10px color-mix(in srgb, var(--blue) 35%, transparent)); }
+}
 h1 { font-size: 21px; font-weight: 600; letter-spacing: -.3px; color: var(--text); }
 .sub {
   max-width: 268px; margin-top: 8px;

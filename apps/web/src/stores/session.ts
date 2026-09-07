@@ -735,11 +735,23 @@ export const useSessionStore = defineStore('session', () => {
     try { localStorage.removeItem(`coomi.draft.${id}`) } catch { /* ignore */ }
   }
 
-  async function clearSessionData(id: string): Promise<boolean> {
-    if (!window.confirm('清空该会话的消息、工具记录和上下文？会保留标题、置顶、模型与人格设置。')) return false
+  async function clearSessionData(id: string, mode: 'context' | 'all' = 'context'): Promise<{ ok: boolean; error?: string }> {
+    // 注意：这里绝不能再弹 window.confirm——WebView 无 WebChromeClient 会静默吞掉，
+    // 永远返回 false（「清空失败」的历史根因）。确认交互统一在 SideDrawer 两次点击完成。
     try {
-      const response = await authedFetch(`/api/sessions/${encodeURIComponent(id)}/clear`, { method: 'POST' })
-      if (!response.ok) return false
+      const response = await authedFetch(`/api/sessions/${encodeURIComponent(id)}/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      if (!response.ok) {
+        let message = `HTTP ${response.status}`
+        try {
+          const data = await response.json()
+          if (data?.message) message = data.message
+        } catch { /* 无错误体就用状态码 */ }
+        return { ok: false, error: message }
+      }
       sessions.clearTranscript(id)
       sessions.touch(id, { turns: 0 })
       if (id === sessionId.value) {
@@ -750,9 +762,9 @@ export const useSessionStore = defineStore('session', () => {
         runState.value = 'idle'
         reconnect()
       }
-      return true
-    } catch {
-      return false
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   }
 
