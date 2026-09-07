@@ -13,6 +13,8 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
@@ -107,7 +109,9 @@ public final class UpdateChecker {
             JSONObject chosen = stableUpdate ? stable : (testUpdate ? test : null);
             String version = chosen == null ? null : chosen.optString("version", "");
             String notes = chosen == null ? null : chosen.optString("notes", "");
-            callback.onResult(dot, version, notes, null);
+            // 回调必须切回主线程：控制台在回调里直接操作 View（红点/文案），
+            // 后台线程触碰 UI 会 CalledFromWrongThreadException 闪退。
+            new Handler(Looper.getMainLooper()).post(() -> callback.onResult(dot, version, notes, null));
         }).start();
     }
 
@@ -122,7 +126,7 @@ public final class UpdateChecker {
                 conn.setRequestProperty("User-Agent", "Coomi-Android/" + currentVersionCode(context));
                 int code = conn.getResponseCode();
                 if (code != 200) {
-                    callback.onResult(false, null, null, "更新源返回 HTTP " + code);
+                    new Handler(Looper.getMainLooper()).post(() -> callback.onResult(false, null, null, "更新源返回 HTTP " + code));
                     return;
                 }
                 try (InputStream in = conn.getInputStream()) {
@@ -144,7 +148,7 @@ public final class UpdateChecker {
                     callback.onResult(hasUpdate, version, notes, null);
                 }
             } catch (Exception e) {
-                callback.onResult(false, null, null, "检查失败：" + e.getMessage());
+                new Handler(Looper.getMainLooper()).post(() -> callback.onResult(false, null, null, "检查失败：" + e.getMessage()));
             }
         }).start();
     }
