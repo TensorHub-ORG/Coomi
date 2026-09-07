@@ -294,10 +294,10 @@ function browseInFileManager() {
   to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 .model-tabs {
-  display: flex; flex-wrap: nowrap;
-  max-width: 100%; overflow-x: auto;
-  min-height: 42px; border-bottom: 1px solid var(--border);
+  display: flex; flex-wrap: nowrap; overflow-x: hidden; scrollbar-width: none;
+  max-width: 100%; min-height: 42px; border-bottom: 1px solid var(--border);
 }
+.model-tabs::-webkit-scrollbar { display: none; }
 .model-tabs button {
   position: relative; flex: 1; min-width: 0; padding: 0 2px;
   color: var(--text-3); font-size: 11.5px; font-weight: 600;
@@ -308,7 +308,8 @@ function browseInFileManager() {
   content: ''; position: absolute; right: 18%; bottom: -1px; left: 18%;
   height: 2px; border-radius: 2px; background: var(--blue);
 }
-.model-list { max-height: min(43vh, 322px); overflow-y: auto; padding-top: 5px; }
+.model-list { max-height: min(43vh, 322px); overflow-y: auto; padding-top: 5px; scrollbar-width: none; }
+.model-list::-webkit-scrollbar { display: none; }
 .usage-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: transparent; }
 .usage-menu {
   position: absolute; z-index: 20; top: calc(var(--safe-top) + 49px); right: 8px;

@@ -1,5 +1,9 @@
 # Coomi
 
+> **最新稳定版：v1.4.6-r1**（Android ARM64）· [下载 APK](https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.6-r1.apk) · [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) · [官网](https://coomi.septemc.com/)
+>
+> v1.4.6 亮点：完整 Ubuntu 24.04 系统环境、Agent 执行实时可观察、报错归因体系、DeepSeek 账号登录、AI 工作室（实验）、通知与任务状态修复。
+
 <table align="center">
   <tr>
     <td align="center" width="20%">
@@ -61,10 +65,14 @@ Coomi 是一个在 Android 设备上运行的本地优先智能体工作环境�
 - **大文件分段读取**：`read_file` 默认只读前 64 KiB，支持按行偏移分批继续读取，超长单行自动截断。
 - **三档主题**：跟随系统 / 明亮 / 夜间，对话界面、控制台、引导页全链路统一，原生状态栏联动。
 - **隐私与授权可控**：手机存储访问默认关闭，开启时联动系统授权；引擎单实例锁防止多实例串扰；更新检查为手动触发，升级保留全部会话、环境与配置。
+- **DeepSeek 账号登录**：支持 DeepSeek App 账号（密码 / 短信验证码）直接登录，复用 App 订阅额度（deepseek-chat / deepseek-reasoner），无需单独购买 API 额度。
+- **AI 工作室（实验）**：多智能体协作工作台——创建工作室、配置成员职责与模型、群聊 @调度、工单看板与审批闭环。
+- **完整 Ubuntu 系统环境**：内置 Ubuntu 24.04 LTS（对齐 Operit 完整发行版），gcc/cmake 等构建链开箱即用，随包离线安装、引擎启动自动升级。
+- **执行过程实时可观察**：Agent 命令与输出在对话页实时滚动展示，支持错误归因（网络 / 上游 / 参数）与可行动自纠提示。
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) 或[官网](https://coomi.septemc.com/)下载最新 APK（`Coomi-Android-arm64-v1.4.0.apk`），安装到 Android 7.0+ 的 ARM64 设备。
+1. 从 [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) 或[官网](https://coomi.septemc.com/)下载最新 APK（`Coomi-Android-arm64-v1.4.6-r1.apk`），安装到 Android 7.0+ 的 ARM64 设备。
 2. 打开 App，完成引导：配置模型服务商（Provider）与 API Key，或先跳过、稍后在「对话设置 → Provider 配置」中填写。
 3. 进入对话界面，向 Agent 下达任务——它可以执行命令、读写文件、识别图片、管理 SKILL/MCP。
 

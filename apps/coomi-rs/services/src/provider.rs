@@ -93,7 +93,12 @@ impl HttpModelProvider {
             Some(false),
         );
         let response = self
-            .send_with_reasoning_fallback(&endpoint, &body, false)
+            .send_with_reasoning_fallback(
+                &endpoint,
+                &body,
+                false,
+                Some(responses_body_legacy(&body)),
+            )
             .await?;
         let value = checked_json(response, "response_body").await?;
         let message = value
@@ -156,7 +161,7 @@ impl HttpModelProvider {
             Some(false),
         );
         let response = self
-            .send_with_reasoning_fallback(&endpoint, &body, true)
+            .send_with_reasoning_fallback(&endpoint, &body, true, None)
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -287,7 +292,7 @@ impl HttpModelProvider {
         let endpoint = responses_compact_endpoint(&self.config.base_url);
         let body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision, true)?,
             "instructions": request.system_prompt
         });
         let value = checked_json(
@@ -391,7 +396,7 @@ impl HttpModelProvider {
         let endpoint = responses_endpoint(&self.config.base_url);
         let mut body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision, true)?,
             "stream": false
         });
         let request_tools = if self.config.capabilities.supports_native_tools {
@@ -415,7 +420,12 @@ impl HttpModelProvider {
             Some(true),
         );
         let response = self
-            .send_with_reasoning_fallback(&endpoint, &body, false)
+            .send_with_reasoning_fallback(
+                &endpoint,
+                &body,
+                false,
+                Some(responses_body_legacy(&body)),
+            )
             .await?;
         let value = checked_json(response, "response_body").await?;
         let mut content = String::new();
@@ -467,7 +477,7 @@ impl HttpModelProvider {
         let endpoint = responses_endpoint(&self.config.base_url);
         let mut body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision, true)?,
             "stream": true
         });
         let request_tools = if self.config.capabilities.supports_native_tools {
@@ -491,7 +501,12 @@ impl HttpModelProvider {
             Some(true),
         );
         let response = self
-            .send_with_reasoning_fallback(&endpoint, &body, true)
+            .send_with_reasoning_fallback(
+                &endpoint,
+                &body,
+                true,
+                Some(responses_body_legacy(&body)),
+            )
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -732,6 +747,7 @@ impl HttpModelProvider {
         endpoint: &str,
         body: &Value,
         streaming: bool,
+        extra_fallback: Option<Value>,
     ) -> Result<Response> {
         let request = || {
             let builder = self.authenticated(self.client.post(endpoint));
@@ -818,6 +834,11 @@ impl HttpModelProvider {
             },
             &mut steps,
         );
+        // 兼容阶梯末位：严格 serde 代理（agnes/OpenCode 等网关）拒绝 Responses
+        // 全形状（type/id/input_text 等）时，退回旧简写形状重试。
+        if let Some(legacy) = extra_fallback {
+            push_step(legacy, &mut steps);
+        }
 
         for fallback in &steps {
             let retry = request()
@@ -1615,6 +1636,42 @@ fn responses_endpoint(base_url: &str) -> String {
     EndpointResolver::new(base_url, ProviderProtocol::OpenAiResponses).inference("")
 }
 
+/// 兼容降级：把 Responses 全形状请求体退回旧简写形状
+/// （message 去 type/id、content 压回字符串；function_call(_output) 去 id）。
+/// 供严格 serde 代理（agnes/OpenCode 等网关）400 时作为最后阶梯重试。
+fn responses_body_legacy(body: &Value) -> Value {
+    let mut legacy = body.clone();
+    if let Some(items) = legacy.get_mut("input").and_then(Value::as_array_mut) {
+        let simplified: Vec<Value> = items
+            .iter()
+            .map(|item| {
+                let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
+                match kind {
+                    "message" => {
+                        let role = item.get("role").cloned().unwrap_or_else(|| json!("user"));
+                        let text = item
+                            .pointer("/content/0/text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned();
+                        json!({ "role": role, "content": text })
+                    }
+                    "function_call" | "function_call_output" => {
+                        let mut object = item.clone();
+                        if let Some(map) = object.as_object_mut() {
+                            map.remove("id");
+                        }
+                        object
+                    }
+                    _ => item.clone(),
+                }
+            })
+            .collect();
+        legacy["input"] = Value::Array(simplified);
+    }
+    legacy
+}
+
 fn responses_compact_endpoint(base_url: &str) -> String {
     format!("{}/compact", responses_endpoint(base_url))
 }
@@ -1873,7 +1930,7 @@ fn openai_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
     Ok(output)
 }
 
-fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Vec<Value>> {
+fn responses_input(messages: &[ChatMessage], supports_vision: bool, strict: bool) -> Result<Vec<Value>> {
     let mut input = Vec::new();
     for message in messages {
         if !message.provider_items.is_empty() {
@@ -1881,27 +1938,43 @@ fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
             continue;
         }
         match message.role {
-            Role::System | Role::User => input.push(json!({
-                "type": "message",
-                "role": role_name(message.role),
-                "content": [{ "type": "input_text", "text": message.content }]
-            })),
-            Role::Assistant => {
-                if !message.content.is_empty() {
+            Role::System | Role::User => {
+                if strict {
                     input.push(json!({
                         "type": "message",
-                        "role": "assistant",
-                        "content": [{ "type": "output_text", "text": message.content }]
+                        "role": role_name(message.role),
+                        "content": [{ "type": "input_text", "text": message.content }]
+                    }));
+                } else {
+                    input.push(json!({
+                        "role": role_name(message.role),
+                        "content": message.content
                     }));
                 }
+            },
+            Role::Assistant => {
+                if !message.content.is_empty() {
+                    if strict {
+                        input.push(json!({
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{ "type": "output_text", "text": message.content }]
+                        }));
+                    } else {
+                        input.push(json!({"role": "assistant", "content": message.content}));
+                    }
+                }
                 for call in &message.tool_calls {
-                    input.push(json!({
+                    let mut call_item = json!({
                         "type": "function_call",
-                        "id": call.id,
                         "call_id": call.id,
                         "name": call.name,
                         "arguments": serde_json::to_string(&call.arguments)?
-                    }));
+                    });
+                    if strict {
+                        call_item["id"] = json!(call.id);
+                    }
+                    input.push(call_item);
                 }
             }
             Role::Tool => {
@@ -1923,12 +1996,15 @@ fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
                     }));
                     Value::Array(items)
                 };
-                input.push(json!({
+                let mut output_item = json!({
                     "type": "function_call_output",
-                    "id": message.tool_call_id.as_deref().context("tool message has no call id")?,
                     "call_id": message.tool_call_id.as_deref().context("tool message has no call id")?,
                     "output": output
-                }));
+                });
+                if strict {
+                    output_item["id"] = json!(message.tool_call_id.as_deref().context("tool message has no call id")?);
+                }
+                input.push(output_item);
             }
         }
     }
@@ -1941,7 +2017,7 @@ fn remote_compaction_v2_body(
     parallel_tool_calls: bool,
     supports_vision: bool,
 ) -> Result<Value> {
-    let mut input = responses_input(&request.messages, supports_vision)?;
+    let mut input = responses_input(&request.messages, supports_vision, true)?;
     input.push(json!({"type": "compaction_trigger"}));
     let mut body = json!({
         "model": request.model,
@@ -2635,7 +2711,7 @@ mod tests {
             "type": "compaction",
             "encrypted_content": "opaque"
         });
-        let input = responses_input(&[ChatMessage::provider_item(item.clone())], true)
+        let input = responses_input(&[ChatMessage::provider_item(item.clone())], true, true)
             .expect("responses input");
         assert_eq!(input, vec![item]);
         assert!(
@@ -2690,7 +2766,7 @@ mod tests {
         });
         let history = vec![ChatMessage::assistant("", vec![call]), output];
 
-        let responses = responses_input(&history, true).expect("Responses history");
+        let responses = responses_input(&history, true, true).expect("Responses history");
         assert_eq!(responses[1]["output"][1]["type"], "output_image");
         assert_eq!(
             responses[1]["output"][1]["image_url"],
@@ -2735,7 +2811,7 @@ mod tests {
         });
         let history = vec![ChatMessage::assistant("", vec![call]), output];
 
-        let responses = responses_input(&history, false).expect("Responses history");
+        let responses = responses_input(&history, false, true).expect("Responses history");
         assert_eq!(responses[1]["output"], "success: image loaded");
 
         let chat = openai_messages(&history, false).expect("Chat history");
