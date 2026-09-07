@@ -223,7 +223,8 @@ public class CoomiActivity extends Activity {
             showLoading(getString(R.string.coomi_engine_starting));
             mCoomiService.restartEngine(result -> {
                 if (result.success) waitForEngine();
-                else showFailure(getString(R.string.coomi_engine_exited), null);
+                else showFailure(getString(R.string.coomi_engine_exited),
+                    result.stderr != null && !result.stderr.isEmpty() ? result.stderr : null);
             });
             return;
         }

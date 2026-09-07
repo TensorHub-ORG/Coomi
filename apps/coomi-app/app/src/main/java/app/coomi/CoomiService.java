@@ -449,11 +449,19 @@ public class CoomiService extends Service {
             }
             File binary = nativeBinary();
             File web = ensureCurrentWebAssets();
-            ensureRuntimeManifestCurrent();
-            ensureBundledRuntimeArtifactsCurrent();
             if (!binary.isFile() || !new File(web, "index.html").isFile()) {
                 mIsEngineStarting = false;
                 return new CommandResult(false, "", "native binary or frontend is missing", -1);
+            }
+            // Runtime V2 资产暂存（Ubuntu rootfs 311MB）失败（典型：存储不足）
+            // 不应阻止引擎启动——引擎可继续用当前已装 Runtime 运行，
+            // 自动升级会在空间释放后的下次启动重试暂存。
+            try {
+                ensureRuntimeManifestCurrent();
+                ensureBundledRuntimeArtifactsCurrent();
+            } catch (Exception stagingError) {
+                Logger.logError(LOG_TAG, "Runtime V2 staging failed, engine continues with current runtime: "
+                    + stagingError.getMessage());
             }
 
             int port = findFreePort();
@@ -580,7 +588,20 @@ public class CoomiService extends Service {
         String actualStamp = stamp.isFile() ? readText(stamp).trim() : "";
         File host = new File(CoomiConstants.RUNTIME_V2_HOST_PATH);
         File rootfs = new File(CoomiConstants.RUNTIME_V2_ROOTFS_PATH);
-        if (expectedStamp.equals(actualStamp) && host.isFile() && rootfs.isFile()) return;
+        if (expectedStamp.equals(actualStamp) && host.isFile() && rootfs.isFile()) {
+            // 批次八：清理旧格式暂存残留（Debian 时代的 151MB staged 包），释放空间。
+            File legacyStaged = new File(CoomiConstants.RUNTIME_V2_DOWNLOAD_DIR, "debian-rootfs-arm64.tar.gz");
+            if (legacyStaged.isFile()) legacyStaged.delete();
+            return;
+        }
+        // 存储预检：复制 Ubuntu rootfs（311MB）前确认可用空间充足，避免写到一半
+        // 磁盘满留下半截文件并反复重试。不足时跳过本次暂存（非致命，引擎照常启动）。
+        long required = 512L * 1024 * 1024;
+        long usable = directory.getUsableSpace();
+        if (usable > 0 && usable < required) {
+            throw new java.io.IOException("insufficient storage for runtime staging: need ~"
+                + required + " bytes, usable " + usable);
+        }
 
         copyAssetAtomically(CoomiConstants.RUNTIME_V2_HOST_ASSET, host);
         copyAssetAtomically(CoomiConstants.RUNTIME_V2_ROOTFS_ASSET, rootfs);
