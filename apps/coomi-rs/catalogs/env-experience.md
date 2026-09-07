@@ -27,6 +27,7 @@ tools: [shell, local_shell, read_file, write_file]
 7. **pip 实践**：项目用 venv；`pip install --user` 的脚本已在 PATH；不要 `sudo pip`（本来就是 root）。
 8. **systemd 不可用**：proot 里没有运行的 systemd——不要 `systemctl start x`；需要后台服务用 `nohup ... &` + local_shell 会话。
 9. **排障入口**：环境异常先调 `runtime_doctor` 看探测事实（工具链版本/网络/挂载），再动手修。
+10. **DNS/网络（Ubuntu 镜像坑）**：镜像自带的 `/etc/resolv.conf` 是指向 systemd-resolved 的悬空符号链接（proot 无 systemd）——`cat /etc/resolv.conf` 报错或 `ping/curl` 域名失败时，先 `ls -l /etc/resolv.conf` 看是否符号链接；引擎每次启动已自动重写为实体 DNS 文件（223.5.5.5/119.29.29.29），若仍异常可手动 `rm -f /etc/resolv.conf` 后重写（勿用 `systemctl` 重启 resolver，proot 里没有 systemd）。
 
 ## 报错自纠流程
 

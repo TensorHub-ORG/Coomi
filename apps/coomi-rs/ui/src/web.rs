@@ -783,6 +783,9 @@ pub async fn serve(
     Telemetry::new(&state.home).flush_background();
     // 内置环境自动升级：APK 内嵌新版 Runtime 与 active 不一致时后台静默升级。
     auto_runtime_upgrade(&state);
+    // DNS 自愈：Ubuntu 镜像自带悬空 resolv.conf 符号链接，每次启动幂等重写为
+    // 实体文件（已装旧实例也能修复，无需重装）。
+    let _ = RuntimeManager::open(&state.home).and_then(|manager| manager.ensure_guest_dns());
     let index = static_dir.join("index.html");
     let files = ServeDir::new(static_dir).not_found_service(ServeFile::new(index));
     let app = Router::new()

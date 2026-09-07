@@ -887,8 +887,15 @@ impl RuntimeManager {
         };
         let rootfs = self.root.join("versions").join(&version).join("rootfs");
         fs::create_dir_all(rootfs.join("etc"))?;
+        let resolv = rootfs.join("etc").join("resolv.conf");
+        // Ubuntu 自带的 /etc/resolv.conf 是指向 systemd-resolved stub 的符号链接
+        // （proot 里没有 systemd → 悬空链接），直接 write 会顺着悬空链接失败。
+        // 先删除旧条目（无论文件还是符号链接），再写实体文件。
+        if resolv.symlink_metadata().is_ok() {
+            let _ = fs::remove_file(&resolv);
+        }
         fs::write(
-            rootfs.join("etc").join("resolv.conf"),
+            &resolv,
             "# Coomi guest DNS (rewritten at install time)\n\
              nameserver 223.5.5.5\n\
              nameserver 119.29.29.29\n\

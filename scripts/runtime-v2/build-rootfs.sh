@@ -42,6 +42,7 @@ mmdebstrap \
   --customize-hook='printf "en_US.UTF-8 UTF-8\nzh_CN.UTF-8 UTF-8\n" > "$1/etc/locale.gen"' \
   --customize-hook='chroot "$1" locale-gen' \
   --customize-hook='mkdir -p "$1/workspace" "$1/home/coomi" "$1/opt/coomi-dev" "$1/tmp"' \
+  --customize-hook='rm -f "$1/etc/resolv.conf"; printf "# Coomi guest DNS\nnameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\n" > "$1/etc/resolv.conf"' \
   --customize-hook='printf "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports noble main universe\ndeb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports noble-updates main universe\ndeb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports noble-security main universe\n" > "$1/etc/apt/sources.list"' \
   --customize-hook='chroot "$1" python3 -c "import sys; assert sys.version_info >= (3, 11)"' \
   "$UBUNTU_SUITE" "$ROOTFS" "deb $UBUNTU_MIRROR $UBUNTU_SUITE main universe"
