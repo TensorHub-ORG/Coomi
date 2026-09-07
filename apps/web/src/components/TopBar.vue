@@ -283,24 +283,25 @@ function browseInFileManager() {
 }
 .model-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: rgba(0,0,0,0.3); }
 .model-menu {
-  position: fixed; z-index: 20; top: 50%; left: 50%;
+  position: fixed; z-index: 20; top: calc(var(--safe-top) + 49px); left: 50%;
   width: min(78vw, 300px); max-height: min(70vh, 420px); overflow-y: auto;
-  transform: translate(-50%, -50%); padding: 6px; border: 1px solid var(--border);
+  transform: translateX(-50%); padding: 6px; border: 1px solid var(--border);
   border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-2);
   animation: menu-pop .2s cubic-bezier(.2, .9, .3, 1.2) both;
 }
 @keyframes menu-pop {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(.9); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(.97); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 .model-tabs {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  display: flex; flex-wrap: nowrap;
   max-width: 100%; overflow-x: auto;
   min-height: 42px; border-bottom: 1px solid var(--border);
 }
 .model-tabs button {
-  position: relative; min-width: 0; padding: 0 3px;
-  color: var(--text-3); font-size: 12px; font-weight: 600;
+  position: relative; flex: 1; min-width: 0; padding: 0 2px;
+  color: var(--text-3); font-size: 11.5px; font-weight: 600;
+  white-space: nowrap; text-align: center;
 }
 .model-tabs button.active { color: var(--blue); }
 .model-tabs button.active::after {

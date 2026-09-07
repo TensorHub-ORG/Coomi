@@ -7584,7 +7584,8 @@ async fn usage_ledger(
             records.push(value);
         }
     }
-    records.reverse();
+    // 迭代已是最新在前（rev），保持顺序：用量流水要求最新记录在最上面。
+
     Ok(Json(json!({ "from": from, "to": to, "input_tokens": input, "cached_input_tokens": cached, "output_tokens": output, "total_tokens": total, "requests": records.len(), "records": records })))
 }
 

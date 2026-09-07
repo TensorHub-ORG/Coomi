@@ -333,7 +333,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     const m = ensure(id)
     // Automatic titles may arrive again after reconnecting or syncing with the engine.
     // Once the user has renamed a session, that explicit title always wins.
-    if (patch.title && !m.renamed) m.title = patch.title
+    // 常驻会话强制命名：自动标题（首条用户消息）不得覆盖。
+    if (patch.title && !m.renamed && id !== GLOBAL_SESSION_ID) m.title = patch.title
     if (patch.turns != null) m.turns = patch.turns
     persistMeta()
   }

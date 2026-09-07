@@ -95,7 +95,7 @@ export const useSessionStore = defineStore('session', () => {
     const trimmed = (GUIDE_TITLES[key] ?? 'Coomi 指南').trim()
     // 首条用户消息作为会话标题，抽屉里就不会全是「新对话」。
     const isFirst = !timeline.value.some(t => t.kind === 'user')
-    if (isFirst) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
+    if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
     timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
     runState.value = 'thinking'
     transport.value?.send({ command: 'send_guide', key })
@@ -501,7 +501,7 @@ export const useSessionStore = defineStore('session', () => {
     }
     // 首条用户消息作为会话标题，抽屉里就不会全是「新对话」。
     const isFirst = !timeline.value.some(t => t.kind === 'user')
-    if (isFirst) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
+    if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
     if (isBusy.value) {
       timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
       transport.value?.send({ command: 'jump_in', text: trimmed })

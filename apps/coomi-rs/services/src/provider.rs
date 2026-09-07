@@ -1882,16 +1882,22 @@ fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
         }
         match message.role {
             Role::System | Role::User => input.push(json!({
+                "type": "message",
                 "role": role_name(message.role),
-                "content": message.content
+                "content": [{ "type": "input_text", "text": message.content }]
             })),
             Role::Assistant => {
                 if !message.content.is_empty() {
-                    input.push(json!({"role": "assistant", "content": message.content}));
+                    input.push(json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": message.content }]
+                    }));
                 }
                 for call in &message.tool_calls {
                     input.push(json!({
                         "type": "function_call",
+                        "id": call.id,
                         "call_id": call.id,
                         "name": call.name,
                         "arguments": serde_json::to_string(&call.arguments)?
@@ -1919,6 +1925,7 @@ fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
                 };
                 input.push(json!({
                     "type": "function_call_output",
+                    "id": message.tool_call_id.as_deref().context("tool message has no call id")?,
                     "call_id": message.tool_call_id.as_deref().context("tool message has no call id")?,
                     "output": output
                 }));

@@ -7,6 +7,7 @@ import com.termux.shared.termux.TermuxConstants;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import android.os.Build;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -34,8 +35,12 @@ final class CoomiBackupArchive {
         File home = new File(CoomiConstants.COOMI_CONFIG_DIR);
         File virtualHome = new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
         notifyProgress(listener, "正在扫描备份内容", 0, 0);
-        long totalBytes = countDirectoryBytes(home, false, false)
+        long totalBytes = countDirectoryBytes(home, false, true)
             + countDirectoryBytes(virtualHome, true, true);
+
+        // 用户反馈：备份一直卡在压缩。根因是 coomi-home 整目录打包把 runtime-v2
+        //（1.1GB 解包的 Ubuntu rootfs + 311MB 下载包）也压了进去——与文案
+        //「不包含运行环境和缓存」不符。统一在此排除。
         long[] processedBytes = {0};
         notifyProgress(listener, "正在压缩备份", 0, totalBytes);
         File archive = File.createTempFile("coomi-backup-", ".zip", context.getCacheDir());
@@ -59,14 +64,37 @@ final class CoomiBackupArchive {
         }
     }
 
+    /** coomi-home 顶层不参与备份的目录：运行环境与缓存（与功能文案一致）。 */
+    private static boolean isExcludedHomeEntry(String name) {
+        String lower = name == null ? "" : name.toLowerCase();
+        return lower.equals("runtime-v2") || lower.equals("cache")
+            || lower.equals("code-tunnel") || lower.equals("downloads");
+    }
+
     private static void addDirectory(ZipOutputStream output, File directory, String prefix,
                                      ProgressListener listener, long[] processedBytes, long totalBytes) throws Exception {
         File[] children = directory.listFiles();
         if (children == null) return;
+        boolean homeRoot = prefix.equals("coomi-home");
         for (File child : children) {
+            if (isSymbolicLink(child)) continue; // 防符号链接循环导致"卡死"
+            if (homeRoot && isExcludedHomeEntry(child.getName())) continue;
             String name = prefix + "/" + child.getName();
             if (child.isDirectory()) addDirectory(output, child, name, listener, processedBytes, totalBytes);
             else addFile(output, name, child, listener, processedBytes, totalBytes);
+        }
+    }
+
+    private static boolean isSymbolicLink(File file) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                return java.nio.file.Files.isSymbolicLink(file.toPath());
+            } catch (Exception ignored) { /* fall through */ }
+        }
+        try {
+            return !file.getCanonicalPath().equals(file.getAbsolutePath());
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
@@ -163,6 +191,8 @@ final class CoomiBackupArchive {
         for (File child : children) {
             String name = child.getName();
             if (userData && ((root && ".coomi".equals(name)) || isEnvironmentEntry(name))) continue;
+            if (root && isExcludedHomeEntry(child.getName())) continue;
+            if (isSymbolicLink(child)) continue;
             if (child.isDirectory()) total += countDirectoryBytes(child, userData, false);
             else if (child.isFile()) total += Math.max(0, child.length());
         }

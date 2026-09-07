@@ -168,7 +168,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="@dimen/coomi_space_m">
+                android:padding="@dimen/coomi_space_m"
+                android:layout_marginBottom="@dimen/coomi_space_m">
                 <TextView
                     style="@style/Coomi.Text.Caption"
                     android:layout_width="match_parent"
@@ -196,7 +197,7 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/coomi_space_s"
+                    android:layout_marginTop="@dimen/coomi_space_m"
                     android:orientation="horizontal">
                     <Button
                         android:id="@+id/btn_smart_backup_reset"
@@ -220,6 +221,12 @@
             </LinearLayout>
 
             <!-- ── 导入备份 ── -->
+            <TextView
+                style="@style/Coomi.Text.SectionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/coomi_space_m"
+                android:text="导入备份" />
             <LinearLayout
                 android:id="@+id/btn_backup_import"
                 style="@style/Coomi.Row"
