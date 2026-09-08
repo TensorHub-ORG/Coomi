@@ -25,6 +25,9 @@ import android.widget.LinearLayout;
 
 /** WindowManager surface only. The chat owner, not this view, owns the WebView lifetime. */
 public final class CoomiFloatingWindow {
+    private static final int MIN_WIDTH_DP = 240;
+    private static final int MIN_HEIGHT_DP = 260;
+
     private final Context context;
     private final WebView webView;
     private final Runnable onClose;
@@ -202,8 +205,8 @@ public final class CoomiFloatingWindow {
         int screenWidth = Math.max(1, available.width());
         int screenHeight = Math.max(1, available.height());
         int edgeInset = Math.min(dp(24), (screenWidth - 1) / 2);
-        int width = constrainPanelWidth(window.width(), dp(240), screenWidth, edgeInset);
-        int height = clamp(window.height(), Math.min(dp(260), screenHeight), screenHeight);
+        int width = constrainPanelWidth(window.width(), dp(MIN_WIDTH_DP), screenWidth, edgeInset);
+        int height = clamp(window.height(), Math.min(dp(MIN_HEIGHT_DP), screenHeight), screenHeight);
         int x = constrainPanelX(window.left, width, screenWidth);
         int y = clamp(window.top, 0, screenHeight - height);
         window.set(x, y, x + width, y + height);
@@ -267,6 +270,12 @@ public final class CoomiFloatingWindow {
     static int constrainPanelX(int requested, int width, int screenWidth) {
         return clamp(requested, 0, Math.max(0, screenWidth - width));
     }
+
+    static int resizeEdges(float x, float y, int width, int height, int border, int corner) {
+        if (x > width - corner && y > height - corner) return 2 | 8;
+        return (x < border ? 1 : 0) | (x > width - border ? 2 : 0)
+            | (y < border ? 4 : 0) | (y > height - border ? 8 : 0);
+    }
     private int dp(int value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
 
     private final class MoveGesture implements View.OnTouchListener {
@@ -320,9 +329,7 @@ public final class CoomiFloatingWindow {
         @Override public boolean onInterceptTouchEvent(MotionEvent event) {
             if (minimized) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                int border = dp(8);
-                edges = (event.getX() < border ? 1 : 0) | (event.getX() > getWidth() - border ? 2 : 0)
-                    | (event.getY() < border ? 4 : 0) | (event.getY() > getHeight() - border ? 8 : 0);
+                edges = resizeEdges(event.getX(), event.getY(), getWidth(), getHeight(), dp(8), dp(32));
                 downX = event.getRawX(); downY = event.getRawY();
                 start.set(params.x, params.y, params.x + params.width, params.y + params.height);
             }
@@ -332,7 +339,8 @@ public final class CoomiFloatingWindow {
             if (edges == 0) return super.onTouchEvent(event);
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
                 int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
-                int minW = Math.min(dp(280), start.width()), minH = Math.min(dp(320), start.height());
+                int minW = Math.min(dp(MIN_WIDTH_DP), start.width());
+                int minH = Math.min(dp(MIN_HEIGHT_DP), start.height());
                 window.set(start);
                 if ((edges & 1) != 0) window.left = clamp(start.left + dx, 0, start.right - minW);
                 if ((edges & 2) != 0) window.right = clamp(start.right + dx, start.left + minW, available.width());
