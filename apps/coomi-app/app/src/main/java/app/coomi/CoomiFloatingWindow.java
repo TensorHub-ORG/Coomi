@@ -121,7 +121,6 @@ public final class CoomiFloatingWindow {
         Icon icon = new Icon(context, kind);
         icon.setContentDescription(description);
         icon.setFocusable(true);
-        icon.setBackgroundResource(android.R.drawable.list_selector_background);
         icon.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
         icon.setOnClickListener(v -> action.run());
         if (Build.VERSION.SDK_INT >= 26) icon.setTooltipText(description);
