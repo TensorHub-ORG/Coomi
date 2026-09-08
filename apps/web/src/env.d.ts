@@ -1,10 +1,16 @@
 /// <reference types="vite/client" />
 
+interface WindowEventMap {
+  'coomi:floating-state': CustomEvent<boolean>
+}
+
 interface Window {
   __coomiHandleSystemBack?: () => boolean
   __coomiApplyAppearance?: (config: AppearanceConfig) => void
+  __coomiFloating?: boolean
   CoomiAndroid?: {
     openDashboard(): void
+    openFloatingWindow?(): void
     importFiles?(): void
     importFilesForRequest?(requestId: string): void
     authorizeFolder?(): void

@@ -32,6 +32,8 @@ import QuestionSheet from '@/components/QuestionSheet.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
+const props = defineProps<{ floating?: boolean }>()
+
 const session = useSessionStore()
 const sessions = useSessionsStore()
 const config = useConfigStore()
@@ -110,6 +112,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:open-session', openSessionFromNative)
   window.removeEventListener('coomi:flush-persistence', session.flushPersistence)
   window.removeEventListener('focus', syncDigitalLifeMode)
+  closeDrawer()
   session.flushPersistence()
   if (runningPoll) { clearInterval(runningPoll); runningPoll = null }
   ro?.disconnect(); ro = null
@@ -154,6 +157,7 @@ function onAnswer(callId: string, answers: Record<string, string>) { session.ans
 function openDrawer() { drawerOpen.value = true; registerOverlay('side-drawer', closeDrawer) }
 function closeDrawer() { drawerOpen.value = false; unregisterOverlay('side-drawer') }
 
+
 watch(() => session.pendingApproval?.callId, (id, previous) => {
   if (previous) unregisterOverlay(`approval:${previous}`)
   if (id) registerOverlay(`approval:${id}`, () => session.approve(id, 'deny'))
@@ -167,7 +171,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 <template>
   <div class="chat">
     <div class="shell" :class="{ pushed: drawerOpen }">
-      <TopBar @menu="openDrawer" />
+      <TopBar :floating="props.floating" @menu="openDrawer" />
 
       <main ref="scroller" class="stream">
         <div v-if="session.timeline.length === 0" ref="content" class="inner empty-inner">

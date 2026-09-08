@@ -161,6 +161,21 @@
             android:resizeableActivity="true"
             android:theme="@style/Theme.Coomi.Web"
             tools:targetApi="n" />
+        <activity
+            android:name=".app.CoomiChatRequestActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|density|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
+            android:excludeFromRecents="true"
+            android:taskAffinity="${TERMUX_PACKAGE_NAME}.coomi.requests"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar.TranslucentDecor" />
+        <service
+            android:name=".app.CoomiFloatingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User initiated floating chat window" />
+        </service>
         <service
             android:name="app.coomi.CoomiService"
             android:exported="false" />

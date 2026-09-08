@@ -251,7 +251,7 @@ function openDashboard() {
 
 .dhead { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; }
 .sfield {
-  flex: 1; display: flex; align-items: center; gap: 7px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
   height: 38px; padding: 0 10px 0 11px;
   border-radius: var(--r-pill); background: var(--fill); color: var(--text-3);
 }
@@ -283,7 +283,7 @@ function openDashboard() {
   border-radius: 50%; background: var(--blue-soft);
 }
 
-.list { flex: 1; overflow-y: auto; padding: 2px 10px 10px; -webkit-overflow-scrolling: touch; }
+.list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px 10px; -webkit-overflow-scrolling: touch; }
 .empty { margin: 26px 12px; font-size: 13.5px; line-height: 1.8; color: var(--text-3); }
 
 .row {

@@ -11,13 +11,12 @@
     android:background="?attr/coomiPage"
     tools:context="com.termux.app.CoomiActivity">
 
-    <!-- WebView：Vue 前端由 coomi-rs 通过 loopback 提供 -->
-    <WebView
+    <!-- The session reparents its single WebView into this container. -->
+    <FrameLayout
         android:id="@+id/coomi_webview"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="?attr/coomiPage"
-        android:visibility="gone"/>
+        android:background="?attr/coomiPage"/>
 
     <!-- 启动闪屏 -->
     <LinearLayout
