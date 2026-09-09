@@ -234,10 +234,9 @@ function fmtTime(ts: number) {
         <div
           v-if="msg.senderId !== 'user'"
           class="avatar"
-          @pointerdown.prevent="onAvatarDown(msg.senderName)"
-          @pointerup="onAvatarUp"
-          @pointerleave="onAvatarUp"
-          @pointercancel="onAvatarUp"
+          @touchstart.prevent="onAvatarDown(msg.senderName)"
+          @touchend="onAvatarUp"
+          @touchcancel="onAvatarUp"
           @contextmenu.prevent
         >
           <Identicon :seed="msg.senderId + msg.senderName" :size="32" />
@@ -260,10 +259,9 @@ function fmtTime(ts: number) {
       <div v-if="memberActive" class="msg streaming-msg">
         <div
           class="avatar"
-          @pointerdown.prevent="onAvatarDown(streamingName)"
-          @pointerup="onAvatarUp"
-          @pointerleave="onAvatarUp"
-          @pointercancel="onAvatarUp"
+          @touchstart.prevent="onAvatarDown(streamingName)"
+          @touchend="onAvatarUp"
+          @touchcancel="onAvatarUp"
           @contextmenu.prevent
         >
           <Identicon :seed="streamingAvatarSeed" :size="32" />
@@ -354,7 +352,10 @@ function fmtTime(ts: number) {
 .notice.err { background: color-mix(in srgb, var(--orange) 16%, var(--bg)); color: var(--orange); }
 .msg { display: flex; gap: 8px; margin-bottom: 12px; }
 .msg.me { flex-direction: row-reverse; }
-.avatar { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0; cursor: pointer; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0; cursor: pointer;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
 .avatar :deep(svg) { width: 100%; height: 100%; }
 .bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; background: var(--bg-elev); border: 1px solid var(--border); min-width: 0; }
 .msg.me .bubble { background: var(--blue-soft); }

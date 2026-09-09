@@ -251,7 +251,8 @@ button, a, [role="button"], input, textarea, select, label {
   -webkit-tap-highlight-color: transparent !important;
   -webkit-touch-callout: none;
 }
-::selection { background: var(--blue-soft); }
+/* 选中文本高亮：用主题蓝做半透明混合，深浅主题下都有足够对比度 */
+::selection { background: color-mix(in srgb, var(--blue) 30%, transparent); }
 html, body, #app { height: 100%; margin: 0; }
 body {
   background: var(--bg);
