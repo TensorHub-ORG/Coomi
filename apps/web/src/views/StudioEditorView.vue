@@ -84,7 +84,7 @@ async function save() {
       const created = await studio.createStudio({
         id: '', name: name.value.trim(),
         description: description.value.trim() || undefined,
-        sharedDir: sharedDir.value.trim() || '/workspace',
+        sharedDir: sharedDir.value.trim(),
         hostId: hostId.value,
         members: members.value.map(m => ({ ...m })),
         createdAt: now, updatedAt: now,
@@ -98,7 +98,7 @@ async function save() {
         ...current,
         name: name.value.trim(),
         description: description.value.trim() || undefined,
-        sharedDir: sharedDir.value.trim() || '/workspace',
+        sharedDir: sharedDir.value.trim(),
         hostId: hostId.value,
         members: members.value.map(m => ({ ...m })),
         updatedAt: Date.now(),

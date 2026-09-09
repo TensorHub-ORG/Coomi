@@ -108,13 +108,16 @@ public final class CoomiFloatingService extends Service {
     private void returnToFullscreen() {
         if (mReleased) return;
         CoomiChatSession session = mSession != null ? mSession : CoomiChatSession.peek();
-        releaseWindow();
+        // 先拉起全屏 Activity 再释放悬浮窗：Android 10+ 的后台启动豁免依赖
+        // 「应用当前有可见窗口」，先 dismiss 再 startActivity 会被拦截，
+        // 表现为悬浮窗直接消失、全屏不出现。
         if (session != null) {
             try { session.restoreFullscreen(); }
             catch (RuntimeException error) {
                 Toast.makeText(this, "请从应用或通知返回聊天", Toast.LENGTH_LONG).show();
             }
         }
+        releaseWindow();
     }
 
     private void closeWindow() {

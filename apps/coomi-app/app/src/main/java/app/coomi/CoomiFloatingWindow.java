@@ -399,17 +399,25 @@ public final class CoomiFloatingWindow {
                     canvas.drawLine(-7, -7, 7, 7, paint); canvas.drawLine(-7, 7, 7, -7, paint);
                     break;
                 case 5:
+                    // 悬浮球：品牌渐变圆 + Coomi LOGO（白色单色化）。
                     paint.setStyle(Paint.Style.FILL);
                     paint.setShader(gradient);
                     canvas.drawCircle(0, 0, 25, paint);
                     paint.setShader(null);
-                    paint.setColor(Color.WHITE);
-                    paint.setStyle(Paint.Style.STROKE);
-                    canvas.drawRoundRect(-12, -9, 12, 8, 6, 6, paint);
-                    canvas.drawLine(-6, 8, -9, 13, paint);
-                    canvas.drawLine(-9, 13, 1, 8, paint);
-                    paint.setStyle(Paint.Style.FILL);
-                    canvas.drawCircle(-5, -1, 1.5f, paint); canvas.drawCircle(5, -1, 1.5f, paint);
+                    android.graphics.drawable.Drawable logo =
+                        context.getDrawable(com.termux.R.drawable.coomi_logo);
+                    if (logo != null) {
+                        logo = logo.mutate();
+                        logo.setColorFilter(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN);
+                        logo.setBounds(-14, -14, 14, 14);
+                        logo.draw(canvas);
+                    } else {
+                        paint.setColor(Color.WHITE);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setStrokeWidth(1.8f);
+                        paint.setStrokeCap(Paint.Cap.ROUND);
+                        canvas.drawRoundRect(-12, -9, 12, 8, 6, 6, paint);
+                    }
                     break;
                 default: break;
             }

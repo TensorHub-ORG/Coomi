@@ -146,10 +146,6 @@ public class CoomiActivity extends Activity {
             Toast.makeText(this, "请等待聊天加载完成", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (Build.VERSION.SDK_INT >= 24 && isInPictureInPictureMode()) {
-            Toast.makeText(this, "请先退出画中画再打开悬浮窗", Toast.LENGTH_SHORT).show();
-            return;
-        }
         if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
             mWaitingForPermission = true;
             try {
@@ -197,15 +193,6 @@ public class CoomiActivity extends Activity {
         if (mSession != null) mSession.flush();
         CoomiEngineMonitor.setAppForeground(false);
         super.onPause();
-    }
-
-    @Override public void onUserLeaveHint() {
-        super.onUserLeaveHint();
-        if (!mWaitingForPermission && !mOpeningFloating && mSession != null && !mSession.isFloating()
-            && !mSession.hasPendingRequest() && !CoomiChatRequestActivity.isActive() && Build.VERSION.SDK_INT >= 24
-            && CoomiEngineMonitor.hasRunningTasks() && !isInPictureInPictureMode()) {
-            try { enterPictureInPictureMode(); } catch (RuntimeException ignored) { }
-        }
     }
 
     @Override public void onBackPressed() {

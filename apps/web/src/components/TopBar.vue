@@ -329,11 +329,18 @@ function browseInFileManager() {
 .usage-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: transparent; }
 .usage-menu {
   position: absolute; z-index: 20; top: calc(var(--safe-top) + 49px); right: 8px;
-  width: min(92vw, 390px); max-height: min(72vh, 560px); overflow-y: auto; padding: 12px 13px;
+  width: min(92vw, 390px); max-height: min(72vh, 560px);
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+  padding: 12px 13px; padding-right: 10px;
   border: 1px solid var(--border); border-radius: var(--r-card);
   background: var(--bg); box-shadow: var(--shadow-2);
   transform-origin: top right; animation: usage-pop .2s cubic-bezier(.2, .9, .3, 1.15) both;
 }
+/* 滚动条内收：轨道上下留出圆角半径的边距，滑块不会伸进圆角视觉区 */
+.usage-menu::-webkit-scrollbar { width: 4px; }
+.usage-menu::-webkit-scrollbar-track { margin: 16px 0; background: transparent; }
+.usage-menu::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
 @keyframes usage-pop {
   from { opacity: 0; transform: scale(.92) translateY(-6px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
@@ -364,7 +371,11 @@ function browseInFileManager() {
   margin-top: 6px; padding-top: 9px; border-top: 1px solid var(--border);
 }
 .usage-env > span { font-size: 12px; color: var(--text-3); flex-shrink: 0; }
-.usage-env .env-row { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; min-width: 0; }
+.usage-env .env-row {
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  flex: 1; min-width: 0; overflow: hidden; justify-content: flex-end;
+}
+.usage-env .env-detail { flex: 1; min-width: 0; }
 .env-badge {
   font-style: normal; font-size: 11px; padding: 3px 9px; border-radius: var(--r-pill);
   white-space: nowrap;

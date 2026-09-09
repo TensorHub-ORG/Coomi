@@ -1642,11 +1642,34 @@ async fn studio_list(State(state): State<AppState>) -> Result<Json<Value>, ApiEr
     Ok(Json(json!({ "studios": studios })))
 }
 
+/// 校正工作室共享目录：前端编辑器可能保存了不可创建的挂载路径（如默认的
+/// /workspace），会导致 SecurityPolicy 初始化失败、所有成员沉默。
+/// 空值/不可创建/不可写一律回退到引擎数据目录下的托管路径。
+fn resolve_studio_workspace(home: &Path, studio: &Studio) -> PathBuf {
+    let raw = studio.shared_dir.trim().to_owned();
+    if !raw.is_empty() {
+        let candidate = PathBuf::from(&raw);
+        let creatable = std::fs::create_dir_all(&candidate).is_ok();
+        let writable = creatable
+            && std::fs::write(candidate.join(".coomi_studio_probe"), b"ok").is_ok();
+        if writable {
+            let _ = std::fs::remove_file(candidate.join(".coomi_studio_probe"));
+            return candidate;
+        }
+    }
+    let fallback = home.join("studios").join(&studio.id).join("workspace");
+    let _ = std::fs::create_dir_all(&fallback);
+    fallback
+}
+
 async fn studio_create(
     State(state): State<AppState>,
     Json(mut studio): Json<Studio>,
 ) -> Result<Json<Value>, ApiError> {
     if studio.id.trim().is_empty() { studio.id = uuid::Uuid::new_v4().to_string(); }
+    studio.shared_dir = resolve_studio_workspace(&state.home, &studio)
+        .to_string_lossy()
+        .to_string();
     let saved = StudioStore::new(state.home.join("studios")).save(studio)
         .map_err(|e| ApiError::bad_request(format!("invalid studio: {e}")))?;
     Ok(Json(json!({ "studio": saved })))
@@ -1666,6 +1689,9 @@ async fn studio_update(
     State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(mut studio): Json<Studio>,
 ) -> Result<Json<Value>, ApiError> {
     studio.id = id;
+    studio.shared_dir = resolve_studio_workspace(&state.home, &studio)
+        .to_string_lossy()
+        .to_string();
     let saved = StudioStore::new(state.home.join("studios")).save(studio)
         .map_err(|e| ApiError::bad_request(format!("invalid studio: {e}")))?;
     Ok(Json(json!({ "studio": saved })))
@@ -1740,9 +1766,11 @@ async fn studio_send_message(
     let approvals = Arc::clone(&state.studio_approvals);
     let home = state.home.clone();
     let studio_id = studio.id.clone();
-    // 共享工作目录不存在时创建，否则 SecurityPolicy 初始化会失败导致成员全部沉默。
-    let workspace = studio.shared_dir.clone();
-    let _ = std::fs::create_dir_all(&workspace);
+    // 共享工作目录：无效路径（如旧数据里的 /workspace）自动回退到托管目录，
+    // 否则 SecurityPolicy 初始化会失败导致成员全部沉默。
+    let workspace = resolve_studio_workspace(&state.home, &studio)
+        .to_string_lossy()
+        .to_string();
     let run_key = studio.id.clone();
     let run_registry = Arc::clone(&state.studio_runs);
     let spawned = tokio::spawn(async move {
