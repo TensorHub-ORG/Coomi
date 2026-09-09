@@ -87,6 +87,11 @@
   color-scheme: light;
 }
 
+:root[data-coomi-floating='true'] {
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+}
+
 /* ── 暗色主题：跟随系统深色模式 ──
    Android 侧（CoomiActivity）把系统深色状态经 JS 桥写入 <html data-theme="dark">；
    桌面浏览器由前端 matchMedia 监听自动设置，两者等效。 */

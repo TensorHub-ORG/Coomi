@@ -12,6 +12,10 @@ import { apiGet } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
 
 defineEmits<{ menu: [] }>()
+const props = defineProps<{ floating?: boolean }>()
+const canOpenFloatingWindow = computed(() => !props.floating && typeof window.CoomiAndroid?.openFloatingWindow === 'function')
+
+function openFloatingWindow() { window.CoomiAndroid?.openFloatingWindow?.() }
 
 const config = useConfigStore()
 const session = useSessionStore()
@@ -201,6 +205,17 @@ function browseInFileManager() {
     </div>
     </Teleport>
 
+    <button
+      v-if="canOpenFloatingWindow"
+      class="icon-btn floating-button"
+      type="button"
+      title="小窗聊天"
+      aria-label="小窗聊天"
+      @click="openFloatingWindow"
+    >
+      <CoomiIcon name="floatingWindow" />
+    </button>
+
     <button class="usage-button" :aria-expanded="usageOpen" aria-label="上下文用量" @click="toggleUsage">
       <svg class="usage-ring" viewBox="0 0 36 36" aria-hidden="true">
         <circle class="usage-track" cx="18" cy="18" r="15" pathLength="100" />
@@ -277,7 +292,7 @@ function browseInFileManager() {
 <style scoped>
 .topbar {
   position: relative;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-shrink: 0;
   min-height: 52px; padding: calc(var(--safe-top) + 6px) 8px 6px;
   background: var(--bg);
 }
@@ -334,7 +349,7 @@ function browseInFileManager() {
 .category-grid span { color:var(--text-3); }
 .category-grid strong { color:var(--text-2); font-family:var(--font-mono); }
 .effort-table { display: grid; gap: 1px; font-variant-numeric: tabular-nums; }
-.effort-head, .effort-row { display: grid; grid-template-columns: 44px minmax(82px, 1.4fr) 54px 50px; align-items: center; gap: 5px; min-height: 27px; }
+.effort-head, .effort-row { display: grid; grid-template-columns: 34px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 5px; min-height: 27px; overflow-wrap: anywhere; }
 .effort-head { color: var(--text-3); font-size: 10.5px; }
 .effort-row { border-top: 1px solid var(--border); color: var(--text-2); font-size: 11px; }
 .effort-head span:not(:first-child), .effort-row span:not(:first-child) { text-align: right; }
@@ -356,7 +371,7 @@ function browseInFileManager() {
 .env-badge.ok { background: var(--ok-soft, #e8f5ee); color: var(--ok, #18794e); }
 .env-badge.warn { background: var(--warn-soft, #fdf3e2); color: var(--focus, #b4690e); }
 .env-badge.down { background: var(--fill); color: var(--text-3); }
-.env-detail { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.env-detail { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .path-btn {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono); font-size: 11.5px; color: var(--blue);
@@ -364,6 +379,7 @@ function browseInFileManager() {
 }
 .path-mask { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.4); display: flex; align-items: flex-end; }
 .path-sheet {
+  max-height: 100%; overflow-y: auto;
   width: 100%;
   background: var(--bg-card);
   border-radius: 18px 18px 0 0;
@@ -408,6 +424,7 @@ function browseInFileManager() {
   border: 0; border-radius: 50%; background: none; color: var(--text-2);
 }
 .icon-btn:active { background: var(--fill); }
+.floating-button:focus-visible { box-shadow: inset 0 0 0 2px var(--blue); }
 .usage-button {
   position: relative; display: grid; place-items: center; flex-shrink: 0;
   width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--text-2);

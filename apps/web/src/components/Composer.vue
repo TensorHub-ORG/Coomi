@@ -49,8 +49,9 @@ function autoGrow() {
   if (!el) return
   el.style.height = 'auto'
   const scrollHeight = el.scrollHeight
-  textareaScrollable.value = scrollHeight > 132
-  el.style.height = Math.min(scrollHeight, 132) + 'px'
+  const maxHeight = Number.parseFloat(getComputedStyle(el).maxHeight) || 132
+  textareaScrollable.value = scrollHeight > maxHeight
+  el.style.height = Math.min(scrollHeight, maxHeight) + 'px'
 }
 
 async function submit() {
@@ -145,6 +146,7 @@ onMounted(() => {
   window.addEventListener('coomi:files-imported', onFilesImported)
   window.addEventListener('coomi:file-exported', onFileExported)
   window.addEventListener('coomi:prefill-draft', onPrefillDraft)
+  window.addEventListener('resize', autoGrow)
   loadDraft()
 })
 onBeforeUnmount(() => {
@@ -152,6 +154,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:files-imported', onFilesImported)
   window.removeEventListener('coomi:file-exported', onFileExported)
   window.removeEventListener('coomi:prefill-draft', onPrefillDraft)
+  window.removeEventListener('resize', autoGrow)
   saveDraft()
 })
 
@@ -286,7 +289,7 @@ watch(text, () => {
 </template>
 
 <style scoped>
-.composer { position: relative; padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); }
+.composer { position: relative; flex-shrink: 0; padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); }
 .edit-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: 0 2px 6px; padding: 6px 12px;
@@ -352,17 +355,18 @@ watch(text, () => {
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
 .input.scrollable { overflow-y: auto; }
+:global(html[data-coomi-floating='true'] .composer .input) { max-height: min(132px, 20vh); }
 .input::placeholder { color: var(--text-3); }
 .input:not(.scrollable)::-webkit-scrollbar { display: none; width: 0; }
 .input.scrollable::-webkit-scrollbar { width: 3px; }
 .input.scrollable::-webkit-scrollbar-track { margin-block: 12px 7px; background: transparent; }
 .input.scrollable::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--border-strong); }
 
-.bar { display: flex; align-items: center; gap: 6px; padding: 2px 0 0 2px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 0 0 2px; }
 .spacer { flex: 1; }
 
 .act {
-  display: grid; place-items: center; width: 34px; height: 34px;
+  display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px;
   border: 0; border-radius: 50%; background: none; color: var(--text-2);
 }
 .act:active { background: var(--fill-press); }
@@ -416,7 +420,7 @@ watch(text, () => {
 @keyframes life-wave-breathe { 0% { transform:translateX(-1.5px) scaleY(.9); opacity:.72; } 50% { transform:translateX(0) scaleY(1.04); opacity:1; } 100% { transform:translateX(1.5px) scaleY(.94); opacity:.8; } }
 @media (prefers-reduced-motion: reduce) { .wave { animation-duration:8s; } }
 .qhead { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-3); }
-.file-actions { display: flex; gap: 7px; margin-bottom: 8px; }
+.file-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
 .qchip.file { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); }
 .qchip {
   height: 32px; padding: 0 13px;

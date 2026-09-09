@@ -6,6 +6,7 @@
 const PATHS: Record<string, string> = {
   // ── 外壳 ──
   menu: 'M3 6h14M3 10h14M3 14h14',
+  floatingWindow: 'M16.5 7V4.5A1.5 1.5 0 0 0 15 3H4.5A1.5 1.5 0 0 0 3 4.5V14A1.5 1.5 0 0 0 4.5 15.5H7M10 9h7v7h-7V9Z',
   plus: 'M10 4v12M4 10h12',
   pencil: 'M4 16h3l8.6-8.6a1.8 1.8 0 0 0-2.5-2.5L4.5 13.5V16ZM12.2 6.6 14.9 9.3',
   search: 'M9 15a6 6 0 1 0 0-12 6 6 0 0 0 0 12ZM13.4 13.4 17 17',

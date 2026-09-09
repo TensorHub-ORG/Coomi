@@ -47,6 +47,7 @@ public class CoomiLauncherActivity extends Activity {
     private static final String LOG_TAG = "CoomiLauncherActivity";
     private static final int REQUEST_CODE_NOTIFICATION = 1001;
     private static final int REQUEST_CODE_BATTERY = 1002;
+    private static final int REQUEST_CODE_OVERLAY = 1003;
     private static final String PREFS_NAME = "coomi_launcher";
     private static final String PREF_AUTOSTART = "autostart_enabled";
     private static final String PREF_AUTOSTART_PENDING = "autostart_pending";
@@ -71,6 +72,7 @@ public class CoomiLauncherActivity extends Activity {
     private Button mRootButton;
     private Button mShizukuButton;
     private Button mAutostartButton;
+    private Button mOverlayButton;
     private Button mContinueButton;
     private CheckBox mTermsCheck;
 
@@ -106,6 +108,15 @@ public class CoomiLauncherActivity extends Activity {
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .edit().putBoolean(PREF_AUTOSTART_PENDING, true).apply();
             openAutostartSettings();
+        });
+        mOverlayButton = findViewById(R.id.btn_overlay_permission);
+        mOverlayButton.setOnClickListener(v -> {
+            // 悬浮窗权限只能跳系统页开关；返回后 onResume/onActivityResult 复查。
+            if (Build.VERSION.SDK_INT >= 23) {
+                startActivityForResult(
+                    new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName())), REQUEST_CODE_OVERLAY);
+            }
         });
         mContinueButton = findViewById(R.id.btn_continue);
         mTermsCheck = findViewById(R.id.check_terms);
@@ -366,6 +377,13 @@ public class CoomiLauncherActivity extends Activity {
             mAutostartButton.setText(autostartOn ? R.string.coomi_enabled : R.string.coomi_go_grant);
         }
 
+        if (mOverlayButton != null) {
+            // 与通知/电池一致的两态药丸：已授予后不可点。
+            boolean overlayOk = Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
+            mOverlayButton.setEnabled(!overlayOk);
+            mOverlayButton.setText(overlayOk ? R.string.coomi_granted : R.string.coomi_go_grant);
+        }
+
         if (mShizukuAccessController != null) {
             updateShizukuButton(mShizukuAccessController.getStatus());
         }
@@ -400,7 +418,8 @@ public class CoomiLauncherActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_NOTIFICATION || requestCode == REQUEST_CODE_BATTERY) {
+        if (requestCode == REQUEST_CODE_NOTIFICATION || requestCode == REQUEST_CODE_BATTERY
+            || requestCode == REQUEST_CODE_OVERLAY) {
             updatePermissionStatus();
         }
     }

@@ -83,6 +83,7 @@ const detail = computed(() => {
 
 .sheet {
   width: 100%; padding: 6px 16px calc(var(--safe-bottom) + 16px);
+  max-height: 100%; overflow-y: auto;
   border-radius: 22px 22px 0 0; background: var(--bg);
   box-shadow: var(--shadow-sheet);
   animation: rise .26s cubic-bezier(.2, .8, .2, 1);

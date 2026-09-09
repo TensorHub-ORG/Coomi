@@ -635,6 +635,8 @@
     <string name="coomi_launcher_battery_title">电池优化</string>
     <string name="coomi_launcher_autostart_title">自启动管理</string>
     <string name="coomi_launcher_autostart_desc">开机自动拉起引擎与定时任务</string>
+    <string name="coomi_launcher_overlay_title">悬浮窗权限</string>
+    <string name="coomi_launcher_overlay_desc">允许聊天小窗悬浮于其他应用之上</string>
     <string name="coomi_launcher_battery_desc">允许后台运行以防引擎被杀</string>
     <string name="coomi_allow">允许</string>
     <string name="coomi_go_grant">去授权</string>
