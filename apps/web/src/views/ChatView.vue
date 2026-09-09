@@ -21,6 +21,7 @@ import type { ToolCard } from '@/stores/viewModel'
 import { buildTimelineBlocks, type TimelineBlockItem } from '@/utils/chatTimeline'
 import type { ApprovalDecision } from '@/protocol/commands'
 import TopBar from '@/components/TopBar.vue'
+import UxProgramBar from '@/components/UxProgramBar.vue'
 import SideDrawer from '@/components/SideDrawer.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import Composer from '@/components/Composer.vue'
@@ -168,6 +169,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   <div class="chat">
     <div class="shell" :class="{ pushed: drawerOpen }">
       <TopBar @menu="openDrawer" />
+      <UxProgramBar />
 
       <main ref="scroller" class="stream">
         <div v-if="session.timeline.length === 0" ref="content" class="inner empty-inner">

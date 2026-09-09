@@ -349,7 +349,22 @@ public class CoomiService extends Service {
     }
 
     public void startEngine(Consumer<CommandResult> callback) {
-        mExecutor.execute(() -> callback.accept(startEngineSync()));
+        mExecutor.execute(() -> {
+            CommandResult result = startEngineSync();
+            reportStartupFailureIfNeeded(result);
+            callback.accept(result);
+        });
+    }
+
+    /** 引擎启动失败自动入队一条 startup_failure 反馈（去重，用户可在诊断页授权补传）。 */
+    private void reportStartupFailureIfNeeded(CommandResult result) {
+        if (result == null || result.success) return;
+        try {
+            FeedbackManager.enqueueNativeError(this, "startup_failure",
+                "引擎启动失败", result.stderr == null || result.stderr.isEmpty() ? result.stdout : result.stderr,
+                FeedbackManager.engineLogTail());
+        } catch (Exception ignored) {
+        }
     }
 
     /** InputStream.readAllBytes 是 Java 9 / API 33+ 才有的方法，Android 7-12 调用必然
@@ -483,6 +498,8 @@ public class CoomiService extends Service {
             mIsEngineRunning = true;
             startBundledRuntimeInstallWhenReady(mEngineProcess, port, token);
             reportDailyActive();
+            // 引擎就绪后补传离线期间的反馈（Outbox 里的记录都已获用户授权或为崩溃自动上报）。
+            new Thread(() -> FeedbackManager.flushOutbox(CoomiService.this), "coomi-feedback-flush").start();
 
             Process process = mEngineProcess;
             new Thread(() -> {
@@ -714,7 +731,9 @@ public class CoomiService extends Service {
     public void restartEngine(Consumer<CommandResult> callback) {
         mExecutor.execute(() -> {
             stopEngineSync();
-            callback.accept(startEngineSync());
+            CommandResult result = startEngineSync();
+            reportStartupFailureIfNeeded(result);
+            callback.accept(result);
         });
     }
 

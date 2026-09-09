@@ -918,6 +918,15 @@ pub async fn serve(
             "/api/settings/telemetry",
             get(telemetry_get).put(telemetry_set),
         )
+        .route(
+            "/api/settings/experience",
+            get(experience_settings_get).put(experience_settings_set),
+        )
+        .route(
+            "/api/ux-program",
+            get(ux_program_get).put(ux_program_put),
+        )
+        .route("/api/ux-program/generate", post(ux_program_generate))
         .route("/api/runtime/installed", get(runtime_installed))
         .route(
             "/api/runtime/v2",
@@ -938,7 +947,11 @@ pub async fn serve(
         .route("/api/life/memory", get(life_memory_get))
         .route(
             "/api/tool-failure-analysis",
-            post(analyze_tool_failures).layer(DefaultBodyLimit::max(32 * 1024)),
+            post(analyze_tool_failures).layer(DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route(
+            "/api/experience",
+            get(experience_list).delete(experience_clear),
         )
         // AI 工作室（实验）
         .route("/api/studios", get(studio_list).post(studio_create))
@@ -975,10 +988,13 @@ pub async fn serve(
             state.clone(),
             auth_layer,
         ))
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("Coomi Rust bridge {BRIDGE_VERSION} listening on http://127.0.0.1:{port}");
+
+    // 用户体验改进计划：每周自动更新检查（有画像且超期才跑，静默后台任务）。
+    tokio::spawn(crate::ux_profile::startup_refresh(state.home.clone()));
 
     // 引擎被终止（SIGTERM/SIGINT，如 app 退出时 Android 侧 destroy）时，
     // 先清理所有由引擎启动的工具进程，再退出 —— 满足“关闭 app 后全部终止”。
@@ -1710,11 +1726,23 @@ async fn studio_send_message(
     emit_now(json!({"event_type":"studio_user_message","content":text}));
     emit_now(json!({"event_type":"studio_start","member_ids":route.member_ids,"direct":route.direct}));
     let members = studio.members.clone();
-    let targets = route.member_ids.into_iter().take(4).collect::<Vec<_>>();
+    let mut targets = route.member_ids.into_iter().take(4).collect::<Vec<_>>();
+    // 路由兜底：未 @ 任何成员且无主持响应时，回退到主持成员（或首个成员），保证必有回复。
+    if targets.is_empty() {
+        let fallback = members
+            .iter()
+            .find(|member| member.id == studio.host_id)
+            .or_else(|| members.first());
+        if let Some(member) = fallback {
+            targets.push(member.id.clone());
+        }
+    }
     let approvals = Arc::clone(&state.studio_approvals);
     let home = state.home.clone();
     let studio_id = studio.id.clone();
+    // 共享工作目录不存在时创建，否则 SecurityPolicy 初始化会失败导致成员全部沉默。
     let workspace = studio.shared_dir.clone();
+    let _ = std::fs::create_dir_all(&workspace);
     let run_key = studio.id.clone();
     let run_registry = Arc::clone(&state.studio_runs);
     let spawned = tokio::spawn(async move {
@@ -1914,18 +1942,18 @@ async fn runtime_doctor(State(state): State<AppState>) -> Result<Json<Value>, Ap
 }
 
 const TOOL_FAILURE_ANALYSIS_PROMPT: &str = r#"
-你是 Coomi 的工具调用可靠性分析器。输入只包含程序生成并经过脱敏的工具调用轨迹，不包含用户对话、文件内容、原始参数值或模型隐藏思维。
+你是 Coomi 的工具调用可靠性分析器。输入包含本回合的工具调用轨迹（参数保留原文，仅密码/密钥/联系方式打码）与可选的最近对话摘要，用于还原真实任务场景。
 
 你的目标不是统计失败次数，而是形成可直接指导工程迭代的精炼中文报告。必须基于证据分析“失败 -> 调整 -> 后续成功/仍失败”的链路。严格区分【证据确认】与【合理推测】，不得把推测写成事实。总长度控制在 400 至 700 个汉字，不写背景铺垫或重复结论。
 
 按以下结构输出 Markdown：
-1. 失败与恢复链路（合并同类项，突出参数结构变化）
+1. 失败与恢复链路（合并同类项，突出参数变化）
 2. 根因判断（标注证据确认或合理推测）
 3. 优先级最高的 3 至 4 条工程修复建议
 4. 每条建议对应的一句测试与验收标准
 5. 仍缺少的关键证据（没有则省略）
 
-不得输出或猜测用户对话、真实路径、URL、密钥、文件内容、原始参数值和隐藏思维/思维链。可以给出简洁的判断依据。不要只复述错误分类，不要给“检查配置”“稍后重试”一类无法验收的泛化建议。
+不得输出或猜测 API Key、密码等敏感凭据；其余内容（路径、命令、URL、参数值、对话）可正常引用。不要只复述错误分类，不要给“检查配置”“稍后重试”一类无法验收的泛化建议。
 "#;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1940,11 +1968,19 @@ struct ToolFailureTraceItem {
     elapsed_ms: Option<u64>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct ConversationExcerptItem {
+    role: String,
+    text: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ToolFailureAnalysisRequest {
     #[serde(default)]
     provider_id: String,
     trace: Vec<ToolFailureTraceItem>,
+    #[serde(default)]
+    conversation_excerpt: Vec<ConversationExcerptItem>,
 }
 
 async fn analyze_tool_failures(
@@ -1963,18 +1999,34 @@ async fn analyze_tool_failures(
         .into_iter()
         .map(sanitize_tool_failure_item)
         .collect::<Vec<_>>();
+    // 放松：一次工具失败即允许溯源分析（反馈卡片的触发条件与之对齐）。
     let failure_count = sanitized
         .iter()
         .filter(|item| item.status == "error")
         .count();
-    if failure_count < 3 {
+    if failure_count < 1 {
         return Err(ApiError::bad_request(
-            "at least three failed tool calls are required",
+            "at least one failed tool call is required",
         ));
     }
+    // 对话摘要仅打码密钥/联系方式并截断，保留原文场景供模型定位。
+    let conversation = body
+        .conversation_excerpt
+        .into_iter()
+        .take(12)
+        .map(|mut item| {
+            item.role = match item.role.as_str() {
+                "user" => "user".to_owned(),
+                "assistant" => "assistant".to_owned(),
+                _ => "unknown".to_owned(),
+            };
+            item.text = sanitize_diagnostic_string(&item.text.chars().take(2_000).collect::<String>(), 2_000);
+            item
+        })
+        .collect::<Vec<_>>();
     let trace_json = serde_json::to_string_pretty(&sanitized)
         .map_err(|error| ApiError::bad_request(format!("invalid tool trace: {error}")))?;
-    if trace_json.len() > 28 * 1024 {
+    if trace_json.len() > 96 * 1024 {
         return Err(ApiError::bad_request("sanitized tool trace is too large"));
     }
 
@@ -1986,13 +2038,20 @@ async fn analyze_tool_failures(
         .map_err(|error| ApiError::bad_request(format!("provider unavailable: {error}")))?;
     let provider = HttpModelProvider::new(provider_config)
         .map_err(|error| ApiError::bad_request(format!("provider unavailable: {error}")))?;
+    let user_content = if conversation.is_empty() {
+        format!("请分析以下本轮工具轨迹（共 {failure_count} 次失败，仅密钥已打码）：\n\n{trace_json}")
+    } else {
+        let conversation_json = serde_json::to_string_pretty(&conversation)
+            .map_err(|error| ApiError::bad_request(format!("invalid conversation excerpt: {error}")))?;
+        format!(
+            "请结合最近对话摘要与工具轨迹（共 {failure_count} 次失败，仅密钥已打码）分析：\n\n【最近对话摘要】\n{conversation_json}\n\n【工具轨迹】\n{trace_json}"
+        )
+    };
     let request = ModelRequest {
         model: provider.model().to_owned(),
         messages: vec![
             ChatMessage::system(TOOL_FAILURE_ANALYSIS_PROMPT),
-            ChatMessage::user(format!(
-                "请分析以下本轮脱敏工具轨迹（共 {failure_count} 次失败）：\n\n{trace_json}"
-            )),
+            ChatMessage::user(user_content),
         ],
         tools: Vec::new(),
         reasoning_effort: Some("low".to_owned()),
@@ -2065,12 +2124,14 @@ fn sanitize_trace_value(value: Value, key: &str, depth: usize) -> Value {
             if is_secret_key(key) {
                 json!("[redacted_secret]")
             } else {
-                json!(sanitize_diagnostic_string(&value, 240))
+                // 放松：保留原文（仅打码密钥/联系方式并截断），保证可溯源。
+                let masked = sanitize_diagnostic_string(&value, 800);
+                json!(masked)
             }
         }
-        Value::Number(_) => json!("[number]"),
-        Value::Bool(value) => json!(value),
-        Value::Null => json!("[null]"),
+        Value::Number(value) => Value::Number(value),
+        Value::Bool(value) => Value::Bool(value),
+        Value::Null => json!(null),
     }
 }
 
@@ -2101,28 +2162,21 @@ fn sanitize_identifier(value: &str, max_chars: usize) -> String {
     }
 }
 
+/// 仅打码密钥形态（sk-/Bearer/长十六进制）与邮箱，路径、URL、命令保留原文（可溯源）。
 fn sanitize_diagnostic_string(value: &str, max_chars: usize) -> String {
     let truncated = value.chars().take(max_chars).collect::<String>();
     truncated
         .split_whitespace()
         .map(|token| {
             let lower = token.to_ascii_lowercase();
-            let looks_like_url = lower.starts_with("http://") || lower.starts_with("https://");
-            let looks_like_path = token.starts_with('/')
-                || token.as_bytes().get(1) == Some(&b':')
-                || token.contains("\\")
-                || token.contains("/data/")
-                || token.contains("/storage/");
             let looks_like_secret = lower.starts_with("sk-")
-                || lower.starts_with("bearer")
+                || lower.starts_with("rk-")
+                || lower.starts_with("pk-")
+                || (lower.starts_with("bearer") && token.len() > 8)
                 || (token.len() >= 24 && token.chars().all(|ch| ch.is_ascii_hexdigit()));
-            if looks_like_url {
-                "[redacted_url]"
-            } else if looks_like_path {
-                "[redacted_path]"
-            } else if looks_like_secret {
+            if looks_like_secret {
                 "[redacted_secret]"
-            } else if token.contains('@') && token.contains('.') {
+            } else if token.contains('@') && token.contains('.') && !token.contains('/') {
                 "[redacted_email]"
             } else {
                 token
@@ -3682,6 +3736,219 @@ async fn fetch_first(urls: &[String]) -> Option<Value> {
 // ─────────────────────────── 匿名统计设置 ───────────────────────────
 
 /// 匿名使用统计开关状态。
+/// 经验蒸馏提示词：输入本回合「工具轨迹（原文，仅密钥打码）」，输出一条结构化经验或 skip。
+const EXPERIENCE_DISTILL_PROMPT: &str = r#"
+你是 Coomi 的经验蒸馏器。输入是一次 Agent 回合中「工具调用轨迹」的节选（保留原文，仅密码/密钥/联系方式打码），其中包含失败与随后的恢复。
+
+任务：判断本回合是否存在值得沉淀的可复用经验（环境差异、工具用法、参数修正、网络/权限问题等「问题→解决」模式）。通用常识（如语法错误改语法）不值得沉淀；环境特异、需要试错才得出的做法值得沉淀。
+
+只输出一个 JSON 对象（不要 Markdown 围栏、不要解释）：
+{"skip": true}
+或
+{"category": "environment|tool|network|permission|arguments 之一", "symptom": "问题现象（≤80字）", "root_cause": "根因（≤80字，标注推测需写『推测：』前缀）", "resolution": "最终生效的解决方式（≤120字，可执行）", "constraints": "适用环境条件（≤60字，没有则空字符串）"}
+"#;
+
+/// 回合成功后的静默蒸馏：从回合消息里抽取工具轨迹，调一次低推理强度模型，
+/// 解析出结构化经验并入库（去重/限频在 experience crate 内完成）。失败静默跳过。
+async fn distill_experience(
+    home: &Path,
+    provider_config: coomi_services::ProviderConfig,
+    turn_messages: &[ChatMessage],
+) -> Result<()> {
+    // 抽取轨迹：先扫 assistant 的 tool_calls（id → 名称/参数），再配对后续
+    // tool 消息（引擎固定写为 "status: output" 格式）。
+    let mut calls_by_id: std::collections::HashMap<String, (String, Value)> =
+        std::collections::HashMap::new();
+    for message in turn_messages {
+        if message.role == coomi_engine::Role::Assistant {
+            for call in &message.tool_calls {
+                calls_by_id
+                    .entry(call.id.clone())
+                    .or_insert_with(|| (call.name.clone(), call.arguments.clone()));
+            }
+        }
+    }
+    let mut trace: Vec<Value> = Vec::new();
+    let mut error_count = 0_usize;
+    let mut success_count = 0_usize;
+    for message in turn_messages {
+        if message.role != coomi_engine::Role::Tool {
+            continue;
+        }
+        let call_id = message.tool_call_id.clone().unwrap_or_default();
+        let (status, output) = match message.content.split_once(": ") {
+            Some(("error", rest)) => ("error", rest),
+            Some(("success", rest)) => ("success", rest),
+            _ => continue,
+        };
+        if status == "error" {
+            error_count += 1;
+        } else {
+            success_count += 1;
+        }
+        let (tool, arguments) = calls_by_id
+            .get(&call_id)
+            .cloned()
+            .unwrap_or_else(|| ("unknown_tool".to_owned(), Value::Null));
+        trace.push(json!({
+            "tool": tool,
+            "arguments": arguments,
+            "status": status,
+            "output": sanitize_diagnostic_string(&output.chars().take(600).collect::<String>(), 600),
+        }));
+    }
+    // 触发条件：确实存在「问题 → 解决」（失败过且最终有成功恢复）。
+    if error_count == 0 || success_count == 0 {
+        return Ok(());
+    }
+    if trace.is_empty() {
+        return Ok(());
+    }
+    let trace_json = serde_json::to_string_pretty(&trace)?;
+    if trace_json.len() > 64 * 1024 {
+        anyhow::bail!("turn trace too large");
+    }
+    let provider = HttpModelProvider::new(provider_config)?;
+    let request = ModelRequest {
+        model: provider.model().to_owned(),
+        messages: vec![
+            ChatMessage::system(EXPERIENCE_DISTILL_PROMPT),
+            ChatMessage::user(format!(
+                "本回合共 {error_count} 次工具失败、{success_count} 次成功恢复。工具轨迹：\n{trace_json}"
+            )),
+        ],
+        tools: Vec::new(),
+        reasoning_effort: Some("low".to_owned()),
+    };
+    let response = tokio::time::timeout(Duration::from_secs(120), provider.complete(request))
+        .await
+        .map_err(|_| anyhow::anyhow!("distillation timed out"))??;
+    let content = sanitize_generated_analysis(&response.content);
+    let start = content.find('{').context("no JSON in distillation output")?;
+    let end = content.rfind('}').context("no JSON in distillation output")?;
+    let parsed: Value = serde_json::from_str(&content[start..=end])?;
+    if parsed.get("skip").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(());
+    }
+    let field = |name: &str, max: usize| -> String {
+        parsed
+            .get(name)
+            .and_then(Value::as_str)
+            .map(|text| text.trim().chars().take(max).collect::<String>())
+            .unwrap_or_default()
+    };
+    let symptom = field("symptom", 120);
+    let resolution = field("resolution", 200);
+    let lesson = coomi_experience::Lesson {
+        id: format!("lesson_{}", chrono::Utc::now().timestamp_millis()),
+        time: chrono::Utc::now().to_rfc3339(),
+        category: {
+            let value = field("category", 20);
+            ["environment", "tool", "network", "permission", "arguments"]
+                .iter()
+                .find(|allowed| value.contains(*allowed))
+                .map(|allowed| (*allowed).to_owned())
+                .unwrap_or_else(|| "environment".to_owned())
+        },
+        symptom,
+        root_cause: field("root_cause", 120),
+        resolution,
+        constraints: field("constraints", 80),
+        confidence: 0.5,
+        use_count: 0,
+        helpful_count: 0,
+    };
+    let stored = coomi_experience::append_lesson(home, lesson)?;
+    if stored {
+        eprintln!("[experience] new lesson stored");
+    }
+    Ok(())
+}
+
+/// 经验库列表（诊断页/前端查看）。
+async fn experience_list(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!({
+        "enabled": coomi_experience::enabled(&state.home),
+        "lessons": coomi_experience::load_lessons(&state.home),
+    })))
+}
+
+/// 清空经验库。
+async fn experience_clear(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    coomi_experience::clear(&state.home)
+        .map_err(|error| ApiError::internal(format!("failed to clear experience: {error:#}")))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// 经验沉淀开关。
+async fn experience_settings_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!({ "enabled": coomi_experience::enabled(&state.home) })))
+}
+
+async fn experience_settings_set(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let enabled = body
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::bad_request("missing enabled: true|false"))?;
+    coomi_experience::set_enabled(&state.home, enabled)
+        .map_err(|error| ApiError::internal(format!("failed to save experience setting: {error:#}")))?;
+    Ok(Json(json!({ "ok": true, "enabled": enabled })))
+}
+
+/// 用户体验改进计划：状态汇总（含只读画像档案）。
+async fn ux_program_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(crate::ux_profile::summary(&state.home)))
+}
+
+/// 更新计划设置：{ "consent": "joined|local_only|undecided", "auto_update": bool }。
+/// 同意加入（joined）后立即上传当前档案。
+async fn ux_program_put(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    if let Some(consent) = body.get("consent").and_then(Value::as_str) {
+        crate::ux_profile::set_consent(&state.home, consent)
+            .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+        if consent == "joined" {
+            crate::ux_profile::upload(&state.home);
+        }
+    }
+    if let Some(auto_update) = body.get("auto_update").and_then(Value::as_bool) {
+        crate::ux_profile::set_auto_update(&state.home, auto_update)
+            .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    }
+    if let Some(exit_reason) = body.get("exit_reason").and_then(Value::as_str) {
+        let _ = crate::ux_profile::set_exit_reason(&state.home, exit_reason);
+    }
+    if let Some(never_ask) = body.get("never_ask").and_then(Value::as_bool) {
+        crate::ux_profile::set_never_ask(&state.home, never_ask)
+            .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    }
+    Ok(Json(json!({ "ok": true, "summary": crate::ux_profile::summary(&state.home) })))
+}
+
+/// 触发一次画像凝练（后台任务；busy 时返回 409）。
+async fn ux_program_generate(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    if crate::ux_profile::is_busy() {
+        return Err(ApiError::conflict("profile generation already running"));
+    }
+    let registry = ProviderRegistry::load(&providers_path(&state.home))
+        .map_err(|error| ApiError::bad_request(format!("provider unavailable: {error}")))?;
+    let selector = body.get("provider_id").and_then(Value::as_str).map(str::trim);
+    let provider_config = registry
+        .resolve(selector)
+        .map_err(|error| ApiError::bad_request(format!("provider unavailable: {error}")))?;
+    crate::ux_profile::start_generate(state.home.clone(), provider_config)
+        .map_err(|error| ApiError::conflict(format!("{error:#}")))?;
+    Ok(Json(json!({ "ok": true, "busy": true })))
+}
+
 async fn telemetry_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let telemetry = Telemetry::new(&state.home);
     Ok(Json(json!({ "enabled": telemetry.enabled() })))
@@ -6941,6 +7208,18 @@ async fn run_turn(
             prompt_context.push_str(&memory_context);
         }
     }
+    // 经验沉淀注入：按当前任务相关性选取本地沉淀的经验条目（top 3），
+    // 注入「环境经验教训」提示段，减少 Agent 对已知环境/工具问题的重复试错。
+    let injected_lesson_ids: Vec<String> = if coomi_experience::enabled(&state.home) {
+        let lessons = coomi_experience::select_relevant(&state.home, prompt, 3);
+        let ids = lessons.iter().map(|lesson| lesson.id.clone()).collect::<Vec<_>>();
+        if !lessons.is_empty() {
+            prompt_context.push_str(&coomi_experience::prompt_section(&lessons));
+        }
+        ids
+    } else {
+        Vec::new()
+    };
     let (sub_agents, fallback_sub_agent_id) = resolve_configured_subagents(&state.home, &registry);
     let scheduler = AgentScheduler::new(
         cwd.clone(),
@@ -6980,7 +7259,7 @@ async fn run_turn(
         Some(format!("{}:{}", provider_config.id, provider_config.model)),
         routed_skills,
     );
-    let provider = HttpModelProvider::new(provider_config)?;
+    let provider = HttpModelProvider::new(provider_config.clone())?;
     let approval = BrowserApproval {
         task: Arc::clone(&task),
         permission: Arc::clone(&context.permission),
@@ -7046,6 +7325,7 @@ async fn run_turn(
     // 部分回复）不丢失；否则下次继续时会话停留在旧历史（表现为「读不了上文」）。
     // touch() 把 updated_at 刷成执行结束时间：会话列表按它排序（而非前端点击时间）。
     session.touch();
+    let messages_before_turn = session.messages.len();
     let turn_result = if recovery {
         agent
             .continue_interrupted_turn(&mut session, &provider, &tools, &approval, &observer)
@@ -7069,6 +7349,26 @@ async fn run_turn(
     }
     store.save_checkpoint(&session)?;
     let mut assistant_text = turn_result?;
+
+    // 经验沉淀（全程静默）：本回合「遇到错误 → 最终解决」时，后台蒸馏一条经验；
+    // 注入过的经验记一次 use，回合成功再记一次 helpful（排序权重）。
+    if coomi_experience::enabled(&state.home) {
+        if !injected_lesson_ids.is_empty() {
+            let _ = coomi_experience::record_injected(&state.home, &injected_lesson_ids);
+            let _ = coomi_experience::mark_helpful(&state.home, &injected_lesson_ids);
+        }
+        let turn_slice_start = messages_before_turn.min(session.messages.len());
+        let turn_messages: Vec<ChatMessage> = session.messages[turn_slice_start..].to_vec();
+        let distill_home = state.home.clone();
+        let distill_provider_config = provider_config.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                distill_experience(&distill_home, distill_provider_config, &turn_messages).await
+            {
+                eprintln!("[experience] distillation skipped: {error:#}");
+            }
+        });
+    }
 
     while session
         .loop_state
@@ -8723,6 +9023,13 @@ impl ApiError {
     fn forbidden(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
             message: message.into(),
         }
     }

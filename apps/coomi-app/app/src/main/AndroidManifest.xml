@@ -133,6 +133,12 @@
             android:theme="@style/Theme.Coomi" />
 
         <activity
+            android:name="app.coomi.CoomiFeedbackActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Coomi" />
+
+        <activity
             android:name="app.coomi.CoomiHomeSettingActivity"
             android:exported="false"
             android:screenOrientation="portrait"

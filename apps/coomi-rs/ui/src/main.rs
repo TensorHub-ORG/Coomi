@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 mod life;
 mod terminal_ui;
+mod ux_profile;
 mod web;
 mod workflow;
 

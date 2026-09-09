@@ -4,6 +4,7 @@ import MessageBubble from '@/components/MessageBubble.vue'
 import ToolGroup from '@/components/ToolGroup.vue'
 import ReasoningBlock from '@/components/ReasoningBlock.vue'
 import NoticeItem from '@/components/NoticeItem.vue'
+import FeedbackCard from '@/components/FeedbackCard.vue'
 
 defineProps<{ block: TimelineBlockItem }>()
 </script>
@@ -16,6 +17,8 @@ defineProps<{ block: TimelineBlockItem }>()
       :msg="block.item"
     />
     <ReasoningBlock v-else-if="block.item.kind === 'reasoning'" :block="block.item" />
+    <!-- 带反馈数据的通知渲染为统一反馈卡片，纯通知走 NoticeItem。 -->
+    <FeedbackCard v-else-if="block.item.kind === 'notice' && block.item.feedback" :notice="block.item" />
     <NoticeItem v-else-if="block.item.kind === 'notice'" :notice="block.item" />
     <div
       v-else-if="block.item.kind === 'question' && block.item.answered"

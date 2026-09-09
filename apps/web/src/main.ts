@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import { router } from './router'
 import { installSystemBackHandler } from './bridge/navigation'
+import { installJsErrorReport } from './bridge/jsErrorReport'
 import { readThemeMode, applyTheme, type ThemeMode } from './stores/config'
 import './styles/global.css'
 
@@ -145,4 +146,5 @@ function initTheme() {
 
 initTheme()
 installSystemBackHandler(router)
+installJsErrorReport()
 createApp(App).use(createPinia()).use(router).mount('#app')

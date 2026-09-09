@@ -31,6 +31,11 @@ public class TermuxApplication extends android.app.Application {
         // Coomi 崩溃采集（Java 崩溃链式记录 + logcat 快照，覆盖原生闪退场景）
         app.coomi.CrashLog.install(this);
 
+        // Coomi 反馈 Outbox 补传：上次崩溃/离线期间未发出的反馈记录，
+        // 在这里自动补传（崩溃记录免弹窗直传；其余记录入队时已经用户授权）。
+        final Context flushContext = context;
+        new Thread(() -> app.coomi.FeedbackManager.flushOutbox(flushContext), "coomi-feedback-flush").start();
+
         // Set log config for the app
         setLogConfig(context);
 

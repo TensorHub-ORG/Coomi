@@ -57,6 +57,7 @@ public final class CrashLog {
         try {
             StringWriter stack = new StringWriter();
             throwable.printStackTrace(new PrintWriter(stack));
+            String stackText = stack.toString();
             StringBuilder builder = new StringBuilder();
             builder.append("==== Coomi Crash ").append(stamp()).append(" ====\n");
             builder.append("thread: ").append(thread.getName())
@@ -67,7 +68,7 @@ public final class CrashLog {
                     .append(" (sdk ").append(Build.VERSION.SDK_INT)
                     .append(", abi ").append(Build.CPU_ABI).append(")\n");
             builder.append("build: ").append(Build.VERSION.RELEASE).append('\n');
-            builder.append(stack);
+            builder.append(stackText);
             builder.append('\n');
             File log = new File(logsDir(context), "crash.log");
             FileWriter writer = new FileWriter(log, true);
@@ -75,6 +76,10 @@ public final class CrashLog {
             writer.close();
             mirrorAppend(context, "crash.log", builder.toString());
             Log.e(TAG, "crash written to " + log.getAbsolutePath());
+            // 崩溃自动反馈：同步写入 Outbox（进程随时会死），随后尽力即时上传；
+            // 未发出的记录在下次启动时由 Application 自动补传——覆盖
+            // 「第一次崩溃太快、第二次启动必须提交」的要求。
+            FeedbackManager.recordCrash(context, thread.getName(), stackText);
         } catch (Throwable ignored) {
         }
     }

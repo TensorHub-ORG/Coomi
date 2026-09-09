@@ -31,15 +31,34 @@ export interface QuestionCard {
   answered: boolean; answers?: Record<string, string>
 }
 
+/** 回合反馈卡片携带的数据（v2 schema 的 web 侧部分，native 上传前会补齐环境/日志并终检脱敏）。 */
+export interface FeedbackPayloadData {
+  /** 反馈通道：工具失败 / 运行时错误 / 性能（停滞等）。 */
+  channel: 'tool_failure' | 'runtime_error' | 'performance'
+  /** 一行摘要（卡片标题）。 */
+  summary: string
+  /** 是否调用模型做溯源分析（有工具失败轨迹时才需要）。 */
+  needsAnalysis: boolean
+  /** 完整工具轨迹（仅密钥类值打码，保留真实路径/命令/参数）。 */
+  toolTrace: ToolDiagnosticTrace[]
+  /** 是否可附带最近对话（用户在设置中开启且时间线里有对话）。 */
+  hasConversation: boolean
+}
+
 export interface NoticeItem {
   kind: 'notice'
   id: string
   tone: 'info' | 'warn' | 'error' | 'success'
   text: string
   detail?: string
+  /** 非空表示这是一张反馈卡片，由 FeedbackCard.vue 渲染（统一布局）。 */
+  feedback?: FeedbackPayloadData
   feedbackEligible?: boolean
   analysisStatus?: 'consent' | 'analyzing' | 'ready' | 'uploading' | 'complete' | 'failed'
-  analysisTrace?: ToolDiagnosticTrace[]
+  /** 溯源分析结论（needsAnalysis 完成后回填，卡片可展开查看）。 */
+  analysisText?: string
+  /** 上传结果独立提示（完成态展示，避免与卡片摘要重复）。 */
+  statusNote?: string
   failureCount?: number
 }
 

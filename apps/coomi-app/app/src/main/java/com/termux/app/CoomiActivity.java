@@ -90,6 +90,8 @@ public class CoomiActivity extends Activity {
     private TextView mLoadingText;
     private TextView mLoadingDetail;
     private Button mRetryButton;
+    private Button mSplashFeedbackButton;
+    private boolean mSplashFeedbackSubmitted;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private CoomiService mCoomiService;
@@ -139,6 +141,8 @@ public class CoomiActivity extends Activity {
         mLoadingDetail = findViewById(R.id.coomi_loading_detail);
         mRetryButton = findViewById(R.id.btn_coomi_retry);
         mRetryButton.setOnClickListener(v -> retryStart());
+        mSplashFeedbackButton = findViewById(R.id.btn_coomi_feedback);
+        mSplashFeedbackButton.setOnClickListener(v -> submitSplashFeedback());
         configureWebView();
 
         showLoading(getString(R.string.coomi_starting));
@@ -223,12 +227,45 @@ public class CoomiActivity extends Activity {
             showLoading(getString(R.string.coomi_engine_starting));
             mCoomiService.restartEngine(result -> {
                 if (result.success) waitForEngine();
-                else showFailure(getString(R.string.coomi_engine_exited),
-                    result.stderr != null && !result.stderr.isEmpty() ? result.stderr : null);
+                else onStartupFailed(result.stderr != null && !result.stderr.isEmpty() ? result.stderr : null);
             });
             return;
         }
-        showFailure(getString(R.string.coomi_engine_exited), null);
+        onStartupFailed(null);
+    }
+
+    /** 启动失败终态：展示可操作 UI + 自动入队一条 startup_failure 反馈（去重，等待补传）。 */
+    private void onStartupFailed(String detail) {
+        if (!CoomiDemo.isEnabled()) {
+            final String reason = detail == null ? "引擎启动失败（自动恢复未成功）" : detail;
+            new Thread(() -> app.coomi.FeedbackManager.enqueueNativeError(CoomiActivity.this,
+                "startup_failure", "引擎启动失败", reason, null), "coomi-feedback-startup").start();
+        }
+        showFailure(getString(R.string.coomi_engine_exited), detail);
+    }
+
+    /** 启动失败页「一键反馈」：采集引擎日志与环境快照立即上传（带 Outbox 兜底）。 */
+    private void submitSplashFeedback() {
+        if (mSplashFeedbackSubmitted) return;
+        mSplashFeedbackSubmitted = true;
+        mSplashFeedbackButton.setEnabled(false);
+        new Thread(() -> {
+            JSONObject payload = app.coomi.FeedbackManager.basePayload("startup_failure");
+            try {
+                JSONObject error = new JSONObject();
+                error.put("title", "引擎启动失败（用户手动反馈）");
+                error.put("message", mLoadingText != null ? mLoadingText.getText().toString() : "引擎启动失败");
+                payload.put("error", error);
+            } catch (Exception ignored) {}
+            String result = app.coomi.FeedbackManager.submit(CoomiActivity.this, payload);
+            boolean ok = false;
+            try { ok = new JSONObject(result).optBoolean("ok", false); } catch (Exception ignored) {}
+            final boolean submitted = ok;
+            runOnUiThread(() -> {
+                Toast.makeText(CoomiActivity.this, submitted
+                    ? R.string.coomi_feedback_sent : R.string.coomi_feedback_failed, Toast.LENGTH_SHORT).show();
+            });
+        }, "coomi-feedback-splash").start();
     }
 
     /** 失败后允许原地重试，否则用户只能杀进程。 */
@@ -236,6 +273,7 @@ public class CoomiActivity extends Activity {
         mStartRequested = false;
         runOnUiThread(() -> {
             mRetryButton.setVisibility(View.GONE);
+            mSplashFeedbackButton.setVisibility(View.GONE);
             mLoadingDetail.setVisibility(View.GONE);
             mSplashSpinner.setVisibility(View.VISIBLE);
         });
@@ -395,6 +433,7 @@ public class CoomiActivity extends Activity {
             mLoadingText.setText(text);
             mLoadingDetail.setVisibility(View.GONE);
             mRetryButton.setVisibility(View.GONE);
+            mSplashFeedbackButton.setVisibility(View.GONE);
             mSplashSpinner.setVisibility(View.VISIBLE);
         });
     }
@@ -421,6 +460,9 @@ public class CoomiActivity extends Activity {
             mLoadingText.setText(message);
             mSplashSpinner.setVisibility(View.GONE);
             mRetryButton.setVisibility(View.VISIBLE);
+            mSplashFeedbackButton.setVisibility(View.VISIBLE);
+            mSplashFeedbackButton.setEnabled(true);
+            mSplashFeedbackSubmitted = false;
             mLoadingDetail.setVisibility(View.GONE);
         });
     }
@@ -498,22 +540,68 @@ public class CoomiActivity extends Activity {
             return app.coomi.CoomiFeedbackClient.diagnostics(CoomiActivity.this).toString();
         }
 
-        /** 原生上报报错反馈：后台线程 POST，绕过 WebView 跨域/CORS 限制。
-         *  完成回调 window.__coomiFeedbackResult(callbackId, {ok, error})。 */
+        /** 原生上报报错反馈：后台线程统一走 FeedbackManager（脱敏终检 + 环境补齐 + Outbox 兜底），
+         *  绕过 WebView 跨域/CORS 限制。完成回调 window.__coomiFeedbackResult(callbackId, {ok, status})。 */
         @JavascriptInterface
         public void sendFeedback(String json, String callbackId) {
             new Thread(() -> {
-                String result = postFeedback(json);
+                String result;
+                try {
+                    JSONObject payload = new JSONObject(json);
+                    result = app.coomi.FeedbackManager.submit(CoomiActivity.this, payload);
+                } catch (Exception error) {
+                    JSONObject fallback = new JSONObject();
+                    try {
+                        fallback.put("ok", false);
+                        fallback.put("error", String.valueOf(error.getMessage()));
+                    } catch (Exception ignored) {}
+                    result = fallback.toString();
+                }
+                final String feedbackResult = result;
                 runOnUiThread(() -> mWebView.evaluateJavascript(
                     "window.__coomiFeedbackResult && window.__coomiFeedbackResult("
                         + org.json.JSONObject.quote(callbackId) + ", "
-                        + org.json.JSONObject.quote(result) + ")",
+                        + org.json.JSONObject.quote(feedbackResult) + ")",
                     null));
             }).start();
         }
 
-        private String postFeedback(String json) {
-            return app.coomi.CoomiFeedbackClient.post(json);
+        /**
+         * 前端上报的运行时异常（连接失败/JS错误/运行时安装失败等）：
+         * 弹原生「检测到异常」对话框，用户一键授权后立即采集上传。
+         * 仅在用户可交互时由前端调用；type 取 runtime_error|performance 等 schema channel。
+         */
+        @JavascriptInterface
+        public void reportError(String type, String title, String detail) {
+            runOnUiThread(() -> showReportErrorDialog(type, title, detail));
+        }
+
+        private void showReportErrorDialog(final String type, final String title, final String detail) {
+            if (isFinishing() || isDestroyed()) return;
+            new AlertDialog.Builder(CoomiActivity.this)
+                .setTitle("检测到异常")
+                .setMessage((title == null || title.isEmpty() ? "运行过程中出现异常" : title)
+                    + "\n\n一键反馈会上传报错信息、设备与环境诊断，帮助定位问题。")
+                .setPositiveButton("一键反馈", (dialog, which) -> new Thread(() -> {
+                    JSONObject payload = app.coomi.FeedbackManager.basePayload(
+                        type == null || type.isEmpty() ? "runtime_error" : type);
+                    try {
+                        JSONObject error = new JSONObject();
+                        error.put("title", title == null ? "" : title);
+                        error.put("message", title == null ? "" : title);
+                        error.put("detail", detail == null ? "" : detail);
+                        payload.put("error", error);
+                    } catch (Exception ignored) {}
+                    String result = app.coomi.FeedbackManager.submit(CoomiActivity.this, payload);
+                    boolean ok = false;
+                    try { ok = new JSONObject(result).optBoolean("ok", false); } catch (Exception ignored) {}
+                    final boolean submitted = ok;
+                    runOnUiThread(() -> Toast.makeText(CoomiActivity.this,
+                        submitted ? R.string.coomi_feedback_sent : R.string.coomi_feedback_failed,
+                        Toast.LENGTH_SHORT).show());
+                }, "coomi-feedback-report").start())
+                .setNegativeButton("暂不", null)
+                .show();
         }
 
         /** 当前主题档位（system/light/dark），前端初始化时同步。 */

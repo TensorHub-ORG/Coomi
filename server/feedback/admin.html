@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Coomi 运营控制台</title>
+<style>
+:root {
+  --bg:#f4f6fb; --card:#ffffff; --line:#e7eaf3; --line2:#eef1f7;
+  --text:#1a2130; --dim:#7a8299; --faint:#a3aabf;
+  --acc:#4f6bf5; --acc-soft:#eef1fe; --acc2:#7b92f8;
+  --ok:#17995c; --ok-soft:#e7f7ef;
+  --warn:#c47d10; --warn-soft:#fdf3e2;
+  --err:#d84343; --err-soft:#fdeaea;
+  --radius:14px; --shadow:0 1px 2px rgba(23,32,64,.04), 0 4px 16px rgba(23,32,64,.05);
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Consolas,monospace;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html { -webkit-text-size-adjust:100%; }
+body { background:var(--bg); color:var(--text); font:14px/1.6 -apple-system,"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif; min-height:100vh; }
+.wrap { max-width:1120px; margin:0 auto; padding:20px 18px calc(48px + env(safe-area-inset-bottom)); }
+
+/* ── 顶栏 ── */
+.header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+.brand { display:flex; align-items:center; gap:10px; }
+.brand .logo { width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,var(--acc),var(--acc2)); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; letter-spacing:-.5px; box-shadow:0 4px 12px rgba(79,107,245,.35); }
+.brand h1 { font-size:17px; font-weight:700; letter-spacing:-.2px; }
+.brand .sub { color:var(--dim); font-size:11.5px; margin-top:1px; }
+.header .actions { display:flex; gap:8px; align-items:center; }
+.ghost-btn { border:1px solid var(--line); background:var(--card); color:var(--dim); font-size:12.5px; padding:7px 14px; border-radius:9px; cursor:pointer; transition:.15s; }
+.ghost-btn:hover { color:var(--text); border-color:#d4d9e8; }
+
+/* ── 登录 ── */
+.login { background:var(--card); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); padding:32px 26px; max-width:380px; margin:10vh auto 0; }
+.login .logo { width:44px; height:44px; border-radius:13px; background:linear-gradient(135deg,var(--acc),var(--acc2)); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; margin-bottom:14px; }
+.login h2 { font-size:17px; margin-bottom:4px; }
+.login .hint { color:var(--dim); font-size:12.5px; margin-bottom:18px; }
+.login input { width:100%; padding:11px 13px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:14px; outline:none; transition:border-color .15s; }
+.login input:focus { border-color:var(--acc); }
+.login button { width:100%; margin-top:12px; padding:11px; border:0; border-radius:10px; background:var(--acc); color:#fff; font-size:14px; font-weight:600; cursor:pointer; transition:.15s; }
+.login button:hover { background:#4260e8; }
+.login button:disabled { opacity:.55; cursor:default; }
+.err { color:var(--err); font-size:12.5px; margin-top:10px; min-height:18px; }
+
+/* ── Tab 导航 ── */
+.tabs { display:flex; gap:4px; background:#e9edf5; border-radius:11px; padding:4px; width:fit-content; margin:16px 0 18px; }
+.tabs button { border:0; background:transparent; color:var(--dim); font-size:13.5px; font-weight:600; padding:7px 22px; border-radius:8px; cursor:pointer; transition:.15s; }
+.tabs button.active { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(23,32,64,.08); }
+
+/* ── 指标卡 ── */
+.metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+.metric { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; }
+.metric .k { color:var(--dim); font-size:12px; display:flex; align-items:center; gap:6px; }
+.metric .v { margin-top:4px; font:700 24px/1.2 var(--mono); letter-spacing:-.5px; }
+.metric .v.small { font-size:19px; }
+.metric .d { margin-top:3px; font-size:11.5px; color:var(--faint); }
+.metric .d .up { color:var(--ok); font-weight:600; }
+.metric .d .down { color:var(--err); font-weight:600; }
+.metric .d .flat { color:var(--faint); }
+.metric.accent { background:linear-gradient(135deg,#5468f2,#7b92f8); border-color:transparent; }
+.metric.accent .k, .metric.accent .d { color:rgba(255,255,255,.75); }
+.metric.accent .v { color:#fff; }
+
+/* ── 面板 ── */
+.panel { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px 18px; margin-bottom:14px; }
+.panel-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.panel-head .t { font-size:14.5px; font-weight:700; }
+.panel-head .hint { color:var(--faint); font-size:11.5px; font-weight:400; }
+
+/* 自定义范围选择器 */
+.range-picker { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.chip { border:1px solid var(--line); background:var(--bg); color:var(--dim); font-size:12px; font-weight:600; padding:5px 12px; border-radius:8px; cursor:pointer; transition:.15s; }
+.chip:hover { border-color:#d4d9e8; color:var(--text); }
+.chip.active { background:var(--acc); border-color:var(--acc); color:#fff; }
+.date-input { border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:12px; font-family:var(--mono); padding:5px 8px; border-radius:8px; }
+.date-sep { color:var(--faint); font-size:12px; }
+
+/* ── 趋势图 ── */
+.chart-box { position:relative; margin-top:10px; }
+.chart-box svg { width:100%; height:190px; display:block; }
+.tooltip { position:absolute; pointer-events:none; background:#222b42; color:#fff; font-size:11.5px; font-family:var(--mono); padding:5px 9px; border-radius:7px; transform:translate(-50%,-130%); white-space:nowrap; opacity:0; transition:opacity .1s; z-index:5; }
+.tooltip .tt-date { color:#9fb0d8; }
+
+/* ── 分布条 ── */
+.bars { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.bar-row { display:grid; grid-template-columns:170px 1fr 90px; gap:12px; align-items:center; font-size:12.5px; }
+.bar-row .name { font-family:var(--mono); color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+.bar-row .track { height:16px; border-radius:6px; background:var(--bg); border:1px solid var(--line2); overflow:hidden; }
+.bar-row .fill { height:100%; border-radius:5px; background:linear-gradient(90deg,var(--acc),var(--acc2)); transition:width .4s ease; }
+.bar-row.channel .fill { background:linear-gradient(90deg,#2fbf8f,#5ad0a8); }
+.bar-row .num { font-family:var(--mono); color:var(--dim); text-align:right; white-space:nowrap; }
+.legend-note { color:var(--faint); font-size:11.5px; margin-top:10px; }
+
+/* ── 反馈列表 ── */
+.toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+.toolbar input[type=search] { flex:1; min-width:160px; padding:9px 13px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:13px; outline:none; }
+.toolbar input[type=search]:focus { border-color:var(--acc); }
+.toolbar select { padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:12.5px; }
+.toolbar .btn { padding:9px 18px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--text); font-size:13px; font-weight:600; cursor:pointer; }
+.toolbar .btn.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
+.toolbar .count { color:var(--dim); font-size:12px; }
+.list { display:flex; flex-direction:column; gap:10px; }
+.item { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:13px 15px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.item:hover { border-color:#c9d2f5; box-shadow:var(--shadow); }
+.item .row1 { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+.item .time { color:var(--faint); font-size:11.5px; font-family:var(--mono); }
+.badge { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
+.badge.c-crash, .badge.c-startup_failure { background:var(--err-soft); color:var(--err); }
+.badge.c-runtime_error, .badge.c-tool_failure { background:var(--warn-soft); color:var(--warn); }
+.badge.c-performance { background:var(--ok-soft); color:var(--ok); }
+.badge.c-manual { background:var(--acc-soft); color:var(--acc); }
+.badge.c-legacy { background:#eef1f7; color:var(--dim); }
+.item .msg { margin-top:5px; font-size:13px; word-break:break-all; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.item .meta { margin-top:6px; color:var(--faint); font-size:11px; display:flex; gap:12px; flex-wrap:wrap; font-family:var(--mono); }
+.item .imgs { color:var(--acc); }
+.item-main { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center; }
+.item-thumb { width:74px; height:58px; border-radius:9px; object-fit:cover; border:1px solid var(--line); background:var(--bg); }
+.empty { text-align:center; color:var(--faint); padding:48px 0; font-size:13px; }
+
+/* ── 详情抽屉 ── */
+.mask { position:fixed; inset:0; background:rgba(18,24,44,.45); backdrop-filter:blur(2px); display:flex; align-items:flex-end; justify-content:center; z-index:50; }
+.sheet { width:100%; max-width:860px; max-height:90vh; overflow:auto; background:var(--bg); border-radius:20px 20px 0 0; padding:18px 18px calc(28px + env(safe-area-inset-bottom)); box-shadow:0 -12px 48px rgba(18,24,44,.2); }
+.sheet .head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px; }
+.sheet .head .t { font-size:15px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); }
+.sheet .head button { background:var(--card); border:1px solid var(--line); color:var(--dim); font-size:16px; width:32px; height:32px; border-radius:9px; cursor:pointer; }
+.kv-grid { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:2px 18px; }
+.kv-grid div { display:flex; gap:8px; padding:3px 0; font-size:12.5px; }
+.kv-grid .k { color:var(--dim); min-width:78px; flex-shrink:0; }
+.kv-grid .v { color:var(--text); word-break:break-all; }
+details.block { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:11px 14px; margin-bottom:10px; }
+details.block summary { cursor:pointer; font-size:12.5px; font-weight:700; color:var(--acc); user-select:none; }
+details.block pre { margin-top:9px; background:var(--bg); border:1px solid var(--line2); border-radius:9px; padding:11px 12px; font-family:var(--mono); font-size:11.5px; line-height:1.7; white-space:pre-wrap; word-break:break-all; max-height:320px; overflow:auto; color:#333c52; }
+.attachments { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:9px; margin-bottom:12px; }
+.attachment-card { border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--card); cursor:zoom-in; }
+.attachment-card img { display:block; width:100%; aspect-ratio:4/3; object-fit:cover; }
+.attachment-card span { display:block; padding:5px 8px; color:var(--dim); font:10.5px/1.3 var(--mono); }
+.lightbox { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(10,14,26,.92); }
+.lightbox img { max-width:100%; max-height:88vh; object-fit:contain; border-radius:8px; }
+.lightbox button { position:absolute; top:16px; right:18px; border:0; background:rgba(255,255,255,.14); color:#fff; font-size:22px; width:40px; height:40px; border-radius:50%; cursor:pointer; }
+
+.ux-item { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px 15px; cursor:pointer; transition:border-color .15s; }
+.ux-item:hover { border-color:#c9d2f5; }
+.ux-item .row1 { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+.ux-item .cid { font-family:var(--mono); font-size:12px; color:var(--text); }
+.ux-item .meta { margin-top:5px; color:var(--dim); font-size:11.5px; display:flex; gap:12px; flex-wrap:wrap; }
+.ux-item .scenes { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+.ux-item .scene-tag { font-size:11px; font-weight:700; padding:2px 10px; border-radius:20px; background:var(--acc-soft); color:var(--acc); }
+.ux-item .sensitive-tag { background:var(--warn-soft); color:var(--warn); }
+.detail-scene { padding:8px 0; border-top:1px solid var(--line2); }
+.detail-scene:first-of-type { border-top:0; }
+.detail-scene .head { display:flex; justify-content:space-between; font-size:13px; font-weight:700; }
+.detail-scene .weight { color:var(--dim); font:11.5px var(--mono); }
+.detail-sub { margin-top:4px; display:flex; flex-wrap:wrap; gap:5px 14px; font-size:12px; color:var(--text-2); }
+.detail-sub b { color:var(--text); }
+
+@media (max-width: 760px) {
+  .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .bar-row { grid-template-columns:105px 1fr 64px; gap:8px; }
+  .kv-grid { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="brand">
+      <div class="logo">C</div>
+      <div>
+        <h1>Coomi 运营控制台</h1>
+        <div class="sub">日活统计 · 用户反馈 · 版本分布</div>
+      </div>
+    </div>
+    <div class="actions" id="headerActions" style="visibility:hidden">
+      <button class="ghost-btn" id="refreshBtn">刷新数据</button>
+      <button class="ghost-btn" id="logoutBtn">退出</button>
+    </div>
+  </div>
+
+  <!-- 登录 -->
+  <div id="loginBox" class="login" style="display:none">
+    <div class="logo">C</div>
+    <h2>管理登录</h2>
+    <div class="hint">登录后查看日活统计与用户反馈</div>
+    <input id="pwd" type="password" placeholder="输入管理密码" autocomplete="current-password">
+    <button id="loginBtn">登 录</button>
+    <div id="loginErr" class="err"></div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="mainBox" style="display:none">
+    <div class="tabs">
+      <button id="tabOverview" class="active" onclick="switchTab('overview')">数据概览</button>
+      <button id="tabFeedback" onclick="switchTab('feedback')">用户反馈</button>
+      <button id="tabUx" onclick="switchTab('ux')">用户画像</button>
+    </div>
+
+    <!-- ── 数据概览 ── -->
+    <div id="overviewPane">
+      <div class="metrics">
+        <div class="metric accent"><div class="k">今日日活</div><div class="v" id="mToday">–</div><div class="d" id="mTodayDelta"></div></div>
+        <div class="metric"><div class="k">昨日日活</div><div class="v" id="mYesterday">–</div><div class="d" id="mYesterdayDate"></div></div>
+        <div class="metric"><div class="k">近 7 日 · 日均日活</div><div class="v" id="mAvg7">–</div><div class="d">按天平均</div></div>
+        <div class="metric"><div class="k">近 30 日 · 日均日活</div><div class="v" id="mAvg30">–</div><div class="d">按天平均</div></div>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="k">近 7 日 · 独立设备</div><div class="v small" id="mUnique7">–</div></div>
+        <div class="metric"><div class="k">近 30 日 · 独立设备</div><div class="v small" id="mUnique30">–</div></div>
+        <div class="metric"><div class="k">累计启动 IP·日</div><div class="v small" id="mTotal">–</div></div>
+        <div class="metric"><div class="k">反馈总数（全部时间）</div><div class="v small" id="mFeedback">–</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span class="t">日活趋势</span>
+          <span class="hint">每设备每日计一次 · 悬停查看数值</span>
+        </div>
+        <div class="chart-box"><div class="tooltip" id="chartTip"></div><div id="trendChart"></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span class="t">版本分布 · 独立设备数</span>
+          <div class="range-picker" id="rangePicker">
+            <button class="chip" data-days="7">近 7 天</button>
+            <button class="chip" data-days="14">近 14 天</button>
+            <button class="chip active" data-days="30">近 30 天</button>
+            <button class="chip" data-days="90">近 90 天</button>
+            <input class="date-input" type="date" id="rangeFrom" title="起始日期">
+            <span class="date-sep">→</span>
+            <input class="date-input" type="date" id="rangeTo" title="结束日期">
+            <button class="chip" id="rangeApply">查询</button>
+          </div>
+        </div>
+        <div class="bars" id="versionBars"><div class="empty">加载中…</div></div>
+        <div class="legend-note" id="versionNote"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span class="t">反馈渠道分布</span>
+          <span class="hint">全部 v2 反馈按渠道计数</span>
+        </div>
+        <div class="bars" id="channelBars"><div class="empty">加载中…</div></div>
+      </div>
+    </div>
+
+    <!-- ── 用户反馈 ── -->
+    <div id="feedbackPane" style="display:none">
+      <div class="toolbar">
+        <input type="search" id="search" placeholder="搜索内容 / 设备 / 版本 / IP …">
+        <select id="channelFilter">
+          <option value="">全部渠道</option>
+          <option value="crash">崩溃</option>
+          <option value="startup_failure">启动失败</option>
+          <option value="runtime_error">运行时错误</option>
+          <option value="tool_failure">工具失败</option>
+          <option value="performance">性能/重启</option>
+          <option value="manual">手动反馈</option>
+          <option value="legacy">旧版(v1)</option>
+        </select>
+        <select id="versionFilter"><option value="">全部版本</option></select>
+        <button class="btn" id="reloadBtn">查询</button>
+        <span class="count" id="count"></span>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+
+  <!-- 详情 -->
+  <div id="detail" class="mask" style="display:none" onclick="if(event.target===this)closeDetail()">
+    <div class="sheet">
+      <div class="head"><span class="t" id="dTitle"></span><button onclick="closeDetail()">✕</button></div>
+      <div id="dBody"></div>
+    </div>
+  </div>
+  <!-- 用户画像 -->
+  <div id="uxPane" style="display:none">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="t">加入计划的用户画像（脱敏）</span>
+        <span class="hint">consent = joined 后每周上传 · 点击查看完整画像</span>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="uxSearch" placeholder="搜索 client_id / 场景类别 …">
+        <span class="count" id="uxCount"></span>
+      </div>
+      <div class="list" id="uxList"></div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox" style="display:none" onclick="if(event.target===this)closeLightbox()">
+    <button aria-label="关闭" onclick="closeLightbox()">×</button><img id="lightboxImage" alt="反馈截图原图">
+  </div>
+</div>
+
+<script>
+let token = localStorage.getItem('coomi_fb_admin_token') || '';
+let versionOptions = [];
+let trendData = [];
+const $ = (id) => document.getElementById(id);
+const api = (path, opt) => fetch(path, Object.assign({ headers: { Authorization: 'Bearer ' + token } }, opt));
+const CHANNEL_NAMES = { crash:'崩溃', startup_failure:'启动失败', runtime_error:'运行时错误', tool_failure:'工具失败', performance:'性能/重启', manual:'手动反馈' };
+const channelName = (c) => CHANNEL_NAMES[c] || c;
+
+function showLogin() { $('loginBox').style.display = 'block'; $('mainBox').style.display = 'none'; $('headerActions').style.visibility = 'hidden'; }
+function showMain() { $('loginBox').style.display = 'none'; $('mainBox').style.display = 'block'; $('headerActions').style.visibility = 'visible'; loadAll(); }
+
+function switchTab(tab) {
+  const overview = tab === 'overview';
+  const ux = tab === 'ux';
+  $('tabOverview').classList.toggle('active', overview);
+  $('tabFeedback').classList.toggle('active', tab === 'feedback');
+  $('tabUx').classList.toggle('active', ux);
+  $('overviewPane').style.display = overview ? '' : 'none';
+  $('feedbackPane').style.display = tab === 'feedback' ? '' : 'none';
+  $('uxPane').style.display = ux ? '' : 'none';
+  if (tab === 'feedback') loadList();
+  if (ux) loadUxList();
+}
+
+async function login() {
+  const pwd = $('pwd').value;
+  $('loginErr').textContent = '';
+  $('loginBtn').disabled = true;
+  try {
+    const r = await fetch('/coomi/feedback/api/admin/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok && j.token) {
+      token = j.token;
+      localStorage.setItem('coomi_fb_admin_token', token);
+      showMain();
+    } else {
+      $('loginErr').textContent = (j && j.error) || '登录失败';
+    }
+  } catch (e) {
+    $('loginErr').textContent = '网络错误：' + e.message;
+  } finally { $('loginBtn').disabled = false; }
+}
+
+function logout() { token = ''; localStorage.removeItem('coomi_fb_admin_token'); $('pwd').value = ''; showLogin(); }
+
+function fmtTime(t) { if (!t) return '-'; const d = new Date(t); if (isNaN(d)) return t; const p = (n)=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()); }
+function fmtDate(d) { const p = (n)=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return fmtDate(d); }
+
+// ── 数据加载 ──
+async function loadAll() { loadOverview(); loadFeedbackStats(); }
+
+async function loadOverview() {
+  try {
+    const r = await fetch('/api/stats', { cache: 'no-store' });
+    const s = await r.json();
+    if (!r.ok) throw new Error(s.error || '统计服务不可用');
+    $('mToday').textContent = String(s.appDauToday ?? 0);
+    $('mYesterday').textContent = String(s.appDauYesterday ?? 0);
+    $('mAvg7').textContent = String(s.appDau7dAverage ?? '–');
+    $('mAvg30').textContent = String(s.appDau30dAverage ?? '–');
+    $('mUnique7').textContent = String(s.appUnique7d ?? 0);
+    $('mUnique30').textContent = String(s.appUnique30d ?? 0);
+    $('mTotal').textContent = String(s.appDailyStartsTotal ?? 0);
+    const y = s.appDauYesterday ?? 0, t = s.appDauToday ?? 0;
+    const delta = $('mTodayDelta');
+    if (y > 0) {
+      const pct = Math.round(((t - y) / y) * 100);
+      delta.innerHTML = `<span class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct)}%</span> vs 昨日`;
+    } else delta.textContent = '';
+    const trend = s.appDau30d || [];
+    trendData = trend;
+    const yesterdayStr = trend.length >= 2 ? trend[trend.length - 2].date : '';
+    $('mYesterdayDate').textContent = yesterdayStr || '';
+    renderTrendChart(trend);
+    versionOptions = (s.versions || []).map((v) => v.version);
+    fillVersionFilter();
+    renderVersionBars(s.versions || [], 30, (s.appUnique30d ?? 0));
+  } catch (e) {
+    $('versionBars').innerHTML = '<div class="empty">统计加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+/** 反馈统计（token 接口）：反馈总数 + 渠道分布。 */
+async function loadFeedbackStats() {
+  try {
+    const r = await api('/coomi/feedback/admin/api/stats');
+    if (r.status === 401) { showLogin(); return; }
+    const fb = await r.json();
+    $('mFeedback').textContent = String(fb.feedbackTotal ?? '–');
+    const channels = fb.channels || [];
+    const cMax = Math.max(1, ...channels.map((c) => c.count));
+    $('channelBars').innerHTML = channels.length ? channels.map((c) => `
+      <div class="bar-row channel">
+        <span class="name">${esc(channelName(c.channel))}</span>
+        <div class="track"><div class="fill" style="width:${Math.round((c.count / cMax) * 100)}%"></div></div>
+        <span class="num">${c.count} 条</span>
+      </div>`).join('') : '<div class="empty">暂无 v2 反馈</div>';
+  } catch (e) {
+    $('channelBars').innerHTML = '<div class="empty">渠道统计加载失败</div>';
+  }
+}
+
+// ── 版本分布（自定义时间范围）──
+let rangeDays = 30;
+async function loadVersionRange(fromDate, toDate) {
+  const box = $('versionBars');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    const qs = fromDate && toDate ? `?from=${fromDate}&to=${toDate}` : '';
+    const r = await fetch('/api/stats' + qs, { cache: 'no-store' });
+    const s = await r.json();
+    if (!r.ok) throw new Error(s.detail?.error || s.error || `HTTP ${r.status}`);
+    const range = s.range;
+    const versions = range ? range.versions : (s.versions || []);
+    const span = range ? `${range.from} → ${range.to}` : '近 30 天';
+    const unique = range ? range.unique : (s.appUnique30d ?? 0);
+    const avg = range ? range.average : null;
+    renderVersionBars(versions, span, unique, avg);
+    if (range && range.trend) renderTrendChart(range.trend);
+  } catch (e) {
+    box.innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+function renderVersionBars(versions, spanLabel, unique, avg) {
+  const box = $('versionBars');
+  if (!versions.length) { box.innerHTML = '<div class="empty">该时间范围内暂无数据</div>'; $('versionNote').textContent = ''; return; }
+  const shown = versions.slice(0, 15);
+  const vMax = Math.max(1, ...shown.map((v) => v.users));
+  box.innerHTML = shown.map((v) => `
+    <div class="bar-row">
+      <span class="name" title="${esc(v.version)}">${esc(v.version)}</span>
+      <div class="track"><div class="fill" style="width:${Math.max(2, Math.round((v.users / vMax) * 100))}%"></div></div>
+      <span class="num">${v.users} 台 · ${pct(v.users, unique)}</span>
+    </div>`).join('');
+  const rest = versions.slice(15).reduce((sum, v) => sum + v.users, 0);
+  $('versionNote').textContent = `时间范围：${spanLabel} · 独立设备 ${unique} 台`
+    + (avg != null ? ` · 日均日活 ${avg}` : '')
+    + (rest > 0 ? ` · 其余 ${versions.length - 15} 个版本合计 ${rest} 台` : '');
+}
+
+function pct(part, total) { return total > 0 ? Math.round((part / total) * 100) + '%' : ''; }
+
+// ── SVG 面积趋势图 ──
+function renderTrendChart(days) {
+  const box = $('trendChart');
+  if (!days || !days.length) { box.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+  const W = 1000, H = 190, padL = 34, padR = 12, padT = 16, padB = 24;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = Math.max(1, ...days.map((d) => d.count));
+  const step = innerW / days.length;
+  const xAt = (i) => padL + i * step + step / 2;
+  const yAt = (v) => padT + innerH - (v / max) * innerH;
+  const pts = days.map((d, i) => [xAt(i), yAt(d.count)]);
+  const line = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const area = line + ` L ${xAt(days.length - 1).toFixed(1)} ${padT + innerH} L ${padL} ${padT + innerH} Z`;
+  const peakIdx = days.reduce((best, d, i) => d.count > days[best].count ? i : best, 0);
+  const gridY = [0, .5, 1].map((f) => padT + innerH * f);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" id="trendSvg">
+    <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4f6bf5" stop-opacity=".28"/>
+      <stop offset="100%" stop-color="#4f6bf5" stop-opacity=".02"/>
+    </linearGradient></defs>`;
+  gridY.forEach((y, i) => {
+    svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#eef1f7" stroke-width="1"/>`;
+    svg += `<text class="axis" x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#a3aabf" font-family="ui-monospace,monospace">${Math.round(max * (1 - i * .5))}</text>`;
+  });
+  svg += `<path d="${area}" fill="url(#areaGrad)"/>`;
+  svg += `<path d="${line}" fill="none" stroke="#4f6bf5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  // 透明命中区（悬停提示）
+  days.forEach((d, i) => {
+    svg += `<rect data-i="${i}" x="${(padL + i * step).toFixed(1)}" y="${padT}" width="${step.toFixed(1)}" height="${innerH}" fill="transparent" style="cursor:crosshair"/>`;
+  });
+  // 峰值标记
+  svg += `<circle cx="${xAt(peakIdx)}" cy="${yAt(days[peakIdx].count)}" r="3.5" fill="#4f6bf5" stroke="#fff" stroke-width="1.5"/>`;
+  // 首尾日期标注
+  svg += `<text x="${padL}" y="${H - 6}" font-size="10.5" fill="#a3aabf" font-family="ui-monospace,monospace">${esc(days[0].date.slice(5))}</text>`;
+  svg += `<text x="${W - padR}" y="${H - 6}" text-anchor="end" font-size="10.5" fill="#a3aabf" font-family="ui-monospace,monospace">${esc(days[days.length - 1].date.slice(5))}</text>`;
+  svg += '</svg>';
+  box.innerHTML = svg;
+  // 悬停提示
+  const tip = $('chartTip');
+  box.querySelectorAll('rect[data-i]').forEach((rect) => {
+    rect.addEventListener('mousemove', () => {
+      const d = days[Number(rect.dataset.i)];
+      tip.innerHTML = `<span class="tt-date">${esc(d.date)}</span>　${d.count} 台设备`;
+      const boxRect = box.getBoundingClientRect();
+      const ratio = (xAt(Number(rect.dataset.i))) / W;
+      tip.style.left = (ratio * boxRect.width) + 'px';
+      tip.style.top = (yAt(d.count) / H) * boxRect.height + 'px';
+      tip.style.opacity = '1';
+    });
+    rect.addEventListener('mouseleave', () => { tip.style.opacity = '0'; });
+  });
+}
+
+// ── 反馈列表 ──
+let searchTimer = null;
+async function loadList() {
+  const q = $('search').value.trim();
+  const channel = $('channelFilter').value;
+  const version = $('versionFilter').value;
+  const r = await api('/coomi/feedback/admin/api/list?limit=200&q=' + encodeURIComponent(q)
+    + (channel ? '&channel=' + encodeURIComponent(channel) : '')
+    + (version ? '&version=' + encodeURIComponent(version) : ''));
+  const j = await r.json();
+  if (r.status === 401) { showLogin(); return; }
+  if (!j.ok) { $('list').innerHTML = '<div class="empty">加载失败：' + esc(j.error || '') + '</div>'; return; }
+  $('count').textContent = '共 ' + j.total + ' 条';
+  const box = $('list');
+  if (!j.items.length) { box.innerHTML = '<div class="empty">暂无反馈' + (q || channel ? '（无匹配）' : '') + '</div>'; return; }
+  box.innerHTML = j.items.map((it) => {
+    const files = Array.isArray(it.attachments) ? it.attachments : [];
+    let thumb = '';
+    if (files.length) {
+      thumb = it.v2
+        ? '/coomi/feedback/admin/api/attachment?id=' + encodeURIComponent(it.id) + '&name=' + encodeURIComponent(files[0].name) + '&token=' + encodeURIComponent(token)
+        : attachmentUrl(it.id.replace(/^error_/, '').replace(/\.json$/, ''), files[0].name);
+    }
+    return `
+    <div class="item" onclick="openDetail('${esc(it.id)}')">
+      <div class="item-main"><div>
+        <div class="row1"><span class="time">${fmtTime(it.time)}</span><span class="badge c-${esc(it.channel)}">${esc(it.channel === 'legacy' ? '旧版' : channelName(it.channel))}</span></div>
+        <div class="msg">${esc(it.message || '(无摘要)')}</div>
+        <div class="meta">${it.version ? '<span>v' + esc(it.version) + '</span>' : ''}${it.device ? '<span>' + esc(it.device) + '</span>' : ''}${it.provider ? '<span>' + esc(it.provider) + (it.model ? ' · ' + esc(it.model) : '') + '</span>' : ''}${it.ip ? '<span>IP ' + esc(it.ip) + '</span>' : ''}${files.length ? `<span class="imgs">图片 ${files.length} 张</span>` : ''}</div>
+      </div>${thumb ? `<img class="item-thumb" src="${thumb}" alt="截图" loading="lazy">` : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function fillVersionFilter() {
+  const sel = $('versionFilter');
+  const current = sel.value;
+  sel.innerHTML = ['<option value="">全部版本</option>']
+    .concat(versionOptions.map((v) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`)).join('');
+}
+
+async function openDetail(id) {
+  $('detail').style.display = 'flex';
+  $('dTitle').textContent = id;
+  $('dBody').innerHTML = '<div class="empty">加载中…</div>';
+  const r = await api('/coomi/feedback/admin/api/detail?id=' + encodeURIComponent(id));
+  const j = await r.json();
+  if (!j.ok) { $('dBody').innerHTML = '<div class="empty">加载失败</div>'; return; }
+  const d = j.data;
+  const isV2 = !!d.schema;
+  const diag = isV2 ? (d.device || {}) : (typeof d.diagnostics === 'string' ? safeParse(d.diagnostics) : (d.diagnostics || {}));
+  const error = isV2 ? (d.error || {}) : {};
+  const ctx = isV2 ? (d.context || {}) : {};
+  const app = isV2 ? (d.app || {}) : {};
+  const kvPairs = isV2 ? [
+    ['时间', d.received_at || d.time || '-'], ['渠道', channelName(d.channel || '')],
+    ['错误', error.title || error.message || ''], ['详情', error.detail || ''],
+    ['App 版本', (app.version_name || '') + (app.version_code ? ' (' + app.version_code + ')' : '')],
+    ['设备', diag.device_model || ''], ['厂商', diag.manufacturer || ''],
+    ['Android', diag.android_version || ''], ['SDK', diag.sdk_int || ''],
+    ['会话', (d.session && (d.session.provider || '') + (d.session.model ? ' · ' + d.session.model : '')) || ''],
+    ['环境', renderEnv(d.environment)],
+    ['IP', d.ip || ''],
+  ] : [
+    ['时间', d.received_at || d.time || '-'], ['错误', d.message || ''], ['详情', d.detail || ''],
+    ['Provider', d.provider || ''], ['模型', d.model || ''], ['权限模式', d.permission_mode || ''],
+    ['版本', diag.version_name || ''], ['设备', diag.device_model || ''], ['厂商', diag.manufacturer || ''],
+    ['Android', diag.android_version || ''], ['SDK', diag.sdk_int || ''], ['IP', d.ip || ''],
+  ];
+  const kv = kvPairs.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(String(v ?? '-'))}</span></div>`).join('');
+
+  const files = Array.isArray(d.attachments) ? d.attachments : [];
+  const attachBase = isV2 ? id : id.replace(/^error_/, '').replace(/\.json$/, '');
+  const images = files.map((file) => {
+    const src = isV2
+      ? '/coomi/feedback/admin/api/attachment?id=' + encodeURIComponent(id) + '&name=' + encodeURIComponent(file.name) + '&token=' + encodeURIComponent(token)
+      : attachmentUrl(attachBase, file.name);
+    return `<div class="attachment-card" onclick="openLightbox('${src.replace(/'/g,"\\'")}')"><img src="${src}" alt="反馈截图" loading="lazy"><span>${esc(file.name)} · ${formatBytes(file.size)}</span></div>`;
+  }).join('');
+
+  const blocks = [];
+  if (d.analysis) blocks.push(['Agent 溯源分析', d.analysis]);
+  if (Array.isArray(ctx.conversation_excerpt) && ctx.conversation_excerpt.length)
+    blocks.push(['最近对话摘要', ctx.conversation_excerpt.map((m) => `[${m.role}] ${m.text}`).join('\n\n')]);
+  if (Array.isArray(ctx.tool_trace) && ctx.tool_trace.length)
+    blocks.push(['工具调用轨迹', ctx.tool_trace.map((t) => `#${t.sequence} ${t.tool} [${t.status}]${t.category ? ' ' + t.category : ''}${t.errorSummary ? '\n  ' + t.errorSummary : ''}`).join('\n')]);
+  if (ctx.engine_log_tail) blocks.push(['引擎日志尾部', ctx.engine_log_tail]);
+  if (isV2 && (d.type || d.contact)) blocks.push(['手动反馈', `类型: ${d.type || '-'}\n联系方式: ${d.contact || '-'}\n内容: ${d.message || ''}`]);
+  const blockHtml = blocks.map(([title, content]) =>
+    `<details class="block"${blocks.length === 1 ? ' open' : ''}><summary>${esc(title)}</summary><pre>${esc(String(content))}</pre></details>`).join('');
+
+  $('dBody').innerHTML = `<div class="kv-grid">${kv}</div>${images ? `<div class="attachments">${images}</div>` : ''}${blockHtml}<details class="block"><summary>原始 JSON</summary><pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
+}
+function renderEnv(env) {
+  if (!env || typeof env !== 'object') return '-';
+  const parts = [];
+  if (env.engine_version) parts.push('engine ' + env.engine_version);
+  if (env.runtime_v2_rootfs_ready !== undefined) parts.push('runtime ' + (env.runtime_v2_rootfs_ready ? 'ok' : 'missing'));
+  if (env.storage_free_bytes) parts.push('存储 ' + formatBytes(env.storage_free_bytes));
+  if (env.bootstrap_ready !== undefined) parts.push('bootstrap ' + (env.bootstrap_ready ? 'ok' : 'no'));
+  return parts.join(' · ') || '-';
+}
+function closeDetail() { $('detail').style.display = 'none'; }
+function attachmentUrl(id, name) { return '/coomi/feedback/admin/api/attachment?id=' + encodeURIComponent(id) + '&name=' + encodeURIComponent(name) + '&token=' + encodeURIComponent(token); }
+function formatBytes(value) { const n=Number(value)||0; return n>=1048576?(n/1048576).toFixed(1)+' MB':n>=1024?Math.round(n/1024)+' KB':n+' B'; }
+function openLightbox(src) { $('lightboxImage').src=src; $('lightbox').style.display='flex'; }
+function closeLightbox() { $('lightbox').style.display='none'; $('lightboxImage').src=''; }
+function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ── 用户画像 ──
+let uxSearchTimer = null;
+async function loadUxList() {
+  const q = ($('uxSearch')?.value || '').trim().toLowerCase();
+  const r = await api('/coomi/feedback/admin/api/ux-list');
+  const j = await r.json();
+  if (r.status === 401) { showLogin(); return; }
+  if (!j.ok) { $('uxList').innerHTML = '<div class="empty">加载失败：' + esc(j.error || '') + '</div>'; return; }
+  const items = j.items.filter((it) => !q || (it.client_id + ' ' + it.scenes).toLowerCase().includes(q));
+  $('uxCount').textContent = '共 ' + items.length + ' 份画像';
+  const box = $('uxList');
+  if (!items.length) { box.innerHTML = '<div class="empty">暂无用户画像</div>'; return; }
+  box.innerHTML = items.map((it) => `
+    <div class="ux-item" onclick="openUxDetail('${esc(it.client_id)}')">
+      <div class="row1"><span class="cid">${esc(it.client_id.slice(0, 13))}…</span><span class="time">${esc((it.generated_at || '').slice(0, 16).replace('T', ' '))}</span></div>
+      <div class="scenes">${(it.scenes || '').split(' / ').filter(Boolean).map((scene) => `<span class="scene-tag">${esc(scene)}</span>`).join('')}${it.sensitive ? `<span class="scene-tag sensitive-tag">私密归类 ${it.sensitive}</span>` : ''}</div>
+      <div class="meta"><span>样本 ${it.messages} 条消息</span><span>${it.sample_quality === 'thin' ? '样本较少' : '样本充分'}</span><span>归档 ${esc(it.month)}</span></div>
+    </div>`).join('');
+}
+
+async function openUxDetail(id) {
+  $('detail').style.display = 'flex';
+  $('dTitle').textContent = '画像 ' + id.slice(0, 13) + '…';
+  $('dBody').innerHTML = '<div class="empty">加载中…</div>';
+  const r = await api('/coomi/feedback/admin/api/ux-detail?id=' + encodeURIComponent(id));
+  const j = await r.json();
+  if (!j.ok) { $('dBody').innerHTML = '<div class="empty">加载失败</div>'; return; }
+  const profile = j.data.profile || {};
+  const parts = [];
+  const scenes = profile.scene_preferences || [];
+  if (scenes.length) {
+    parts.push('<h3 style="margin-bottom:8px">场景偏好</h3>' + scenes.map((scene) => `
+      <div class="detail-scene">
+        <div class="head"><span>${esc(scene.category)}</span><span class="weight">约 ${Math.round((scene.weight || 0) * 100)}%</span></div>
+        <div class="detail-sub">${(scene.subcategories || []).map((sub) => `<span><b>${esc(sub.name)}</b> ${esc(sub.level || '')}${sub.count ? ' · ' + sub.count + '次' : ''}${sub.example ? ' · 如：' + esc(sub.example) : ''}</span>`).join('')}</div>
+      </div>`).join(''));
+  }
+  const prefs = profile.task_preferences || [];
+  if (prefs.length) {
+    parts.push('<h3 style="margin:10px 0 6px">任务偏好</h3>' + prefs.map((pref) => `<div class="detail-scene"><div class="detail-sub"><span><b>${esc(pref.dimension)}</b> ${esc(pref.preference)}${pref.evidence ? ' · 证据 ' + pref.evidence : ''}</span></div></div>`).join(''));
+  }
+  const issues = profile.environment_issues || [];
+  if (issues.length) {
+    parts.push('<h3 style="margin:10px 0 6px">环境问题</h3>' + issues.map((issue) => `<div class="detail-scene"><div class="detail-sub"><span><b>${esc(issue.category)}</b> ${esc(issue.issue)}${issue.workaround ? ' · 规避：' + esc(issue.workaround) : ''}</span></div></div>`).join(''));
+  }
+  const sensitive = profile.sensitive_summary || [];
+  if (sensitive.length) {
+    parts.push('<h3 style="margin:10px 0 6px">私密归类</h3><div class="detail-sub">' + sensitive.map((s) => `<span><b>${esc(s.category)}</b> ${s.count} 条</span>`).join('') + '</div>');
+  }
+  parts.push('<details class="block" style="margin-top:12px"><summary>原始 JSON</summary><pre>' + esc(JSON.stringify(j.data, null, 2)) + '</pre></details>');
+  $('dBody').innerHTML = parts.join('');
+}
+
+// ── 事件绑定 ──
+$('loginBtn').onclick = login;
+$('pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+$('refreshBtn').onclick = () => { loadAll(); if (!$('feedbackPane').style.display || $('feedbackPane').style.display === 'none') {} else loadList(); };
+$('logoutBtn').onclick = logout;
+$('search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadList, 350); });
+$('channelFilter').addEventListener('change', loadList);
+$('versionFilter').addEventListener('change', loadList);
+$('reloadBtn').onclick = loadList;
+$('uxSearch')?.addEventListener('input', () => { clearTimeout(uxSearchTimer); uxSearchTimer = setTimeout(loadUxList, 350); });
+
+// 版本分布范围选择
+$('rangePicker').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip[data-days]');
+  if (!chip) return;
+  document.querySelectorAll('#rangePicker .chip[data-days]').forEach((c) => c.classList.remove('active'));
+  chip.classList.add('active');
+  rangeDays = Number(chip.dataset.days);
+  $('rangeFrom').value = ''; $('rangeTo').value = '';
+  loadVersionRange(daysAgo(rangeDays - 1), fmtDate(new Date()));
+});
+$('rangeApply').onclick = () => {
+  const from = $('rangeFrom').value, to = $('rangeTo').value;
+  if (from && to) { document.querySelectorAll('#rangePicker .chip[data-days]').forEach((c) => c.classList.remove('active')); loadVersionRange(from, to); }
+};
+
+(async function init() {
+  // 默认填充自定义范围输入框（近 30 天）
+  $('rangeFrom').value = daysAgo(29);
+  $('rangeTo').value = fmtDate(new Date());
+  if (!token) { showLogin(); return; }
+  const r = await api('/coomi/feedback/admin/api/list?limit=1');
+  if (r.status === 401) showLogin(); else showMain();
+})();
+</script>
+</body>
+</html>

@@ -83,6 +83,15 @@
             android:layout_marginTop="@dimen/coomi_space_xl"
             android:visibility="gone"
             android:text="@string/coomi_splash_retry"/>
+
+        <Button
+            android:id="@+id/btn_coomi_feedback"
+            style="@style/Coomi.Button.Outline"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/coomi_button_height"
+            android:layout_marginTop="@dimen/coomi_space_s"
+            android:visibility="gone"
+            android:text="@string/coomi_splash_feedback"/>
     </LinearLayout>
 
 </FrameLayout>

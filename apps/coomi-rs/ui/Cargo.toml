@@ -22,6 +22,7 @@ coomi-engine = { path = "../engine" }
 coomi-security = { path = "../security" }
 coomi-services = { path = "../services" }
 coomi-telemetry = { path = "../telemetry" }
+coomi-experience = { path = "../experience" }
 coomi-tools = { path = "../tools" }
 chrono.workspace = true
 crossterm.workspace = true

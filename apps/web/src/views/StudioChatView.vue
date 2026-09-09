@@ -21,6 +21,8 @@ const sending = ref(false)
 const pendingUser = ref<StudioMessage | null>(null)
 const streamContent = ref('')
 const streamingMember = ref('')
+/** 后台成员执行错误（原先是静默吞掉，导致「发了消息没反应」） */
+const streamNotices = ref<string[]>([])
 const importedFiles = ref<string[]>([])
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
 
@@ -41,6 +43,7 @@ onBeforeUnmount(() => {
 
 watch(() => studio.messages.length, () => { scrollToBottom() })
 watch(streamContent, () => { scrollToBottom() })
+watch(() => streamNotices.value.length, () => { scrollToBottom() })
 
 function scrollToBottom() {
   nextTick(() => {
@@ -74,6 +77,7 @@ async function send() {
   const text = input.value.trim()
   if (!text || sending.value) return
   sending.value = true
+  streamNotices.value = []
   const fileNames = importedFiles.value.map(path => path.split('/').pop() || '文件')
   const displayText = [text, ...fileNames.map(n => `📎 ${n}`)].filter(Boolean).join('\n')
   pendingUser.value = {
@@ -96,6 +100,9 @@ async function send() {
         streamContent.value += String(event.content ?? '')
       } else if (['studio_tool_start', 'studio_tool_done', 'studio_tool_approval'].includes(String(event.event_type))) {
         studio.onToolEvent(event)
+      } else if (event.event_type === 'studio_error') {
+        const message = String(event.message ?? '成员执行出错')
+        streamNotices.value.push(message)
       } else if (event.event_type === 'studio_message') {
         streamContent.value = ''
         streamingMember.value = ''
@@ -109,6 +116,9 @@ async function send() {
     sending.value = false
   }
 }
+
+/** 成员执行中（含未产出首字前的等待）：三点动画指示。 */
+const memberActive = computed(() => Boolean(streamingMember.value))
 
 function fmtTime(ts: number) {
   return new Date(ts).toLocaleTimeString()
@@ -128,6 +138,7 @@ function fmtTime(ts: number) {
 
     <main ref="scroller" class="stream">
       <div v-if="studio.error" class="notice err">{{ studio.error }}</div>
+      <div v-for="(note, index) in streamNotices" :key="'err-' + index" class="notice err">{{ note }}</div>
       <p v-if="studio.messages.length === 0 && !pendingUser && !streamContent" class="empty">开始对话吧，输入 @成员 直接指派任务。</p>
       <div v-for="msg in studio.messages" :key="msg.id" class="msg" :class="{ me: msg.senderId === 'user' }">
         <div class="avatar">{{ msg.senderName[0] }}</div>
@@ -143,11 +154,14 @@ function fmtTime(ts: number) {
           <div class="content">{{ pendingUser.content }}</div>
         </div>
       </div>
-      <div v-if="streamContent" class="msg streaming-msg">
+      <div v-if="memberActive" class="msg streaming-msg">
         <div class="avatar">{{ studio.members.find(m => m.id === streamingMember)?.name?.[0] || 'AI' }}</div>
-        <div class="bubble">
-          <div class="meta"><b>{{ studio.members.find(m => m.id === streamingMember)?.name || 'AI' }}</b><span>正在回复</span></div>
-          <div class="content">{{ streamContent }}<i class="stream-cursor" aria-hidden="true" /></div>
+        <div class="stream-col">
+          <div class="typing" aria-label="成员执行中"><i /><i /><i /></div>
+          <div v-if="streamContent" class="bubble">
+            <div class="meta"><b>{{ studio.members.find(m => m.id === streamingMember)?.name || 'AI' }}</b><span>正在回复</span></div>
+            <div class="content">{{ streamContent }}<i class="stream-cursor" aria-hidden="true" /></div>
+          </div>
         </div>
       </div>
       <article v-for="tool in studio.toolCards" :key="tool.callId" class="tool-card" :class="tool.status">
@@ -199,6 +213,13 @@ function fmtTime(ts: number) {
 .meta b { font-size: 12px; color: var(--text); }
 .meta span { font-size: 10px; color: var(--text-3); }
 .content { font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.stream-col { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 75%; min-width: 0; }
+.stream-col .bubble { max-width: 100%; }
+.typing { display: inline-flex; align-items: center; gap: 4px; padding: 9px 13px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; }
+.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); animation: studio-typing 1.2s ease-in-out infinite; }
+.typing i:nth-child(2) { animation-delay: .18s; }
+.typing i:nth-child(3) { animation-delay: .36s; }
+@keyframes studio-typing { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 .stream-cursor { display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -.15em; border-radius: 1px; background: var(--blue); animation: studio-cursor .85s steps(1) infinite; }
 @keyframes studio-cursor { 50% { opacity: 0; } }
 .composer { padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); border-top: 1px solid var(--border); }

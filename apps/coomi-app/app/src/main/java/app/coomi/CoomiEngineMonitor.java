@@ -274,19 +274,19 @@ public class CoomiEngineMonitor extends Service {
                     + mUnhealthyChecks + " checks; restarting while idle");
                 mUnhealthyChecks = 0;
                 updateStatus("重启中…");
-                restartEngine();
+                restartEngine("引擎健康检查连续失败，已自动重启");
             } else if ("stopped".equals(status)) {
                 mUnhealthyChecks = 0;
                 Logger.logInfo(LOG_TAG, "Engine not running, restarting...");
                 updateStatus("重启中…");
-                restartEngine();
+                restartEngine("引擎进程意外退出，已自动拉起");
             } else {
                 Logger.logWarn(LOG_TAG, "Ignoring unknown engine status: " + status);
             }
         });
     }
 
-    private void restartEngine() {
+    private void restartEngine(String reason) {
         if (!mBound || mCoomiService == null) return;
         if (mRestartInFlight) return;
         if (mRestartAttempts >= MAX_RESTART_ATTEMPTS) {
@@ -297,6 +297,12 @@ public class CoomiEngineMonitor extends Service {
         mRestartAttempts++;
         mRestartInFlight = true;
         Logger.logInfo(LOG_TAG, "Restart attempt " + mRestartAttempts);
+        // 性能/稳定性信号自动入队：引擎异常重启属用户可感知的可用性问题，
+        // 记录到反馈 Outbox（去重），用户打开「问题反馈与诊断」页时授权上传。
+        final String feedbackReason = reason + "（第 " + mRestartAttempts + " 次）";
+        new Thread(() -> FeedbackManager.enqueueNativeError(CoomiEngineMonitor.this,
+            "performance", "引擎异常自动重启", feedbackReason, null),
+            "coomi-feedback-restart").start();
 
         mCoomiService.startEngine(result -> {
             mRestartInFlight = false;
@@ -306,7 +312,7 @@ public class CoomiEngineMonitor extends Service {
             } else {
                 updateStatus("失败 (尝试 " + mRestartAttempts + "/" + MAX_RESTART_ATTEMPTS + ")");
                 if (mRestartAttempts < MAX_RESTART_ATTEMPTS) {
-                    mHandler.postDelayed(this::restartEngine, RESTART_DELAY_MS);
+                    mHandler.postDelayed(() -> restartEngine(reason), RESTART_DELAY_MS);
                 }
             }
         });

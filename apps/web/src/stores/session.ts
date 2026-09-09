@@ -12,6 +12,7 @@ import { useConnectionStore } from './connection'
 import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { isGlobalSession as isGlobalSessionId } from '@/bridge/life'
+import { reportErrorToNative, sendFeedbackViaBridge } from '@/bridge/feedback'
 import { router } from '@/router'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
 
@@ -57,8 +58,32 @@ export const useSessionStore = defineStore('session', () => {
   let turnToolTrace: ToolDiagnosticTrace[] = []
   let consecutiveToolFailures = 0
   let maxConsecutiveToolFailures = 0
-  let failureNoticeCreated = false
+  /** 回合级异常信号：任一工具失败 / agent_error / 输出流停滞都会置位，turn_end 汇总成一张反馈卡。 */
+  let turnHadError = false
+  let lastTurnErrorDetail = ''
+  /** 停滞检测：回合运行中超过 STALL_TIMEOUT_MS 无任何 WS 事件视为疑似停滞。 */
+  let stallWatchTimer: ReturnType<typeof setInterval> | null = null
+  let stallDetected = false
+  let lastEventAt = Date.now()
+  const STALL_TIMEOUT_MS = 90_000
   const transport = shallowRef<Transport | null>(null)
+
+  function armStallWatch() {
+    disarmStallWatch()
+    lastEventAt = Date.now()
+    stallWatchTimer = setInterval(() => {
+      if (runState.value === 'idle') { disarmStallWatch(); return }
+      if (Date.now() - lastEventAt < STALL_TIMEOUT_MS) return
+      if (!stallDetected) {
+        stallDetected = true
+        pushNotice('warn', `输出流已停滞 ${Math.round(STALL_TIMEOUT_MS / 1000)} 秒，本轮结束后可一键反馈`)
+      }
+      disarmStallWatch()
+    }, 15_000)
+  }
+  function disarmStallWatch() {
+    if (stallWatchTimer) { clearInterval(stallWatchTimer); stallWatchTimer = null }
+  }
 
   const isBusy = computed(() => runState.value !== 'idle')
   const pendingApproval = computed(() => timeline.value.find((t): t is ToolCard => t.kind === 'tool' && t.status === 'awaiting_approval'))
@@ -98,6 +123,7 @@ export const useSessionStore = defineStore('session', () => {
     if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
     timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
     runState.value = 'thinking'
+    armStallWatch()
     transport.value?.send({ command: 'send_guide', key })
     persistSoon()
   }
@@ -191,6 +217,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function applyEvent(ev: AgentEvent) {
+    lastEventAt = Date.now()
     switch (ev.event_type) {
       // 兜底：turn_end 之后又开始吐字（引擎续了一轮），状态得跟着回到忙。
       case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; appendAssistant(ev.content); break
@@ -242,16 +269,8 @@ export const useSessionStore = defineStore('session', () => {
               maxConsecutiveToolFailures = Math.max(maxConsecutiveToolFailures, consecutiveToolFailures)
               trace.category = classifyToolError(ev.result_preview)
               trace.errorSummary = sanitizeDiagnosticText(ev.result_preview)
-              if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
-                failureNoticeCreated = true
-                const noticeId = nextId()
-                timeline.value.push({
-                  kind: 'notice', id: noticeId, tone: 'warn', analysisStatus: 'consent', feedbackEligible: true,
-                  text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，建议反馈脱敏错误记录。`,
-                  analysisTrace: turnToolTrace.map(item => ({ ...item, callId: undefined })),
-                  failureCount: turnToolTrace.filter(item => item.status === 'error').length,
-                })
-              }
+              turnHadError = true
+              lastTurnErrorDetail = trace.errorSummary
             } else consecutiveToolFailures = 0
           }
         }
@@ -318,7 +337,13 @@ export const useSessionStore = defineStore('session', () => {
         break
       }
       case 'compression': pushNotice('info', `上下文已压缩 ${fmtTokens(ev.before)} → ${fmtTokens(ev.after)}`); break
-      case 'connection_retry': connection.setRetry(`${ev.message}（${ev.attempt}/${ev.max_attempts}）`); break
+      case 'connection_retry':
+        connection.setRetry(`${ev.message}（${ev.attempt}/${ev.max_attempts}）`)
+        // 重试到上限仍连不上且用户可交互：交给原生弹「一键反馈」。
+        if (ev.attempt >= ev.max_attempts && !isBusy.value) {
+          reportErrorToNative('runtime_error', '网络连接失败', `${ev.message}（已重试 ${ev.attempt} 次）`)
+        }
+        break
       case 'stream_reset':
         endAssistantStream()
         while (timeline.value.length > 0) {
@@ -331,10 +356,21 @@ export const useSessionStore = defineStore('session', () => {
         endAssistantStream()
         runState.value = 'idle'
         retryConfirmation.value = ev.message
+        disarmStallWatch()
         break
-      case 'agent_error': endAssistantStream(); pushNotice('error', ev.message); if (ev.is_fatal) runState.value = 'idle'; persistSoon(); break
+      case 'agent_error':
+        endAssistantStream(); pushNotice('error', ev.message)
+        turnHadError = true
+        lastTurnErrorDetail = sanitizeDiagnosticText(ev.message)
+        disarmStallWatch()
+        if (ev.is_fatal) {
+          runState.value = 'idle'
+          pushFeedbackCard('runtime_error', `本轮执行异常终止：${ev.message.slice(0, 80)}`, lastTurnErrorDetail, false)
+          resetTurnFeedbackSignals()
+        }
+        persistSoon(); break
       case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); void router.push(ev.route); break
-      case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); pushNotice('warn', '已停止本轮执行'); break
+      case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); pushNotice('warn', '已停止本轮执行'); disarmStallWatch(); break
       case 'bg_task_detached': pushNotice('info', `↪ 已转入后台任务 #${ev.task_id}（${ev.tool_name}）`); break
       case 'bg_task_completed': pushNotice(ev.is_error ? 'error' : 'success', `${ev.is_error ? '✕' : '✓'} 后台任务 #${ev.task_id} ${ev.is_error ? '失败' : '完成'}`); break
       case 'loop_progress':
@@ -365,6 +401,7 @@ export const useSessionStore = defineStore('session', () => {
         break
       case 'turn_end':
         endAssistantStream(); cancelRunningTools(); connection.setRetry(null); runState.value = 'idle'
+        disarmStallWatch()
         // 收尾清理：去掉空白思考块（部分供应商会发空的 reasoning 分片）。
         timeline.value = timeline.value.filter(item => !(item.kind === 'reasoning' && !item.content.trim()))
         // 批次五 #7：任务结束后执行过程自动折叠——收起全部已展开的工具卡，
@@ -373,22 +410,23 @@ export const useSessionStore = defineStore('session', () => {
           if (item.kind === 'tool' && item.status !== 'awaiting_approval') item.expanded = false
         })
         {
+          // 回合末统一反馈卡：本轮有任何异常（工具失败/agent_error/输出停滞）
+          // 就在瀑布流末尾放一张卡片，用户一键授权即自动采集上传。
           const failures = turnToolTrace.filter(item => item.status === 'error').length
-          if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
-            const trace = turnToolTrace.map(item => ({ ...item, callId: undefined }))
-            const noticeId = nextId()
-            timeline.value.push({
-              kind: 'notice', id: noticeId, tone: 'warn', analysisStatus: 'consent', feedbackEligible: true,
-              text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，建议反馈脱敏错误记录。`,
-              analysisTrace: trace,
-              failureCount: failures,
-            })
+          if (turnHadError || stallDetected) {
+            const parts: string[] = []
+            if (failures > 0) parts.push(`${failures} 次工具调用失败`)
+            if (stallDetected) parts.push('输出流一度停滞')
+            const summary = `本轮出现${parts.join('、')}，遇到问题了吗？`
+            pushFeedbackCard(
+              failures > 0 ? 'tool_failure' : 'performance',
+              summary,
+              lastTurnErrorDetail,
+              failures > 0,
+            )
           }
         }
-        turnToolTrace = []
-        consecutiveToolFailures = 0
-        maxConsecutiveToolFailures = 0
-        failureNoticeCreated = false
+        resetTurnFeedbackSignals()
         persistSoon()
         break
       case 'session_state': {
@@ -449,6 +487,7 @@ export const useSessionStore = defineStore('session', () => {
   function retryInterruptedTurn() {
     retryConfirmation.value = null
     runState.value = 'thinking'
+    armStallWatch()
     transport.value?.send({ command: 'retry_turn' })
   }
 
@@ -495,6 +534,7 @@ export const useSessionStore = defineStore('session', () => {
       if (cutAt >= 0) timeline.value.splice(cutAt)
       timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
       runState.value = 'thinking'
+      armStallWatch()
       transport.value?.send({ command: 'edit_turn', msg_id: edit.mid, text: trimmed })
       persistSoon()
       return
@@ -511,6 +551,7 @@ export const useSessionStore = defineStore('session', () => {
     turnToolTrace = []
     timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
     runState.value = 'thinking'
+    armStallWatch()
     transport.value?.send({ command: 'send_message', text: trimmed })
     persistSoon()
   }
@@ -876,15 +917,60 @@ export const useSessionStore = defineStore('session', () => {
   }
   function pushNotice(tone: 'info' | 'warn' | 'error' | 'success', text: string) { timeline.value.push({ kind: 'notice', id: nextId(), tone, text }) }
 
-  async function consentToolFailureFeedback(noticeId: string): Promise<boolean> {
+  /** 在瀑布流末尾放一张统一反馈卡（每回合至多一张，由 turn_end / 致命错误触发）。 */
+  function pushFeedbackCard(
+    channel: 'tool_failure' | 'runtime_error' | 'performance',
+    summary: string,
+    detail: string,
+    needsAnalysis: boolean,
+  ) {
+    timeline.value.push({
+      kind: 'notice', id: nextId(), tone: 'warn',
+      text: summary,
+      detail: detail || undefined,
+      feedback: {
+        channel,
+        summary,
+        needsAnalysis,
+        toolTrace: turnToolTrace.map(({ callId: _callId, ...item }) => item),
+        hasConversation: timeline.value.some(t => t.kind === 'user' || (t.kind === 'assistant' && t.content)),
+      },
+      analysisStatus: 'consent', feedbackEligible: true,
+      failureCount: turnToolTrace.filter(item => item.status === 'error').length,
+    })
+  }
+
+  /** 回合结束后清空异常信号（反馈卡已携带轨迹快照）。 */
+  function resetTurnFeedbackSignals() {
+    turnToolTrace = []
+    consecutiveToolFailures = 0
+    maxConsecutiveToolFailures = 0
+    turnHadError = false
+    lastTurnErrorDetail = ''
+    stallDetected = false
+    disarmStallWatch()
+  }
+
+  function updateAnalysisNotice(id: string, patch: Partial<Extract<Timelineitem, { kind: 'notice' }>>) {
+    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === id)
+    if (notice?.kind === 'notice') Object.assign(notice, patch)
+  }
+
+  /**
+   * 反馈第一步（consent → analyzing → ready/failed）：
+   * 有工具失败轨迹时调用引擎做一次轻量溯源分析；纯运行时错误跳过分析直接 ready。
+   */
+  async function prepareTurnFeedback(noticeId: string): Promise<boolean> {
     const notice = timeline.value.find(item => item.kind === 'notice' && item.id === noticeId)
-    if (notice?.kind !== 'notice' || !notice.analysisTrace?.length) return false
+    if (notice?.kind !== 'notice' || !notice.feedback) return false
     if (!['consent', 'failed'].includes(notice.analysisStatus ?? '')) return false
-    const trace = notice.analysisTrace
-    const failureCount = notice.failureCount ?? trace.filter(item => item.status === 'error').length
+    const feedback = notice.feedback
+    if (!feedback.needsAnalysis || feedback.toolTrace.length === 0) {
+      updateAnalysisNotice(noticeId, { analysisStatus: 'ready' })
+      return true
+    }
     updateAnalysisNotice(noticeId, {
       analysisStatus: 'analyzing', feedbackEligible: false, detail: undefined,
-      text: '正在后台轻量整理工具调用错误，完成后将自动上传。您可以继续对话。',
     })
     persistSoon()
     try {
@@ -893,7 +979,8 @@ export const useSessionStore = defineStore('session', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider_id: config.currentProviderId,
-          trace: trace.map(({ callId: _callId, ...item }) => item),
+          trace: feedback.toolTrace,
+          conversation_excerpt: buildConversationExcerpt(),
         }),
       })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -902,39 +989,74 @@ export const useSessionStore = defineStore('session', () => {
       if (!analysis) throw new Error('empty analysis')
       updateAnalysisNotice(noticeId, {
         analysisStatus: 'ready', feedbackEligible: false,
-        text: `已完成 ${failureCount} 次工具失败的脱敏整理，正在自动上传。`,
-        detail: `${analysis}\n\n${buildLocalEvidence(trace)}`,
+        analysisText: analysis,
       })
       persistSoon()
       return true
     } catch (error) {
       updateAnalysisNotice(noticeId, {
         analysisStatus: 'failed', feedbackEligible: true, detail: undefined,
-        text: `反馈整理失败，未上传任何内容：${error instanceof Error ? error.message : String(error)}。可点击重试。`,
+        analysisText: error instanceof Error ? error.message : String(error),
       })
       persistSoon()
       return false
     }
   }
 
-  function finishToolFailureFeedback(noticeId: string, ok: boolean, reason = '') {
+  /** 反馈第二步（ready → 上传）：组装 v2 payload，经原生桥上传（含脱敏终检与 Outbox 兜底）。 */
+  async function sendTurnFeedback(noticeId: string): Promise<{ ok: boolean; reason: string; queued: boolean }> {
+    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === noticeId)
+    if (notice?.kind !== 'notice' || !notice.feedback) return { ok: false, reason: 'gone', queued: false }
+    const feedback = notice.feedback
+    const payload = {
+      channel: feedback.channel,
+      error: { title: feedback.summary, message: feedback.summary, detail: notice.detail ?? '' },
+      context: {
+        conversation_excerpt: buildConversationExcerpt(),
+        tool_trace: feedback.toolTrace,
+      },
+      analysis: notice.analysisText ?? null,
+      session: {
+        session_id: sessionId.value,
+        provider: config.currentProviderId,
+        model: config.currentModel,
+        permission_mode: config.permissionMode,
+      },
+      time: new Date().toISOString(),
+    }
+    const result = await sendFeedbackViaBridge(payload)
+    return { ok: result.ok, reason: result.error ?? '', queued: result.status === 'queued' }
+  }
+
+  /** 反馈第三步：回写卡片状态（不改动摘要文本，状态提示由卡片自身渲染，避免重复）。 */
+  function finishTurnFeedback(noticeId: string, ok: boolean, reason = '', queued = false) {
     updateAnalysisNotice(noticeId, ok ? {
       analysisStatus: 'complete', feedbackEligible: false,
-      text: '工具调用错误记录已完成脱敏整理并自动上传，感谢您的反馈。',
-      analysisTrace: undefined,
+      statusNote: queued ? '反馈已加入队列，联网后自动发送' : undefined,
     } : {
       analysisStatus: 'ready', feedbackEligible: true,
-      text: `整理已完成，但自动上传失败${reason ? `：${reason}` : ''}。可直接重试上传，无需再次调用模型。`,
+      statusNote: reason ? `上传失败：${reason}` : undefined,
     })
     persistSoon()
   }
 
-  function updateAnalysisNotice(id: string, patch: Partial<Extract<Timelineitem, { kind: 'notice' }>>) {
-    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === id)
-    if (notice?.kind === 'notice') Object.assign(notice, patch)
+  /** 最近数轮对话摘要（仅密钥/联系方式打码，保留原文场景，供反馈溯源；上限 ~8000 字符）。 */
+  function buildConversationExcerpt(): Array<{ role: 'user' | 'assistant'; text: string }> {
+    const excerpt: Array<{ role: 'user' | 'assistant'; text: string }> = []
+    let total = 0
+    for (let i = timeline.value.length - 1; i >= 0 && total < 8000; i--) {
+      const item = timeline.value[i]
+      if (item.kind !== 'user' && item.kind !== 'assistant') continue
+      const content = item.content.trim()
+      if (!content) continue
+      const text = maskSecrets(content.slice(0, 2000))
+      excerpt.unshift({ role: item.kind === 'user' ? 'user' : 'assistant', text })
+      total += text.length
+    }
+    return excerpt
   }
 
-  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, collaboration, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, clearSessionData, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, consentToolFailureFeedback, finishToolFailureFeedback }
+  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, collaboration, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, clearSessionData, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, prepareTurnFeedback, sendTurnFeedback, finishTurnFeedback }
 })
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }
@@ -952,6 +1074,19 @@ function sanitizeToolName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 80) || 'unknown_tool'
 }
 
+/**
+ * 密钥/联系方式打码（唯一保留的脱敏项）：只处理密码、API Key、Bearer 令牌、
+ * 邮箱与手机号。路径、命令、URL、参数值一律保留原文，保证反馈可溯源。
+ */
+function maskSecrets(text: string): string {
+  return text
+    .replace(/\b(?:sk|rk|pk)-[a-zA-Z0-9._-]{8,}\b/g, 'sk-***')
+    .replace(/\bBearer\s+[a-zA-Z0-9._~+/=-]{8,}/gi, 'Bearer ***')
+    .replace(/((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential)s?\s*[:=]\s*)(["']?)[^\s"',}&]+\2/gi, '$1***')
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '***@***')
+    .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '1**********')
+}
+
 function classifyToolError(message: string): string {
   const text = message.toLowerCase()
   if (/permission|denied|allowed area/.test(text)) return 'permission_or_sandbox'
@@ -962,9 +1097,13 @@ function classifyToolError(message: string): string {
   return 'execution_error'
 }
 
+/**
+ * 工具参数脱敏（放松版）：保留真实字符串（路径/命令/URL 原文，仅打码密钥与长文本截断），
+ * 结构上限不变（深度 4、数组 12、对象 30），保证反馈能还原真实任务场景。
+ */
 function summarizeArguments(value: unknown, key = '', depth = 0): unknown {
   if (depth > 4) return '[max_depth]'
-  if (value === null) return '[null]'
+  if (value === null) return null
   if (Array.isArray(value)) return value.slice(0, 12).map(item => summarizeArguments(item, key, depth + 1))
   if (typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 30).map(([childKey, child]) => [
@@ -972,44 +1111,20 @@ function summarizeArguments(value: unknown, key = '', depth = 0): unknown {
       summarizeArguments(child, childKey, depth + 1),
     ]))
   }
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return '[number]'
+  if (typeof value === 'boolean' || typeof value === 'number') return value
   if (typeof value !== 'string') return `[${typeof value}]`
-  const text = value.trim()
   const lowerKey = key.toLowerCase()
   if (/key|token|secret|password|authorization|credential/.test(lowerKey)) return '[redacted_secret]'
-  if (/path|file|dir|cwd|destination|source/.test(lowerKey) || /^(?:\/|[a-z]:\\)/i.test(text)) {
-    const extension = text.match(/\.([a-zA-Z0-9]{1,8})$/)?.[1]?.toLowerCase()
-    return `[${/^(?:\/|[a-z]:\\)/i.test(text) ? 'absolute' : 'relative'}_path${extension ? ` ext=.${extension}` : ''}]`
-  }
-  if (/command|cmd|script/.test(lowerKey) || /[\s;&|><]/.test(text)) {
-    const tokens = text.split(/\s+/).filter(Boolean)
-    const executable = tokens[0]?.split(/[\\/]/).pop()?.replace(/[^a-zA-Z0-9_.+-]/g, '') || 'unknown'
-    const flags = tokens.slice(1).filter(token => /^--?[a-zA-Z0-9_-]+$/.test(token)).slice(0, 12)
-    return { kind: 'command_shape', executable, flags, token_count: tokens.length, has_shell_operators: /[;&|><]/.test(text) }
-  }
-  if (/^https?:\/\//i.test(text)) return '[url_redacted]'
-  if (/^[a-zA-Z][a-zA-Z0-9_.:-]{0,31}$/.test(text)) return text
-  return `[string length=${text.length}]`
+  // 保留原文：仅密钥形态打码 + 超长截断（保留头尾）。
+  const text = value.trim()
+  const masked = maskSecrets(text)
+  if (masked.length <= 600) return masked
+  return masked.slice(0, 400) + `…（截断，全长 ${masked.length} 字符）…` + masked.slice(-120)
 }
 
+/** 错误摘要打码：仅密钥与联系方式，长度上限 1200。 */
 function sanitizeDiagnosticText(message: string): string {
-  return message
-    .slice(0, 1200)
-    .replace(/\b(?:sk-|Bearer\s+)[a-zA-Z0-9._-]{8,}\b/gi, '[redacted_secret]')
-    .replace(/https?:\/\/[^\s"']+/gi, '[redacted_url]')
-    .replace(/(?:[a-zA-Z]:\\|\/data\/|\/storage\/|\/sdcard\/|\/home\/)[^\s"']+/g, '[redacted_path]')
-    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[redacted_email]')
-    .replace(/\b[0-9a-f]{24,}\b/gi, '[redacted_identifier]')
-    .replace(/(["'])(?:(?!\1).){41,}\1/g, '[redacted_text]')
-}
-
-function buildLocalEvidence(items: ToolDiagnosticTrace[]): string {
-  return [
-    '【程序采集的脱敏证据】',
-    '不含用户消息、原始参数值、文件内容、真实路径、URL、密钥或模型隐藏思维。',
-    ...items.map(item => `#${item.sequence} ${item.tool} | ${item.status}${item.category ? ` | ${item.category}` : ''}${item.elapsedMs !== undefined ? ` | ${item.elapsedMs}ms` : ''}\n参数结构: ${JSON.stringify(item.argumentShape)}${item.errorSummary ? `\n错误摘要: ${item.errorSummary}` : ''}`),
-  ].join('\n')
+  return maskSecrets(String(message ?? '')).slice(0, 1200)
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
