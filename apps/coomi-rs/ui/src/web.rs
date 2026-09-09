@@ -1766,6 +1766,31 @@ async fn studio_send_message(
     let approvals = Arc::clone(&state.studio_approvals);
     let home = state.home.clone();
     let studio_id = studio.id.clone();
+    // 成员名册：职责公开，系统提示词互相保密。
+    let roster = members.iter()
+        .map(|member| format!("- {}（职责：{}）", member.name, member.role))
+        .collect::<Vec<_>>()
+        .join("
+");
+    // 全量聊天记录：所有成员可见（用户与全部成员的历史发言），超长保尾部。
+    let mut transcript = store
+        .messages(&studio_id)
+        .map(|items| items.iter()
+            .map(|message| format!(
+                "{}：{}",
+                message.sender_name,
+                message.content.chars().take(400).collect::<String>()))
+            .collect::<Vec<_>>()
+            .join("
+"))
+        .unwrap_or_default();
+    {
+        let length = transcript.chars().count();
+        if length > 12_000 {
+            transcript = transcript.chars().skip(length - 12_000).collect();
+        }
+    }
+
     // 共享工作目录：无效路径（如旧数据里的 /workspace）自动回退到托管目录，
     // 否则 SecurityPolicy 初始化会失败导致成员全部沉默。
     let workspace = resolve_studio_workspace(&state.home, &studio)
@@ -1774,7 +1799,6 @@ async fn studio_send_message(
     let run_key = studio.id.clone();
     let run_registry = Arc::clone(&state.studio_runs);
     let spawned = tokio::spawn(async move {
-        let mut prior = String::new();
         let mut queue = targets.into_iter().map(|id|(id, 0usize)).collect::<VecDeque<_>>();
         let mut dispatches = 0usize;
         while let Some((target_id, depth)) = queue.pop_front() {
@@ -1793,8 +1817,26 @@ async fn studio_send_message(
                 Err(error) => { emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","message":format!("成员模型初始化失败：{error}")})); continue; }
             };
             emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"executing"}));
-            let system = format!("你是 AI 工作室成员“{}”。职责：{}\n{}\n共享工作目录：{}。你和其他成员共同解决用户目标。请直接给出本角色的工作成果；如已有成员发言，请在其基础上协作，不要重复。", member.name, member.role, member.system_prompt, workspace);
-            let user = if prior.is_empty() { text.clone() } else { format!("用户目标：{}\n\n已有成员成果：\n{}", text, prior) };
+            let system = format!("你是 AI 工作室成员“{}”。
+你的职责：{}
+{}
+
+【成员名册】（职责公开；各成员的系统提示词互相保密）：
+{}
+
+【协作规则】
+1. 你能看到工作室的全部聊天记录（见消息末尾的记录）。
+2. 发言时用 @成员名 直接邀请对应成员参与，被 @ 的成员会自动被触发继续工作。
+3. 主动协作：当话题与其他成员的职责相关时，明确 @ 它提出请求、补充或质疑，推动多成员讨论。
+4. 直接给出本角色的成果，不要重复他人已完成的内容。
+共享工作目录：{}", member.name, member.role, member.system_prompt, roster, workspace);
+            let user = format!("【用户最新消息】
+{text}
+
+【工作室聊天记录（全部成员可见）】
+{transcript}
+
+请基于以上内容继续推进目标；需要其他成员参与时 @ 它。");
             let policy_mode = match member.tool_permission { ToolPermission::Ask => AccessMode::WorkspaceWrite, ToolPermission::Auto | ToolPermission::Full => AccessMode::FullAccess };
             let cwd = PathBuf::from(&workspace);
             let policy = match SecurityPolicy::new(&cwd, policy_mode) { Ok(value) => value, Err(error) => { emit(json!({"event_type":"studio_error","message":format!("工作目录不可用：{error}")})); continue; } };
@@ -1811,7 +1853,11 @@ async fn studio_send_message(
                     let mentions = members.iter().filter(|other| other.id != member.id && (response.contains(&format!("@{}", other.name)) || response.contains(&format!("@{}", other.id)))).map(|other|other.id.clone()).collect::<Vec<_>>();
                     let reply = StudioMessage::new(member.id.clone(), member.name.clone(), response.clone(), mentions.clone());
                     if let Err(error) = StudioStore::new(studio_store_root.clone()).append_message(&studio_id, &reply) { emit(json!({"event_type":"studio_error","message":format!("保存成员回复失败：{error}")})); }
-                    else { prior.push_str(&format!("{}：{}\n", member.name, response)); emit(json!({"event_type":"studio_message","message":reply})); }
+                    else {
+                        transcript.push('\n');
+                        transcript.push_str(&format!("{}：{}", member.name, response));
+                        emit(json!({"event_type":"studio_message","message":reply}));
+                    }
                     if depth < 3 { for mentioned in mentions { queue.push_back((mentioned, depth + 1)); } }
                     emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"done"}));
                 }

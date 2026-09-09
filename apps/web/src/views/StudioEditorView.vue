@@ -116,7 +116,7 @@ async function save() {
 
 <template>
   <div class="page">
-    <PageHead :title="isNew ? '新建工作室' : '编辑工作室'" @back="goBack(router, 'dashboard')" />
+    <PageHead :title="isNew ? '新建工作室' : '编辑工作室'" @back="goBack(router, '/studio')" />
 
     <main class="body">
       <p v-if="message" class="notice ok">{{ message }}</p>

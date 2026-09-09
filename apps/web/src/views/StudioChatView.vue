@@ -5,6 +5,7 @@ import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { useStudioStore, type StudioMessage } from '@/stores/studio'
 import StudioMemberStrip from '@/components/StudioMemberStrip.vue'
+import Identicon from '@/components/Identicon.vue'
 import StudioWorkBoard from '@/components/StudioWorkBoard.vue'
 import { goBack } from '@/bridge/navigation'
 
@@ -127,7 +128,7 @@ function fmtTime(ts: number) {
 
 <template>
   <div class="page">
-    <PageHead :title="studio.currentStudio?.name ?? '工作室'" @back="goBack(router, 'dashboard')">
+    <PageHead :title="studio.currentStudio?.name ?? '工作室'" @back="goBack(router, '/studio')">
       <template #right>
         <button class="icon-btn" aria-label="工单看板" @click="showWorkBoard = true"><CoomiIcon name="todo" :size="18" /></button>
         <button class="icon-btn" aria-label="编辑" @click="router.push(`/studio/${studioId}/edit`)"><CoomiIcon name="pencil" :size="18" /></button>
@@ -141,21 +142,21 @@ function fmtTime(ts: number) {
       <div v-for="(note, index) in streamNotices" :key="'err-' + index" class="notice err">{{ note }}</div>
       <p v-if="studio.messages.length === 0 && !pendingUser && !streamContent" class="empty">开始对话吧，输入 @成员 直接指派任务。</p>
       <div v-for="msg in studio.messages" :key="msg.id" class="msg" :class="{ me: msg.senderId === 'user' }">
-        <div class="avatar">{{ msg.senderName[0] }}</div>
+        <div class="avatar"><Identicon :seed="msg.senderId === 'user' ? 'user' : msg.senderId + msg.senderName" :size="32" /></div>
         <div class="bubble">
           <div class="meta"><b>{{ msg.senderName }}</b><span>{{ fmtTime(msg.timestamp) }}</span></div>
           <div class="content">{{ msg.content }}</div>
         </div>
       </div>
       <div v-if="pendingUser" class="msg me pending-msg">
-        <div class="avatar">我</div>
+        <div class="avatar"><Identicon seed="user" :size="32" /></div>
         <div class="bubble">
           <div class="meta"><b>我</b><span>{{ fmtTime(pendingUser.timestamp) }}</span></div>
           <div class="content">{{ pendingUser.content }}</div>
         </div>
       </div>
       <div v-if="memberActive" class="msg streaming-msg">
-        <div class="avatar">{{ studio.members.find(m => m.id === streamingMember)?.name?.[0] || 'AI' }}</div>
+        <div class="avatar"><Identicon :seed="streamingMember" :size="32" /></div>
         <div class="stream-col">
           <div class="typing" aria-label="成员执行中"><i /><i /><i /></div>
           <div v-if="streamContent" class="bubble">
@@ -206,7 +207,8 @@ function fmtTime(ts: number) {
 .notice.err { background: color-mix(in srgb, var(--orange) 16%, var(--bg)); color: var(--orange); }
 .msg { display: flex; gap: 8px; margin-bottom: 12px; }
 .msg.me { flex-direction: row-reverse; }
-.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--blue-soft); color: var(--blue); display: grid; place-items: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+.avatar :deep(svg) { width: 100%; height: 100%; }
 .bubble { max-width: 75%; padding: 8px 12px; border-radius: 12px; background: var(--bg-elev); border: 1px solid var(--border); }
 .msg.me .bubble { background: var(--blue-soft); }
 .meta { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }

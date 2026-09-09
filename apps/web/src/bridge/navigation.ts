@@ -27,6 +27,7 @@ export function installSystemBackHandler(router: Router): void {
     // 三级页（记忆库/心情日记）先回二级（数字生命体）。
     if (route.startsWith('/life/')) goBack(router, '/life')
     else if (route === '/appearance' || route === '/persona') goBack(router, '/settings')
+    else if (route.startsWith('/studio/')) goBack(router, '/studio')
     else if (
       route === '/hooks'
       || route === '/life'
@@ -40,6 +41,7 @@ export function installSystemBackHandler(router: Router): void {
       || route === '/usage'
       || route === '/updates'
       || route === '/ux-program'
+      || route === '/studio'
       || route === '/providers'
       || route.startsWith('/providers/')
     ) goBack(router, 'dashboard')
