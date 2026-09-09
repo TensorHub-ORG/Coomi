@@ -68,6 +68,18 @@ export interface StudioListItem {
   lastActive?: number
 }
 
+function normalizeStudio(value: Studio): Studio {
+  return {
+    ...value,
+    members: (value.members ?? []).map(member => ({
+      ...member,
+      // Rust's persisted enum uses running/completed; the chat UI uses the
+      // more descriptive executing/done labels for the same states.
+      status: ({ running: 'executing', completed: 'done' } as Record<string, MemberStatus>)[String(member.status)] ?? member.status,
+    })),
+  }
+}
+
 export const useStudioStore = defineStore('studio', () => {
   const studios = ref<StudioListItem[]>([])
   const currentStudio = ref<Studio | null>(null)
@@ -79,6 +91,7 @@ export const useStudioStore = defineStore('studio', () => {
   const notice = ref('')
   const streamingMembers = ref<Record<string, string>>({})
   const toolCards = ref<StudioToolCard[]>([])
+  let activeRequestAbort: AbortController | null = null
 
   const members = computed(() => currentStudio.value?.members ?? [])
   const host = computed(() => members.value.find(m => m.id === currentStudio.value?.hostId) ?? members.value[0] ?? null)
@@ -106,7 +119,7 @@ export const useStudioStore = defineStore('studio', () => {
     error.value = ''
     try {
       const data = await apiGet<{ studio: Studio; messages?: StudioMessage[]; workItems?: WorkItem[] }>(`/api/studios/${encodeURIComponent(id)}`)
-      currentStudio.value = data.studio
+      currentStudio.value = normalizeStudio(data.studio)
       messages.value = data.messages ?? []
       workItems.value = data.workItems ?? []
     } catch (e) {
@@ -120,7 +133,7 @@ export const useStudioStore = defineStore('studio', () => {
     error.value = ''
     try {
       const data = await apiSend<{ studio: Studio }>('/api/studios', 'POST', input)
-      currentStudio.value = data.studio
+      currentStudio.value = normalizeStudio(data.studio)
       await fetchStudios()
       return data.studio
     } catch (e) {
@@ -133,7 +146,7 @@ export const useStudioStore = defineStore('studio', () => {
     error.value = ''
     try {
       const data = await apiSend<{ studio: Studio }>(`/api/studios/${encodeURIComponent(id)}`, 'PUT', input)
-      currentStudio.value = data.studio
+      currentStudio.value = normalizeStudio(data.studio)
       await fetchStudios()
       return data.studio
     } catch (e) {
@@ -244,56 +257,98 @@ export const useStudioStore = defineStore('studio', () => {
     }
   }
 
-  /** 发送期间的兜底轮询：部分 WebView 上 SSE 事件可能丢失（状态/工具可见、文本/消息丢失），
-   *  每 4 秒从服务端增量合并一次，保证群聊消息必然补齐，不依赖单条事件。 */
+  /**
+   * Merge server state without replacing the reactive array. Replacing it while
+   * a response bubble is being rendered causes WebView Vue builds to lose the
+   * current DOM node. Sorting also keeps messages from concurrent member runs
+   * in their actual chat order.
+   */
   function mergeServerMessages(items: StudioMessage[]) {
     for (const item of items) {
-      if (!messages.value.some(m => m.id === item.id)) messages.value.push(item)
+      const index = messages.value.findIndex(m => m.id === item.id)
+      if (index >= 0) messages.value[index] = item
+      else messages.value.push(item)
     }
+    messages.value.sort((a, b) => a.timestamp - b.timestamp)
   }
 
   async function sendMessage(content: string, onEvent?: (event: Record<string, any>) => void) {
     if (!currentStudio.value) return null
     error.value = ''
+    running.value = true
     const studioIdNow = currentStudio.value.id
-    const pollTimer = setInterval(() => {
-      void (async () => {
-        try {
-          const data = await apiGet<{ messages: StudioMessage[] }>(`/api/studios/${encodeURIComponent(studioIdNow)}/messages`)
-          mergeServerMessages(data.messages ?? [])
-        } catch { /* 轮询失败忽略，下个周期再试 */ }
-      })()
-    }, 4000)
+    let pollInFlight = false
+    const pollMessages = async () => {
+      if (pollInFlight) return
+      pollInFlight = true
+      try {
+        const data = await apiGet<{ messages: StudioMessage[] }>(`/api/studios/${encodeURIComponent(studioIdNow)}/messages`)
+        mergeServerMessages(data.messages ?? [])
+      } catch { /* transient bridge failures are retried on the next tick */ }
+      finally { pollInFlight = false }
+    }
+    // Start immediately, then keep the persisted transcript as a second channel
+    // while SSE is open. This is deliberately independent of reader.read().
+    void pollMessages()
+    const pollTimer = setInterval(() => { void pollMessages() }, 1000)
+    const dispatch = (event: Record<string, any>) => {
+      onEvent?.(event)
+      if (['studio_message', 'studio_user_message'].includes(String(event.event_type)) && event.message) {
+        onMessage(event.message as StudioMessage)
+      }
+    }
+    const requestAbort = new AbortController()
+    activeRequestAbort = requestAbort
     try {
       const response = await authedFetch(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/messages`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify({ content }),
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({ content }), signal: requestAbort.signal,
       })
       if (!response.ok || !response.body) throw new Error(`POST studio message → ${response.status}`)
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      const consume = (flush = false) => {
+        // SSE permits CRLF and multiple data lines per event. Normalizing the
+        // block first avoids dropping events split across WebView read chunks.
+        buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const blocks = buffer.split('\n\n')
+        if (!flush) buffer = blocks.pop() ?? ''
+        else buffer = ''
+        for (const block of blocks) {
+          const data = block.split('\n')
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trim())
+            .join('\n')
+            .trim()
+          if (!data || data === '[DONE]') continue
+          try {
+            const event = JSON.parse(data) as Record<string, any>
+            dispatch(event)
+          } catch { /* malformed upstream event: keep the stream alive */ }
+        }
+      }
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue
-          try {
-            const event = JSON.parse(line.slice(5).trim())
-            onEvent?.(event)
-            if (event.event_type === 'studio_message') onMessage(event.message)
-          } catch { /* 忽略不完整事件 */ }
-        }
+        consume()
       }
+      buffer += decoder.decode()
+      consume(true)
       clearInterval(pollTimer)
+      await pollMessages()
       await fetchMessages()
       return true
     } catch (e) {
       clearInterval(pollTimer)
-      error.value = e instanceof Error ? e.message : String(e)
+      if (!(e instanceof DOMException && e.name === 'AbortError')) {
+        error.value = e instanceof Error ? e.message : String(e)
+      }
       return null
+    } finally {
+      if (activeRequestAbort === requestAbort) activeRequestAbort = null
+      running.value = false
     }
   }
 
@@ -306,6 +361,7 @@ export const useStudioStore = defineStore('studio', () => {
     const existing = messages.value.findIndex(m => m.id === msg.id)
     if (existing >= 0) messages.value[existing] = msg
     else messages.value.push(msg)
+    messages.value.sort((a, b) => a.timestamp - b.timestamp)
   }
 
   function onTextDelta(memberId: string, delta: string) {
@@ -336,7 +392,17 @@ export const useStudioStore = defineStore('studio', () => {
 
   async function stopRun() {
     if (!currentStudio.value) return
-    await apiSend(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/stop`, 'POST')
+    const id = currentStudio.value.id
+    // Release the long-lived SSE connection first so the stop request is not
+    // queued behind it by the WebView's per-host connection pool.
+    activeRequestAbort?.abort()
+    try {
+      await apiSend(`/api/studios/${encodeURIComponent(id)}/stop`, 'POST')
+    } finally {
+      // The server-side abort above still stops the member task if the request
+      // reaches the engine after the reader has been closed.
+      activeRequestAbort?.abort()
+    }
   }
 
   function onWorkItem(item: WorkItem) {
@@ -346,6 +412,8 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   function reset() {
+    activeRequestAbort?.abort()
+    activeRequestAbort = null
     currentStudio.value = null
     messages.value = []
     workItems.value = []

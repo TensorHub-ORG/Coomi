@@ -51,7 +51,12 @@ export async function authedFetch(
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const r = await authedFetch(`${API_BASE}${path}`, { headers: { Accept: 'application/json' } })
+  const r = await authedFetch(`${API_BASE}${path}`, {
+    headers: { Accept: 'application/json' },
+    // The Android WebView may keep a JSON response fresh for the whole run;
+    // studio polling must always observe messages written since the last tick.
+    cache: 'no-store',
+  })
   if (!r.ok) throw new Error(`GET ${path} → ${r.status}`)
   return r.json() as Promise<T>
 }

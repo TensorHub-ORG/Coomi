@@ -28,8 +28,7 @@ const showAtPicker = ref(false)
 const showWorkBoard = ref(false)
 const sending = ref(false)
 const pendingUser = ref<StudioMessage | null>(null)
-const streamContent = ref('')
-const streamingMember = ref('')
+const streamContentByMember = ref<Record<string, string>>({})
 const streamNotices = ref<string[]>([])
 const importedFiles = ref<string[]>([])
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
@@ -62,6 +61,7 @@ onBeforeUnmount(() => {
 })
 
 watch(() => studio.messages.length, () => { scrollToBottom() })
+watch(streamContentByMember, () => { scrollToBottom() }, { deep: true })
 
 function scrollToBottom() {
   nextTick(() => {
@@ -89,15 +89,35 @@ function onContentClick(event: MouseEvent) {
   setTimeout(() => { button.textContent = '复制' }, 1200)
 }
 
-/** 流式实时流只取最新一行，单行省略展示。 */
-const streamTicker = computed(() => {
-  const lines = streamContent.value.split('\n').filter(line => line.trim())
-  return lines[lines.length - 1] ?? ''
+/** 流式实时流只取最新一行，单行省略展示。每个成员独立保留，避免切换成员时覆盖内容。 */
+const activeMemberIds = computed(() => {
+  const ids = Object.keys(streamContentByMember.value)
+  // SSE 状态事件可能被旧版 WebView 丢弃；发送期间至少展示主持人的执行气泡。
+  if (ids.length > 0) return ids
+  if (sending.value && studio.host?.id) return [studio.host.id]
+  return []
 })
-const streamingName = computed(() =>
-  studio.members.find(m => m.id === streamingMember.value)?.name || 'AI')
-const streamingAvatarSeed = computed(() => streamingMember.value || 'ai')
-const memberActive = computed(() => Boolean(streamingMember.value))
+const memberActive = computed(() => activeMemberIds.value.length > 0)
+const showPendingUser = computed(() => {
+  const pending = pendingUser.value
+  if (!pending) return false
+
+  // The Rust endpoint persists the user's message before opening the stream.
+  // Hide the optimistic bubble as soon as that durable copy is visible.
+  const prompt = pending.content.split('\n📎 ')[0]
+  return !studio.messages.some(message =>
+    message.senderId === 'user' &&
+    message.timestamp >= pending.timestamp &&
+    message.content.startsWith(prompt),
+  )
+})
+function streamTicker(memberId: string): string {
+  const lines = (streamContentByMember.value[memberId] ?? '').split('\n').filter(line => line.trim())
+  return lines[lines.length - 1] ?? ''
+}
+function streamingName(memberId: string): string {
+  return studio.members.find(m => m.id === memberId)?.name || 'AI'
+}
 
 function insertAt(id: string) {
   const m = studio.members.find(x => x.id === id)
@@ -157,24 +177,38 @@ async function send() {
     await studio.sendMessage(requestText, (event) => {
       if (event.event_type === 'studio_user_message') return
       if (event.event_type === 'studio_member_status') {
-        studio.onMemberStatus(String(event.member_id), event.status as never)
-        streamingMember.value = ['thinking', 'executing'].includes(String(event.status)) ? String(event.member_id) : ''
+        const memberId = String(event.member_id ?? '')
+        if (!memberId) return
+        const status = String(event.status)
+        studio.onMemberStatus(memberId, status as never)
+        if (['thinking', 'executing'].includes(status)) {
+          if (!(memberId in streamContentByMember.value)) streamContentByMember.value[memberId] = ''
+        } else if (['done', 'failed'].includes(status)) {
+          delete streamContentByMember.value[memberId]
+        }
       } else if (event.event_type === 'studio_text_delta') {
-        if (streamingMember.value !== String(event.member_id)) { streamingMember.value = String(event.member_id); streamContent.value = '' }
-        streamContent.value += String(event.content ?? '')
+        const memberId = String(event.member_id ?? '')
+        if (!memberId) return
+        streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
+      } else if (event.event_type === 'studio_reasoning_delta') {
+        const memberId = String(event.member_id ?? '')
+        if (!memberId) return
+        streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
+      } else if (event.event_type === 'studio_stream_reset') {
+        const memberId = String(event.member_id ?? '')
+        if (memberId) streamContentByMember.value[memberId] = ''
       } else if (['studio_tool_start', 'studio_tool_done', 'studio_tool_approval'].includes(String(event.event_type))) {
         studio.onToolEvent(event)
       } else if (event.event_type === 'studio_error') {
         streamNotices.value.push(String(event.message ?? '成员执行出错'))
       } else if (event.event_type === 'studio_message') {
-        streamContent.value = ''
-        streamingMember.value = ''
+        const memberId = String(event.message?.senderId ?? '')
+        if (memberId) delete streamContentByMember.value[memberId]
       }
     })
   } finally {
     pendingUser.value = null
-    streamContent.value = ''
-    streamingMember.value = ''
+    streamContentByMember.value = {}
     await studio.fetchMessages()
     sending.value = false
   }
@@ -248,29 +282,29 @@ function fmtTime(ts: number) {
           <div class="content md" v-html="html(msg)" @click="onContentClick" />
         </div>
       </div>
-      <div v-if="pendingUser" class="msg me pending-msg">
+      <div v-if="showPendingUser" class="msg me pending-msg">
         <div class="avatar"><Identicon seed="user" :size="32" /></div>
         <div class="bubble">
-          <div class="meta"><b>我</b><span>{{ fmtTime(pendingUser.timestamp) }}</span></div>
-          <div class="content">{{ pendingUser.content }}</div>
+          <div class="meta"><b>我</b><span>{{ fmtTime(pendingUser?.timestamp ?? 0) }}</span></div>
+          <div class="content">{{ pendingUser?.content ?? '' }}</div>
         </div>
       </div>
-      <!-- 成员执行中：三点动画 + 单行实时流气泡 -->
-      <div v-if="memberActive" class="msg streaming-msg">
+      <!-- 成员执行中：三点动画 + 单行实时流气泡。每位成员一条稳定气泡。 -->
+      <div v-for="memberId in activeMemberIds" :key="'streaming-' + memberId" class="msg streaming-msg">
         <div
           class="avatar"
-          @touchstart.prevent="onAvatarDown(streamingName)"
+          @touchstart.prevent="onAvatarDown(streamingName(memberId))"
           @touchend="onAvatarUp"
           @touchcancel="onAvatarUp"
           @contextmenu.prevent
         >
-          <Identicon :seed="streamingAvatarSeed" :size="32" />
+          <Identicon :seed="memberId || 'ai'" :size="32" />
         </div>
         <div class="stream-col">
           <div class="typing" aria-label="成员执行中"><i /><i /><i /></div>
-          <div v-if="streamContent" class="bubble ticker-bubble">
-            <div class="meta"><b>{{ streamingName }}</b><span>正在回复</span></div>
-            <div class="ticker">{{ streamTicker }}<i class="stream-cursor" aria-hidden="true" /></div>
+          <div v-if="streamContentByMember[memberId]" class="bubble ticker-bubble">
+            <div class="meta"><b>{{ streamingName(memberId) }}</b><span>正在回复</span></div>
+            <div class="ticker">{{ streamTicker(memberId) }}<i class="stream-cursor" aria-hidden="true" /></div>
           </div>
         </div>
       </div>

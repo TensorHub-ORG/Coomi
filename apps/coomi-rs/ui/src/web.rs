@@ -3,8 +3,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use axum::Json;
 use axum::Router;
-use axum::body::Body;
-use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path as AxumPath;
 use axum::extract::Query;
@@ -13,11 +11,13 @@ use axum::extract::ws::Message;
 use axum::extract::ws::WebSocket;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::http::HeaderMap;
+use axum::http::HeaderName;
 use axum::http::HeaderValue;
 use axum::http::Method;
 use axum::http::StatusCode;
 use axum::http::header;
 use axum::response::IntoResponse;
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
@@ -1733,6 +1733,14 @@ async fn studio_approve(
     Ok(Json(json!({"ok": true})))
 }
 
+/// Build an SSE event with a harmless comment large enough to defeat the
+/// buffering threshold used by some Android WebView networking stacks.
+fn studio_sse_event(payload: Value) -> SseEvent {
+    SseEvent::default()
+        .data(payload.to_string())
+        .comment(" ".repeat(4096))
+}
+
 async fn studio_send_message(
     State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>,
 ) -> Result<axum::response::Response, ApiError> {
@@ -1742,14 +1750,26 @@ async fn studio_send_message(
     let studio = store.load(&id).map_err(|e| ApiError::not_found(format!("studio not found: {e}")))?;
     let route = record_user_message(&store, &studio, &text)
         .map_err(|e| ApiError::bad_request(format!("route message: {e}")))?;
+    // The message is persisted before the stream starts. Include that durable
+    // copy in the first event so the WebView can replace its optimistic bubble
+    // immediately, without waiting for a polling round-trip.
+    let user_message = store
+        .messages(&id)
+        .map_err(|e| ApiError::internal(format!("read user message: {e}")))?
+        .into_iter()
+        .rev()
+        .find(|message| message.sender_id == "user" && message.content == text);
     let registry = ProviderRegistry::load(&providers_path(&state.home))
         .map_err(|e| ApiError::bad_request(format!("provider unavailable: {e}")))?;
     let studio_store_root = state.home.join("studios");
-    let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
+    // Use axum's native SSE body.  A hand-built `Body::from_stream` is valid HTTP,
+    // but some Android WebViews buffer small chunked responses until the request
+    // closes.  Native SSE adds the correct framing and lets us emit keep-alives.
+    let (tx, rx) = mpsc::unbounded_channel::<Result<SseEvent, Infallible>>();
     let emit_now = |event: Value| {
-        let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event))));
+        let _ = tx.send(Ok(studio_sse_event(event)));
     };
-    emit_now(json!({"event_type":"studio_user_message","content":text}));
+    emit_now(json!({"event_type":"studio_user_message","content":text,"message":user_message}));
     emit_now(json!({"event_type":"studio_start","member_ids":route.member_ids,"direct":route.direct}));
     let members = studio.members.clone();
     let mut targets = route.member_ids.into_iter().take(4).collect::<Vec<_>>();
@@ -1805,7 +1825,7 @@ async fn studio_send_message(
             if dispatches >= 24 { break; }
             dispatches += 1;
             let Some(member) = members.iter().find(|member| member.id == target_id).cloned() else { continue };
-            let emit = |event: Value| { let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event)))); };
+            let emit = |event: Value| { let _ = tx.send(Ok(studio_sse_event(event))); };
             emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"thinking"}));
             let selector = format!("{}:{}", member.provider_id, member.model);
             let provider_config = match registry.resolve(Some(&selector)) {
@@ -1864,20 +1884,34 @@ async fn studio_send_message(
                 Err(error) => { emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","member_id":member.id,"message":format!("成员回复失败：{error:#}")})); }
             }
         }
-        let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", json!({"event_type":"studio_end"})))));
+        let _ = tx.send(Ok(studio_sse_event(json!({"event_type":"studio_end"}))));
         run_registry.lock().unwrap_or_else(|p| p.into_inner()).remove(&run_key);
     });
     state.studio_runs.lock().unwrap_or_else(|p| p.into_inner()).insert(id, spawned.abort_handle());
-    let body = Body::from_stream(futures_util::stream::unfold(rx, |mut receiver| async { receiver.recv().await.map(|item| (item, receiver)) }));
-    axum::response::Response::builder().status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-cache, no-transform")
-        .header(header::CONNECTION, "keep-alive")
-        .body(body).map_err(|error| ApiError::internal(format!("build studio stream: {error}")))
+    let stream = futures_util::stream::unfold(rx, |mut receiver| async {
+        receiver.recv().await.map(|item| (item, receiver))
+    });
+    let mut response = Sse::new(stream)
+        // Android WebView may buffer tiny chunked responses while a request is
+        // still open. A padded comment is ignored by SSE clients but crosses
+        // that buffer boundary every second, keeping member output visible.
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(1)).text("studio-alive ".repeat(512)))
+        .into_response();
+    // Honored by reverse proxies and harmless on the loopback bridge.  More
+    // importantly, it documents that this response must reach the WebView live.
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    Ok(response)
 }
 
 struct StudioAgentObserver {
-    sender: mpsc::UnboundedSender<Result<Bytes, Infallible>>,
+    sender: mpsc::UnboundedSender<Result<SseEvent, Infallible>>,
     member_id: String,
 }
 
@@ -1891,12 +1925,12 @@ impl AgentObserver for StudioAgentObserver {
             AgentEvent::StreamReset => json!({"event_type":"studio_stream_reset","member_id":self.member_id}),
             _ => return,
         };
-        let _ = self.sender.send(Ok(Bytes::from(format!("data: {}\n\n", payload))));
+        let _ = self.sender.send(Ok(studio_sse_event(payload)));
     }
 }
 
 struct StudioApproval {
-    sender: mpsc::UnboundedSender<Result<Bytes, Infallible>>,
+    sender: mpsc::UnboundedSender<Result<SseEvent, Infallible>>,
     approvals: Arc<StdMutex<HashMap<String, oneshot::Sender<bool>>>>,
     member_id: String,
     member_name: String,
@@ -1911,7 +1945,7 @@ impl ApprovalHandler for StudioApproval {
         let (sender, receiver) = oneshot::channel();
         self.approvals.lock().unwrap_or_else(|p|p.into_inner()).insert(call.id.clone(), sender);
         let payload = json!({"event_type":"studio_tool_approval","member_id":self.member_id,"member_name":self.member_name,"call_id":call.id,"tool_name":call.name,"arguments":call.arguments,"risk_summary":reason});
-        let _ = self.sender.send(Ok(Bytes::from(format!("data: {}\n\n", payload))));
+        let _ = self.sender.send(Ok(studio_sse_event(payload)));
         tokio::time::timeout(Duration::from_secs(300), receiver).await.ok().and_then(Result::ok).unwrap_or(false)
     }
 }

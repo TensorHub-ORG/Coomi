@@ -1,8 +1,8 @@
 # Coomi
 
-> **最新稳定版：v1.4.6-r1**（Android ARM64）· [下载 APK](https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.6-r1.apk) · [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) · [官网](https://coomi.septemc.com/)
+> **最新稳定版：v1.4.7**（Android ARM64）· [下载 APK](https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.7.apk) · [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) · [官网](https://coomi.septemc.com/)
 >
-> v1.4.6 亮点：完整 Ubuntu 24.04 系统环境、Agent 执行实时可观察、报错归因体系、DeepSeek 账号登录、AI 工作室（实验）、通知与任务状态修复。
+> v1.4.7 亮点：AI 工作室成员消息实时流式显示、重复气泡修复、群聊协作体验升级、悬浮聊天窗口与反馈体验优化。
 
 <table align="center">
   <tr>
@@ -72,7 +72,7 @@ Coomi 是一个在 Android 设备上运行的本地优先智能体工作环境�
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) 或[官网](https://coomi.septemc.com/)下载最新 APK（`Coomi-Android-arm64-v1.4.6-r1.apk`），安装到 Android 7.0+ 的 ARM64 设备。
+1. 从 [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) 或[官网](https://coomi.septemc.com/)下载最新 APK（`Coomi-Android-arm64-v1.4.7.apk`），安装到 Android 7.0+ 的 ARM64 设备。
 2. 打开 App，完成引导：配置模型服务商（Provider）与 API Key，或先跳过、稍后在「对话设置 → Provider 配置」中填写。
 3. 进入对话界面，向 Agent 下达任务——它可以执行命令、读写文件、识别图片、管理 SKILL/MCP。
 
