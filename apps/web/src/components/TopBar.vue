@@ -426,6 +426,9 @@ function browseInFileManager() {
 }
 .icon-btn:active { background: var(--fill); }
 .floating-button:focus-visible { box-shadow: inset 0 0 0 2px var(--blue); }
+/* 顶栏流内子元素是 菜单/小窗/用量 三个：space-between 会把小窗按钮挤到正中间，
+   被绝对定位的模型名盖住。margin-left:auto 让它靠右与用量按钮成组。 */
+.floating-button { margin-left: auto; margin-right: 2px; }
 .usage-button {
   position: relative; display: grid; place-items: center; flex-shrink: 0;
   width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--text-2);
