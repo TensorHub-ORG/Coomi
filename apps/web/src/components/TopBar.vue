@@ -10,6 +10,7 @@ import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
 import { apiGet } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
+import { displayModelName } from '@/stores/config'
 
 defineEmits<{ menu: [] }>()
 const props = defineProps<{ floating?: boolean }>()
@@ -172,7 +173,7 @@ function browseInFileManager() {
     </button>
 
     <button class="center" :aria-expanded="modelOpen" @click="toggleModel">
-      <span class="model">{{ config.currentModel }}</span>
+      <span class="model">{{ displayModelName(config.currentModel) }}</span>
       <span v-if="connection.demo" class="demo">演示</span>
       <span v-if="config.planMode" class="plan">计划</span>
       <CoomiIcon name="chevronDown" :size="13" class="caret" />
@@ -197,7 +198,7 @@ function browseInFileManager() {
           :class="{ selected: item.providerId === config.currentProviderId && item.model === config.currentModel }"
           @click="choose(item.providerId, item.model)"
         >
-          <span><b>{{ item.model }}</b><small>{{ item.provider }}</small></span>
+          <span><b>{{ displayModelName(item.model) }}</b><small>{{ item.provider }}</small></span>
           <CoomiIcon v-if="item.providerId === config.currentProviderId && item.model === config.currentModel" name="check" :size="15" />
         </button>
         <p v-if="activeModelGroup.items.length === 0" class="model-empty">{{ modelGroups.length ? '该分类暂无可用模型' : '暂无已配置供应商' }}</p>

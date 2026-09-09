@@ -183,6 +183,17 @@ const MOCK_PROVIDERS: ProviderConfig[] = [
   { id: 'anthropic', name: 'Anthropic', apiKeyMasked: '****9f3c', hasKey: true, models: ['claude-sonnet-4', 'claude-opus-4'] },
 ]
 
+/**
+ * 模型名展示净化：剔除私有区/零宽/变体选择等「豆腐块」字符。
+ * 仅影响显示；API 调用仍使用未净化的原始模型 ID。
+ * 典型场景：从网页文档复制模型名时带进了图标字体字符（如 deepseek-□4-flash）。
+ */
+export function displayModelName(name: string): string {
+  if (!name) return name
+  const cleaned = name.replace(/[-​-‏‪-‮⁠-⁤︀-️￰-￿]/g, '')
+  return cleaned || name
+}
+
 export const useConfigStore = defineStore('config', () => {
   const savedPermission = localStorage.getItem('coomi.permissionMode') as PermissionMode | null
   const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
