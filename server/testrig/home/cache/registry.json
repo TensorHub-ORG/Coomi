@@ -1,0 +1,5128 @@
+{
+  "registry": {
+    "mcps": [
+      {
+        "author": "upstash",
+        "description": "Up-to-date code documentation for LLMs and AI coding agents. 为 LLM 与 AI 编码助手提供最新代码文档，检索主流开源库的 API 用法。 为 LLM 与 AI 编码助手提供最新代码文档，检索主流开源库的 API 用法。",
+        "id": "upstash-context7",
+        "license": "MIT",
+        "name": "Context7",
+        "ref": "main",
+        "repository": "upstash/context7",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "ChromeDevTools",
+        "description": "Chrome DevTools for coding agents: inspect, debug and profile real browsers. 让 Agent 通过 Chrome DevTools 协议调试真实浏览器。 让 Agent 通过 Chrome DevTools 协议调试真实浏览器：检查元素、断点调试、性能分析。",
+        "id": "chrome-devtools-mcp",
+        "license": "Apache-2.0",
+        "name": "Chrome DevTools MCP",
+        "ref": "main",
+        "repository": "ChromeDevTools/chrome-devtools-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "DeusData",
+        "description": "High-performance code intelligence MCP server that indexes codebases into a queryable knowledge base. 高性能代码智能服务，把代码库建成可查询的知识库。 高性能代码智能服务，把整个代码库索引为可查询的知识库，支持语义检索与代码问答。",
+        "id": "codebase-memory-mcp",
+        "license": "MIT",
+        "name": "Codebase Memory MCP",
+        "ref": "main",
+        "repository": "DeusData/codebase-memory-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "microsoft",
+        "description": "Microsoft's official Playwright MCP server for browser automation and web testing. 微软官方 Playwright MCP：浏览器自动化与网页测试。 微软官方 Playwright MCP：让 Agent 驱动浏览器完成自动化操作、截图与端到端测试。",
+        "id": "playwright-mcp",
+        "license": "Apache-2.0",
+        "name": "Playwright MCP",
+        "ref": "main",
+        "repository": "microsoft/playwright-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "GitHub's official MCP server to work with repositories, issues, pull requests and actions. GitHub 官方 MCP：操作仓库、Issue、PR 与 Actions。 GitHub 官方 MCP：操作仓库、Issue、Pull Request 与 Actions 工作流。",
+        "id": "github-mcp-server",
+        "license": "MIT",
+        "name": "GitHub MCP Server",
+        "ref": "main",
+        "repository": "github/github-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "oraios",
+        "description": "A powerful MCP toolkit for coding with semantic retrieval and editing across projects. 面向编码的 MCP 工具箱：跨项目语义检索与编辑。 面向编码的 MCP 工具箱：跨项目语义检索、代码编辑与重构辅助。",
+        "id": "serena",
+        "license": "MIT",
+        "name": "Serena",
+        "ref": "main",
+        "repository": "oraios/serena",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "czlonkowski",
+        "description": "Build n8n workflows from Claude, Cursor and Windsurf via natural language. 用自然语言在 Claude/Cursor 中构建 n8n 自动化工作流。 用自然语言在 Claude/Cursor 中构建 n8n 自动化工作流。",
+        "id": "n8n-mcp",
+        "license": "MIT",
+        "name": "n8n MCP",
+        "ref": "main",
+        "repository": "czlonkowski/n8n-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "xpzouying",
+        "description": "MCP server for xiaohongshu.com content browsing and searching. 小红书内容浏览与搜索的 MCP 服务。 小红书内容浏览与搜索的 MCP 服务，支持笔记检索与页面抓取。",
+        "id": "xiaohongshu-mcp",
+        "license": "Apache-2.0",
+        "name": "小红书 MCP",
+        "ref": "main",
+        "repository": "xpzouying/xiaohongshu-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "tadata-org",
+        "description": "Expose your FastAPI endpoints as MCP tools automatically. 自动把 FastAPI 接口暴露为 MCP 工具。 自动把 FastAPI 接口暴露为 MCP 工具，零改动接入 Agent。",
+        "id": "fastapi-mcp",
+        "license": "MIT",
+        "name": "FastAPI MCP",
+        "ref": "main",
+        "repository": "tadata-org/fastapi_mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "mrexodia",
+        "description": "AI-powered reverse engineering assistant bridging IDA Pro with LLMs. 连接 IDA Pro 与 LLM 的 AI 逆向工程助手。 连接 IDA Pro 与 LLM 的 AI 逆向工程助手，支持反汇编分析与脚本控制。",
+        "id": "ida-pro-mcp",
+        "license": "MIT",
+        "name": "IDA Pro MCP",
+        "ref": "main",
+        "repository": "mrexodia/ida-pro-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "0x4m4",
+        "description": "MCP agents for offensive security: recon, fuzzing and exploit analysis. 面向攻防安全的 MCP 代理：侦察、模糊测试与漏洞分析。 面向攻防安全的 MCP 代理：侦察、模糊测试与漏洞利用分析。",
+        "id": "hexstrike-ai",
+        "license": "MIT",
+        "name": "HexStrike AI",
+        "ref": "main",
+        "repository": "0x4m4/hexstrike-ai",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "mcp-use",
+        "description": "The fullstack MCP framework to develop MCP apps for ChatGPT, Claude and more. 全栈 MCP 开发框架，一套代码接入多个客户端。 全栈 MCP 开发框架，一套代码接入 ChatGPT、Claude 等客户端。",
+        "id": "mcp-use",
+        "license": "MIT",
+        "name": "mcp-use",
+        "ref": "main",
+        "repository": "mcp-use/mcp-use",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "awslabs",
+        "description": "Open source MCP servers for AWS services. AWS 官方开源 MCP 服务器集合。 AWS 官方开源 MCP 服务器集合：覆盖 S3、EC2、Lambda 等常用服务。",
+        "id": "awslabs-mcp",
+        "license": "Apache-2.0",
+        "name": "AWS MCP Servers",
+        "ref": "main",
+        "repository": "awslabs/mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "AgentDeskAI",
+        "description": "Monitor browser console logs, network requests and page errors from your IDE. 把浏览器日志、网络请求与页面错误接入 IDE。 把浏览器控制台日志、网络请求与页面错误实时接入 IDE 供 Agent 诊断。",
+        "id": "browser-tools-mcp",
+        "license": "MIT",
+        "name": "Browser Tools MCP",
+        "ref": "main",
+        "repository": "AgentDeskAI/browser-tools-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "firecrawl",
+        "description": "Official Firecrawl MCP server for web scraping, crawling and search. Firecrawl 官方 MCP：网页抓取、爬取与搜索。 Firecrawl 官方 MCP：网页抓取、站点爬取与内容搜索，输出干净的 Markdown。",
+        "id": "firecrawl-mcp",
+        "license": "MIT",
+        "name": "Firecrawl MCP",
+        "ref": "main",
+        "repository": "firecrawl/firecrawl-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "BrowserMCP",
+        "description": "Browser MCP server that allows AI apps to interact with browser automation. 让 AI 应用控制浏览器完成自动化交互。 让 AI 应用控制浏览器完成自动化交互：导航、点击、表单填写与截图。",
+        "id": "browsermcp",
+        "license": "Apache-2.0",
+        "name": "Browser MCP",
+        "ref": "main",
+        "repository": "BrowserMCP/mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "getsentry",
+        "description": "MCP server and CLI providing tools for building Xcode projects. 为 Xcode 工程构建提供工具的 MCP 服务器与 CLI。 为 Xcode 工程构建提供工具的 MCP 服务器与 CLI，支持模拟器操作与构建日志分析。",
+        "id": "xcodebuild-mcp",
+        "license": "MIT",
+        "name": "XcodeBuild MCP",
+        "ref": "main",
+        "repository": "getsentry/XcodeBuildMCP",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "sooperset",
+        "description": "MCP server for Atlassian tools: Confluence and Jira. Atlassian 工具（Confluence/Jira）的 MCP 服务器。 Atlassian 工具（Confluence/Jira）的 MCP 服务器：文档检索与工单管理。",
+        "id": "mcp-atlassian",
+        "license": "MIT",
+        "name": "MCP Atlassian",
+        "ref": "main",
+        "repository": "sooperset/mcp-atlassian",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "executeautomation",
+        "description": "Playwright MCP server to automate browsers with AI. 用 AI 驱动 Playwright 自动化浏览器操作。 用 AI 驱动 Playwright 自动化浏览器操作：点击、填写、断言与截图。",
+        "id": "mcp-playwright",
+        "license": "MIT",
+        "name": "Playwright MCP (executeautomation)",
+        "ref": "main",
+        "repository": "executeautomation/mcp-playwright",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "JerBouma",
+        "description": "Transparent and efficient financial analysis with 150+ ratios and models. 透明高效的财务分析工具，内置 150+ 指标与模型。 透明高效的财务分析工具，内置 150+ 指标与模型，支持财报数据拉取。",
+        "id": "financetoolkit",
+        "license": "MIT",
+        "name": "Finance Toolkit",
+        "ref": "main",
+        "repository": "JerBouma/FinanceToolkit",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "exa-labs",
+        "description": "Exa MCP for web search and web crawling. Exa 语义搜索与网页爬取的 MCP。 Exa 语义搜索与网页爬取的 MCP：基于内容的深度搜索。",
+        "id": "exa-mcp",
+        "license": "MIT",
+        "name": "Exa MCP",
+        "ref": "main",
+        "repository": "exa-labs/exa-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "makenotion",
+        "description": "Official Notion MCP server for pages, databases and content. Notion 官方 MCP：页面与数据库管理。 Notion 官方 MCP：管理页面、数据库与内容。",
+        "id": "notion-mcp",
+        "license": "MIT",
+        "name": "Notion MCP",
+        "ref": "main",
+        "repository": "makenotion/notion-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "open-webui",
+        "description": "A simple, secure MCP-to-OpenAPI proxy server. 把 MCP 服务转成 OpenAPI 的轻量代理。 把 MCP 服务转成 OpenAPI 接口的轻量安全代理。",
+        "id": "mcpo",
+        "license": "MIT",
+        "name": "MCPO",
+        "ref": "main",
+        "repository": "open-webui/mcpo",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "antvis",
+        "description": "Visualization MCP with 25+ chart types powered by AntV. 基于 AntV 的图表可视化 MCP，支持 25+ 图表类型。 基于 AntV 的图表可视化 MCP：让 Agent 直接生成 25+ 种图表。",
+        "id": "mcp-server-chart",
+        "license": "MIT",
+        "name": "Chart MCP",
+        "ref": "main",
+        "repository": "antvis/mcp-server-chart",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "vitali87",
+        "description": "The ultimate RAG for your monorepo: query, understand and edit code. 面向大仓的代码 RAG：查询、理解并编辑代码。 面向大型代码仓库的 RAG：构建代码图谱，支持理解与编辑。",
+        "id": "code-graph-rag",
+        "license": "MIT",
+        "name": "Code Graph RAG",
+        "ref": "main",
+        "repository": "vitali87/code-graph-rag",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "haris-musa",
+        "description": "A Model Context Protocol server for Excel file manipulation. 操作 Excel 文件的 MCP 服务器。 操作 Excel 文件的 MCP 服务器：读写、格式化与公式处理。",
+        "id": "excel-mcp",
+        "license": "MIT",
+        "name": "Excel MCP",
+        "ref": "main",
+        "repository": "haris-musa/excel-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "tabularisdb",
+        "description": "Open-source desktop SQL workspace with MCP for PostgreSQL, MySQL, SQLite. 支持 PostgreSQL/MySQL/SQLite 的桌面 SQL 工作台，内置 MCP。 支持 PostgreSQL/MySQL/SQLite 的桌面 SQL 工作台，内置 MCP 供 Agent 查询。",
+        "id": "tabularis",
+        "license": "Apache-2.0",
+        "name": "Tabularis",
+        "ref": "main",
+        "repository": "tabularisdb/tabularis",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "atilaahmettaner",
+        "description": "TradingView MCP server: real-time market data and technical analysis. TradingView MCP：实时行情与技术分析。 TradingView MCP：实时行情数据、技术指标与图表分析。",
+        "id": "tradingview-mcp",
+        "license": "MIT",
+        "name": "TradingView MCP",
+        "ref": "main",
+        "repository": "atilaahmettaner/tradingview-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "microsoft",
+        "description": "A visualization language that lets AI agents reliably create charts. 让 AI 代理可靠生成图表的可视化语言。 让 AI 代理可靠生成图表的可视化语言，支持多种图表类型。",
+        "id": "flint-chart",
+        "license": "MIT",
+        "name": "Flint Chart",
+        "ref": "main",
+        "repository": "microsoft/flint-chart",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "apify",
+        "description": "Extract data from social media, websites and APIs via Apify actors. 通过 Apify Actor 从社媒、网站与 API 提取数据。 通过 Apify Actor 从社交媒体、网站与 API 提取结构化数据。",
+        "id": "apify-mcp",
+        "license": "MIT",
+        "name": "Apify MCP",
+        "ref": "main",
+        "repository": "apify/apify-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "bytebase",
+        "description": "Token conscious database MCP server for Postgres, MySQL, SQL Server. 省 token 的数据库 MCP：支持 Postgres/MySQL/SQL Server。 省 token 的数据库 MCP：支持 Postgres/MySQL/SQL Server，查询结果紧凑。",
+        "id": "dbhub",
+        "license": "MIT",
+        "name": "DBHub",
+        "ref": "main",
+        "repository": "bytebase/dbhub",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "grafana",
+        "description": "MCP server for Grafana dashboards and metrics. Grafana 看板与指标的 MCP 服务器。 Grafana 看板与指标的 MCP 服务器：查询指标与排查告警。",
+        "id": "mcp-grafana",
+        "license": "Apache-2.0",
+        "name": "Grafana MCP",
+        "ref": "main",
+        "repository": "grafana/mcp-grafana",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "bethington",
+        "description": "Ghidra MCP server with 200+ tools for AI-powered reverse engineering. Ghidra MCP：200+ 工具的 AI 逆向工程。 Ghidra MCP：200+ 工具，AI 驱动的二进制逆向工程。",
+        "id": "ghidra-mcp",
+        "license": "Apache-2.0",
+        "name": "Ghidra MCP",
+        "ref": "main",
+        "repository": "bethington/ghidra-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "crystaldba",
+        "description": "Configurable read/write access to PostgreSQL with cost guardrails. 可配置读写权限的 PostgreSQL MCP，带成本护栏。 可配置读写权限的 PostgreSQL MCP，带成本护栏与安全审计。",
+        "id": "postgres-mcp",
+        "license": "MIT",
+        "name": "Postgres MCP Pro",
+        "ref": "main",
+        "repository": "crystaldba/postgres-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "stickerdaniel",
+        "description": "Open-source MCP server for LinkedIn profiles and search. LinkedIn 个人主页与搜索的开源 MCP。 LinkedIn 个人主页与搜索的开源 MCP。",
+        "id": "linkedin-mcp",
+        "license": "Apache-2.0",
+        "name": "LinkedIn MCP",
+        "ref": "main",
+        "repository": "stickerdaniel/linkedin-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "punitarani",
+        "description": "Google Flights MCP, CLI and Python library. Google Flights 机票查询 MCP、CLI 与 Python 库。 Google Flights 机票查询 MCP、CLI 与 Python 库。",
+        "id": "fli",
+        "license": "MIT",
+        "name": "FLI - Google Flights",
+        "ref": "main",
+        "repository": "punitarani/fli",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "blazickjp",
+        "description": "Search and analyze arXiv papers via MCP. 检索与分析 arXiv 论文的 MCP 服务器。 检索与分析 arXiv 论文的 MCP 服务器。",
+        "id": "arxiv-mcp",
+        "license": "Apache-2.0",
+        "name": "ArXiv MCP",
+        "ref": "main",
+        "repository": "blazickjp/arxiv-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "taylorwilsdon",
+        "description": "Control Gmail, Calendar, Docs, Sheets, Slides and more. 控制 Gmail、日历、文档、表格与幻灯片。 控制 Gmail、日历、文档、表格与幻灯片的 Google Workspace MCP。",
+        "id": "google-workspace-mcp",
+        "license": "MIT",
+        "name": "Google Workspace MCP",
+        "ref": "main",
+        "repository": "taylorwilsdon/google_workspace_mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "skyhook-io",
+        "description": "The missing open-source Kubernetes UI with a built-in MCP server. 内置 MCP 的开源 Kubernetes 管理界面。 内置 MCP 的开源 Kubernetes 管理界面：资源查看与运维操作。",
+        "id": "radar",
+        "license": "Apache-2.0",
+        "name": "Radar",
+        "ref": "main",
+        "repository": "skyhook-io/radar",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "supabase-community",
+        "description": "Connect Supabase to your AI assistants. 让 AI 助手连接 Supabase 数据库与项目。 让 AI 助手连接 Supabase 数据库、Edge Functions 与项目配置。",
+        "id": "supabase-mcp",
+        "license": "Apache-2.0",
+        "name": "Supabase MCP",
+        "ref": "main",
+        "repository": "supabase-community/supabase-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "sparfenyuk",
+        "description": "A bridge between Streamable HTTP and stdio MCP transports. Streamable HTTP 与 stdio 传输的桥接代理。 Streamable HTTP 与 stdio 两种 MCP 传输的桥接代理。",
+        "id": "mcp-proxy",
+        "license": "MIT",
+        "name": "MCP Proxy",
+        "ref": "main",
+        "repository": "sparfenyuk/mcp-proxy",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "zinja-coder",
+        "description": "Plugin for JADX to integrate MCP server for APK analysis. JADX 的 MCP 插件，用于 APK 反编译分析。 JADX 的 MCP 插件，让 Agent 直接分析反编译后的 APK 代码。",
+        "id": "jadx-ai-mcp",
+        "license": "Apache-2.0",
+        "name": "JADX AI MCP",
+        "ref": "main",
+        "repository": "zinja-coder/jadx-ai-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "brightdata",
+        "description": "All-in-one MCP server for web scraping with proxy and dataset support. 一站式网页抓取 MCP：代理、爬取与数据集。 一站式网页抓取 MCP：代理、爬取与数据集服务。",
+        "id": "brightdata-mcp",
+        "license": "MIT",
+        "name": "Bright Data MCP",
+        "ref": "main",
+        "repository": "brightdata/brightdata-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "zhizhuodemao",
+        "description": "AI Agent-first JS reverse engineering with headed Chrome debugging. 面向 Agent 的 JS 逆向 MCP：有头 Chrome 调试与断点。 面向 Agent 的 JS 逆向 MCP：有头 Chrome 调试、断点、网络与 WebSocket 分析。",
+        "id": "js-reverse-mcp",
+        "license": "Apache-2.0",
+        "name": "JS Reverse MCP",
+        "ref": "main",
+        "repository": "zhizhuodemao/js-reverse-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "openags",
+        "description": "Search and download academic papers from multiple sources. 多来源学术论文检索与下载。 多来源学术论文检索与下载的 MCP、CLI 与技能。",
+        "id": "paper-search-mcp",
+        "license": "MIT",
+        "name": "Paper Search MCP",
+        "ref": "main",
+        "repository": "openags/paper-search-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "samuelgursky",
+        "description": "MCP server integration for DaVinci Resolve Studio video editing. DaVinci Resolve Studio 视频剪辑的 MCP 集成。 DaVinci Resolve Studio 视频剪辑的 MCP 集成：时间线与渲染控制。",
+        "id": "davinci-resolve-mcp",
+        "license": "MIT",
+        "name": "DaVinci Resolve MCP",
+        "ref": "main",
+        "repository": "samuelgursky/davinci-resolve-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "timescale",
+        "description": "MCP server and plugin for Postgres skills and documentation. Postgres 技能与文档的 MCP 服务器。 Postgres 技能与文档的 MCP 服务器：查询优化建议。",
+        "id": "pg-aiguide",
+        "license": "Apache-2.0",
+        "name": "Postgres AI Guide",
+        "ref": "main",
+        "repository": "timescale/pg-aiguide",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "korotovsky",
+        "description": "A powerful Slack MCP server with no permission requirements. 免权限配置的 Slack MCP 服务器。 免权限配置的 Slack MCP 服务器：消息收发与频道管理。",
+        "id": "slack-mcp-server",
+        "license": "MIT",
+        "name": "Slack MCP Server",
+        "ref": "main",
+        "repository": "korotovsky/slack-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "stripe",
+        "description": "One-stop shop for building AI-powered products with Stripe. 用 Stripe 构建 AI 产品的官方工具包。 Stripe 官方工具包：让 Agent 操作支付、账单与客户。",
+        "id": "stripe-agent-toolkit",
+        "license": "MIT",
+        "name": "Stripe Agent Toolkit",
+        "ref": "main",
+        "repository": "stripe/agent-toolkit",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "anysearch-ai",
+        "description": "Unified real-time search MCP: web, news, images, videos and more. 统一实时搜索 MCP：网页、新闻、图片、视频等。 统一实时搜索 MCP：网页、新闻、图片、视频等多源检索。",
+        "id": "anysearch-mcp",
+        "license": "Apache-2.0",
+        "name": "AnySearch MCP",
+        "ref": "main",
+        "repository": "anysearch-ai/anysearch-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "isaacphi",
+        "description": "Expose semantic language tooling (LSP) to MCP clients. 把 LSP 语义工具能力暴露给 MCP 客户端。 把 LSP 语义工具能力暴露给 MCP 客户端：跳转、补全与诊断。",
+        "id": "mcp-language-server",
+        "license": "BSD-3-Clause",
+        "name": "MCP Language Server",
+        "ref": "main",
+        "repository": "isaacphi/mcp-language-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "MiniMax-AI",
+        "description": "Official MiniMax MCP server for LLM, TTS and image generation. MiniMax 官方 MCP：文本、语音与图像生成。 MiniMax 官方 MCP：文本、语音与图像生成能力接入。",
+        "id": "minimax-mcp",
+        "license": "MIT",
+        "name": "MiniMax MCP",
+        "ref": "main",
+        "repository": "MiniMax-AI/MiniMax-MCP",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "flux159",
+        "description": "MCP server for Kubernetes management commands. Kubernetes 管理命令的 MCP 服务器。 Kubernetes 管理命令的 MCP 服务器：Pod/Deployment 等资源操作。",
+        "id": "mcp-server-kubernetes",
+        "license": "MIT",
+        "name": "Kubernetes MCP",
+        "ref": "main",
+        "repository": "flux159/mcp-server-kubernetes",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "qdrant",
+        "description": "Official Qdrant MCP server for vector search. Qdrant 官方向量检索 MCP 服务器。 Qdrant 官方向量检索 MCP 服务器。",
+        "id": "mcp-server-qdrant",
+        "license": "Apache-2.0",
+        "name": "Qdrant MCP",
+        "ref": "main",
+        "repository": "qdrant/mcp-server-qdrant",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "brave",
+        "description": "Brave Search API MCP server for web search. Brave 搜索 API 的 MCP 服务器。 Brave 搜索 API 的 MCP 服务器：网页搜索与结果提取。",
+        "id": "brave-search-mcp",
+        "license": "MIT",
+        "name": "Brave Search MCP",
+        "ref": "main",
+        "repository": "brave/brave-search-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "designcomputer",
+        "description": "Secure MCP server for MySQL database interactions. 安全的 MySQL 数据库交互 MCP。 安全的 MySQL 数据库交互 MCP：查询与运维。",
+        "id": "mysql-mcp",
+        "license": "MIT",
+        "name": "MySQL MCP",
+        "ref": "main",
+        "repository": "designcomputer/mysql_mcp_server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "neo4j-contrib",
+        "description": "Neo4j Labs MCP servers for graph database interaction. Neo4j Labs 图数据库 MCP。 Neo4j Labs 图数据库 MCP：Cypher 查询与图谱操作。",
+        "id": "mcp-neo4j",
+        "license": "MIT",
+        "name": "Neo4j MCP",
+        "ref": "main",
+        "repository": "neo4j-contrib/mcp-neo4j",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "clickhouse",
+        "description": "Connect ClickHouse to your AI assistants. 让 AI 助手连接 ClickHouse。 让 AI 助手连接 ClickHouse 数据库执行分析查询。",
+        "id": "mcp-clickhouse",
+        "license": "Apache-2.0",
+        "name": "ClickHouse MCP",
+        "ref": "main",
+        "repository": "clickhouse/mcp-clickhouse",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "elastic",
+        "description": "MCP server for Elasticsearch search and analytics. Elasticsearch 搜索与分析 MCP。 Elasticsearch 搜索与分析 MCP。",
+        "id": "elasticsearch-mcp",
+        "license": "Apache-2.0",
+        "name": "Elasticsearch MCP",
+        "ref": "main",
+        "repository": "elastic/mcp-server-elasticsearch",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "redis",
+        "description": "Official Redis MCP server: natural language interface to Redis. Redis 官方 MCP：自然语言操作 Redis。 Redis 官方 MCP：自然语言操作 Redis 键值与数据结构。",
+        "id": "mcp-redis",
+        "license": "MIT",
+        "name": "Redis MCP",
+        "ref": "main",
+        "repository": "redis/mcp-redis",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "zilliztech",
+        "description": "MCP servers for Milvus vector database. Milvus 向量数据库 MCP。 Milvus 向量数据库 MCP：集合管理与向量检索。",
+        "id": "mcp-server-milvus",
+        "license": "Apache-2.0",
+        "name": "Milvus MCP",
+        "ref": "main",
+        "repository": "zilliztech/mcp-server-milvus",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "ahujasid",
+        "description": "Community plugin to control Blender 3D with any LLM. 用任意 LLM 控制 Blender 3D 的社区插件。 用任意 LLM 控制 Blender 3D：建模、材质与渲染自动化。",
+        "id": "blender-mcp",
+        "license": "MIT",
+        "name": "Blender MCP",
+        "ref": "main",
+        "repository": "ahujasid/blender-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "MarkusPfundstein",
+        "description": "MCP server that interacts with Obsidian via the Obsidian Local REST API. 通过本地 REST API 操作 Obsidian 笔记。 通过本地 REST API 操作 Obsidian 笔记：读写与搜索知识库。",
+        "id": "mcp-obsidian",
+        "license": "MIT",
+        "name": "Obsidian MCP",
+        "ref": "main",
+        "repository": "MarkusPfundstein/mcp-obsidian",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "mongodb-js",
+        "description": "MCP server to connect to MongoDB databases. 连接 MongoDB 数据库的官方 MCP。 连接 MongoDB 数据库的官方 MCP：集合与文档操作。",
+        "id": "mongodb-mcp-server",
+        "license": "Apache-2.0",
+        "name": "MongoDB MCP Server",
+        "ref": "main",
+        "repository": "mongodb-js/mongodb-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "tavily-ai",
+        "description": "Production ready MCP server with real-time search and extraction. 生产级 MCP：实时搜索与网页提取。 生产级 MCP：实时搜索与网页内容提取。",
+        "id": "tavily-mcp",
+        "license": "MIT",
+        "name": "Tavily MCP",
+        "ref": "main",
+        "repository": "tavily-ai/tavily-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "containers",
+        "description": "MCP server for Kubernetes and container orchestration. Kubernetes 与容器编排的 MCP 服务器。 Kubernetes 与容器编排的 MCP 服务器。",
+        "id": "kubernetes-mcp-server",
+        "license": "Apache-2.0",
+        "name": "Kubernetes MCP Server",
+        "ref": "main",
+        "repository": "containers/kubernetes-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "idosal",
+        "description": "Put an end to code hallucinations: serve your repo to agents. 把仓库内容结构化地提供给 Agent，消除代码幻觉。 把仓库内容结构化地提供给 Agent，消除代码幻觉。",
+        "id": "git-mcp",
+        "license": "Apache-2.0",
+        "name": "GitMCP",
+        "ref": "main",
+        "repository": "idosal/git-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "googleapis",
+        "description": "Open source MCP server for Google Cloud databases. 谷歌云数据库的 MCP 工具箱。 谷歌云数据库（BigQuery/Cloud SQL 等）的 MCP 工具箱。",
+        "id": "mcp-toolbox",
+        "license": "Apache-2.0",
+        "name": "MCP Toolbox for Databases",
+        "ref": "main",
+        "repository": "googleapis/mcp-toolbox",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "GLips",
+        "description": "MCP server providing Figma layout information to AI coding agents. 把 Figma 设计稿布局信息提供给 AI 编码代理。 把 Figma 设计稿布局信息提供给 AI 编码代理，还原度更高的 UI 开发。",
+        "id": "figma-context-mcp",
+        "license": "MIT",
+        "name": "Figma Context MCP",
+        "ref": "main",
+        "repository": "GLips/Figma-Context-MCP",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "chigwell",
+        "description": "Telegram MCP server powered by Telethon. 基于 Telethon 的 Telegram MCP 服务器。 基于 Telethon 的 Telegram MCP 服务器：收发消息与管理会话。",
+        "id": "telegram-mcp",
+        "license": "Apache-2.0",
+        "name": "Telegram MCP",
+        "ref": "main",
+        "repository": "chigwell/telegram-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "kimtaeyoon83",
+        "description": "Download and search YouTube subtitles via MCP. 获取并检索 YouTube 字幕的 MCP。 获取并检索 YouTube 字幕的 MCP。",
+        "id": "youtube-transcript-mcp",
+        "license": "MIT",
+        "name": "YouTube Transcript MCP",
+        "ref": "main",
+        "repository": "kimtaeyoon83/mcp-server-youtube-transcript",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "varunneal",
+        "description": "Connect your LLM with Spotify playback and playlists. 让 LLM 控制 Spotify 播放与歌单。 让 LLM 控制 Spotify 播放、歌单与搜索。",
+        "id": "spotify-mcp",
+        "license": "MIT",
+        "name": "Spotify MCP",
+        "ref": "main",
+        "repository": "varunneal/spotify-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "angiejones",
+        "description": "An MCP implementation for Selenium WebDriver. 基于 Selenium WebDriver 的浏览器自动化 MCP。 基于 Selenium WebDriver 的浏览器自动化 MCP。",
+        "id": "mcp-selenium",
+        "license": "MIT",
+        "name": "Selenium MCP",
+        "ref": "main",
+        "repository": "angiejones/mcp-selenium",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "jerhadf",
+        "description": "Integrate Linear project management with AI assistants. 让 AI 助手接入 Linear 项目管理。 让 AI 助手接入 Linear 项目管理：issue 创建与查询。",
+        "id": "linear-mcp-server",
+        "license": "MIT",
+        "name": "Linear MCP Server",
+        "ref": "main",
+        "repository": "jerhadf/linear-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "Snowflake-Labs",
+        "description": "MCP server for Snowflake including Cortex AI and object management. Snowflake 官方 MCP：含 Cortex AI 与对象管理。 Snowflake 官方 MCP：数据仓库查询、Cortex AI 与对象管理。",
+        "id": "snowflake-mcp",
+        "license": "Apache-2.0",
+        "name": "Snowflake MCP",
+        "ref": "main",
+        "repository": "Snowflake-Labs/mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "datadog-labs",
+        "description": "Official Datadog MCP server for observability workflows. Datadog 官方观测平台 MCP。 Datadog 官方观测平台 MCP：指标查询与监控排查。",
+        "id": "datadog-mcp-server",
+        "license": "MIT",
+        "name": "Datadog MCP Server",
+        "ref": "main",
+        "repository": "datadog-labs/mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "yoda-digital",
+        "description": "Production-grade GitLab MCP server with 86 tools. 生产级 GitLab MCP 服务器，内置 86 个工具。 生产级 GitLab MCP 服务器，内置 86 个工具：仓库、MR 与 CI。",
+        "id": "gitlab-mcp-server",
+        "license": "MIT",
+        "name": "GitLab MCP Server",
+        "ref": "main",
+        "repository": "yoda-digital/mcp-gitlab-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "gifflet",
+        "description": "Graphiti MCP for temporal knowledge graph memory. 带时间感知的知识图谱记忆 MCP。 带时间感知的知识图谱记忆 MCP：动态实体与关系管理。",
+        "id": "graphiti-mcp-server",
+        "license": "MIT",
+        "name": "Graphiti MCP Server",
+        "ref": "main",
+        "repository": "gifflet/graphiti-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "matthewhand",
+        "description": "MCP server for building and managing Flowise chatflows. 构建与管理 Flowise 对话流的 MCP。 构建与管理 Flowise 对话流的 MCP。",
+        "id": "mcp-flowise",
+        "license": "MIT",
+        "name": "Flowise MCP",
+        "ref": "main",
+        "repository": "matthewhand/mcp-flowise",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "Anarkh-Lee",
+        "description": "Universal database MCP connector supporting MySQL, PostgreSQL, Oracle and more. 通用数据库 MCP 连接器，支持 17 种数据库。 通用数据库 MCP 连接器，支持 MySQL、PostgreSQL、Oracle、MongoDB 等 17 种。",
+        "id": "universal-db-mcp",
+        "license": "MIT",
+        "name": "通用数据库 MCP",
+        "ref": "main",
+        "repository": "Anarkh-Lee/universal-db-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "aliyun",
+        "description": "Universal multi-cloud data MCP server supporting over 10 databases. 阿里云官方多云数据库 MCP，支持 10+ 种数据库。 阿里云官方多云数据库 MCP：支持 10+ 种数据库的查询与操作。",
+        "id": "aliyun-dms-mcp",
+        "license": "Apache-2.0",
+        "name": "阿里云 DMS MCP",
+        "ref": "main",
+        "repository": "aliyun/alibabacloud-dms-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "call518",
+        "description": "Control Apache Airflow with natural language via MCP. 用自然语言控制 Apache Airflow。 用自然语言控制 Apache Airflow：DAG 管理与任务监控。",
+        "id": "airflow-mcp",
+        "license": "MIT",
+        "name": "Airflow MCP API",
+        "ref": "main",
+        "repository": "call518/MCP-Airflow-API",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "mhmzdev",
+        "description": "Provide Figma design data to Flutter coding agents. 把 Figma 设计数据提供给 Flutter 编码代理。 把 Figma 设计数据提供给 Flutter 编码代理。",
+        "id": "figma-flutter-mcp",
+        "license": "MIT",
+        "name": "Figma Flutter MCP",
+        "ref": "main",
+        "repository": "mhmzdev/figma-flutter-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "erithwik",
+        "description": "MCP server for Hackernews stories and comments. Hacker News 资讯与评论的 MCP。 Hacker News 资讯与评论的 MCP。",
+        "id": "mcp-hn",
+        "license": "MIT",
+        "name": "HackerNews MCP",
+        "ref": "main",
+        "repository": "erithwik/mcp-hn",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "rohitg00",
+        "description": "A MCP server for Kubernetes command line operations. Kubernetes 命令行操作的 MCP。 Kubernetes 命令行操作的 MCP，已收录 CNCF Landscape。",
+        "id": "kubectl-mcp-server",
+        "license": "MIT",
+        "name": "Kubectl MCP Server",
+        "ref": "main",
+        "repository": "rohitg00/kubectl-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "aaronsb",
+        "description": "MCP server providing automated Google Workspace access. 自动化访问 Google Workspace 的 MCP。 自动化访问 Google Workspace 的 MCP。",
+        "id": "google-workspace-mcp-aaronsb",
+        "license": "Apache-2.0",
+        "name": "Google Workspace MCP (aaronsb)",
+        "ref": "main",
+        "repository": "aaronsb/google-workspace-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "daobataotie",
+        "description": "MSSQL MCP server for SQL Server interactions. SQL Server 交互的 MCP 服务器。 SQL Server 交互的 MCP 服务器。",
+        "id": "mssql-mcp",
+        "license": "MIT",
+        "name": "MSSQL MCP",
+        "ref": "main",
+        "repository": "daobataotie/mssql-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "Aaronontheweb",
+        "description": "MSSQL Server MCP implementation written in C#. 用 C# 实现的 MSSQL Server MCP。 用 C# 实现的 MSSQL Server MCP。",
+        "id": "mssql-mcp-csharp",
+        "license": "Apache-2.0",
+        "name": "MSSQL MCP (C#)",
+        "ref": "main",
+        "repository": "Aaronontheweb/mssql-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "microsoft",
+        "description": "Microsoft MCP Gateway: reverse proxy and management layer for MCP. 微软 MCP 网关：MCP 反向代理与管理层。 微软 MCP 网关：MCP 服务的反向代理与统一管理。",
+        "id": "mcp-gateway",
+        "license": "MIT",
+        "name": "MCP Gateway",
+        "ref": "main",
+        "repository": "microsoft/mcp-gateway",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "apisql-dev",
+        "description": "Connect all your databases with one MCP server. 一个 MCP 连接所有数据库的瑞士军刀。 一个 MCP 连接所有数据库：多数据源统一查询。",
+        "id": "apisql-mcp",
+        "license": "MIT",
+        "name": "APISQL MCP",
+        "ref": "main",
+        "repository": "apisql-dev/apisql-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "dryeab",
+        "description": "MCP server for Telegram message sending and receiving. Telegram 消息收发 MCP。 Telegram 消息收发 MCP。",
+        "id": "mcp-telegram",
+        "license": "MIT",
+        "name": "Telegram MCP (dryeab)",
+        "ref": "main",
+        "repository": "dryeab/mcp-telegram",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "bilims",
+        "description": "MCP server for Microsoft SQL Server. Microsoft SQL Server 的 MCP 服务器。 Microsoft SQL Server 的 MCP 服务器。",
+        "id": "mcp-sqlserver",
+        "license": "MIT",
+        "name": "MCP SQLServer",
+        "ref": "main",
+        "repository": "bilims/mcp-sqlserver",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "yangkyeongmo",
+        "description": "MCP server for Apache Airflow. Apache Airflow 的 MCP 服务器。 Apache Airflow 的 MCP 服务器。",
+        "id": "airflow-mcp-server",
+        "license": "MIT",
+        "name": "Airflow MCP Server",
+        "ref": "main",
+        "repository": "yangkyeongmo/mcp-server-apache-airflow",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "GeLi2001",
+        "description": "MCP server for Shopify API. Shopify API 的 MCP 服务器。 Shopify API 的 MCP 服务器：商品与订单管理。",
+        "id": "shopify-mcp",
+        "license": "MIT",
+        "name": "Shopify MCP",
+        "ref": "main",
+        "repository": "GeLi2001/shopify-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "Coding-Solo",
+        "description": "MCP server for interfacing with the Godot game engine. 与 Godot 游戏引擎交互的 MCP。 与 Godot 游戏引擎交互的 MCP：场景与脚本操作。",
+        "id": "godot-mcp",
+        "license": "MIT",
+        "name": "Godot MCP",
+        "ref": "main",
+        "repository": "Coding-Solo/godot-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "runesleo",
+        "description": "Universal content reader MCP server for 10+ platforms. 支持 10+ 平台的通用内容读取 MCP。 支持 10+ 平台的通用内容读取 MCP。",
+        "id": "x-reader",
+        "license": "MIT",
+        "name": "X-Reader",
+        "ref": "main",
+        "repository": "runesleo/x-reader",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "bitbonsai",
+        "description": "A lightweight MCP server for secrets and credentials vault. 轻量密钥保险库 MCP。 轻量密钥保险库 MCP：安全存取凭据。",
+        "id": "mcpvault",
+        "license": "MIT",
+        "name": "MCPVault",
+        "ref": "main",
+        "repository": "bitbonsai/mcpvault",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "coddingtonbear",
+        "description": "Secure REST API and MCP server for local Obsidian vaults. 本地 Obsidian 库的安全 REST API 与 MCP。 本地 Obsidian 库的安全 REST API 与 MCP。",
+        "id": "obsidian-local-rest",
+        "license": "MIT",
+        "name": "Obsidian Local REST API MCP",
+        "ref": "main",
+        "repository": "coddingtonbear/obsidian-local-rest-api",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "a-bonus",
+        "description": "The ultimate Google Docs, Sheets, Drive and Gmail MCP. 谷歌文档、表格、云盘与邮件的综合 MCP。 谷歌文档、表格、云盘与邮件的综合 MCP。",
+        "id": "google-docs-mcp",
+        "license": "MIT",
+        "name": "Google Docs MCP",
+        "ref": "main",
+        "repository": "a-bonus/google-docs-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "ZubeidHendricks",
+        "description": "MCP server for YouTube API: video management and analytics. YouTube API 的 MCP：视频管理与数据分析。 YouTube API 的 MCP：视频管理与数据分析。",
+        "id": "mcp-server-youtube",
+        "license": "MIT",
+        "name": "YouTube MCP Server",
+        "ref": "main",
+        "repository": "ZubeidHendricks/youtube-mcp-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "isaacwasserman",
+        "description": "MCP server for Snowflake data warehouse. Snowflake 数据仓库的 MCP 服务器。 Snowflake 数据仓库的 MCP 服务器。",
+        "id": "snowflake-mcp-gpl",
+        "license": "GPL-3.0",
+        "name": "Snowflake MCP Server",
+        "ref": "main",
+        "repository": "isaacwasserman/mcp-snowflake-server",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "VikashLoomba",
+        "description": "A VSCode extension to find and install Agent Skills. 在 VSCode 中发现并安装 Agent 技能的扩展。 在 VSCode 中发现并安装 Agent 技能的扩展。",
+        "id": "copilot-mcp",
+        "license": "GPL-3.0",
+        "name": "Copilot MCP",
+        "ref": "main",
+        "repository": "VikashLoomba/copilot-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "yokingma",
+        "description": "Web search, scraping and extraction in one MCP server. 搜索、爬取与提取合一 MCP。 搜索、爬取与提取合一 MCP。",
+        "id": "one-search-mcp",
+        "license": "MIT",
+        "name": "OneSearch MCP",
+        "ref": "main",
+        "repository": "yokingma/one-search-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "av",
+        "description": "Stop configuring your AI stack - one command to use it. 一键配置整个 AI 技术栈。 一键配置整个 AI 技术栈，统一网关接入。",
+        "id": "harbor",
+        "license": "Apache-2.0",
+        "name": "Harbor",
+        "ref": "main",
+        "repository": "av/harbor",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "amirsina-mandegari",
+        "description": "MCP server for GitLab merge request reviews. GitLab 合并请求评审的 MCP。 GitLab 合并请求评审的 MCP。",
+        "id": "gitlab-mr-mcp",
+        "license": "MIT",
+        "name": "GitLab MR MCP",
+        "ref": "main",
+        "repository": "amirsina-mandegari/gitlab-mr-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "gethopp",
+        "description": "Figma plugin and MCP server to bypass API limits. 绕过 Figma API 限制的插件与 MCP。 绕过 Figma API 限制的插件与 MCP。",
+        "id": "figma-mcp-bridge",
+        "license": "MIT",
+        "name": "Figma MCP Bridge",
+        "ref": "main",
+        "repository": "gethopp/figma-mcp-bridge",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "ertugrul59",
+        "description": "Captures TradingView chart images via Selenium. 通过 Selenium 抓取 TradingView 图表。 通过 Selenium 抓取 TradingView 图表。",
+        "id": "tradingview-chart-mcp",
+        "license": "MIT",
+        "name": "TradingView Chart MCP",
+        "ref": "main",
+        "repository": "ertugrul59/tradingview-chart-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "devrelopers",
+        "description": "A Rust MCP server exposing Hacker News to AI assistants. 用 Rust 实现，向 AI 助手暴露 Hacker News。 用 Rust 实现，向 AI 助手暴露 Hacker News。",
+        "id": "mcp-hn-devrel",
+        "license": "MIT",
+        "name": "HackerNews MCP (Rust)",
+        "ref": "main",
+        "repository": "devrelopers/hackernews-mcp",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      },
+      {
+        "author": "getzep",
+        "description": "Temporal knowledge graph memory for AI agents. AI 代理的时间感知知识图谱记忆。 AI 代理的时间感知知识图谱记忆：增量构建动态图谱。",
+        "id": "graphiti-memory",
+        "license": "MIT",
+        "name": "Graphiti",
+        "ref": "main",
+        "repository": "getzep/graphiti",
+        "subdir": "",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "mcp"
+        ],
+        "verified": false
+      }
+    ],
+    "skills": [
+      {
+        "author": "obra",
+        "description": "A disciplined, step-by-step process for debugging complex issues: reproduce the failure, isolate the root cause, and verify the fix. 一套严谨的分步调试流程：复现问题、定位根因、验证修复。",
+        "id": "systematic-debugging",
+        "license": "MIT",
+        "name": "Systematic Debugging",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/systematic-debugging",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "debugging",
+          "workflow"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Proactively request and drive code review with a clear, executable request. 主动发起并推进代码评审，产出清晰可执行的评审请求。",
+        "id": "requesting-code-review",
+        "license": "MIT",
+        "name": "Requesting Code Review",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/requesting-code-review",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "code-review",
+          "workflow"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Structured brainstorming to design robust solutions before coding. 在写代码之前进行结构化头脑风暴，设计稳健的解决方案。 在写代码之前进行结构化头脑风暴，设计稳健的解决方案。",
+        "id": "brainstorming",
+        "license": "MIT",
+        "name": "Brainstorming",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/brainstorming",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Coordinate multiple subagents working in parallel without conflicts. 协调多个子代理并行工作且互不冲突。 协调多个子代理并行工作且互不冲突。",
+        "id": "dispatching-parallel-agents",
+        "license": "MIT",
+        "name": "Dispatching Parallel Agents",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/dispatching-parallel-agents",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Follow a written plan step by step, adapting when reality diverges. 按书面计划逐步执行，现实偏离时灵活调整。 按书面计划逐步执行，现实偏离时灵活调整。",
+        "id": "executing-plans",
+        "license": "MIT",
+        "name": "Executing Plans",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/executing-plans",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Safely finish a feature branch: tests, quality gates and merge. 安全地收尾功能分支：测试、质量门禁与合并。 安全地收尾功能分支：测试、质量门禁与合并。",
+        "id": "finishing-a-development-branch",
+        "license": "MIT",
+        "name": "Finishing a Development Branch",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/finishing-a-development-branch",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Respond to code review feedback with discipline and thoroughness. 严谨地回应代码评审反馈并彻底改进。 严谨地回应代码评审反馈并彻底改进。",
+        "id": "receiving-code-review",
+        "license": "MIT",
+        "name": "Receiving Code Review",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/receiving-code-review",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Decompose work and delegate implementation to subagents. 拆分任务并把实现委托给子代理。 拆分任务并把实现委托给子代理。",
+        "id": "subagent-driven-development",
+        "license": "MIT",
+        "name": "Subagent-Driven Development",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/subagent-driven-development",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Write tests first, then implement, then refactor with confidence. 先写测试再实现，最后放心重构。 先写测试再实现，最后放心重构。",
+        "id": "test-driven-development",
+        "license": "MIT",
+        "name": "Test-Driven Development",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/test-driven-development",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Leverage git worktrees for parallel work without branch juggling. 用 git worktree 并行开发，无需来回切换分支。 用 git worktree 并行开发，无需来回切换分支。",
+        "id": "using-git-worktrees",
+        "license": "MIT",
+        "name": "Using Git Worktrees",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/using-git-worktrees",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "The meta-skill that coordinates all other superpowers skills. 协调其余所有 superpowers 技能的元技能。 协调其余所有 superpowers 技能的元技能。",
+        "id": "using-superpowers",
+        "license": "MIT",
+        "name": "Using Superpowers",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/using-superpowers",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Never claim done before verifying the work actually works. 在真正验证工作有效之前，绝不宣称完成。 在真正验证工作有效之前，绝不宣称完成。",
+        "id": "verification-before-completion",
+        "license": "MIT",
+        "name": "Verification Before Completion",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/verification-before-completion",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Write clear, executable plans that agents can follow reliably. 编写清晰可执行的计划，让代理可靠遵循。 编写清晰可执行的计划，让代理可靠遵循。",
+        "id": "writing-plans",
+        "license": "MIT",
+        "name": "Writing Plans",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/writing-plans",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "obra",
+        "description": "Author high-quality SKILL.md files that teach agents new abilities. 编写高质量的 SKILL.md，教会代理新能力。 编写高质量的 SKILL.md，教会代理新能力。",
+        "id": "writing-skills",
+        "license": "MIT",
+        "name": "Writing Skills",
+        "ref": "main",
+        "repository": "obra/superpowers",
+        "subdir": "skills/writing-skills",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Secure authentication patterns: sessions, tokens, OAuth and MFA. 安全的认证实现模式：会话、令牌、OAuth 与多因素认证。 安全的认证实现模式：会话、令牌、OAuth 与多因素认证。",
+        "id": "auth-implementation-patterns",
+        "license": "MIT",
+        "name": "Auth Implementation Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/auth-implementation-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Optimize Bazel builds: caching, targets and dependency hygiene. 优化 Bazel 构建：缓存、目标与依赖卫生。 优化 Bazel 构建：缓存、目标与依赖卫生。",
+        "id": "bazel-build-optimization",
+        "license": "MIT",
+        "name": "Bazel Build Optimization",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/bazel-build-optimization",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Systematic debugging: reproduce, isolate, fix and verify. 系统性调试：复现、隔离、修复与验证。 系统性调试：复现、隔离、修复与验证。",
+        "id": "debugging-strategies",
+        "license": "MIT",
+        "name": "Debugging Strategies",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/debugging-strategies",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "End-to-end test design: selectors, fixtures and stable flows. 端到端测试设计：选择器、夹具与稳定流程。 端到端测试设计：选择器、夹具与稳定流程。",
+        "id": "e2e-testing-patterns",
+        "license": "MIT",
+        "name": "E2E Testing Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/e2e-testing-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Robust error handling: typed errors, retries and observability. 健壮的错误处理：类型化错误、重试与可观测性。 健壮的错误处理：类型化错误、重试与可观测性。",
+        "id": "error-handling-patterns",
+        "license": "MIT",
+        "name": "Error Handling Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/error-handling-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Manage monorepos: structure, tooling and CI strategies. 单仓库管理：结构、工具链与 CI 策略。 单仓库管理：结构、工具链与 CI 策略。",
+        "id": "monorepo-management",
+        "license": "MIT",
+        "name": "Monorepo Management",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/monorepo-management",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Use Nx workspace: generators, caching and dependency graphs. 使用 Nx 工作区：生成器、缓存与依赖图。 使用 Nx 工作区：生成器、缓存与依赖图。",
+        "id": "nx-workspace-patterns",
+        "license": "MIT",
+        "name": "NX Workspace Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/nx-workspace-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Optimize SQL: indexes, query plans and schema design. SQL 优化：索引、执行计划与 schema 设计。 SQL 优化：索引、执行计划与 schema 设计。",
+        "id": "sql-optimization-patterns",
+        "license": "MIT",
+        "name": "SQL Optimization Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/sql-optimization-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Speed up Turborepo pipelines with smart caching. 用智能缓存加速 Turborepo 流水线。 用智能缓存加速 Turborepo 流水线。",
+        "id": "turborepo-caching",
+        "license": "MIT",
+        "name": "Turborepo Caching",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/developer-essentials/skills/turborepo-caching",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Modern async Python: asyncio, tasks and concurrency control. 现代异步 Python：asyncio、任务与并发控制。 现代异步 Python：asyncio、任务与并发控制。",
+        "id": "async-python-patterns",
+        "license": "MIT",
+        "name": "Async Python Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/async-python-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Identify and fix common Python anti-patterns. 识别并修复常见的 Python 反模式。 识别并修复常见的 Python 反模式。",
+        "id": "python-anti-patterns",
+        "license": "MIT",
+        "name": "Python Anti-Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-anti-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design reliable background jobs: queues, workers and retries. 设计可靠的后台任务：队列、Worker 与重试。 设计可靠的后台任务：队列、Worker 与重试。",
+        "id": "python-background-jobs",
+        "license": "MIT",
+        "name": "Python Background Jobs",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-background-jobs",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Consistent Python code style: formatting, naming and linting. 一致的 Python 代码风格：格式化、命名与静态检查。 一致的 Python 代码风格：格式化、命名与静态检查。",
+        "id": "python-code-style",
+        "license": "MIT",
+        "name": "Python Code Style",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-code-style",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Manage Python configuration: env vars, settings and secrets. Python 配置管理：环境变量、设置与密钥。 Python 配置管理：环境变量、设置与密钥。",
+        "id": "python-configuration",
+        "license": "MIT",
+        "name": "Python Configuration",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-configuration",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Apply design patterns idiomatically in Python. 在 Python 中地道地应用设计模式。 在 Python 中地道地应用设计模式。",
+        "id": "python-design-patterns",
+        "license": "MIT",
+        "name": "Python Design Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-design-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Resilient Python error handling and exception design. 有韧性的 Python 错误处理与异常设计。 有韧性的 Python 错误处理与异常设计。",
+        "id": "python-error-handling",
+        "license": "MIT",
+        "name": "Python Error Handling",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-error-handling",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Instrument Python services: logging, metrics and tracing. 为 Python 服务插桩：日志、指标与链路追踪。 为 Python 服务插桩：日志、指标与链路追踪。",
+        "id": "python-observability",
+        "license": "MIT",
+        "name": "Python Observability",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-observability",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Package Python projects: pyproject, wheels and publishing. Python 打包：pyproject、wheel 与发布。 Python 打包：pyproject、wheel 与发布。",
+        "id": "python-packaging",
+        "license": "MIT",
+        "name": "Python Packaging",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-packaging",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Profile and optimize Python performance hot paths. 剖析并优化 Python 性能热点。 剖析并优化 Python 性能热点。",
+        "id": "python-performance-optimization",
+        "license": "MIT",
+        "name": "Python Performance Optimization",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-performance-optimization",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Organize Python projects: packages, layers and imports. Python 项目组织：包、分层与导入。 Python 项目组织：包、分层与导入。",
+        "id": "python-project-structure",
+        "license": "MIT",
+        "name": "Python Project Structure",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-project-structure",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Build resilient Python: timeouts, circuit breakers and fallbacks. 构建有韧性的 Python：超时、熔断与降级。 构建有韧性的 Python：超时、熔断与降级。",
+        "id": "python-resilience",
+        "license": "MIT",
+        "name": "Python Resilience",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-resilience",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Manage Python resources: context managers, pools and lifecycle. Python 资源管理：上下文管理器、连接池与生命周期。 Python 资源管理：上下文管理器、连接池与生命周期。",
+        "id": "python-resource-management",
+        "license": "MIT",
+        "name": "Python Resource Management",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-resource-management",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Test Python code: unit, integration and property testing. Python 测试：单元、集成与属性测试。 Python 测试：单元、集成与属性测试。",
+        "id": "python-testing-patterns",
+        "license": "MIT",
+        "name": "Python Testing Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-testing-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Leverage static typing: generics, protocols and mypy. 善用静态类型：泛型、Protocol 与 mypy。 善用静态类型：泛型、Protocol 与 mypy。",
+        "id": "python-type-safety",
+        "license": "MIT",
+        "name": "Python Type Safety",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/python-type-safety",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Use uv for fast Python dependency management and tooling. 用 uv 加速 Python 依赖管理与工具链。 用 uv 加速 Python 依赖管理与工具链。",
+        "id": "uv-package-manager",
+        "license": "MIT",
+        "name": "UV Package Manager",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/python-development/skills/uv-package-manager",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Backend architecture patterns: layers, boundaries and modules. 后端架构模式：分层、边界与模块化。 后端架构模式：分层、边界与模块化。",
+        "id": "architecture-patterns",
+        "license": "MIT",
+        "name": "Architecture Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/backend-development/skills/architecture-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Implement CQRS: commands, queries and separate models. 实现 CQRS：命令、查询与分离模型。 实现 CQRS：命令、查询与分离模型。",
+        "id": "cqrs-implementation",
+        "license": "MIT",
+        "name": "CQRS Implementation",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/backend-development/skills/cqrs-implementation",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design microservices: boundaries, contracts and resilience. 微服务设计：边界、契约与韧性。 微服务设计：边界、契约与韧性。",
+        "id": "microservices-patterns",
+        "license": "MIT",
+        "name": "Microservices Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/backend-development/skills/microservices-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Implement distributed transactions with saga orchestration. 用 Saga 编排实现分布式事务。 用 Saga 编排实现分布式事务。",
+        "id": "saga-orchestration",
+        "license": "MIT",
+        "name": "Saga Orchestration",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/backend-development/skills/saga-orchestration",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Test Temporal workflows and activities written in Python. 测试用 Python 编写的 Temporal 工作流与活动。 测试用 Python 编写的 Temporal 工作流与活动。",
+        "id": "temporal-python-testing",
+        "license": "MIT",
+        "name": "Temporal Python Testing",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/backend-development/skills/temporal-python-testing",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design durable workflow orchestration with timeouts and retries. 设计带超时与重试的持久化工作流编排。 设计带超时与重试的持久化工作流编排。",
+        "id": "workflow-orchestration-patterns",
+        "license": "MIT",
+        "name": "Workflow Orchestration Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/backend-development/skills/workflow-orchestration-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Build with Next.js App Router: layouts, data and rendering. Next.js App Router 开发：布局、数据与渲染。 Next.js App Router 开发：布局、数据与渲染。",
+        "id": "nextjs-app-router-patterns",
+        "license": "MIT",
+        "name": "Next.js App Router Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/frontend-mobile-development/skills/nextjs-app-router-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Architect React Native apps: navigation, state and native modules. React Native 应用架构：导航、状态与原生模块。 React Native 应用架构：导航、状态与原生模块。",
+        "id": "react-native-architecture",
+        "license": "MIT",
+        "name": "React Native Architecture",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/frontend-mobile-development/skills/react-native-architecture",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Choose and apply React state management patterns. 选择并应用 React 状态管理模式。 选择并应用 React 状态管理模式。",
+        "id": "react-state-management",
+        "license": "MIT",
+        "name": "React State Management",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/frontend-mobile-development/skills/react-state-management",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Build consistent design systems with Tailwind CSS. 用 Tailwind CSS 构建一致的设计系统。 用 Tailwind CSS 构建一致的设计系统。",
+        "id": "tailwind-design-system",
+        "license": "MIT",
+        "name": "Tailwind Design System",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/frontend-mobile-development/skills/tailwind-design-system",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design reliable Airflow DAGs: dependencies and retries. 设计可靠的 Airflow DAG：依赖与重试。 设计可靠的 Airflow DAG：依赖与重试。",
+        "id": "airflow-dag-patterns",
+        "license": "MIT",
+        "name": "Airflow DAG Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/data-engineering/skills/airflow-dag-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Apply data quality frameworks: profiling and validation. 应用数据质量框架：画像与校验。 应用数据质量框架：画像与校验。",
+        "id": "data-quality-frameworks",
+        "license": "MIT",
+        "name": "Data Quality Frameworks",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/data-engineering/skills/data-quality-frameworks",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Model data with dbt: staging, marts and tests. 用 dbt 建模：贴源、数据集市与测试。 用 dbt 建模：贴源、数据集市与测试。",
+        "id": "dbt-transformation-patterns",
+        "license": "MIT",
+        "name": "dbt Transformation Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/data-engineering/skills/dbt-transformation-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Optimize Spark jobs: partitioning, joins and memory. 优化 Spark 作业：分区、连接与内存。 优化 Spark 作业：分区、连接与内存。",
+        "id": "spark-optimization",
+        "license": "MIT",
+        "name": "Spark Optimization",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/data-engineering/skills/spark-optimization",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Manage Kubernetes with GitOps: declarative config and sync. 用 GitOps 管理 Kubernetes：声明式配置与同步。 用 GitOps 管理 Kubernetes：声明式配置与同步。",
+        "id": "gitops-workflow",
+        "license": "MIT",
+        "name": "GitOps Workflow",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/kubernetes-operations/skills/gitops-workflow",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Scaffold maintainable Helm charts with best practices. 按最佳实践搭建可维护的 Helm Chart。 按最佳实践搭建可维护的 Helm Chart。",
+        "id": "helm-chart-scaffolding",
+        "license": "MIT",
+        "name": "Helm Chart Scaffolding",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/kubernetes-operations/skills/helm-chart-scaffolding",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Generate correct Kubernetes manifests for common workloads. 为常见负载生成正确的 Kubernetes 清单。 为常见负载生成正确的 Kubernetes 清单。",
+        "id": "k8s-manifest-generator",
+        "license": "MIT",
+        "name": "K8s Manifest Generator",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/kubernetes-operations/skills/k8s-manifest-generator",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Harden Kubernetes with network, RBAC and pod security policies. 用网络、RBAC 与 Pod 安全策略加固 Kubernetes。 用网络、RBAC 与 Pod 安全策略加固 Kubernetes。",
+        "id": "k8s-security-policies",
+        "license": "MIT",
+        "name": "K8s Security Policies",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/kubernetes-operations/skills/k8s-security-policies",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Identify and apply cloud cost optimization strategies. 识别并应用云成本优化策略。 识别并应用云成本优化策略。",
+        "id": "cost-optimization",
+        "license": "MIT",
+        "name": "Cloud Cost Optimization",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cloud-infrastructure/skills/cost-optimization",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design reusable Terraform modules with clear interfaces. 设计接口清晰的复用型 Terraform 模块。 设计接口清晰的复用型 Terraform 模块。",
+        "id": "terraform-module-library",
+        "license": "MIT",
+        "name": "Terraform Module Library",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cloud-infrastructure/skills/terraform-module-library",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Route and manage traffic with Istio VirtualService and Gateway. 用 Istio VirtualService 与 Gateway 进行流量管理。 用 Istio VirtualService 与 Gateway 进行流量管理。",
+        "id": "istio-traffic-management",
+        "license": "MIT",
+        "name": "Istio Traffic Management",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cloud-infrastructure/skills/istio-traffic-management",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design portable multi-cloud architectures. 设计可移植的多云架构。 设计可移植的多云架构。",
+        "id": "multi-cloud-architecture",
+        "license": "MIT",
+        "name": "Multi-Cloud Architecture",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cloud-infrastructure/skills/multi-cloud-architecture",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design deployment pipelines: stages, gates and rollback. 设计部署流水线：阶段、门禁与回滚。 设计部署流水线：阶段、门禁与回滚。",
+        "id": "deployment-pipeline-design",
+        "license": "MIT",
+        "name": "Deployment Pipeline Design",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cicd-automation/skills/deployment-pipeline-design",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Write reliable GitHub Actions workflows and templates. 编写可靠的 GitHub Actions 工作流与模板。 编写可靠的 GitHub Actions 工作流与模板。",
+        "id": "github-actions-templates",
+        "license": "MIT",
+        "name": "GitHub Actions Templates",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cicd-automation/skills/github-actions-templates",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Handle secrets safely across CI/CD and runtime. 在 CI/CD 与运行时安全地处理密钥。 在 CI/CD 与运行时安全地处理密钥。",
+        "id": "secrets-management",
+        "license": "MIT",
+        "name": "Secrets Management",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/cicd-automation/skills/secrets-management",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Build attack trees to model threat scenarios. 构建攻击树以建模威胁场景。 构建攻击树以建模威胁场景。",
+        "id": "attack-tree-construction",
+        "license": "MIT",
+        "name": "Attack Tree Construction",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/security-scanning/skills/attack-tree-construction",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Configure SAST tools and triage findings effectively. 配置 SAST 工具并有效处置告警。 配置 SAST 工具并有效处置告警。",
+        "id": "sast-configuration",
+        "license": "MIT",
+        "name": "SAST Configuration",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/security-scanning/skills/sast-configuration",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Apply STRIDE threat modeling to system designs. 对系统设计应用 STRIDE 威胁建模。 对系统设计应用 STRIDE 威胁建模。",
+        "id": "stride-analysis-patterns",
+        "license": "MIT",
+        "name": "STRIDE Analysis Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/security-scanning/skills/stride-analysis-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Map threats to concrete mitigation controls. 把威胁映射到具体的缓解控制措施。 把威胁映射到具体的缓解控制措施。",
+        "id": "threat-mitigation-mapping",
+        "license": "MIT",
+        "name": "Threat Mitigation Mapping",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/security-scanning/skills/threat-mitigation-mapping",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Instrument distributed tracing across services. 在服务间接入分布式链路追踪。 在服务间接入分布式链路追踪。",
+        "id": "distributed-tracing",
+        "license": "MIT",
+        "name": "Distributed Tracing",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/observability-monitoring/skills/distributed-tracing",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design effective Grafana dashboards for operations. 设计高效的 Grafana 运维看板。 设计高效的 Grafana 运维看板。",
+        "id": "grafana-dashboards",
+        "license": "MIT",
+        "name": "Grafana Dashboards",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/observability-monitoring/skills/grafana-dashboards",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Configure Prometheus: scraping, rules and alerting. 配置 Prometheus：抓取、规则与告警。 配置 Prometheus：抓取、规则与告警。",
+        "id": "prometheus-configuration",
+        "license": "MIT",
+        "name": "Prometheus Configuration",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/observability-monitoring/skills/prometheus-configuration",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Define and track SLOs with error budgets. 定义并跟踪 SLO 与错误预算。 定义并跟踪 SLO 与错误预算。",
+        "id": "slo-implementation",
+        "license": "MIT",
+        "name": "SLO Implementation",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/observability-monitoring/skills/slo-implementation",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Choose embedding models and chunking strategies for RAG. 为 RAG 选择嵌入模型与分块策略。 为 RAG 选择嵌入模型与分块策略。",
+        "id": "embedding-strategies",
+        "license": "MIT",
+        "name": "Embedding Strategies",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/llm-application-dev/skills/embedding-strategies",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Implement retrieval-augmented generation end to end. 端到端实现检索增强生成（RAG）。 端到端实现检索增强生成（RAG）。",
+        "id": "rag-implementation",
+        "license": "MIT",
+        "name": "RAG Implementation",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/llm-application-dev/skills/rag-implementation",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Craft effective prompts: structure, context and constraints. 编写有效提示词：结构、上下文与约束。 编写有效提示词：结构、上下文与约束。",
+        "id": "prompt-engineering-patterns",
+        "license": "MIT",
+        "name": "Prompt Engineering Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/llm-application-dev/skills/prompt-engineering-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Evaluate LLM outputs with metrics, evals and regression tests. 用指标、评测与回归测试评估 LLM 输出。 用指标、评测与回归测试评估 LLM 输出。",
+        "id": "llm-evaluation",
+        "license": "MIT",
+        "name": "LLM Evaluation",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/llm-application-dev/skills/llm-evaluation",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design PostgreSQL schemas: types, indexes and constraints. 设计 PostgreSQL 表结构：类型、索引与约束。 设计 PostgreSQL 表结构：类型、索引与约束。",
+        "id": "postgresql-design",
+        "license": "MIT",
+        "name": "PostgreSQL Design",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/database-design/skills/postgresql",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Test JavaScript/TypeScript with modern tooling. 用现代工具测试 JavaScript/TypeScript。 用现代工具测试 JavaScript/TypeScript。",
+        "id": "javascript-testing-patterns",
+        "license": "MIT",
+        "name": "JavaScript Testing Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/javascript-typescript/skills/javascript-testing-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Write modern JavaScript: ES modules, async and tooling. 编写现代 JavaScript：ES 模块、异步与工具链。 编写现代 JavaScript：ES 模块、异步与工具链。",
+        "id": "modern-javascript-patterns",
+        "license": "MIT",
+        "name": "Modern JavaScript Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/javascript-typescript/skills/modern-javascript-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Build Node.js backends: structure, streams and performance. 构建 Node.js 后端：结构、流与性能。 构建 Node.js 后端：结构、流与性能。",
+        "id": "nodejs-backend-patterns",
+        "license": "MIT",
+        "name": "Node.js Backend Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/javascript-typescript/skills/nodejs-backend-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Master TypeScript advanced types and generics. 掌握 TypeScript 高级类型与泛型。 掌握 TypeScript 高级类型与泛型。",
+        "id": "typescript-advanced-types",
+        "license": "MIT",
+        "name": "TypeScript Advanced Types",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/javascript-typescript/skills/typescript-advanced-types",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Write defensive Bash: set -euo pipefail and error traps. 编写防御式 Bash：set -euo pipefail 与错误陷阱。 编写防御式 Bash：set -euo pipefail 与错误陷阱。",
+        "id": "bash-defensive-patterns",
+        "license": "MIT",
+        "name": "Bash Defensive Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/shell-scripting/skills/bash-defensive-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Test shell scripts with BATS framework. 用 BATS 框架测试 Shell 脚本。 用 BATS 框架测试 Shell 脚本。",
+        "id": "bats-testing-patterns",
+        "license": "MIT",
+        "name": "BATS Testing Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/shell-scripting/skills/bats-testing-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Apply Go concurrency patterns: goroutines and channels. 应用 Go 并发模式：goroutine 与 channel。 应用 Go 并发模式：goroutine 与 channel。",
+        "id": "go-concurrency-patterns",
+        "license": "MIT",
+        "name": "Go Concurrency Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/systems-programming/skills/go-concurrency-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Write memory-safe systems code in C/C++/Rust. 用 C/C++/Rust 编写内存安全的系统代码。 用 C/C++/Rust 编写内存安全的系统代码。",
+        "id": "memory-safety-patterns",
+        "license": "MIT",
+        "name": "Memory Safety Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/systems-programming/skills/memory-safety-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Design Rust async code: futures, streams and runtimes. 设计 Rust 异步代码：future、流与运行时。 设计 Rust 异步代码：future、流与运行时。",
+        "id": "rust-async-patterns",
+        "license": "MIT",
+        "name": "Rust Async Patterns",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/systems-programming/skills/rust-async-patterns",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Create effective incident runbooks for common failures. 为常见故障编写有效的应急手册。 为常见故障编写有效的应急手册。",
+        "id": "incident-runbook-templates",
+        "license": "MIT",
+        "name": "Incident Runbook Templates",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/incident-response/skills/incident-runbook-templates",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "wshobson",
+        "description": "Write blameless postmortems that drive improvement. 编写无指责复盘，驱动持续改进。 编写无指责复盘，驱动持续改进。",
+        "id": "postmortem-writing",
+        "license": "MIT",
+        "name": "Postmortem Writing",
+        "ref": "main",
+        "repository": "wshobson/agents",
+        "subdir": "plugins/incident-response/skills/postmortem-writing",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Systematically build understanding of an unfamiliar codebase. 系统性地建立对陌生代码库的理解。 系统性地建立对陌生代码库的理解。",
+        "id": "acquire-codebase-knowledge",
+        "license": "MIT",
+        "name": "Acquire Codebase Knowledge",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/acquire-codebase-knowledge",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Govern AI agents: policy, oversight and audit. AI 代理治理：策略、监督与审计。 AI 代理治理：策略、监督与审计。",
+        "id": "agent-governance",
+        "license": "MIT",
+        "name": "Agent Governance",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/agent-governance",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Review prompts for injection risks and safety issues. 审查提示词中的注入风险与安全问题。 审查提示词中的注入风险与安全问题。",
+        "id": "ai-prompt-engineering-safety-review",
+        "license": "MIT",
+        "name": "AI Prompt Engineering Safety Review",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/ai-prompt-engineering-safety-review",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Generate architecture blueprints before implementation. 在实现前生成架构蓝图。 在实现前生成架构蓝图。",
+        "id": "architecture-blueprint-generator",
+        "license": "MIT",
+        "name": "Architecture Blueprint Generator",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/architecture-blueprint-generator",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Write precise feature specifications agents can implement. 编写 Agent 可实现的精确功能规格。 编写 Agent 可实现的精确功能规格。",
+        "id": "create-specification",
+        "license": "MIT",
+        "name": "Create Specification",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/create-specification",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Break specifications into actionable implementation plans. 把规格拆解为可执行的实现计划。 把规格拆解为可执行的实现计划。",
+        "id": "create-implementation-plan",
+        "license": "MIT",
+        "name": "Create Implementation Plan",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/create-implementation-plan",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Write clear product requirements documents. 编写清晰的产品需求文档（PRD）。 编写清晰的产品需求文档（PRD）。",
+        "id": "prd",
+        "license": "MIT",
+        "name": "PRD Writing",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/prd",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Document architectural decisions with ADRs. 用 ADR 记录架构决策。 用 ADR 记录架构决策。",
+        "id": "create-architectural-decision-record",
+        "license": "MIT",
+        "name": "Architectural Decision Record",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/create-architectural-decision-record",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Write Conventional Commits that generate changelogs. 编写可自动生成变更日志的规范提交信息。 编写可自动生成变更日志的规范提交信息。",
+        "id": "conventional-commit",
+        "license": "MIT",
+        "name": "Conventional Commits",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/conventional-commit",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Craft clear, atomic git commit messages. 编写清晰、原子的 git 提交信息。 编写清晰、原子的 git 提交信息。",
+        "id": "git-commit",
+        "license": "MIT",
+        "name": "Git Commit",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/git-commit",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Use gitmoji conventions in commit messages. 在提交信息中使用 gitmoji 约定。 在提交信息中使用 gitmoji 约定。",
+        "id": "gitmoji",
+        "license": "MIT",
+        "name": "Gitmoji",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/gitmoji",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Name branches with conventional prefixes. 用规范前缀命名分支。 用规范前缀命名分支。",
+        "id": "conventional-branch",
+        "license": "MIT",
+        "name": "Conventional Branches",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/conventional-branch",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Harden GitHub Actions against supply-chain attacks. 加固 GitHub Actions 以防御供应链攻击。 加固 GitHub Actions 以防御供应链攻击。",
+        "id": "github-actions-hardening",
+        "license": "MIT",
+        "name": "GitHub Actions Hardening",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/github-actions-hardening",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Write lean multi-stage Dockerfiles. 编写精简的多阶段 Dockerfile。 编写精简的多阶段 Dockerfile。",
+        "id": "multi-stage-dockerfile",
+        "license": "MIT",
+        "name": "Multi-Stage Dockerfile",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/multi-stage-dockerfile",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Detect and remediate leaked secrets in code. 检测并修复代码中泄露的密钥。 检测并修复代码中泄露的密钥。",
+        "id": "secret-scanning",
+        "license": "MIT",
+        "name": "Secret Scanning",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/secret-scanning",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Optimize SQL queries with execution plans and indexing. 用执行计划与索引优化 SQL 查询。 用执行计划与索引优化 SQL 查询。",
+        "id": "sql-optimization",
+        "license": "MIT",
+        "name": "SQL Optimization",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/sql-optimization",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Tune PostgreSQL: configuration, vacuum and query tuning. PostgreSQL 调优：配置、vacuum 与查询。 PostgreSQL 调优：配置、vacuum 与查询。",
+        "id": "postgresql-optimization",
+        "license": "MIT",
+        "name": "PostgreSQL Optimization",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/postgresql-optimization",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Produce thorough threat models for software systems. 为软件系统产出完整的威胁模型。 为软件系统产出完整的威胁模型。",
+        "id": "threat-model-analyst",
+        "license": "MIT",
+        "name": "Threat Model Analyst",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/threat-model-analyst",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Run blameless incident postmortems end to end. 端到端执行无指责的故障复盘。 端到端执行无指责的故障复盘。",
+        "id": "incident-postmortem",
+        "license": "MIT",
+        "name": "Incident Postmortem",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/incident-postmortem",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Convert meeting notes into structured minutes and actions. 把会议笔记整理为结构化纪要待办。 把会议笔记整理为结构化纪要待办。",
+        "id": "meeting-minutes",
+        "license": "MIT",
+        "name": "Meeting Minutes",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/meeting-minutes",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Draft fair, evidence-based performance reviews. 撰写公正、基于证据的绩效评估。 撰写公正、基于证据的绩效评估。",
+        "id": "performance-review-writer",
+        "license": "MIT",
+        "name": "Performance Review Writer",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/performance-review-writer",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Draft clear professional emails for any purpose. 为任何场景起草清晰专业的邮件。 为任何场景起草清晰专业的邮件。",
+        "id": "email-drafter",
+        "license": "MIT",
+        "name": "Email Drafter",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/email-drafter",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Run an effective technical job search: resume and interviews. 高效求职：简历与面试准备。 高效求职：简历与面试准备。",
+        "id": "technical-job-search",
+        "license": "MIT",
+        "name": "Technical Job Search",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/technical-job-search",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Optimize prompts for clarity, specificity and safety. 优化提示词的清晰度、具体性与安全性。 优化提示词的清晰度、具体性与安全性。",
+        "id": "prompt-optimizer",
+        "license": "MIT",
+        "name": "Prompt Optimizer",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/prompt-optimizer",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Generate and iterate images with AI image tools. 用 AI 图像工具生成并迭代图片。 用 AI 图像工具生成并迭代图片。",
+        "id": "generate-image",
+        "license": "MIT",
+        "name": "Generate Image",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/generate-image",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Generate draw.io diagrams from structured descriptions. 从结构化描述生成 draw.io 图表。 从结构化描述生成 draw.io 图表。",
+        "id": "draw-io-diagram-generator",
+        "license": "MIT",
+        "name": "Draw.io Diagram Generator",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/draw-io-diagram-generator",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Convert Markdown documents to clean HTML. 把 Markdown 文档转换为干净的 HTML。 把 Markdown 文档转换为干净的 HTML。",
+        "id": "markdown-to-html",
+        "license": "MIT",
+        "name": "Markdown to HTML",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/markdown-to-html",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Create actionable GitHub issues from feature specs. 从功能规格创建可执行的 GitHub Issue。 从功能规格创建可执行的 GitHub Issue。",
+        "id": "create-github-issue-feature-from-specification",
+        "license": "MIT",
+        "name": "GitHub Issue from Specification",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/create-github-issue-feature-from-specification",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Unit test Vue components and Pinia stores. 对 Vue 组件与 Pinia store 编写单元测试。 对 Vue 组件与 Pinia store 编写单元测试。",
+        "id": "unit-test-vue-pinia",
+        "license": "MIT",
+        "name": "Vue Pinia Unit Tests",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/unit-test-vue-pinia",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Refactor code safely with tests and small steps. 用测试与小步推进安全地重构代码。 用测试与小步推进安全地重构代码。",
+        "id": "refactor",
+        "license": "MIT",
+        "name": "Refactor",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/refactor",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Break work into tiny verifiable steps. 把工作拆成微小的可验证步骤。 把工作拆成微小的可验证步骤。",
+        "id": "tiny-stepping",
+        "license": "MIT",
+        "name": "Tiny Stepping",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/tiny-stepping",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Verify work against requirements before delivering. 交付前对照需求复核工作。 交付前对照需求复核工作。",
+        "id": "doublecheck",
+        "license": "MIT",
+        "name": "Double Check",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/doublecheck",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Diagnose issues methodically: gather, isolate, confirm. 有条理地诊断问题：收集、隔离、确认。 有条理地诊断问题：收集、隔离、确认。",
+        "id": "diagnose",
+        "license": "MIT",
+        "name": "Diagnose",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/diagnose",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "Document a codebase with guided walkthroughs. 用引导式讲解记录代码库。 用引导式讲解记录代码库。",
+        "id": "code-tour",
+        "license": "MIT",
+        "name": "Code Tour",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/code-tour",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      },
+      {
+        "author": "github",
+        "description": "A playbook of quality gates for shipping software. 发布软件的质量门禁手册。 发布软件的质量门禁手册。",
+        "id": "quality-playbook",
+        "license": "MIT",
+        "name": "Quality Playbook",
+        "ref": "main",
+        "repository": "github/awesome-copilot",
+        "subdir": "skills/quality-playbook",
+        "submitted_at": "2026-08-12",
+        "tags": [
+          "skill"
+        ],
+        "verified": false
+      }
+    ],
+    "updated_at": "2026-08-12T00:00:00Z",
+    "version": 1,
+    "workflows": []
+  },
+  "stats": {
+    "app": null,
+    "github": {
+      "generated_at": "2026-09-09T07:26:38Z",
+      "mcps": {
+        "airflow-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 12,
+          "pushed_at": "2026-08-05T06:58:55Z",
+          "stars": 52
+        },
+        "airflow-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 49,
+          "pushed_at": "2026-03-03T13:24:59Z",
+          "stars": 177
+        },
+        "aliyun-dms-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 16,
+          "pushed_at": "2026-07-29T04:22:13Z",
+          "stars": 52
+        },
+        "anysearch-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 184,
+          "pushed_at": "2026-08-24T03:24:27Z",
+          "stars": 1842
+        },
+        "apify-mcp": {
+          "downloads_30d": 606,
+          "downloads_total": 10254,
+          "forks": 255,
+          "pushed_at": "2026-09-08T21:06:12Z",
+          "stars": 6445
+        },
+        "apisql-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 6,
+          "pushed_at": "2026-07-07T11:17:15Z",
+          "stars": 41
+        },
+        "arxiv-mcp": {
+          "downloads_30d": 54,
+          "downloads_total": 320,
+          "forks": 252,
+          "pushed_at": "2026-08-26T23:16:26Z",
+          "stars": 3124
+        },
+        "awslabs-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1748,
+          "pushed_at": "2026-09-09T00:08:16Z",
+          "stars": 9676
+        },
+        "blender-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 2579,
+          "pushed_at": "2026-09-07T15:51:01Z",
+          "stars": 27835
+        },
+        "brave-search-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 200,
+          "pushed_at": "2026-09-07T17:58:09Z",
+          "stars": 1433
+        },
+        "brightdata-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 325,
+          "pushed_at": "2026-08-12T07:39:54Z",
+          "stars": 2635
+        },
+        "browser-tools-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 197588,
+          "forks": 529,
+          "pushed_at": "2026-08-12T16:48:04Z",
+          "stars": 7315
+        },
+        "browsermcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 564,
+          "pushed_at": "2025-04-24T21:49:44Z",
+          "stars": 7065
+        },
+        "chrome-devtools-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 3609,
+          "pushed_at": "2026-09-09T07:08:35Z",
+          "stars": 51406
+        },
+        "code-graph-rag": {
+          "downloads_30d": 201,
+          "downloads_total": 448,
+          "forks": 668,
+          "pushed_at": "2026-09-09T00:48:15Z",
+          "stars": 5109
+        },
+        "codebase-memory-mcp": {
+          "downloads_30d": 318579,
+          "downloads_total": 1038052,
+          "forks": 3481,
+          "pushed_at": "2026-09-09T05:38:13Z",
+          "stars": 42721
+        },
+        "copilot-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 297,
+          "forks": 54,
+          "pushed_at": "2026-06-15T20:18:27Z",
+          "stars": 506
+        },
+        "datadog-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4,
+          "pushed_at": "2026-08-17T17:14:38Z",
+          "stars": 44
+        },
+        "davinci-resolve-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 300,
+          "pushed_at": "2026-09-09T02:42:01Z",
+          "stars": 2554
+        },
+        "dbhub": {
+          "downloads_30d": 154,
+          "downloads_total": 473,
+          "forks": 294,
+          "pushed_at": "2026-09-08T10:20:41Z",
+          "stars": 3485
+        },
+        "elasticsearch-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 15182,
+          "forks": 150,
+          "pushed_at": "2026-09-09T03:47:30Z",
+          "stars": 710
+        },
+        "exa-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 386,
+          "pushed_at": "2026-08-21T04:44:51Z",
+          "stars": 4987
+        },
+        "excel-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 460,
+          "pushed_at": "2026-04-12T06:14:45Z",
+          "stars": 4167
+        },
+        "fastapi-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 961,
+          "pushed_at": "2025-11-24T14:51:54Z",
+          "stars": 12003
+        },
+        "figma-context-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1260,
+          "pushed_at": "2026-09-08T21:05:44Z",
+          "stars": 15808
+        },
+        "figma-flutter-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25,
+          "pushed_at": "2026-02-27T04:33:45Z",
+          "stars": 244
+        },
+        "figma-mcp-bridge": {
+          "downloads_30d": 1509,
+          "downloads_total": 6189,
+          "forks": 80,
+          "pushed_at": "2026-09-01T20:46:01Z",
+          "stars": 571
+        },
+        "financetoolkit": {
+          "downloads_30d": 29,
+          "downloads_total": 176,
+          "forks": 616,
+          "pushed_at": "2026-09-08T23:19:32Z",
+          "stars": 5310
+        },
+        "firecrawl-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 880,
+          "pushed_at": "2026-09-08T06:44:14Z",
+          "stars": 7423
+        },
+        "fli": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 393,
+          "pushed_at": "2026-07-20T19:24:17Z",
+          "stars": 3144
+        },
+        "flint-chart": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 231,
+          "pushed_at": "2026-09-08T20:21:57Z",
+          "stars": 4164
+        },
+        "ghidra-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 54601,
+          "forks": 125,
+          "pushed_at": "2026-09-04T01:17:26Z",
+          "stars": 3735
+        },
+        "git-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 741,
+          "pushed_at": "2026-05-08T14:21:24Z",
+          "stars": 8376
+        },
+        "github-mcp-server": {
+          "downloads_30d": 63643,
+          "downloads_total": 861359,
+          "forks": 4938,
+          "pushed_at": "2026-09-08T18:59:05Z",
+          "stars": 32815
+        },
+        "gitlab-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 23,
+          "pushed_at": "2026-08-12T20:15:47Z",
+          "stars": 64
+        },
+        "gitlab-mr-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 5,
+          "pushed_at": "2026-04-02T13:12:19Z",
+          "stars": 25
+        },
+        "godot-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 468,
+          "pushed_at": "2026-04-16T23:37:00Z",
+          "stars": 5584
+        },
+        "google-docs-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 146,
+          "forks": 215,
+          "pushed_at": "2026-08-31T18:45:37Z",
+          "stars": 658
+        },
+        "google-workspace-mcp": {
+          "downloads_30d": 164,
+          "downloads_total": 7536,
+          "forks": 980,
+          "pushed_at": "2026-09-08T22:45:43Z",
+          "stars": 3131
+        },
+        "google-workspace-mcp-aaronsb": {
+          "downloads_30d": 75,
+          "downloads_total": 365,
+          "forks": 51,
+          "pushed_at": "2026-08-31T16:31:12Z",
+          "stars": 176
+        },
+        "graphiti-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 18,
+          "pushed_at": "2025-07-31T19:36:18Z",
+          "stars": 144
+        },
+        "graphiti-memory": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 3121,
+          "pushed_at": "2026-09-08T20:38:41Z",
+          "stars": 30712
+        },
+        "harbor": {
+          "downloads_30d": 355,
+          "downloads_total": 54620,
+          "forks": 228,
+          "pushed_at": "2026-09-07T14:09:12Z",
+          "stars": 3211
+        },
+        "hexstrike-ai": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 2424,
+          "pushed_at": "2026-08-03T14:33:09Z",
+          "stars": 11724
+        },
+        "ida-pro-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1418,
+          "pushed_at": "2026-08-28T18:08:44Z",
+          "stars": 11921
+        },
+        "jadx-ai-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 79441,
+          "forks": 250,
+          "pushed_at": "2026-08-30T07:48:06Z",
+          "stars": 2767
+        },
+        "js-reverse-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 354,
+          "pushed_at": "2026-09-03T11:45:13Z",
+          "stars": 2709
+        },
+        "kubectl-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 89,
+          "forks": 182,
+          "pushed_at": "2026-04-08T22:37:48Z",
+          "stars": 956
+        },
+        "kubernetes-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 90600,
+          "forks": 432,
+          "pushed_at": "2026-09-09T05:15:32Z",
+          "stars": 2070
+        },
+        "linear-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 56,
+          "pushed_at": "2025-05-01T19:45:31Z",
+          "stars": 348
+        },
+        "linkedin-mcp": {
+          "downloads_30d": 1745,
+          "downloads_total": 12641,
+          "forks": 592,
+          "pushed_at": "2026-09-09T06:10:36Z",
+          "stars": 3401
+        },
+        "mcp-atlassian": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1351,
+          "pushed_at": "2026-09-05T06:53:40Z",
+          "stars": 5878
+        },
+        "mcp-clickhouse": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 203,
+          "pushed_at": "2026-09-08T16:34:28Z",
+          "stars": 869
+        },
+        "mcp-flowise": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 23,
+          "pushed_at": "2025-01-30T21:02:15Z",
+          "stars": 54
+        },
+        "mcp-gateway": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 90,
+          "pushed_at": "2026-09-08T21:02:36Z",
+          "stars": 820
+        },
+        "mcp-grafana": {
+          "downloads_30d": 18533,
+          "downloads_total": 243534,
+          "forks": 441,
+          "pushed_at": "2026-09-08T16:04:18Z",
+          "stars": 3435
+        },
+        "mcp-hn": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 23,
+          "pushed_at": "2025-07-14T02:15:28Z",
+          "stars": 76
+        },
+        "mcp-hn-devrel": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1,
+          "pushed_at": "2026-05-29T19:35:57Z",
+          "stars": 17
+        },
+        "mcp-language-server": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 144,
+          "pushed_at": "2026-03-01T23:27:09Z",
+          "stars": 1589
+        },
+        "mcp-neo4j": {
+          "downloads_30d": 0,
+          "downloads_total": 1680,
+          "forks": 258,
+          "pushed_at": "2026-04-10T18:53:37Z",
+          "stars": 980
+        },
+        "mcp-obsidian": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 499,
+          "pushed_at": "2026-08-31T11:49:01Z",
+          "stars": 4378
+        },
+        "mcp-playwright": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 533,
+          "pushed_at": "2025-12-13T04:28:38Z",
+          "stars": 5643
+        },
+        "mcp-proxy": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 260,
+          "pushed_at": "2026-07-20T21:05:47Z",
+          "stars": 2743
+        },
+        "mcp-redis": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 110,
+          "pushed_at": "2026-09-02T11:17:52Z",
+          "stars": 618
+        },
+        "mcp-selenium": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 121,
+          "pushed_at": "2026-02-23T03:24:23Z",
+          "stars": 427
+        },
+        "mcp-server-chart": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 415,
+          "pushed_at": "2026-08-27T01:50:14Z",
+          "stars": 4354
+        },
+        "mcp-server-kubernetes": {
+          "downloads_30d": 14,
+          "downloads_total": 1715,
+          "forks": 280,
+          "pushed_at": "2026-08-31T15:59:13Z",
+          "stars": 1578
+        },
+        "mcp-server-milvus": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 70,
+          "pushed_at": "2026-08-11T02:22:58Z",
+          "stars": 243
+        },
+        "mcp-server-qdrant": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 303,
+          "pushed_at": "2026-09-04T00:13:58Z",
+          "stars": 1522
+        },
+        "mcp-server-youtube": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 134,
+          "pushed_at": "2026-08-08T22:55:53Z",
+          "stars": 573
+        },
+        "mcp-sqlserver": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 15,
+          "pushed_at": "2026-03-31T07:51:50Z",
+          "stars": 40
+        },
+        "mcp-telegram": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 39,
+          "pushed_at": "2025-06-15T10:11:05Z",
+          "stars": 252
+        },
+        "mcp-toolbox": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1710,
+          "pushed_at": "2026-09-09T06:29:51Z",
+          "stars": 16341
+        },
+        "mcp-use": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 1443,
+          "pushed_at": "2026-09-08T22:04:06Z",
+          "stars": 10596
+        },
+        "mcpo": {
+          "downloads_30d": 0,
+          "downloads_total": 115,
+          "forks": 490,
+          "pushed_at": "2026-05-17T20:40:30Z",
+          "stars": 4366
+        },
+        "mcpvault": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 126,
+          "pushed_at": "2026-09-07T12:06:23Z",
+          "stars": 1654
+        },
+        "minimax-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 282,
+          "pushed_at": "2026-08-20T12:06:49Z",
+          "stars": 1578
+        },
+        "mongodb-mcp-server": {
+          "downloads_30d": 14,
+          "downloads_total": 148,
+          "forks": 285,
+          "pushed_at": "2026-09-08T23:55:59Z",
+          "stars": 1124
+        },
+        "mssql-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 10,
+          "pushed_at": "2026-09-04T08:56:55Z",
+          "stars": 39
+        },
+        "mssql-mcp-csharp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 22,
+          "pushed_at": "2026-01-22T18:15:12Z",
+          "stars": 156
+        },
+        "mysql-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 257,
+          "pushed_at": "2026-08-02T13:36:20Z",
+          "stars": 1382
+        },
+        "n8n-mcp": {
+          "downloads_30d": 123,
+          "downloads_total": 337,
+          "forks": 3639,
+          "pushed_at": "2026-09-07T10:04:14Z",
+          "stars": 22855
+        },
+        "notion-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 623,
+          "pushed_at": "2026-07-25T16:20:03Z",
+          "stars": 4622
+        },
+        "obsidian-local-rest": {
+          "downloads_30d": 0,
+          "downloads_total": 2147242,
+          "forks": 343,
+          "pushed_at": "2026-08-31T02:21:05Z",
+          "stars": 2903
+        },
+        "one-search-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 20,
+          "pushed_at": "2026-07-31T01:37:16Z",
+          "stars": 140
+        },
+        "paper-search-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 261,
+          "pushed_at": "2026-08-17T05:39:02Z",
+          "stars": 2595
+        },
+        "pg-aiguide": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 107,
+          "pushed_at": "2026-09-09T04:55:27Z",
+          "stars": 1835
+        },
+        "playwright-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 83720,
+          "forks": 3121,
+          "pushed_at": "2026-09-04T22:45:53Z",
+          "stars": 36908
+        },
+        "postgres-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 342,
+          "forks": 371,
+          "pushed_at": "2026-08-17T05:06:35Z",
+          "stars": 3280
+        },
+        "radar": {
+          "downloads_30d": 12601,
+          "downloads_total": 60045,
+          "forks": 202,
+          "pushed_at": "2026-09-09T07:28:05Z",
+          "stars": 3290
+        },
+        "serena": {
+          "downloads_30d": 0,
+          "downloads_total": 1709,
+          "forks": 1975,
+          "pushed_at": "2026-09-08T11:26:10Z",
+          "stars": 29057
+        },
+        "shopify-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 117,
+          "pushed_at": "2026-04-05T00:29:07Z",
+          "stars": 239
+        },
+        "slack-mcp-server": {
+          "downloads_30d": 0,
+          "downloads_total": 16795,
+          "forks": 367,
+          "pushed_at": "2026-07-16T17:14:22Z",
+          "stars": 1820
+        },
+        "snowflake-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 108,
+          "pushed_at": "2026-05-15T16:30:51Z",
+          "stars": 297
+        },
+        "snowflake-mcp-gpl": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 84,
+          "pushed_at": "2025-10-07T15:05:17Z",
+          "stars": 186
+        },
+        "spotify-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 132,
+          "pushed_at": "2026-03-11T14:15:06Z",
+          "stars": 614
+        },
+        "stripe-agent-toolkit": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 337,
+          "pushed_at": "2026-09-09T07:22:36Z",
+          "stars": 1795
+        },
+        "supabase-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 403,
+          "pushed_at": "2026-09-09T06:24:04Z",
+          "stars": 2898
+        },
+        "tabularis": {
+          "downloads_30d": 15298,
+          "downloads_total": 69730,
+          "forks": 313,
+          "pushed_at": "2026-09-04T07:56:50Z",
+          "stars": 4859
+        },
+        "tavily-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 297,
+          "pushed_at": "2026-09-03T06:56:27Z",
+          "stars": 2373
+        },
+        "telegram-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 408,
+          "pushed_at": "2026-09-08T13:00:01Z",
+          "stars": 1578
+        },
+        "tradingview-chart-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 29,
+          "pushed_at": "2026-03-14T10:35:43Z",
+          "stars": 100
+        },
+        "tradingview-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 930,
+          "pushed_at": "2026-09-01T15:15:48Z",
+          "stars": 4396
+        },
+        "universal-db-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 91,
+          "pushed_at": "2026-03-17T08:35:16Z",
+          "stars": 926
+        },
+        "upstash-context7": {
+          "downloads_30d": 35,
+          "downloads_total": 1190,
+          "forks": 2976,
+          "pushed_at": "2026-09-09T05:50:02Z",
+          "stars": 61800
+        },
+        "x-reader": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 93,
+          "pushed_at": "2026-08-29T23:58:29Z",
+          "stars": 961
+        },
+        "xcodebuild-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 34883,
+          "forks": 313,
+          "pushed_at": "2026-09-07T03:40:41Z",
+          "stars": 6358
+        },
+        "xiaohongshu-mcp": {
+          "downloads_30d": 41627,
+          "downloads_total": 248654,
+          "forks": 2310,
+          "pushed_at": "2026-09-07T04:42:10Z",
+          "stars": 15703
+        },
+        "youtube-transcript-mcp": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 98,
+          "pushed_at": "2026-07-21T03:28:48Z",
+          "stars": 591
+        }
+      },
+      "skills": {
+        "acquire-codebase-knowledge": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "agent-governance": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "ai-prompt-engineering-safety-review": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "airflow-dag-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "architecture-blueprint-generator": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "architecture-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "async-python-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "attack-tree-construction": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "auth-implementation-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "bash-defensive-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "bats-testing-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "bazel-build-optimization": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "brainstorming": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "code-tour": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "conventional-branch": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "conventional-commit": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "cost-optimization": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "cqrs-implementation": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "create-architectural-decision-record": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "create-github-issue-feature-from-specification": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "create-implementation-plan": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "create-specification": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "data-quality-frameworks": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "dbt-transformation-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "debugging-strategies": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "deployment-pipeline-design": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "diagnose": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "dispatching-parallel-agents": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "distributed-tracing": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "doublecheck": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "draw-io-diagram-generator": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "e2e-testing-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "email-drafter": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "embedding-strategies": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "error-handling-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "executing-plans": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "finishing-a-development-branch": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "generate-image": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "git-commit": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "github-actions-hardening": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "github-actions-templates": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "gitmoji": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "gitops-workflow": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "go-concurrency-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "grafana-dashboards": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "helm-chart-scaffolding": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "incident-postmortem": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "incident-runbook-templates": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "istio-traffic-management": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "javascript-testing-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "k8s-manifest-generator": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "k8s-security-policies": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "llm-evaluation": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "markdown-to-html": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "meeting-minutes": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "memory-safety-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "microservices-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "modern-javascript-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "monorepo-management": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "multi-cloud-architecture": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "multi-stage-dockerfile": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "nextjs-app-router-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "nodejs-backend-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "nx-workspace-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "performance-review-writer": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "postgresql-design": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "postgresql-optimization": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "postmortem-writing": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "prd": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "prometheus-configuration": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "prompt-engineering-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "prompt-optimizer": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "python-anti-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-background-jobs": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-code-style": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-configuration": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-design-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-error-handling": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-observability": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-packaging": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-performance-optimization": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-project-structure": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-resilience": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-resource-management": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-testing-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "python-type-safety": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "quality-playbook": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "rag-implementation": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "react-native-architecture": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "react-state-management": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "receiving-code-review": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "refactor": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "requesting-code-review": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "rust-async-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "saga-orchestration": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "sast-configuration": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "secret-scanning": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "secrets-management": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "slo-implementation": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "spark-optimization": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "sql-optimization": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "sql-optimization-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "stride-analysis-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "subagent-driven-development": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "systematic-debugging": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "tailwind-design-system": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "technical-job-search": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "temporal-python-testing": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "terraform-module-library": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "test-driven-development": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "threat-mitigation-mapping": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "threat-model-analyst": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "tiny-stepping": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "turborepo-caching": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "typescript-advanced-types": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "unit-test-vue-pinia": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4916,
+          "pushed_at": "2026-09-09T00:25:30Z",
+          "stars": 38794
+        },
+        "using-git-worktrees": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "using-superpowers": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "uv-package-manager": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "verification-before-completion": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "workflow-orchestration-patterns": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 4212,
+          "pushed_at": "2026-09-07T01:09:29Z",
+          "stars": 39512
+        },
+        "writing-plans": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        },
+        "writing-skills": {
+          "downloads_30d": 0,
+          "downloads_total": 0,
+          "forks": 25386,
+          "pushed_at": "2026-09-08T21:39:23Z",
+          "stars": 283555
+        }
+      },
+      "workflows": {}
+    }
+  }
+}

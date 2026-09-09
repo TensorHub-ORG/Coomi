@@ -1,0 +1,8 @@
+{"id":"91301e0f-d97b-474d-9282-65a11fb89c24","senderId":"user","senderName":"用户","content":"hello team","mentions":["m1"],"workItemId":null,"type":"message","timestamp":1788958966469}
+{"id":"486c5f5a-a453-4dad-9a1f-86fb515b6c67","senderId":"user","senderName":"用户","content":"hello team","mentions":["m1"],"workItemId":null,"type":"message","timestamp":1788959037377}
+{"id":"76f6574e-1afd-4d64-a1d2-723d81a68d2a","senderId":"m1","senderName":"成员 1","content":"","mentions":[],"workItemId":null,"type":"message","timestamp":1788959037490}
+{"id":"e6c059e2-b59f-4494-a0f9-1154b3b4a974","senderId":"user","senderName":"用户","content":"hello team","mentions":["m1"],"workItemId":null,"type":"message","timestamp":1788959181657}
+{"id":"25c96081-73ac-41a8-818c-e2c9866832b3","senderId":"m1","senderName":"成员 1","content":"","mentions":[],"workItemId":null,"type":"message","timestamp":1788959181716}
+{"id":"d5afe886-370b-443a-91c5-f3bda744839c","senderId":"user","senderName":"用户","content":"hello team","mentions":["m1"],"workItemId":null,"type":"message","timestamp":1788959203604}
+{"id":"4261c20f-1440-4e6e-b635-323092847489","senderId":"m1","senderName":"成员 1","content":"成员回复：本阶段分析完成。@成员 2 请继续补充观点。","mentions":["m2"],"workItemId":null,"type":"message","timestamp":1788959204939}
+{"id":"4233b51e-4b23-4633-a6ef-022d8ef7608d","senderId":"m2","senderName":"成员 2","content":"成员回复：本阶段分析完成。@成员 2 请继续补充观点。","mentions":[],"workItemId":null,"type":"message","timestamp":1788959206217}

@@ -1,0 +1,12 @@
+{
+  "active": "mock",
+  "providers": {
+    "mock": {
+      "type": "openai",
+      "display": "Mock",
+      "api_key": "sk-test",
+      "base_url": "http://127.0.0.1:9098/v1",
+      "model": "mock-model"
+    }
+  }
+}

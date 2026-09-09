@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "backend": "legacy_termux",
+  "status": "not_installed",
+  "active_version": null,
+  "previous_version": null,
+  "installed_at_ms": null,
+  "error": null
+}

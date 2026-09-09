@@ -1,0 +1,17 @@
+{
+   "context_title": {
+      "message": "使用迅雷下載"
+   },
+   "description": {
+      "message": "迅雷下載支持"
+   },
+   "multi_context_title": {
+      "message": "進入多選下載模式 (Shift+D)"
+   },
+   "name": {
+      "message": "迅雷下載支持"
+   },
+   "usage": {
+      "message": "您已進入“多選下載”模式：    \u003Cbr> •點擊“鼠標左鍵”選擇需要下載的鏈接    \u003Cbr> •點擊“鼠標右鍵”取消選擇    \u003Cbr> •按住“鼠標左鍵”並拖拽，可以框選多個鏈接    \u003Cbr> •按住“鼠標右鍵”並拖拽，可以框選取消多個選擇    \u003Cbr> •按下“Enter”鍵開始下載    \u003Cbr> •按下“Esc”鍵退出“多選下載”模式"
+   }
+}

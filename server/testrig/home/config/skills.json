@@ -1,0 +1,55 @@
+{
+  "skills": {
+    "env-experience": {
+      "commit": "bundled",
+      "enabled": true,
+      "git_ref": "1.4.6",
+      "path": "\\\\?\\F:\\_WorkSpace\\Projects\\Coomi-Android\\server\\testrig\\home\\skills\\env-experience",
+      "repository": "Coomi/bundled",
+      "source": "env-experience",
+      "source_type": "catalog",
+      "subdir": "env-experience"
+    },
+    "env-templates": {
+      "commit": "bundled",
+      "enabled": true,
+      "git_ref": "1.4.6",
+      "path": "\\\\?\\F:\\_WorkSpace\\Projects\\Coomi-Android\\server\\testrig\\home\\skills\\env-templates",
+      "repository": "Coomi/bundled",
+      "source": "env-templates",
+      "source_type": "catalog",
+      "subdir": "env-templates"
+    },
+    "runtime-environments": {
+      "commit": "bundled",
+      "enabled": true,
+      "git_ref": "main",
+      "path": "\\\\?\\F:\\_WorkSpace\\Projects\\Coomi-Android\\server\\testrig\\home\\skills\\runtime-environments",
+      "repository": "TensorHub-ORG/Coomi",
+      "source": "runtime-environments",
+      "source_type": "catalog",
+      "subdir": ""
+    },
+    "skill-creator": {
+      "commit": "bundled",
+      "enabled": true,
+      "git_ref": "1.4.5",
+      "path": "\\\\?\\F:\\_WorkSpace\\Projects\\Coomi-Android\\server\\testrig\\home\\skills\\skill-creator",
+      "repository": "Coomi/bundled",
+      "source": "skill-creator",
+      "source_type": "catalog",
+      "subdir": "skill-creator"
+    },
+    "ui-designer": {
+      "commit": "bundled",
+      "enabled": true,
+      "git_ref": "1.4.6",
+      "path": "\\\\?\\F:\\_WorkSpace\\Projects\\Coomi-Android\\server\\testrig\\home\\skills\\ui-designer",
+      "repository": "Coomi/bundled",
+      "source": "ui-designer",
+      "source_type": "catalog",
+      "subdir": "ui-designer"
+    }
+  },
+  "version": 1
+}

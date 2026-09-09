@@ -1,0 +1,41 @@
+{
+  "id": "50a1b732-5f3e-4b7d-8c2a-b9f4e6d1a001",
+  "provider_id": "",
+  "model": "",
+  "cwd": "\\\\?\\F:\\_WorkSpace\\Projects\\Coomi-Android\\server\\testrig\\home",
+  "created_at": "2026-09-09T13:00:38.384655100Z",
+  "updated_at": "2026-09-09T13:00:38.384655100Z",
+  "messages": [],
+  "usage": {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "cache_observed_input_tokens": 0,
+    "output_tokens": 0,
+    "cache_data_available": false
+  },
+  "mode": "agent",
+  "title": "常驻会话",
+  "title_manually_set": false,
+  "pinned": false,
+  "summary": "",
+  "context": {
+    "last_usage": {
+      "input_tokens": 0,
+      "cached_input_tokens": 0,
+      "cache_observed_input_tokens": 0,
+      "output_tokens": 0,
+      "cache_data_available": false
+    },
+    "estimated_active_tokens": 0,
+    "compaction_count": 0,
+    "server_observed_local_tokens": 0,
+    "prefill_input_tokens": null,
+    "comp_hash": null,
+    "first_window_id": null,
+    "previous_window_id": null,
+    "window_id": null
+  },
+  "plan": null,
+  "loop_state": null,
+  "hooks_started": false
+}

@@ -1,0 +1,44 @@
+{
+   "action": {
+      "default_icon": "assets/icon19_normal.png",
+      "default_popup": "popup.html",
+      "default_title": "迅雷Chrome支持"
+   },
+   "background": {
+      "service_worker": "service-worker-loader.js",
+      "type": "module"
+   },
+   "content_scripts": [ {
+      "all_frames": true,
+      "css": [ "assets/content.css", "assets/chrome-runtime-promise-71a4e0c4.css", "assets/content-292a538b.css" ],
+      "js": [ "assets/content.js-loader-58705284.js" ],
+      "matches": [ "http://*/*", "https://*/*", "ftp://*/*" ],
+      "run_at": "document_start"
+   } ],
+   "default_locale": "zh_CN",
+   "description": "__MSG_description__",
+   "host_permissions": [ "\u003Call_urls>", "http://*/*", "https://*/*" ],
+   "icons": {
+      "128": "assets/install_logo.png",
+      "16": "assets/menu_logo.png",
+      "48": "assets/extension_logo.png"
+   },
+   "incognito": "split",
+   "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDEa5DG04lhgzzm3gRSXPPOZOv6ZXnzQrBv+rjUE/dL5br9Duh1kbwGQJCO4QMDvD1usf6FoXDsuvZwYzH6lg1pLI7m/wmQC3NQURHQ7J5zAy7VY0F7qSVqclcpRKY2k00vcqxok6lota3Z1QxUVUwWc9VUfr4gRUeQa4KlEsXzGwIDAQAB",
+   "manifest_version": 3,
+   "name": "迅雷下载支持",
+   "optional_permissions": [  ],
+   "options_page": "options.html",
+   "permissions": [ "contextMenus", "cookies", "tabs", "webRequest", "downloads", "nativeMessaging", "storage", "scripting", "notifications" ],
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "3.52.5",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "assets/*" ],
+      "use_dynamic_url": false
+   }, {
+      "matches": [ "ftp://*/*", "http://*/*", "https://*/*" ],
+      "resources": [ "assets/runtime-dom.esm-bundler-65457635.js", "assets/util-2d803e2a.js", "assets/index-7b1b919b.js", "assets/tool-aa30449a.js", "assets/chrome-runtime-promise-fcd5d99a.js", "assets/stat-b988e0dc.js", "assets/content.js-c1c147bd.js" ],
+      "use_dynamic_url": false
+   } ]
+}

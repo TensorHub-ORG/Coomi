@@ -244,9 +244,26 @@ export const useStudioStore = defineStore('studio', () => {
     }
   }
 
+  /** 发送期间的兜底轮询：部分 WebView 上 SSE 事件可能丢失（状态/工具可见、文本/消息丢失），
+   *  每 4 秒从服务端增量合并一次，保证群聊消息必然补齐，不依赖单条事件。 */
+  function mergeServerMessages(items: StudioMessage[]) {
+    for (const item of items) {
+      if (!messages.value.some(m => m.id === item.id)) messages.value.push(item)
+    }
+  }
+
   async function sendMessage(content: string, onEvent?: (event: Record<string, any>) => void) {
     if (!currentStudio.value) return null
     error.value = ''
+    const studioIdNow = currentStudio.value.id
+    const pollTimer = setInterval(() => {
+      void (async () => {
+        try {
+          const data = await apiGet<{ messages: StudioMessage[] }>(`/api/studios/${encodeURIComponent(studioIdNow)}/messages`)
+          mergeServerMessages(data.messages ?? [])
+        } catch { /* 轮询失败忽略，下个周期再试 */ }
+      })()
+    }, 4000)
     try {
       const response = await authedFetch(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/messages`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify({ content }),
@@ -263,12 +280,18 @@ export const useStudioStore = defineStore('studio', () => {
         buffer = lines.pop() ?? ''
         for (const line of lines) {
           if (!line.startsWith('data:')) continue
-          try { const event = JSON.parse(line.slice(5).trim()); onEvent?.(event); if (event.event_type === 'studio_message') onMessage(event.message) } catch { /* 忽略不完整事件 */ }
+          try {
+            const event = JSON.parse(line.slice(5).trim())
+            onEvent?.(event)
+            if (event.event_type === 'studio_message') onMessage(event.message)
+          } catch { /* 忽略不完整事件 */ }
         }
       }
+      clearInterval(pollTimer)
       await fetchMessages()
       return true
     } catch (e) {
+      clearInterval(pollTimer)
       error.value = e instanceof Error ? e.message : String(e)
       return null
     }
