@@ -240,7 +240,10 @@ impl StdioCognitiveRuntime {
             .env("COOMI_LIFE_TOKEN", &token)
             .env("HOME", state_root)
             .env("PATH", "/usr/local/bin:/usr/bin:/bin")
-            .env("LANG", "C.UTF-8");
+            .env("LANG", "C.UTF-8")
+            // 协议约定 stdio 为 UTF-8 JSON 行；显式锁定编码，不依赖平台 locale 推断
+            // （Windows 默认 cp936 会让中文输出破坏协议，已在测试中实测复现）。
+            .env("PYTHONIOENCODING", "utf-8");
         Self::spawn_command(command, token).await
     }
 

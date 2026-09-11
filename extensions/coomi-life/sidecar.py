@@ -2078,6 +2078,13 @@ def serve_stdio(root: Path, token: str) -> int:
 
 
 def main() -> int:
+    # stdio 协议是 UTF-8 JSON 行；Windows 等平台默认 stdout 走本地编码（cp936），
+    # 中文输出会破坏协议（官方测试套件曾因此在 Windows 上失败），这里显式锁定。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser()
     parser.add_argument("--stdio", action="store_true", required=True)
     parser.add_argument("--state-root", type=Path, required=True)
