@@ -28,6 +28,8 @@ export class DemoTransport implements Transport {
     this.after(240, () => this.emitState('open'))
   }
 
+  get alive(): boolean { return !this.closed }
+
   close(): void {
     this.closed = true
     this.aborting = true

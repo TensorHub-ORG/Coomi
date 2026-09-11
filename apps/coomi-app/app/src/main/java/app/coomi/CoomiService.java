@@ -116,11 +116,11 @@ public class CoomiService extends Service {
     }
 
     @Override public IBinder onBind(Intent intent) { return mBinder; }
-    @Override
-    public void onCreate() {
+    @Override public void onCreate() {
         Logger.logInfo(LOG_TAG, "Native service created");
         mExecutor.execute(() -> {
             try {
+                ensureTermuxProperties();
                 ensureRuntimeManifestCurrent();
                 ensureBundledRuntimeArtifactsCurrent();
             } catch (Exception error) {
@@ -241,6 +241,7 @@ public class CoomiService extends Service {
                 }
 
                 callback.onStep("准备 Rust 运行目录");
+                ensureTermuxProperties();
                 CommandResult directories = execTermux(
                     "mkdir -p " + shellQuote(home() + "/.coomi/config")
                         + " " + shellQuote(home() + "/.coomi/sessions")
@@ -338,6 +339,48 @@ public class CoomiService extends Service {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * 幂等写入 ~/.termux/termux.properties：保证 allow-external-apps=true。
+     * 外部 app（如自动化侧）经 RUN_COMMAND 拉起 Termux 命令时，RunCommandService 会检查
+     * 该属性，缺失即拒绝执行并报 "requires allow-external-apps property"。Coomi 的引擎
+     * 与插件都需要这条路，因此由服务启动时自动补写；只补 Coomi 需要的键，用户已有配置
+     * 原样保留（键值冲突时改为 true，其余行不动）。
+     */
+    private void ensureTermuxProperties() {
+        try {
+            File directory = new File(TermuxConstants.TERMUX_DATA_HOME_DIR_PATH);
+            if (!directory.isDirectory() && !directory.mkdirs()) {
+                Logger.logError(LOG_TAG, "cannot create ~/.termux directory");
+                return;
+            }
+            File properties = new File(TermuxConstants.TERMUX_PROPERTIES_PRIMARY_FILE_PATH);
+            String content = properties.isFile() ? readText(properties) : "";
+            String key = TermuxConstants.PROP_ALLOW_EXTERNAL_APPS + "=true";
+            if (content.contains(key)) return;
+            String keyPrefix = TermuxConstants.PROP_ALLOW_EXTERNAL_APPS + "=";
+            StringBuilder updated = new StringBuilder();
+            boolean patched = false;
+            for (String line : content.split("\n", -1)) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty() && !trimmed.startsWith("#") && trimmed.startsWith(keyPrefix)) {
+                    if (!patched) {
+                        updated.append(key).append('\n');
+                        patched = true;
+                    }
+                    continue; // 丢弃旧值行（无论 true/false，统一替换为 true）
+                }
+                updated.append(line).append('\n');
+            }
+            if (!patched) updated.append(key).append('\n');
+            try (FileWriter writer = new FileWriter(properties)) {
+                writer.write(updated.toString());
+            }
+            Logger.logInfo(LOG_TAG, "termux.properties ensured allow-external-apps=true");
+        } catch (Exception e) {
+            Logger.logError(LOG_TAG, "failed to ensure termux.properties: " + e.getMessage());
+        }
     }
 
     private void removeLegacyRuntimePayloads() {

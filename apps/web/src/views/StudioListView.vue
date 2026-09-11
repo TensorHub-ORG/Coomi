@@ -39,6 +39,14 @@ function fmtTime(ts?: number) {
     </PageHead>
 
     <main class="body">
+      <section class="theater-intro">
+        <span class="tile"><CoomiIcon name="play" :size="18" /></span>
+        <div class="ti-text">
+          <b>角色剧场</b>
+          <span>在编辑器中用「人格预设」一键添加角色，进入聊天页开启剧场模式，角色们即可围绕话题互相对话，你随时可以插话。</span>
+        </div>
+      </section>
+
       <p v-if="studio.error" class="notice err">{{ studio.error }}</p>
       <p v-if="studio.loading" class="hint">加载中…</p>
       <p v-else-if="studio.studios.length === 0" class="empty">
@@ -87,6 +95,11 @@ function fmtTime(ts?: number) {
 .icon-btn.blue { color: var(--blue); }
 .notice { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; }
 .notice.err { background: color-mix(in srgb, var(--orange) 16%, var(--bg)); color: var(--orange); }
+.theater-intro { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 11px 12px; border: 1px solid var(--blue-border); border-radius: 12px; background: var(--blue-soft); }
+.theater-intro .tile { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--blue); color: #fff; }
+.ti-text { min-width: 0; }
+.ti-text b { display: block; font-size: 13px; font-weight: 650; color: var(--blue); }
+.ti-text span { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
 .hint { padding: 4px; text-align: center; font-size: 13px; color: var(--text-3); }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 16px; text-align: center; color: var(--text-3); }
 .empty b { font-size: 15px; color: var(--text); }

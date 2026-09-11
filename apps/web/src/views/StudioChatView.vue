@@ -26,12 +26,22 @@ const input = ref('')
 const scroller = ref<HTMLElement | null>(null)
 const showAtPicker = ref(false)
 const showWorkBoard = ref(false)
-const sending = ref(false)
+// 并发运行计数：剧场开演后仍可插话（第二个 sendMessage 流），首个流结束时
+// 不能把 sending 置回 false，因此由计数派生。
+const activeRunCount = ref(0)
+const sending = computed(() => activeRunCount.value > 0)
 const pendingUser = ref<StudioMessage | null>(null)
 const streamContentByMember = ref<Record<string, string>>({})
 const streamNotices = ref<string[]>([])
 const importedFiles = ref<string[]>([])
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
+
+/** 角色剧场：面板开关、话题、参演角色与运行状态。 */
+const theaterOpen = ref(false)
+const theaterTopic = ref('')
+const selectedActors = ref<string[]>([])
+const theaterRunning = ref(false)
+const theaterError = ref('')
 
 /** 顶部工具面板：默认收起，有待确认操作时强制展开。 */
 const toolsOpen = ref(false)
@@ -92,9 +102,13 @@ function onContentClick(event: MouseEvent) {
 /** 流式实时流只取最新一行，单行省略展示。每个成员独立保留，避免切换成员时覆盖内容。 */
 const activeMemberIds = computed(() => {
   const ids = Object.keys(streamContentByMember.value)
-  // SSE 状态事件可能被旧版 WebView 丢弃；发送期间至少展示主持人的执行气泡。
+  // SSE 状态事件可能被旧版 WebView 丢弃；发送期间至少展示一个执行气泡
+  //（剧场模式优先展示第一位参演角色，其余情况展示主持人）。
   if (ids.length > 0) return ids
-  if (sending.value && studio.host?.id) return [studio.host.id]
+  if (sending.value) {
+    if (theaterOpen.value && selectedActors.value.length > 0) return [selectedActors.value[0]]
+    if (studio.host?.id) return [studio.host.id]
+  }
   return []
 })
 const memberActive = computed(() => activeMemberIds.value.length > 0)
@@ -156,62 +170,106 @@ function removeImportedFile(path: string) {
   importedFiles.value = importedFiles.value.filter(item => item !== path)
 }
 
-async function send() {
-  const text = input.value.trim()
-  if (!text || sending.value) return
-  sending.value = true
+/** 流式事件统一处理：普通消息与剧场对谈共用（成员状态、增量、工具卡片、落库消息）。 */
+function handleStreamEvent(event: Record<string, any>) {
+  if (event.event_type === 'studio_user_message') return
+  if (event.event_type === 'studio_member_status') {
+    const memberId = String(event.member_id ?? '')
+    if (!memberId) return
+    const status = String(event.status)
+    studio.onMemberStatus(memberId, status as never)
+    if (['thinking', 'executing'].includes(status)) {
+      if (!(memberId in streamContentByMember.value)) streamContentByMember.value[memberId] = ''
+    } else if (['done', 'failed'].includes(status)) {
+      delete streamContentByMember.value[memberId]
+    }
+  } else if (event.event_type === 'studio_text_delta') {
+    const memberId = String(event.member_id ?? '')
+    if (!memberId) return
+    streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
+  } else if (event.event_type === 'studio_reasoning_delta') {
+    const memberId = String(event.member_id ?? '')
+    if (!memberId) return
+    streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
+  } else if (event.event_type === 'studio_stream_reset') {
+    const memberId = String(event.member_id ?? '')
+    if (memberId) streamContentByMember.value[memberId] = ''
+  } else if (['studio_tool_start', 'studio_tool_done', 'studio_tool_approval'].includes(String(event.event_type))) {
+    studio.onToolEvent(event)
+  } else if (event.event_type === 'studio_error') {
+    streamNotices.value.push(String(event.message ?? '成员执行出错'))
+  } else if (event.event_type === 'studio_message') {
+    const memberId = String(event.message?.senderId ?? '')
+    if (memberId) delete streamContentByMember.value[memberId]
+  }
+}
+
+/** 统一发送入口：计入并发计数，只有最后一个流结束时才清理流式状态。 */
+async function dispatch(displayText: string, requestText: string) {
+  activeRunCount.value += 1
   streamNotices.value = []
-  const fileNames = importedFiles.value.map(path => path.split('/').pop() || '文件')
-  const displayText = [text, ...fileNames.map(n => `📎 ${n}`)].filter(Boolean).join('\n')
   pendingUser.value = {
     id: `pending-${Date.now()}`, senderId: 'user', senderName: '我', content: displayText,
     mentions: [], timestamp: Date.now(), type: 'text',
   }
+  scrollToBottom()
+  try {
+    await studio.sendMessage(requestText, handleStreamEvent)
+  } finally {
+    pendingUser.value = null
+    activeRunCount.value = Math.max(0, activeRunCount.value - 1)
+    if (activeRunCount.value === 0) streamContentByMember.value = {}
+    await studio.fetchMessages()
+  }
+}
+
+async function send() {
+  const text = input.value.trim()
+  // 剧场模式开启时允许插话：即使已有流在跑（sending）也放行普通消息，
+  // 该消息会作为用户消息写入会话并路由给主持人回应，角色们照常继续。
+  if (!text || (sending.value && !theaterOpen.value)) return
+  const fileNames = importedFiles.value.map(path => path.split('/').pop() || '文件')
+  const displayText = [text, ...fileNames.map(n => `📎 ${n}`)].filter(Boolean).join('\n')
   const fileInstruction = importedFiles.value.length ? `请读取这些已导入文件：\n${importedFiles.value.join('\n')}` : ''
   const requestText = [text, fileInstruction].filter(Boolean).join('\n\n')
   input.value = ''
   importedFiles.value = []
   toolsTouched.value = false
-  scrollToBottom()
-  try {
-    await studio.sendMessage(requestText, (event) => {
-      if (event.event_type === 'studio_user_message') return
-      if (event.event_type === 'studio_member_status') {
-        const memberId = String(event.member_id ?? '')
-        if (!memberId) return
-        const status = String(event.status)
-        studio.onMemberStatus(memberId, status as never)
-        if (['thinking', 'executing'].includes(status)) {
-          if (!(memberId in streamContentByMember.value)) streamContentByMember.value[memberId] = ''
-        } else if (['done', 'failed'].includes(status)) {
-          delete streamContentByMember.value[memberId]
-        }
-      } else if (event.event_type === 'studio_text_delta') {
-        const memberId = String(event.member_id ?? '')
-        if (!memberId) return
-        streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
-      } else if (event.event_type === 'studio_reasoning_delta') {
-        const memberId = String(event.member_id ?? '')
-        if (!memberId) return
-        streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
-      } else if (event.event_type === 'studio_stream_reset') {
-        const memberId = String(event.member_id ?? '')
-        if (memberId) streamContentByMember.value[memberId] = ''
-      } else if (['studio_tool_start', 'studio_tool_done', 'studio_tool_approval'].includes(String(event.event_type))) {
-        studio.onToolEvent(event)
-      } else if (event.event_type === 'studio_error') {
-        streamNotices.value.push(String(event.message ?? '成员执行出错'))
-      } else if (event.event_type === 'studio_message') {
-        const memberId = String(event.message?.senderId ?? '')
-        if (memberId) delete streamContentByMember.value[memberId]
-      }
-    })
-  } finally {
-    pendingUser.value = null
-    streamContentByMember.value = {}
-    await studio.fetchMessages()
-    sending.value = false
-  }
+  await dispatch(displayText, requestText)
+}
+
+function toggleTheater() {
+  theaterOpen.value = !theaterOpen.value
+  if (!theaterOpen.value) theaterError.value = ''
+}
+
+function toggleActor(id: string) {
+  const index = selectedActors.value.indexOf(id)
+  if (index >= 0) selectedActors.value.splice(index, 1)
+  else if (selectedActors.value.length < 3) selectedActors.value.push(id)
+}
+
+/**
+ * 开演：按现有 studio.sendMessage 协议发送一条编排指令消息。
+ * 指令里带 @角色名，Rust 侧 route_message 会把所选角色都加入发言队列；
+ * 成员系统提示词要求「需要其他成员参与时 @ 它」，回复中的 @ 会触发对方
+ * 继续发言，从而形成轮流对谈（编排指令级实现，无需改动协议）。
+ */
+async function startTheater() {
+  const topic = theaterTopic.value.trim()
+  if (!topic) { theaterError.value = '请输入话题'; return }
+  const actorIds = selectedActors.value
+  if (actorIds.length < 2 || actorIds.length > 3) { theaterError.value = '请选择 2-3 位角色'; return }
+  if (sending.value) { theaterError.value = '当前有对话进行中，请稍候再开演'; return }
+  const names = actorIds
+    .map(id => studio.members.find(m => m.id === id)?.name ?? '')
+    .filter(Boolean)
+  if (names.length < 2) { theaterError.value = '所选角色不存在，请重新选择'; return }
+  const instruction = `请${names.map(n => `@${n}`).join('、')}围绕「${topic}」即兴对话，按「${names.join('：…\n')}：…」交替发言，每人至少 2 轮，先${names[0]}开始。`
+  theaterRunning.value = true
+  theaterError.value = ''
+  await dispatch(instruction, instruction)
+  theaterRunning.value = false
 }
 
 function fmtTime(ts: number) {
@@ -223,12 +281,15 @@ function fmtTime(ts: number) {
   <div class="page">
     <PageHead :title="studio.currentStudio?.name ?? '工作室'" @back="goBack(router, '/studio')">
       <template #right>
+        <button class="icon-btn" :class="{ on: theaterOpen }" aria-label="角色剧场" @click="toggleTheater"><CoomiIcon name="play" :size="18" /></button>
         <button class="icon-btn" aria-label="工单看板" @click="showWorkBoard = true"><CoomiIcon name="todo" :size="18" /></button>
         <button class="icon-btn" aria-label="编辑" @click="router.push(`/studio/${studioId}/edit`)"><CoomiIcon name="pencil" :size="18" /></button>
       </template>
     </PageHead>
 
     <StudioMemberStrip />
+
+    <div v-if="theaterOpen && !theaterRunning" class="theater-hint">角色剧场已开启：输入话题、选择 2-3 位角色后点「开演」，角色们即兴对谈；对谈中你随时可以插话。</div>
 
     <!-- ── 顶部半屏工具瀑布流（可展开/收起） ── -->
     <div class="tool-panel">
@@ -311,6 +372,28 @@ function fmtTime(ts: number) {
     </main>
 
     <div class="composer">
+      <div v-if="theaterOpen" class="theater-panel">
+        <div class="theater-head">
+          <b>角色剧场</b>
+          <span class="theater-sub">角色互相对话，你随时插嘴</span>
+          <button type="button" class="theater-close" aria-label="关闭剧场模式" @click="toggleTheater"><CoomiIcon name="close" :size="14" /></button>
+        </div>
+        <label class="theater-field"><span>话题</span><input v-model="theaterTopic" placeholder="例如：周末去哪里玩" /></label>
+        <div class="theater-field">
+          <span>角色（2-3 位）</span>
+          <div class="actor-chips">
+            <button v-for="m in studio.members" :key="m.id" type="button" class="actor-chip" :class="{ on: selectedActors.includes(m.id) }" @click="toggleActor(m.id)">
+              {{ m.name }}<em v-if="m.role === 'actor'">演员</em>
+            </button>
+          </div>
+        </div>
+        <div class="theater-foot">
+          <span v-if="theaterError" class="theater-err">{{ theaterError }}</span>
+          <span v-else-if="theaterRunning" class="theater-run">对谈进行中…</span>
+          <button v-if="theaterRunning" type="button" class="theater-btn stop" @click="studio.stopRun()"><CoomiIcon name="stop" :size="13" />停止</button>
+          <button v-else type="button" class="theater-btn go" :disabled="!theaterTopic.trim() || selectedActors.length < 2" @click="startTheater"><CoomiIcon name="play" :size="13" />开演</button>
+        </div>
+      </div>
       <div v-if="importedFiles.length" class="attachments">
         <span v-for="path in importedFiles" :key="path" class="attachment">
           <CoomiIcon name="fileRead" :size="14" />
@@ -321,8 +404,8 @@ function fmtTime(ts: number) {
       <div class="input-row">
         <button class="at-btn" aria-label="提及成员" @click="showAtPicker = !showAtPicker"><CoomiIcon name="at" :size="18" /></button>
         <button v-if="hasNative" class="file-btn" aria-label="导入文件" @click="importFiles"><CoomiIcon name="fileRead" :size="18" /></button>
-        <input v-model="input" placeholder="输入消息，@成员 直接指派…" @keyup.enter="send" />
-        <button v-if="sending" class="send-btn stop" aria-label="停止" @click="studio.stopRun()"><CoomiIcon name="stop" :size="15" /></button>
+        <input v-model="input" :placeholder="theaterOpen ? '输入消息即可插话，@成员 直接指派…' : '输入消息，@成员 直接指派…'" @keyup.enter="send" />
+        <button v-if="sending && !theaterOpen" class="send-btn stop" aria-label="停止" @click="studio.stopRun()"><CoomiIcon name="stop" :size="15" /></button>
         <button v-else class="send-btn" :disabled="!input.trim() && !importedFiles.length" @click="send"><CoomiIcon name="arrowRight" :size="16" /></button>
       </div>
     </div>
@@ -339,6 +422,30 @@ function fmtTime(ts: number) {
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); position: relative; }
 .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; background: none; color: var(--text-2); }
+.icon-btn.on { color: var(--blue); background: var(--blue-soft); border-radius: 10px; }
+
+/* ── 角色剧场 ── */
+.theater-hint { flex-shrink: 0; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--blue-soft); color: var(--blue); font-size: 11.5px; line-height: 1.5; }
+.theater-panel { padding: 9px 10px; margin-bottom: 8px; border: 1px solid var(--blue-border); border-radius: 12px; background: var(--bg-elev); }
+.theater-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.theater-head b { font-size: 13px; color: var(--text); }
+.theater-sub { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-3); }
+.theater-close { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 50%; background: none; color: var(--text-3); }
+.theater-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.theater-field > span { font-size: 11px; color: var(--text-3); }
+.theater-field input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--fill); color: var(--text); font-size: 12.5px; }
+.actor-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.actor-chip { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--bg); color: var(--text-2); font-size: 12px; }
+.actor-chip em { font-style: normal; font-size: 9.5px; padding: 1px 5px; border-radius: var(--r-pill); background: var(--fill-strong); color: var(--text-3); }
+.actor-chip.on { border-color: var(--blue-border); background: var(--blue-soft); color: var(--blue); }
+.actor-chip.on em { background: color-mix(in srgb, var(--blue) 14%, transparent); color: var(--blue); }
+.theater-foot { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.theater-err { flex: 1; font-size: 11.5px; color: var(--danger); }
+.theater-run { flex: 1; font-size: 11.5px; color: var(--orange); }
+.theater-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 76px; height: 30px; border: 0; border-radius: 8px; font-size: 12.5px; font-weight: 600; }
+.theater-btn.go { background: var(--blue); color: #fff; }
+.theater-btn.go:disabled { opacity: .45; }
+.theater-btn.stop { background: var(--fill-strong); color: var(--text-2); }
 
 /* ── 顶部工具面板（半屏、可展开收起） ── */
 .tool-panel {

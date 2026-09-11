@@ -41,6 +41,8 @@ interface Window {
     /** 测试通道更新红点开关（默认关）。 */
     getTestUpdateDotEnabled?(): boolean
     setTestUpdateDotEnabled?(enabled: boolean): void
+    /** F8 语音陪伴 TTS 朗读（text 为纯文本；无桥时前端静默降级，仅留日志）。 */
+    speak?(text: string): void
   }
 }
 

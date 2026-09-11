@@ -61,6 +61,10 @@ onMounted(() => {
   <div class="page">
     <PageHead title="会话历史" @back="router.push('/')">
       <template #right>
+        <button class="tm" aria-label="对话时光机" @click="router.push('/life/timemachine')">
+          <CoomiIcon name="clock" :size="14" />
+          <span>对话时光机</span>
+        </button>
         <button class="icon-btn blue" aria-label="新对话" @click="startNew">
           <CoomiIcon name="plus" />
         </button>
@@ -154,6 +158,13 @@ onMounted(() => {
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .icon-btn.blue { color: var(--blue); }
+.tm {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 11px; margin-right: 2px;
+  border-radius: var(--r-pill); background: var(--fill-strong);
+  color: var(--text-2); font-size: 12px; font-weight: 550; white-space: nowrap;
+}
+.tm:active { background: var(--fill-press); }
 
 .searchrow { flex-shrink: 0; padding: 10px 12px 4px; background: var(--page); }
 .search {
