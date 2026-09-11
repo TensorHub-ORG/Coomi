@@ -61,7 +61,9 @@ impl TaskStatus {
         use TaskStatus as S;
         matches!(
             (self, next),
-            (S::Queued, S::WaitingLock | S::Running | S::Cancelled)
+            // Queued → Interrupted：进程可能死在“已入队、未开跑”之间，重启恢复
+            // 必须能把这类僵尸记录转成 Interrupted，否则引擎每次启动都恢复失败。
+            (S::Queued, S::WaitingLock | S::Running | S::Cancelled | S::Interrupted)
                 | (
                     S::WaitingLock,
                     S::Running | S::PausePending | S::Cancelled | S::Interrupted | S::Conflict
@@ -789,11 +791,15 @@ impl TaskManager {
             .map(|record| record.id.clone())
             .collect::<Vec<_>>();
         for id in ids {
-            self.transition(
+            // 单条恢复失败绝不能让引擎起不来：1.4.7 曾因这里 `?` 上抛导致
+            // “启动即退出”，Android 监控再自动拉起，形成重启风暴。
+            if let Err(error) = self.transition(
                 &id,
                 TaskStatus::Interrupted,
                 Some("engine restarted; explicit retry is required"),
-            )?;
+            ) {
+                eprintln!("[task-manager] recover interrupted {id}: {error:#}");
+            }
         }
         Ok(())
     }
@@ -951,6 +957,26 @@ mod tests {
             .expect("restart task");
         drop(manager);
         let reopened = TaskManager::open(home.path()).expect("reopen manager");
+        assert_eq!(
+            reopened.get(&record.id).expect("restored task").status,
+            TaskStatus::Interrupted
+        );
+    }
+
+    // 回归（1.4.7 重启风暴）：进程死在“已入队、未开跑”时磁盘留下 Queued 记录
+    // （create 即持久化），重启恢复必须能把它转为 Interrupted，而不是让引擎
+    // 启动直接失败。
+    #[test]
+    fn reopen_recovers_persisted_queued_task() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = TaskManager::open(home.path()).expect("open manager");
+        let record = manager
+            .create("session", "agent", TaskPriority::Normal, Vec::new())
+            .expect("create task");
+        assert_eq!(record.status, TaskStatus::Queued);
+        drop(manager);
+
+        let reopened = TaskManager::open(home.path()).expect("reopen must not fail");
         assert_eq!(
             reopened.get(&record.id).expect("restored task").status,
             TaskStatus::Interrupted

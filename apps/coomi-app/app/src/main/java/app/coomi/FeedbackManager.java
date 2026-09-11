@@ -240,7 +240,11 @@ public final class FeedbackManager {
                 int count = input.read(buffer);
                 String text = count > 0 ? new String(buffer, 0, count, StandardCharsets.UTF_8) : "";
                 int newline = text.indexOf('\n');
-                return (newline >= 0 ? text.substring(0, newline) : text).trim();
+                String version = (newline >= 0 ? text.substring(0, newline) : text).trim();
+                // 引导脚本曾把 bash 的 stderr 写进标记文件（如 rootfs 里 Termux 遗留
+                // profile 路径的 Permission denied），非法内容只会污染诊断，按缺失处理。
+                if (!version.matches("coomi [0-9A-Za-z.\\-]{1,40}")) return "";
+                return version;
             }
         } catch (Exception ignored) {
             return "";

@@ -38,6 +38,11 @@ public class CoomiEngineMonitor extends Service {
     private static final int MONITOR_INTERVAL_MS = 30000; // 30s
     private static final int RESTART_DELAY_MS = 5000;
     private static final int MAX_RESTART_ATTEMPTS = 5;
+    // 引擎连续存活超过该时长才视为真正稳定、清零重启计数；1.4.7 的重启风暴里
+    // 引擎“先启动成功、1~2 秒后恢复阶段崩溃”，若启动成功即清零，熔断永远触发不了。
+    private static final long ENGINE_STABLE_MS = 90 * 1000L;
+    // 同一重启原因的反馈入队节流：死循环场景下每 5 秒一次重启，会刷爆反馈通道。
+    private static final long RESTART_FEEDBACK_THROTTLE_MS = 5 * 60 * 1000L;
     private static final long WAKELOCK_TIMEOUT_MS = 15 * 60 * 1000L;
     private static final long WAKELOCK_REACQUIRE_INTERVAL_MS = 10 * 60 * 1000L;
 
@@ -53,6 +58,11 @@ public class CoomiEngineMonitor extends Service {
     private int mUnhealthyChecks = 0;
     private boolean mRestartInFlight = false;
     private String mCurrentStatus = "Starting...";
+    /** 本次“运行中”周期的开始时间；0 表示引擎当前不处于运行状态。 */
+    private long mEngineRunningSinceMs = 0;
+    /** 重启原因 -> 最近一次反馈入队时间（静态：进程存活期内跨 Service 重建生效）。 */
+    private static final Object sFeedbackThrottleLock = new Object();
+    private static final java.util.HashMap<String, Long> sLastRestartFeedbackAt = new java.util.HashMap<>();
 
     /** Task state from the Web bridge: done or running:&lt;count&gt;. */
     private static volatile String sTaskStatus = null;
@@ -253,7 +263,13 @@ public class CoomiEngineMonitor extends Service {
             String status = result.stdout.trim();
             if ("running".equals(status)) {
                 mUnhealthyChecks = 0;
-                mRestartAttempts = 0;
+                long now = System.currentTimeMillis();
+                if (mEngineRunningSinceMs == 0) {
+                    mEngineRunningSinceMs = now;
+                } else if (now - mEngineRunningSinceMs >= ENGINE_STABLE_MS) {
+                    // 连续稳定运行足够久才算恢复，清零重启计数。
+                    mRestartAttempts = 0;
+                }
                 updateStatus("运行中");
             } else if ("starting".equals(status)) {
                 // `starting` also means the native process is alive but its
@@ -277,6 +293,14 @@ public class CoomiEngineMonitor extends Service {
                 restartEngine("引擎健康检查连续失败，已自动重启");
             } else if ("stopped".equals(status)) {
                 mUnhealthyChecks = 0;
+                long now = System.currentTimeMillis();
+                long uptimeMs = mEngineRunningSinceMs > 0 ? now - mEngineRunningSinceMs : -1;
+                mEngineRunningSinceMs = 0;
+                if (uptimeMs >= 0 && uptimeMs < ENGINE_STABLE_MS) {
+                    // 快速崩溃：不重置重启计数，让 MAX_RESTART_ATTEMPTS 熔断可以生效。
+                    Logger.logWarn(LOG_TAG, "Engine crashed " + uptimeMs
+                        + "ms after start; crash-loop guard keeps restart attempt count");
+                }
                 Logger.logInfo(LOG_TAG, "Engine not running, restarting...");
                 updateStatus("重启中…");
                 restartEngine("引擎进程意外退出，已自动拉起");
@@ -297,17 +321,14 @@ public class CoomiEngineMonitor extends Service {
         mRestartAttempts++;
         mRestartInFlight = true;
         Logger.logInfo(LOG_TAG, "Restart attempt " + mRestartAttempts);
-        // 性能/稳定性信号自动入队：引擎异常重启属用户可感知的可用性问题，
-        // 记录到反馈 Outbox（去重），用户打开「问题反馈与诊断」页时授权上传。
-        final String feedbackReason = reason + "（第 " + mRestartAttempts + " 次）";
-        new Thread(() -> FeedbackManager.enqueueNativeError(CoomiEngineMonitor.this,
-            "performance", "引擎异常自动重启", feedbackReason, null),
-            "coomi-feedback-restart").start();
+        enqueueRestartFeedbackThrottled(reason, mRestartAttempts);
 
         mCoomiService.startEngine(result -> {
             mRestartInFlight = false;
             if (result.success) {
-                mRestartAttempts = 0;
+                // 不在这里清零 mRestartAttempts：进程拉起成功不代表稳定
+                // （1.4.7 曾启动 1~2 秒后即崩），稳定 ENGINE_STABLE_MS 后由
+                // 监控轮询的 running 分支清零，保证熔断在快速崩溃循环下生效。
                 mHandler.postDelayed(() -> updateStatus("运行中"), RESTART_DELAY_MS);
             } else {
                 updateStatus("失败 (尝试 " + mRestartAttempts + "/" + MAX_RESTART_ATTEMPTS + ")");
@@ -316,6 +337,23 @@ public class CoomiEngineMonitor extends Service {
                 }
             }
         });
+    }
+
+    /**
+     * 重启反馈入队（5 分钟同因节流）：死循环场景下每几秒就重启一次，
+     * 不节流会把反馈通道刷爆（1.4.7 两台设备两天各产生数百条）。
+     */
+    private void enqueueRestartFeedbackThrottled(String reason, int attempt) {
+        long now = System.currentTimeMillis();
+        synchronized (sFeedbackThrottleLock) {
+            Long last = sLastRestartFeedbackAt.get(reason);
+            if (last != null && now - last < RESTART_FEEDBACK_THROTTLE_MS) return;
+            sLastRestartFeedbackAt.put(reason, now);
+        }
+        final String feedbackReason = reason + "（第 " + attempt + " 次）";
+        new Thread(() -> FeedbackManager.enqueueNativeError(CoomiEngineMonitor.this,
+            "performance", "引擎异常自动重启", feedbackReason, null),
+            "coomi-feedback-restart").start();
     }
 
     // ── Notification ──
