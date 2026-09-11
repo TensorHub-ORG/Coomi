@@ -5,6 +5,7 @@ import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { useStudioStore, type StudioMember, type ToolPermission } from '@/stores/studio'
 import { useConfigStore } from '@/stores/config'
+import { THEATER_PRESETS, buildActorSystemPrompt, uniqueMemberName, type TheaterPreset } from '@/utils/theaterPresets'
 import { goBack } from '@/bridge/navigation'
 
 const router = useRouter()
@@ -68,6 +69,24 @@ function addMember() {
 function removeMember(id: string) {
   members.value = members.value.filter(m => m.id !== id)
   if (hostId.value === id) hostId.value = members.value[0]?.id ?? ''
+}
+
+/** 从人格预设一键添加剧场演员：中文名（重名加序号）+ actor 职责 + 人设 systemPrompt + 默认模型。 */
+function addActor(preset: TheaterPreset) {
+  if (members.value.length >= 12) { error.value = '成员数已达上限（12 个）'; return }
+  const id = `member-${Date.now().toString(36)}-${members.value.length + 1}`
+  const provider = config.providers.find(p => p.hasKey && p.models.length > 0)
+  members.value.push({
+    id,
+    name: uniqueMemberName(preset.label, members.value),
+    providerId: provider?.id ?? '',
+    model: provider?.models[0] ?? '',
+    role: 'actor',
+    systemPrompt: buildActorSystemPrompt(preset),
+    toolPermission: 'ask',
+    status: 'idle',
+  })
+  if (!hostId.value) hostId.value = id
 }
 
 function setHost(id: string) { hostId.value = id }
@@ -165,6 +184,19 @@ async function save() {
         </div>
       </section>
 
+      <section class="group">
+        <div class="group-head">
+          <p class="sec-label">角色剧场 · 从人格预设添加角色</p>
+        </div>
+        <p class="theater-tip">点击人格预设，一键添加一位保持人设的剧场演员（职责为 actor，系统提示词已按人设写好），可在上方成员卡片中继续调整。</p>
+        <div class="preset-grid">
+          <button v-for="p in THEATER_PRESETS" :key="p.value" type="button" class="preset-chip" @click="addActor(p)">
+            <span class="preset-name">{{ p.label }}</span>
+            <span class="preset-desc">{{ p.persona }}</span>
+          </button>
+        </div>
+      </section>
+
       <button class="save-btn" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存工作室' }}</button>
     </main>
   </div>
@@ -195,4 +227,10 @@ async function save() {
 .member-grid select { height: 32px; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--fill); color: var(--text); font-size: 11px; }
 .save-btn { width: 100%; min-height: 42px; border: 0; border-radius: 8px; background: var(--blue); color: #fff; font-size: 13px; font-weight: 600; }
 .save-btn:disabled { opacity: .5; }
+.theater-tip { margin: 0 0 10px; font-size: 11.5px; line-height: 1.55; color: var(--text-3); }
+.preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.preset-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); text-align: left; }
+.preset-chip:active { background: var(--blue-soft); border-color: var(--blue-border); }
+.preset-name { font-size: 13px; font-weight: 650; color: var(--text); }
+.preset-desc { font-size: 10.5px; line-height: 1.45; color: var(--text-3); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 </style>

@@ -155,7 +155,9 @@ export const useSessionStore = defineStore('session', () => {
 
   /** 换 sessionId 后必须重连：WS 的路径里带着 session id。 */
   function connect(wsUrl?: string) {
-    if (transport.value && connectedSessionId === sessionId.value) return
+    // 已有连接且仍然存活（打开/连接中/重连等待中）就复用；死连接（重试耗尽停摆）必须重建，
+    // 否则退出聊天页再进来会一直卡在「已停止重连」，发消息也被静默丢弃。
+    if (transport.value && connectedSessionId === sessionId.value && transport.value.alive) return
     const targetSessionId = sessionId.value
     const previous = transport.value
     transport.value = null
@@ -383,7 +385,11 @@ export const useSessionStore = defineStore('session', () => {
         // 气泡投递完成：把最后一条 assistant 标记为生命体气泡并复位投递态。
         lifeDelivering.value = false
         const last = timeline.value[timeline.value.length - 1]
-        if (last?.kind === 'assistant') last.life = true
+        if (last?.kind === 'assistant') {
+          last.life = true
+          // 回填投递触发类型（morning/egg/milestone_stage/everyday），供气泡卡片定制渲染。
+          if (ev.trigger) last.lifeTrigger = ev.trigger
+        }
         void refreshLifeUnread()
         break
       }
@@ -520,6 +526,12 @@ export const useSessionStore = defineStore('session', () => {
   function sendMessage(text: string) {
     const trimmed = text.trim()
     if (!trimmed) return
+    // 传输层已停摆时先重建连接，避免消息被静默丢弃（1006 重试耗尽后不自动恢复的历史问题）。
+    if (transport.value && !transport.value.alive) {
+      transport.value = null
+      connectedSessionId = ''
+      connect(connection.wsUrl || undefined)
+    }
     // 编辑覆盖模式：截断目标轮次（与引擎 edit_turn 行为一致），以新文本重新执行。
     const edit = pendingEdit.value
     if (edit) {
@@ -1056,7 +1068,7 @@ export const useSessionStore = defineStore('session', () => {
     return excerpt
   }
 
-  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, collaboration, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, clearSessionData, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, prepareTurnFeedback, sendTurnFeedback, finishTurnFeedback }
+  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, collaboration, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, clearSessionData, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, pushNotice, prepareTurnFeedback, sendTurnFeedback, finishTurnFeedback }
 })
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }

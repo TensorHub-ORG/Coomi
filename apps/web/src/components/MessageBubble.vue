@@ -11,6 +11,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { AssistantMessage, UserMessage } from '@/stores/viewModel'
 import { useSessionStore } from '@/stores/session'
 import { renderMarkdown } from '@/utils/markdown'
+import { speak } from '@/bridge/tts'
+import { apiSend } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
 
@@ -27,6 +29,12 @@ const isUser = computed(() => props.msg.kind === 'user')
 const isAssistant = computed(() => props.msg.kind === 'assistant')
 /** 生命体主动消息（气泡/开场问候）：带生命体标记的渲染样式。 */
 const isLife = computed(() => isAssistant.value && (props.msg as AssistantMessage).life === true)
+/** 生命体主动消息的投递触发类型（life_delivered 事件回填）。 */
+const lifeTrigger = computed(() => (props.msg as AssistantMessage).lifeTrigger)
+const isMorning = computed(() => lifeTrigger.value === 'morning')
+const isEgg = computed(() => lifeTrigger.value === 'egg')
+/** 早安播报 / 每日彩蛋：带小标题的卡片形态（其余 life 消息保持现状）。 */
+const isLifeCard = computed(() => isLife.value && (isMorning.value || isEgg.value))
 /** 只有最新一条用户消息可编辑重发。 */
 const isLastUser = computed(() => isUser.value && session.lastUserMessage === props.msg)
 /** 只有最新一条助手消息可回撤。 */
@@ -157,6 +165,44 @@ async function copyAll() {
   copied.value = true
   setTimeout(() => { copied.value = false }, 1400)
 }
+
+/** 简单去掉 markdown 符号，得到适合朗读的纯文本。 */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')              // 代码块整体略过
+    .replace(/`([^`]*)`/g, '$1')                  // 行内代码取文字
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')     // 图片取 alt
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')      // 链接取文案
+    .replace(/^#{1,6}\s+/gm, '')                  // 标题符号
+    .replace(/[*_~>|]/g, '')                      // 强调/引用/表格符号
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** F8 语音陪伴：朗读整条消息（流式中不提供，内容还没定稿）。 */
+function readAloud() {
+  speak(stripMarkdown(props.msg.content))
+}
+
+const saving = ref(false)
+const savedText = ref('')
+
+/** 收藏进记忆：把整条消息写入 memory.jsonl（供「最近记忆」展示）。 */
+async function saveToMemory() {
+  if (saving.value) return
+  saving.value = true
+  savedText.value = ''
+  try {
+    await apiSend<{ ok: boolean }>('/api/life/memory', 'POST', { text: props.msg.content })
+    session.pushNotice('success', '已收藏进记忆')
+    savedText.value = '已收藏'
+    setTimeout(() => { savedText.value = '' }, 1400)
+  } catch (reason) {
+    session.pushNotice('error', `收藏失败：${reason instanceof Error ? reason.message : String(reason)}`)
+  } finally {
+    saving.value = false
+  }
+}
 </script>
 
 <template>
@@ -177,10 +223,42 @@ async function copyAll() {
   </div>
 
   <div v-else class="assistant" :class="{ life: isLife }">
-    <div v-if="isLife" class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
-    <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" @click="onBlockClick" />
-    <FileInline v-if="filePaths.length" :paths="filePaths" />
-    <span v-if="streaming" class="stream-caret" />
+    <!-- 早安播报 / 每日彩蛋：顶部小标题 + 正文的卡片形态，右上角朗读。 -->
+    <div v-if="isLifeCard" class="life-card" :class="lifeTrigger">
+      <div class="life-card-head">
+        <span class="life-card-title">
+          <CoomiIcon :name="isMorning ? 'sun' : 'sparkle'" :size="14" />
+          <span>{{ isMorning ? '早安播报' : '每日彩蛋' }}</span>
+        </span>
+        <button v-if="!streaming" class="act speak-act" @click="readAloud">
+          <CoomiIcon name="play" :size="13" />
+          <span>朗读</span>
+        </button>
+      </div>
+      <div v-for="(h, i) in blocks" :key="i" class="md blk card-blk cascade" v-html="h" @click="onBlockClick" />
+      <FileInline v-if="filePaths.length" :paths="filePaths" />
+      <span v-if="streaming" class="stream-caret" />
+      <div v-if="isEgg" class="life-card-foot">
+        <button class="act save-act" :disabled="saving" @click="saveToMemory">
+          <CoomiIcon name="memory" :size="13" />
+          <span>{{ saving ? '收藏中…' : savedText || '收藏进记忆' }}</span>
+        </button>
+      </div>
+    </div>
+
+    <template v-else>
+      <div v-if="isLife" class="life-head">
+        <div class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
+        <button v-if="!streaming" class="act speak-act" @click="readAloud">
+          <CoomiIcon name="play" :size="13" />
+          <span>朗读</span>
+        </button>
+      </div>
+      <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" @click="onBlockClick" />
+      <FileInline v-if="filePaths.length" :paths="filePaths" />
+      <span v-if="streaming" class="stream-caret" />
+    </template>
+
     <div class="acts">
       <button class="act" @click="copyAll">
         <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
@@ -247,5 +325,57 @@ async function copyAll() {
   font-size: 12.5px; color: var(--text-3);
 }
 .act:active { background: var(--fill); color: var(--blue); }
+
+/* ── 生命体消息头部：tag 居左 + 朗读居右 ── */
+.life-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 6px;
+}
+.life-head .life-tag { margin: 0; }
+
+/* F8 语音陪伴：右上角小「朗读」按钮（复用 act 基础样式，仅缩小强化）。 */
+.speak-act {
+  height: 26px; padding: 0 8px;
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg));
+  color: var(--accent); font-size: 11.5px; font-weight: 650;
+}
+.speak-act:active { background: var(--accent-soft); color: var(--accent); }
+
+/* ── 早安播报 / 每日彩蛋卡片：顶部小标题 + 渐变高亮，移动端友好 ── */
+.life-card {
+  overflow: hidden;
+  padding: 10px 13px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 14px;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--accent-soft) 55%, var(--bg)), var(--bg) 58%);
+}
+.life-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: -10px -13px 2px; padding: 7px 9px 7px 12px;
+  background: color-mix(in srgb, var(--accent-soft) 78%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+}
+.life-card-title {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--accent); font-size: 12.5px; font-weight: 700;
+}
+/* 卡片内正文：去掉单条 life 消息的左边条/底色，交给卡片统一承载。 */
+.assistant.life .life-card .card-blk {
+  padding: 0; border-left: 0; border-radius: 0; background: transparent;
+}
+.life-card .card-blk + .card-blk { margin-top: 8px; }
+.life-card .stream-caret { margin-top: 6px; }
+.life-card-foot {
+  display: flex; justify-content: flex-end; margin-top: 5px;
+}
+/* 每日彩蛋右下角「收藏进记忆」：accent 描边胶囊，触屏友好。 */
+.save-act {
+  height: 28px; padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg));
+  color: var(--accent); font-size: 12px; font-weight: 650;
+}
+.save-act:active { background: var(--accent-soft); color: var(--accent); }
+.save-act:disabled { opacity: .55; }
 </style>
 

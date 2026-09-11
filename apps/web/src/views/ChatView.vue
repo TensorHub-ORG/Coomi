@@ -63,6 +63,18 @@ function syncScrollHost() {
 
 const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline))
 
+/** 生命体未读问候的触发类型 → 药丸标题（morning/egg 直接展示类型文案）。 */
+const LIFE_TRIGGER_LABELS: Record<string, string> = {
+  morning: '早安播报',
+  egg: '每日彩蛋',
+  milestone_stage: '里程碑时刻',
+  everyday: '日常问候',
+}
+const lifePillTitle = computed(() => {
+  const label = LIFE_TRIGGER_LABELS[session.lifeUnread[0]?.trigger ?? '']
+  return label || `${session.lifeUnreadName || '数字生命体'} 想对你说`
+})
+
 function syncDigitalLifeMode() {
   config.syncDigitalLifeEnabled()
   if (!session.isBusy) session.syncLifeMode()
@@ -233,7 +245,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
           @click="session.deliverLife()"
         >
           <CoomiIcon name="lifeRings" :size="15" />
-          <span class="life-pill-label">{{ session.lifeUnreadName || '数字生命体' }} 想对你说</span>
+          <span class="life-pill-label">{{ lifePillTitle }}</span>
           <span class="life-pill-preview">{{ session.lifeUnread[0].text }}</span>
         </button>
       </Transition>

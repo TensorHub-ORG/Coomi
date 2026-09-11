@@ -91,7 +91,10 @@ export const useStudioStore = defineStore('studio', () => {
   const notice = ref('')
   const streamingMembers = ref<Record<string, string>>({})
   const toolCards = ref<StudioToolCard[]>([])
-  let activeRequestAbort: AbortController | null = null
+  // 并发发送（如剧场对谈中插话）：running 由计数维护，activeRequestAborts 跟踪
+  // 全部活动流，停止时统一中止，避免第一个流结束时把 running 误置为 false。
+  let runningCount = 0
+  const activeRequestAborts = new Set<AbortController>()
 
   const members = computed(() => currentStudio.value?.members ?? [])
   const host = computed(() => members.value.find(m => m.id === currentStudio.value?.hostId) ?? members.value[0] ?? null)
@@ -275,6 +278,7 @@ export const useStudioStore = defineStore('studio', () => {
   async function sendMessage(content: string, onEvent?: (event: Record<string, any>) => void) {
     if (!currentStudio.value) return null
     error.value = ''
+    runningCount += 1
     running.value = true
     const studioIdNow = currentStudio.value.id
     let pollInFlight = false
@@ -298,7 +302,7 @@ export const useStudioStore = defineStore('studio', () => {
       }
     }
     const requestAbort = new AbortController()
-    activeRequestAbort = requestAbort
+    activeRequestAborts.add(requestAbort)
     try {
       const response = await authedFetch(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/messages`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -347,8 +351,9 @@ export const useStudioStore = defineStore('studio', () => {
       }
       return null
     } finally {
-      if (activeRequestAbort === requestAbort) activeRequestAbort = null
-      running.value = false
+      activeRequestAborts.delete(requestAbort)
+      runningCount -= 1
+      running.value = runningCount > 0
     }
   }
 
@@ -393,15 +398,15 @@ export const useStudioStore = defineStore('studio', () => {
   async function stopRun() {
     if (!currentStudio.value) return
     const id = currentStudio.value.id
-    // Release the long-lived SSE connection first so the stop request is not
-    // queued behind it by the WebView's per-host connection pool.
-    activeRequestAbort?.abort()
+    // Release every long-lived SSE connection first so the stop request is not
+    // queued behind them by the WebView's per-host connection pool.
+    for (const controller of [...activeRequestAborts]) controller.abort()
     try {
       await apiSend(`/api/studios/${encodeURIComponent(id)}/stop`, 'POST')
     } finally {
       // The server-side abort above still stops the member task if the request
       // reaches the engine after the reader has been closed.
-      activeRequestAbort?.abort()
+      for (const controller of [...activeRequestAborts]) controller.abort()
     }
   }
 
@@ -412,8 +417,9 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   function reset() {
-    activeRequestAbort?.abort()
-    activeRequestAbort = null
+    for (const controller of [...activeRequestAborts]) controller.abort()
+    activeRequestAborts.clear()
+    runningCount = 0
     currentStudio.value = null
     messages.value = []
     workItems.value = []

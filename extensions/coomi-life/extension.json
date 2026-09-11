@@ -1,19 +1,15 @@
 {
-  "version": 1,
+  "version": 2,
   "id": "coomi-life",
   "display_name": "Coomi Life",
   "experimental": true,
   "requires_runtime": "proot_linux",
   "requires_python": ">=3.11",
-  "dependencies": [
-    "aiohttp>=3.9,<4",
-    "numpy>=1.24,<3"
-  ],
-  "upstream": {
-    "repository": "https://github.com/ywbing-xrang/laap-AGI",
-    "commit": "fe98e1e61adefe5899a01db561143ee8f8c45086",
-    "license": "Apache-2.0",
-    "notice_file_present": false
+  "dependencies": [],
+  "engine": {
+    "name": "psi-v2",
+    "description": "Self-contained PSI-style cognitive engine: homeostatic needs (Dorner Psi), Russell circumplex emotion, multi-factor bond model, episodic memory with TF-IDF recall and Ebbinghaus decay, personality dynamics.",
+    "stdlib_only": true
   },
   "transport": {
     "kind": "json_rpc_stdio",
