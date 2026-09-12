@@ -1,10 +1,7 @@
 //! Git 面板 AI 能力：提交信息生成 / 变更总结 / 代码 review / 冲突解决建议 / README 生成。
 //!
-//! 复用 [`crate::deepseek`] 账号客户端（chat.deepseek.com 私有协议）：
-//! DeepSeek 账号模式下 `ProviderConfig.api_key` 即登录令牌，会话在首次调用时
-//! 懒创建并缓存在 [`ChatState`]。所有模型调用统一经过私有 [`AiGit::chat_once`]；
-//! 模型不可用（未登录/无令牌）或调用失败时，一律返回启发式降级文本（`Ok`），
-//! 绝不因 AI 失败而让上层 API 报错。
+//! 所有模型调用统一经过私有 [`AiGit::chat_once`]；模型不可用（未配置/无令牌）
+//! 或调用失败时，一律返回启发式降级文本（`Ok`），绝不因 AI 失败而让上层 API 报错。
 //!
 //! 注册方式（由调用方统一处理，本文件不修改 `lib.rs`）：
 //! ```text
@@ -12,7 +9,6 @@
 //! ```
 
 use crate::config::{ProviderConfig, ProviderKind};
-use crate::deepseek::client::{ChatState, chat_completion, create_session};
 use crate::git_engine::{FileEntry, GitEngine, ProjectInfo};
 use anyhow::{Context, Result, anyhow};
 use futures_util::StreamExt;
@@ -20,7 +16,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Duration;
 
 /// 单次补全输入的最大字符数，防止超长 diff 撑爆上下文。
@@ -66,8 +61,6 @@ pub struct ReviewIssue {
 /// 模型调用协议模式：决定 `chat_once` 走哪一套 API。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AiMode {
-    /// chat.deepseek.com 私有协议（账号登录，会话 + PoW）。
-    DeepSeekAccount,
     /// OpenAI 兼容 `POST {base}/chat/completions`（OpenAiCompatible / OpenAiResponses）。
     OpenAiCompatible,
     /// Anthropic Messages API（`POST {base}/v1/messages`）。
@@ -85,14 +78,14 @@ pub struct GitAiConfig {
     /// 是否启用独立配置。
     #[serde(default)]
     pub enabled: bool,
-    /// 协议：`openai_compatible`（默认）/ `anthropic` / `gemini` / `deepseek_account`。
+    /// 协议：`openai_compatible`（默认）/ `anthropic` / `gemini`。
     #[serde(default = "default_git_ai_kind")]
     pub kind: String,
     /// API 入口地址，如 `https://api.deepseek.com/v1`。
     /// 序列化输出 snake_case（与前端接口一致）；兼容早期 camelCase 文件。
     #[serde(default, alias = "baseUrl")]
     pub base_url: String,
-    /// API Key（`deepseek_account` 时为账号登录令牌）。
+    /// API Key（标准协议令牌）。
     #[serde(default, alias = "apiKey")]
     pub api_key: String,
     /// 模型名，如 `deepseek-chat`。
@@ -138,20 +131,18 @@ impl GitAiConfig {
 /// Git 面板 AI 助手：包装模型客户端，为 Git 场景提供模型能力与降级路径。
 pub struct AiGit {
     http: Client,
-    /// 访问令牌：DeepSeek 账号模式下即登录令牌；标准协议模式下为 API Key。
+    /// 访问令牌（API Key）。
     token: String,
     /// 模型名，如 "deepseek-chat"。
     model: String,
     /// 当前协议模式。
     mode: AiMode,
-    /// 标准协议（OpenAI 兼容 / Anthropic / Gemini）的 base_url；DeepSeek 账号模式不使用。
+    /// 标准协议（OpenAI 兼容 / Anthropic / Gemini）的 base_url。
     base_url: String,
-    /// 会话状态（chat_session_id 懒创建后缓存）。
-    state: Mutex<ChatState>,
 }
 
 impl AiGit {
-    /// 未登录的空助手（模型不可用，所有能力走降级路径）。
+    /// 未配置的空助手（模型不可用，所有能力走降级路径）。
     pub fn new() -> Self {
         Self::with_token("", "deepseek-chat")
     }
@@ -168,9 +159,8 @@ impl AiGit {
             http,
             token: token.into(),
             model: model.into(),
-            mode: AiMode::DeepSeekAccount,
+            mode: AiMode::OpenAiCompatible,
             base_url: String::new(),
-            state: Mutex::new(ChatState::new()),
         }
     }
 
@@ -188,15 +178,9 @@ impl AiGit {
     }
 
     /// 从 Provider 配置构造。所有「base_url + api_key 均非空」的 provider 都可用：
-    /// - DeepSeek 账号（chat.deepseek.com / DeepSeekAccount）走私有协议；
-    /// - 其余（OpenAI 兼容、Anthropic、Gemini）走各自标准协议。
+    /// OpenAI 兼容、Anthropic、Gemini 走各自标准协议。
     /// 无有效配置时返回不可用助手（所有能力走降级路径，绝不报错）。
     pub fn from_provider(config: &ProviderConfig) -> Self {
-        let is_deepseek_account = config.base_url.contains("chat.deepseek.com")
-            || matches!(config.kind, ProviderKind::DeepSeekAccount);
-        if is_deepseek_account {
-            return Self::with_token(config.api_key.clone(), config.model.clone());
-        }
         if config.base_url.trim().is_empty() || config.api_key.trim().is_empty() {
             return Self::new();
         }
@@ -214,27 +198,17 @@ impl AiGit {
         )
     }
 
-    /// 模型是否可用：标准协议要求令牌与 base_url 均非空；DeepSeek 账号要求令牌非空。
-    /// 会话在首次调用时懒创建并缓存于 ChatState。
+    /// 模型是否可用：要求令牌与 base_url 均非空。
     pub fn available(&self) -> bool {
-        match self.mode {
-            AiMode::DeepSeekAccount => !self.token.trim().is_empty(),
-            AiMode::OpenAiCompatible | AiMode::Anthropic | AiMode::Gemini => {
-                !self.token.trim().is_empty() && !self.base_url.trim().is_empty()
-            }
-        }
+        !self.token.trim().is_empty() && !self.base_url.trim().is_empty()
     }
 
     /// 从 Git AI 独立配置构造（不依赖全局 Provider）。协议按 `kind` 路由：
-    /// - `deepseek_account` 或 base_url 含 `chat.deepseek.com` → DeepSeek 账号私有协议；
     /// - `anthropic` → Anthropic Messages API；
     /// - `gemini` → Gemini Native 流式接口；
     /// - 其余 → OpenAI 兼容 `chat/completions`。
     /// 配置不可用时返回不可用助手（所有能力走降级路径，绝不报错）。
     pub fn from_git_config(config: &GitAiConfig) -> Self {
-        if config.kind == "deepseek_account" || config.base_url.contains("chat.deepseek.com") {
-            return Self::with_token(config.api_key.clone(), config.model.clone());
-        }
         let mode = match config.kind.as_str() {
             "anthropic" => AiMode::Anthropic,
             "gemini" => AiMode::Gemini,
@@ -260,95 +234,10 @@ impl AiGit {
             return Err(anyhow!("AI 模型未配置或未登录"));
         }
         match self.mode {
-            AiMode::DeepSeekAccount => self.chat_once_deepseek(system, user, max_tokens).await,
             AiMode::OpenAiCompatible => self.chat_once_openai(system, user, max_tokens).await,
             AiMode::Anthropic => self.chat_once_anthropic(system, user, max_tokens).await,
             AiMode::Gemini => self.chat_once_gemini(system, user, max_tokens).await,
         }
-    }
-
-    /// DeepSeek 账号私有协议：懒创建会话 -> chat/completion -> 解析 SSE 提取文本。
-    async fn chat_once_deepseek(
-        &self,
-        system: &str,
-        user: &str,
-        max_tokens: usize,
-    ) -> Result<String> {
-        let token = self.token.trim();
-        if token.is_empty() {
-            return Err(anyhow!("DeepSeek 账号尚未登录"));
-        }
-        // 获取或创建会话；不在 await 期间持有锁，避免阻塞其他任务。
-        let session_id = {
-            let state = self.state.lock().expect("ai_git ChatState 锁中毒");
-            match state.chat_session_id {
-                Some(id) => id,
-                None => {
-                    drop(state);
-                    let session = create_session(&self.http, token).await?;
-                    let id = session.chat_session_id;
-                    let mut state = self.state.lock().expect("ai_git ChatState 锁中毒");
-                    state.chat_session_id = Some(id);
-                    id
-                }
-            }
-        };
-        let prompt = fold_prompt(system, user, max_tokens);
-        let model = self.model.clone();
-        let response = chat_completion(&self.http, token, session_id, &model, &prompt, false)
-            .await
-            .context("DeepSeek 聊天请求失败")?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("DeepSeek 对话失败 HTTP {status}: {body}"));
-        }
-        let mut content = String::new();
-        let mut pending = String::new();
-        let mut stream = response.bytes_stream();
-        let mut done = false;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("读取 DeepSeek SSE 流失败")?;
-            pending.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(pos) = pending.find('\n') {
-                let line = pending[..pos].trim().to_string();
-                pending.drain(..=pos);
-                let Some(data) = line.strip_prefix("data:") else {
-                    continue;
-                };
-                let data = data.trim();
-                if data.is_empty() || data == "[DONE]" {
-                    continue;
-                }
-                let Ok(value) = serde_json::from_str::<Value>(data) else {
-                    continue;
-                };
-                let delta = value
-                    .get("text_delta")
-                    .or_else(|| value.pointer("/choices/0/delta/content"))
-                    .or_else(|| value.get("content"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                content.push_str(delta);
-                let finished = value
-                    .get("finish_reason")
-                    .and_then(Value::as_str)
-                    .is_some_and(|v| !v.is_empty())
-                    || value.get("done").and_then(Value::as_bool) == Some(true);
-                if finished {
-                    done = true;
-                    break;
-                }
-            }
-            if done {
-                break;
-            }
-        }
-        let content = content.trim().to_string();
-        if content.is_empty() {
-            return Err(anyhow!("DeepSeek 响应没有文本内容"));
-        }
-        Ok(content)
     }
 
     /// OpenAI 兼容：`POST {base}/chat/completions`（stream=true，Bearer 认证），
@@ -1482,14 +1371,6 @@ fn extract_json_array(text: &str) -> Option<&str> {
     Some(&text[start..=end])
 }
 
-/// 将 system/user 折叠为 DeepSeek 官方 prompt（与 provider.rs 约定一致），
-/// max_tokens 以指令形式软约束输出长度。
-fn fold_prompt(system: &str, user: &str, max_tokens: usize) -> String {
-    format!(
-        "系统：{system}\n\n用户：{user}\n\n（要求：输出控制在 {max_tokens} tokens 以内，只输出最终结果。）"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1605,8 +1486,8 @@ line after
         }
     }
 
-    /// 回归：AI 助手此前只认 DeepSeek 账号（chat.deepseek.com），OpenAI 兼容 /
-    /// Anthropic / Gemini provider 一律不可用（静默降级，表现为「调用不到 AI 模型」）。
+    /// 回归：任何已配置的标准协议 provider（OpenAI 兼容 / Anthropic / Gemini）
+    /// 都必须可用，不能静默降级（表现为「调用不到 AI 模型」）。
     #[test]
     fn from_provider_accepts_any_configured_provider() {
         // OpenAI 兼容（如 DeepSeek 开放平台 api.deepseek.com）：必须可用。
@@ -1639,15 +1520,6 @@ line after
                 ProviderKind::OpenAiCompatible,
                 "https://api.deepseek.com/v1",
                 "",
-            ))
-            .available()
-        );
-        // DeepSeek 账号模式（私有协议）保持可用。
-        assert!(
-            AiGit::from_provider(&provider_config(
-                ProviderKind::DeepSeekAccount,
-                "https://chat.deepseek.com",
-                "login-token",
             ))
             .available()
         );
@@ -1716,12 +1588,27 @@ line after
     }
 
     #[test]
-    fn available_reflects_token() {
+    fn available_reflects_token_and_base_url() {
         let ai = AiGit::new();
         assert!(!ai.available());
-        let ai = AiGit::with_token("sk-test-token", "deepseek-chat");
+        // 有 token + base_url → 可用（标准协议）。
+        let ai = AiGit::with_provider(
+            "sk-test-token",
+            "deepseek-chat",
+            AiMode::OpenAiCompatible,
+            "https://api.deepseek.com/v1",
+        );
         assert!(ai.available());
-        let ai = AiGit::with_token("   ", "deepseek-chat");
+        // 只有 token、没有 base_url → 不可用（无法确定端点）。
+        let ai = AiGit::with_token("sk-test-token", "deepseek-chat");
+        assert!(!ai.available());
+        // 空白 token → 不可用。
+        let ai = AiGit::with_provider(
+            "   ",
+            "deepseek-chat",
+            AiMode::OpenAiCompatible,
+            "https://api.deepseek.com/v1",
+        );
         assert!(!ai.available());
     }
 

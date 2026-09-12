@@ -448,11 +448,11 @@ export function gitAiRootCause(commit?: string): Promise<{ text: string }> {
 export interface GitAiConfig {
   /** 是否启用独立配置。 */
   enabled: boolean
-  /** 协议：openai_compatible（默认）/ anthropic / gemini / deepseek_account。 */
+  /** 协议：openai_compatible（默认）/ anthropic / gemini。 */
   kind: string
   /** API 入口地址，如 https://api.deepseek.com/v1。 */
   base_url: string
-  /** API Key（deepseek_account 时为账号登录令牌）。 */
+  /** API Key。 */
   api_key: string
   /** 模型名，如 deepseek-chat。 */
   model: string

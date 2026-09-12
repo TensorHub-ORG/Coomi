@@ -367,7 +367,6 @@ const AI_KIND_OPTIONS: { kind: string; label: string; url: string; model: string
   { kind: 'openai_compatible', label: 'OpenAI 兼容', url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
   { kind: 'anthropic', label: 'Anthropic', url: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
   { kind: 'gemini', label: 'Gemini', url: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
-  { kind: 'deepseek_account', label: 'DeepSeek 账号登录', url: 'https://chat.deepseek.com', model: 'deepseek-chat' },
 ]
 const aiKindOption = computed(() => AI_KIND_OPTIONS.find(o => o.kind === aiConfig.value.kind) ?? AI_KIND_OPTIONS[0])
 
