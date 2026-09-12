@@ -1,6 +1,7 @@
 package app.coomi;
 
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
@@ -54,6 +55,13 @@ public class CoomiService extends Service {
 
     private static String prefix() { return TermuxConstants.TERMUX_PREFIX_DIR_PATH; }
     private static String home() { return TermuxConstants.TERMUX_HOME_DIR_PATH; }
+
+    /** 工作区目录固定为默认 $HOME/coomi（引擎 --cwd）；目录不存在则尝试创建，失败回退 home。 */
+    private static String workspaceDir(Context context) {
+        File f = new File(CoomiConstants.COOMI_WORKSPACE);
+        if (!f.isDirectory() && !f.mkdirs()) return home();
+        return CoomiConstants.COOMI_WORKSPACE;
+    }
     private static String preload() { return prefix() + "/lib/libtermux-exec-ld-preload.so"; }
 
     private static String termuxEnvironment() {
@@ -526,11 +534,11 @@ public class CoomiService extends Service {
             String token = generateToken();
             mEngineToken = token;
             String command = termuxEnvironment()
-                + "export RUST_BACKTRACE=1; cd " + shellQuote(home()) + "; "
+                + "export RUST_BACKTRACE=1; cd " + shellQuote(workspaceDir(this)) + "; "
                 + "exec >>" + shellQuote(CoomiConstants.ENGINE_LOG_PATH) + " 2>&1; "
                 + "exec " + shellQuote(binary.getAbsolutePath())
                 + " --home " + shellQuote(CoomiConstants.COOMI_CONFIG_DIR)
-                + " --cwd " + shellQuote(home())
+                + " --cwd " + shellQuote(workspaceDir(this))
                 + " serve --port " + port
                 + " --token " + shellQuote(token)
                 + " --static-dir " + shellQuote(web.getAbsolutePath());

@@ -296,6 +296,7 @@ function browseInFileManager() {
   display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-shrink: 0;
   min-height: 52px; padding: calc(var(--safe-top) + 6px) 8px 6px;
   background: var(--bg);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 .model-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: rgba(0,0,0,0.3); }
 .model-menu {
@@ -453,12 +454,13 @@ function browseInFileManager() {
 .center {
   position: absolute; left: 50%; transform: translateX(-50%);
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  height: 36px; padding: 0 10px; max-width: 60%;
+  height: 36px; padding: 0 12px; max-width: 60%;
   border: 0; border-radius: var(--r-pill); background: none; color: var(--text);
+  transition: background .15s;
 }
-.center:active { background: var(--fill); }
+.center:active { background: var(--fill-strong); }
 .model {
-  font-size: 15.5px; font-weight: 600; letter-spacing: -.1px;
+  font-size: 15.5px; font-weight: 650; letter-spacing: -.1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .plan {

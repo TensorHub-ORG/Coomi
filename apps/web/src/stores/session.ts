@@ -13,6 +13,7 @@ import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { isGlobalSession as isGlobalSessionId } from '@/bridge/life'
 import { reportErrorToNative, sendFeedbackViaBridge } from '@/bridge/feedback'
+import { speak } from '@/bridge/tts'
 import { router } from '@/router'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
 
@@ -61,6 +62,8 @@ export const useSessionStore = defineStore('session', () => {
   /** 回合级异常信号：任一工具失败 / agent_error / 输出流停滞都会置位，turn_end 汇总成一张反馈卡。 */
   let turnHadError = false
   let lastTurnErrorDetail = ''
+  /** 用户主动停止本轮：turn_end 时跳过自动朗读（内容未定稿，不该读）。 */
+  let turnCancelled = false
   /** 停滞检测：回合运行中超过 STALL_TIMEOUT_MS 无任何 WS 事件视为疑似停滞。 */
   let stallWatchTimer: ReturnType<typeof setInterval> | null = null
   let stallDetected = false
@@ -372,7 +375,7 @@ export const useSessionStore = defineStore('session', () => {
         }
         persistSoon(); break
       case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); void router.push(ev.route); break
-      case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); pushNotice('warn', '已停止本轮执行'); disarmStallWatch(); break
+      case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); turnCancelled = true; pushNotice('warn', '已停止本轮执行'); disarmStallWatch(); break
       case 'bg_task_detached': pushNotice('info', `↪ 已转入后台任务 #${ev.task_id}（${ev.tool_name}）`); break
       case 'bg_task_completed': pushNotice(ev.is_error ? 'error' : 'success', `${ev.is_error ? '✕' : '✓'} 后台任务 #${ev.task_id} ${ev.is_error ? '失败' : '完成'}`); break
       case 'loop_progress':
@@ -434,6 +437,12 @@ export const useSessionStore = defineStore('session', () => {
         }
         resetTurnFeedbackSignals()
         persistSoon()
+        // F8 语音陪伴：开启自动朗读时，回合正常结束后朗读最后一条助手消息
+        // （用户主动停止的不读，避免把未定稿内容念出来）。
+        if (config.ttsAutoRead && !turnCancelled) {
+          const last = timeline.value[timeline.value.length - 1]
+          if (last?.kind === 'assistant' && last.content.trim()) speak(stripMarkdownForTts(last.content))
+        }
         break
       case 'session_state': {
         // 重连后引擎告知本会话是否仍在后台执行（切走会话后任务继续跑）。
@@ -545,6 +554,8 @@ export const useSessionStore = defineStore('session', () => {
       }
       if (cutAt >= 0) timeline.value.splice(cutAt)
       timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
+      turnToolTrace = []
+      turnCancelled = false
       runState.value = 'thinking'
       armStallWatch()
       transport.value?.send({ command: 'edit_turn', msg_id: edit.mid, text: trimmed })
@@ -556,11 +567,13 @@ export const useSessionStore = defineStore('session', () => {
     if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
     if (isBusy.value) {
       timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
+      turnCancelled = false
       transport.value?.send({ command: 'jump_in', text: trimmed })
       persistSoon()
       return
     }
     turnToolTrace = []
+    turnCancelled = false
     timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
     runState.value = 'thinking'
     armStallWatch()
@@ -893,6 +906,22 @@ export const useSessionStore = defineStore('session', () => {
     pendingEdit.value = null
     transport.value?.send({ command: 'undo_turn', msg_id: mid })
     persistSoon()
+  }
+
+  /** 去掉 markdown 标记，得到适合朗读的纯文本（与气泡内朗读保持一致）。 */
+  function stripMarkdownForTts(text: string): string {
+    return text
+      .replace(/```[\s\S]*?```/g, '代码块')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^>\s?/gm, '')
+      .replace(/[*_~]+/g, '')
+      .replace(/^\s*[-+*]\s+/gm, '')
+      .replace(/^\s*\d+\.\s+/gm, '')
+      .replace(/\s+/g, ' ')
+      .trim()
   }
 
   function appendAssistant(content: string) {

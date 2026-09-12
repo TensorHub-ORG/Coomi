@@ -23,8 +23,8 @@ const emit = defineEmits<{ back: [] }>()
 .bar {
   display: flex; align-items: center; gap: 4px; flex-shrink: 0;
   padding: calc(var(--safe-top) + 6px) 8px 6px;
-  background: var(--bg); border-bottom: 1px solid var(--border);
+  background: var(--bg); border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
-.title { flex: 1; min-width: 0; font-size: 16.5px; font-weight: 650; color: var(--text); }
+.title { flex: 1; min-width: 0; font-size: 17px; font-weight: 680; letter-spacing: -0.015em; color: var(--text); }
 .right { display: flex; align-items: center; gap: 2px; }
 </style>

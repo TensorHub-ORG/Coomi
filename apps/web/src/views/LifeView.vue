@@ -823,10 +823,11 @@ onMounted(() => {
 .enable-group button > .life-mark { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%; color: var(--blue); background: var(--blue-soft); }
 .enable-group strong { color: var(--text); font-size: 14px; font-weight: 600; }
 .enable-group small { margin-top: 2px; color: var(--text-3); font-size: 12px; }
-.switch { position: relative; flex: none; width: 42px; height: 24px; border-radius: 12px; background: var(--border-strong); transition: background .2s; }
-.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-1); transition: transform .2s; }
-.switch.on { background: var(--blue); }
-.switch.on::after { transform: translateX(18px); }
+.switch { position: relative; flex: none; width: 42px; height: 24px; border-radius: 12px; background: var(--border-strong); transition: background .2s; --knob-x: 0px; }
+.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-1); transition: transform .32s var(--spring); transform: translateX(var(--knob-x)); }
+.switch.on { background: var(--blue); --knob-x: 18px; }
+.switch.on::after { transform: translateX(var(--knob-x)); }
+.switch:active::after { transform: translateX(var(--knob-x)) scale(.85); }
 .status-row, .metrics > div { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 13px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .status-row strong, .metrics strong { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .status-row strong.ok { color: var(--ok); }

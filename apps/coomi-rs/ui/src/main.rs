@@ -36,6 +36,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod life;
+mod snapshot_schedule;
 mod terminal_ui;
 mod ux_profile;
 mod web;

@@ -44,14 +44,27 @@
   --code-bg-dark: #1e2430;
 
   /* ── 形状 / 阴影 ── */
-  --r-card: 16px;
-  --r-md: 12px;
+  --r-card: 18px;
+  --r-md: 13px;
   --r-sm: 9px;
   --r-pill: 999px;
-  --shadow-1: 0 1px 2px rgba(23, 32, 54, 0.05), 0 2px 8px rgba(23, 32, 54, 0.04);
-  --shadow-2: 0 6px 24px rgba(23, 32, 54, 0.1);
+  --shadow-1: 0 1px 2px rgba(23, 32, 54, 0.04), 0 4px 14px rgba(23, 32, 54, 0.06);
+  --shadow-2: 0 10px 32px rgba(23, 32, 54, 0.12), 0 2px 8px rgba(23, 32, 54, 0.05);
+  --shadow-3: 0 18px 48px rgba(23, 32, 54, 0.16);
   --shadow-sheet: 0 -10px 44px rgba(23, 32, 54, 0.16);
   --shadow-drawer: 10px 0 44px rgba(23, 32, 54, 0.18);
+  --ring-focus: 0 0 0 3px color-mix(in srgb, var(--blue) 16%, transparent);
+
+  /* ── 动效：统一缓动与时长，避免各组件各写一套 ── */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);   /* 内容入场：匀减速，安全默认 */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);    /* 需要利落果断时 */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);          /* 内容离场 */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);     /* 往返型开关 */
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);       /* 活泼回弹：按压/滑块/开关，克制使用 */
+  --dur-1: 0.12s;  /* 即时反馈：按压、颜色切换 */
+  --dur-2: 0.22s;  /* 状态变化：hover、开关、tooltip */
+  --dur-3: 0.34s;  /* 布局变化：模态、抽屉、面板 */
+  --dur-4: 0.5s;   /* 入场：页面切换、消息进入 */
 
   /* ── 排版 ── */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
@@ -243,10 +256,10 @@
   --bg-card: #fffefa; --bg-input: #f4f2ed; --bg-elevated: #fffefa; --user-bubble: #4f607f;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-/* 点击不出现蓝色高亮方块：WebView 的 tap highlight / focus ring 全部去掉，
-   交互反馈交给各组件自己的 :active 样式。 */
-*:focus { outline: none !important; }
-*:focus-visible { outline: none !important; }
+/* 点击不出现蓝色高亮方块：WebView 的 tap highlight 去掉；
+   键盘导航（Tab）的焦点环保留，用主题蓝软环表达，保证无障碍可达性。 */
+*:focus { outline: none; }
+*:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 78%, transparent); outline-offset: 2px; }
 button, a, [role="button"], input, textarea, select, label {
   -webkit-tap-highlight-color: transparent !important;
   -webkit-touch-callout: none;
@@ -270,41 +283,71 @@ input, textarea { font-family: inherit; color: inherit; }
 select { color-scheme: inherit; }
 select option, select optgroup { background: var(--bg); color: var(--text); }
 a { color: var(--blue); text-decoration: none; }
-h1, h2, h3 { margin: 0; font-weight: 650; }
+h1, h2, h3 { margin: 0; font-weight: 680; letter-spacing: -0.015em; }
 
 /* ── 按钮 ── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 46px; padding: 0 18px; border-radius: var(--r-md);
+  min-height: 46px; padding: 0 18px; border-radius: 13px;
   background: var(--fill-strong); color: var(--text);
-  font-size: 15px; font-weight: 550; letter-spacing: 0.01em;
-  transition: background 0.16s, opacity 0.16s, transform 0.07s;
+  font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
+  transition: background 0.16s, opacity 0.16s, transform 0.32s var(--spring), box-shadow 0.16s;
 }
-.btn:active { transform: scale(0.985); }
-.btn-primary { background: var(--blue); color: #fff; }
-.btn-primary:active { background: var(--blue-press); }
+.btn:active { transform: scale(0.9); }
+.btn-primary { background: linear-gradient(135deg, var(--blue), color-mix(in srgb, var(--blue) 84%, var(--blue-press))); color: #fff; box-shadow: 0 2px 12px color-mix(in srgb, var(--blue) 28%, transparent); }
+.btn-primary:active { background: var(--blue-press); box-shadow: none; }
 .btn-soft { background: var(--blue-soft); color: var(--blue); }
 .btn-danger { background: var(--danger-soft); color: var(--danger); }
 .btn-ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); }
 .btn:disabled { opacity: 0.42; pointer-events: none; }
 
+/* 悬停设备（鼠标）上的轻抬/辉光反馈；触屏设备不触发，按压反馈见 :active */
+@media (hover: hover) and (pointer: fine) {
+  .btn:not(:disabled):hover { box-shadow: 0 4px 14px rgba(23, 32, 54, 0.1); }
+  .btn-primary:not(:disabled):hover { box-shadow: 0 7px 22px color-mix(in srgb, var(--blue) 38%, transparent); }
+  .pill:not(:disabled):hover { background: var(--fill-press); color: var(--text); }
+  .icon-btn:not(:disabled):hover { background: var(--fill-strong); color: var(--text); }
+}
+
 /* ── 药丸 / 图标按钮 / 卡片 ── */
 .pill {
-  display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px;
+  display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 13px;
   border-radius: var(--r-pill); background: var(--fill-strong); color: var(--text-2);
   font-size: 13px; font-weight: 550; white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.3s var(--spring);
 }
+.pill:active { background: var(--fill-press); transform: scale(0.9); }
 .pill.on { background: var(--blue-soft); color: var(--blue); }
 .pill.warn-on { background: var(--orange-soft); color: var(--orange); }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: var(--r-md); color: var(--text-2);
-  flex-shrink: 0; transition: background 0.15s;
+  width: 40px; height: 40px; border-radius: 13px; color: var(--text-2);
+  flex-shrink: 0; transition: background 0.15s, transform 0.3s var(--spring);
 }
-.icon-btn:active { background: var(--fill-strong); }
-.card { background: var(--bg); border-radius: var(--r-card); box-shadow: var(--shadow-1); overflow: hidden; }
-.sec-label { font-size: 12.5px; color: var(--text-3); padding: 0 4px 8px; letter-spacing: 0.02em; }
+.icon-btn:active { background: var(--fill-strong); transform: scale(0.85); }
+
+/* ── 开关（全局回退）：弹簧滑动 + 按压压缩；局部已写 spring 的视图（如 Git 面板）不受影响 ── */
+.switch i { transition: left 0.3s var(--spring), transform 0.3s var(--spring) !important; }
+.switch:active i { transform: scale(0.85) !important; }
+
+/* ── 表单：边框/背景色过渡更柔和，焦点变化不跳变 ── */
+input, textarea, select {
+  transition: border-color 0.18s, box-shadow 0.18s, background-color 0.18s;
+}
+
+/* ── 卡片：悬停设备上轻抬 + 阴影加深 ── */
+@media (hover: hover) and (pointer: fine) {
+  .card {
+    transition: box-shadow 0.22s var(--ease-out-quart), transform 0.22s var(--ease-out-quart);
+  }
+  .card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
+}
+.card {
+  background: var(--bg); border-radius: var(--r-card);
+  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  box-shadow: var(--shadow-1); overflow: hidden;
+}
+.sec-label { font-size: 12px; color: var(--text-3); padding: 0 4px 8px; letter-spacing: 0.03em; }
 
 /* ── 等宽块 ── */
 .code {
@@ -315,7 +358,7 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ── 动效：瀑布流的基本单元 ── */
@@ -325,6 +368,22 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
 }
 .cascade { animation: coomi-cascade 0.26s cubic-bezier(0.22, 0.68, 0.19, 1) both; }
 .fade-in { animation: coomi-cascade 0.24s cubic-bezier(0.22, 0.68, 0.19, 1) both; }
+
+/* 消息/卡片入场：淡入 + 轻抬，虚拟滚动列表项的内层使用（--i 控制错落步进） */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.rise-in {
+  animation: rise-in 0.32s var(--ease-out-quart) both;
+  animation-delay: calc(min(var(--i, 0), 6) * 40ms);
+}
+
+/* ── 路由过渡：视图切换 crossfade + 轻抬 ── */
+.view-enter-active { transition: opacity var(--dur-2) var(--ease-out-quart), transform var(--dur-2) var(--ease-out-quart); }
+.view-leave-active { transition: opacity var(--dur-1) var(--ease-in); }
+.view-enter-from { opacity: 0; transform: translateY(8px); }
+.view-leave-to { opacity: 0; }
 
 @keyframes coomi-spin { to { transform: rotate(360deg); } }
 @keyframes coomi-blink { 50% { opacity: 0; } }
@@ -357,7 +416,7 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
 }
 
 /* ── Markdown 正文 ── */
-.md { font-size: 15.5px; line-height: 1.72; word-break: break-word; }
+.md { font-size: 15.5px; line-height: 1.74; word-break: break-word; }
 .md :first-child { margin-top: 0; }
 .md :last-child { margin-bottom: 0; }
 .md p { margin: 0.55em 0; }
@@ -368,24 +427,35 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
 .md code {
   font-family: var(--font-mono); font-size: 0.87em;
   background: var(--fill-strong); color: var(--code-text);
-  padding: 1.5px 6px; border-radius: 6px;
+  padding: 2px 6px; border-radius: 6px;
 }
 .md pre code {
-  display: block; padding: 13px 14px; overflow-x: auto; white-space: pre;
-  background: none; font-size: 12.8px; line-height: 1.62;
+  display: block; padding: 14px 15px; overflow-x: auto; white-space: pre;
+  background: none; font-size: 12.8px; line-height: 1.65;
   -webkit-overflow-scrolling: touch;
 }
-.md ul, .md ol { margin: 0.55em 0; padding-left: 1.3em; }
-.md li { margin: 0.24em 0; }
+.md ul, .md ol { margin: 0.55em 0; padding-left: 1.35em; }
+.md li { margin: 0.26em 0; }
 .md li::marker { color: var(--text-3); }
-.md h1, .md h2, .md h3 { font-size: 1.06em; font-weight: 650; margin: 0.85em 0 0.4em; }
-.md a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
-.md strong { font-weight: 650; }
+.md h1, .md h2, .md h3 { font-size: 1.08em; font-weight: 680; margin: 0.9em 0 0.42em; letter-spacing: -0.01em; }
+.md a { color: var(--blue); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--blue) 45%, transparent); }
+.md strong { font-weight: 680; }
 .md blockquote {
-  margin: 0.7em 0; padding: 2px 0 2px 12px;
-  border-left: 2px solid var(--blue-border); color: var(--text-2);
+  margin: 0.7em 0; padding: 4px 0 4px 13px;
+  border-left: 3px solid var(--blue-border); color: var(--text-2);
 }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 1.1em 0; }
 .md table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 0.7em 0; display: block; overflow-x: auto; }
-.md th, .md td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
-.md th { background: var(--fill); font-weight: 600; }
+.md th, .md td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; }
+.md th { background: var(--fill); font-weight: 620; }
+
+/* ── 无障碍：用户偏好减少动态时，一键关掉装饰性动效 ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

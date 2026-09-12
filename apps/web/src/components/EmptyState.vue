@@ -43,9 +43,14 @@ function pick(key: 'fast' | 'plan' | 'careful') {
 
 <template>
   <div class="empty">
-    <CoomiMark :size="52" class="logo" />
-    <h1>有什么可以帮你？</h1>
-    <p class="sub">我在你手机里的 Linux 环境真实执行命令、读写文件、跑脚本。</p>
+    <div class="hero">
+      <div class="mark-wrap">
+        <CoomiMark :size="46" class="logo" />
+        <span class="halo" aria-hidden="true" />
+      </div>
+      <h1>有什么可以帮你？</h1>
+      <p class="sub">我在你手机里的 Linux 环境真实执行命令、读写文件、跑脚本。</p>
+    </div>
 
     <p v-if="connection.demo" class="demobar">
       <CoomiIcon name="alert" :size="14" />
@@ -62,23 +67,24 @@ function pick(key: 'fast' | 'plan' | 'careful') {
         :aria-selected="active === m.key"
         @click="pick(m.key)"
       >
-        <CoomiIcon :name="m.icon" :size="15" />
+        <CoomiIcon :name="m.icon" :size="14" />
         <span>{{ m.label }}</span>
       </button>
+      <span class="seg-thumb" :class="'seg-' + active" aria-hidden="true" />
     </div>
-    <p class="hint">{{ hint }}</p>
+    <p class="hint" :class="{ on: !!hint }">{{ hint || ' ' }}</p>
 
     <div class="sugs">
       <button
         v-for="(s, i) in SUGGESTIONS"
         :key="s.text"
         class="sug cascade"
-        :style="{ animationDelay: 40 * i + 'ms' }"
+        :style="{ animationDelay: 50 * i + 'ms' }"
         @click="s.guide ? session.sendGuide(s.guide) : session.sendMessage(s.text)"
       >
-        <span class="sicon"><CoomiIcon :name="s.icon" :size="17" /></span>
+        <span class="sicon"><CoomiIcon :name="s.icon" :size="16" /></span>
         <span class="stext">{{ s.text }}</span>
-        <CoomiIcon name="chevronRight" :size="14" class="sarrow" />
+        <span class="sarrow"><CoomiIcon name="chevronRight" :size="12" /></span>
       </button>
     </div>
   </div>
@@ -86,56 +92,102 @@ function pick(key: 'fast' | 'plan' | 'careful') {
 
 <style scoped>
 .empty {
-  margin: auto 0; padding: 22px 4px 8px;
+  margin: 0 auto; padding: 10px 6px 10px;
   display: flex; flex-direction: column; align-items: center;
   text-align: center;
+  max-width: 460px;
 }
-.logo { margin-bottom: 14px; animation: coomi-breathe 3.4s ease-in-out infinite; }
+.hero { display: flex; flex-direction: column; align-items: center; }
+.mark-wrap { position: relative; margin-bottom: 12px; }
+.logo { display: block; animation: coomi-breathe 3.4s ease-in-out infinite; }
+.halo {
+  position: absolute; inset: -14px; z-index: -1; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--blue) 20%, transparent), transparent 68%);
+  animation: halo-pulse 3.4s ease-in-out infinite;
+}
+.halo::after {
+  content: ''; position: absolute; inset: 10px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--blue) 10%, transparent), transparent 64%);
+}
+@keyframes halo-pulse {
+  0%, 100% { opacity: .5; transform: scale(.96); }
+  50% { opacity: 1; transform: scale(1.07); }
+}
 @keyframes coomi-breathe {
-  0%, 100% { transform: scale(1); opacity: .88; filter: drop-shadow(0 0 0 transparent); }
-  50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 10px color-mix(in srgb, var(--blue) 35%, transparent)); }
+  0%, 100% { transform: scale(1); opacity: .92; }
+  50% { transform: scale(1.04); opacity: 1; }
 }
-h1 { font-size: 21px; font-weight: 600; letter-spacing: -.3px; color: var(--text); }
+h1 {
+  font-size: 24px; font-weight: 720; letter-spacing: -0.5px; color: var(--text);
+  line-height: 1.28;
+}
 .sub {
-  max-width: 268px; margin-top: 8px;
-  font-size: 13.5px; line-height: 1.65; color: var(--text-3);
+  max-width: 320px; margin-top: 8px;
+  font-size: 14px; line-height: 1.65; color: var(--text-2);
 }
 .demobar {
   display: flex; align-items: flex-start; gap: 7px;
-  max-width: 320px; margin-top: 14px; padding: 9px 12px;
-  border-radius: var(--r-md); background: var(--orange-soft);
-  font-size: 12.5px; line-height: 1.55; color: #8a4a30; text-align: left;
+  max-width: 320px; margin-top: 14px; padding: 9px 13px;
+  border-radius: 12px; background: var(--orange-soft);
+  font-size: 12.5px; line-height: 1.55; color: var(--orange); text-align: left;
 }
 .demobar :deep(svg) { flex-shrink: 0; margin-top: 1px; color: var(--orange); }
 
 .seg {
-  display: flex; gap: 2px; margin-top: 20px; padding: 3px;
+  position: relative;
+  display: flex; gap: 3px; margin-top: 16px; padding: 5px;
   border-radius: var(--r-pill); background: var(--fill);
 }
 .sitem {
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 34px; padding: 0 14px;
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 36px; min-width: 86px; padding: 0 14px;
   border: 0; border-radius: var(--r-pill); background: none;
   font-size: 13.5px; font-weight: 600; color: var(--text-3);
-  transition: background .16s, color .16s;
+  transition: color .18s ease;
 }
-.sitem.on { background: var(--bg); color: var(--blue); box-shadow: var(--shadow-1); }
-.hint { min-height: 17px; margin-top: 10px; font-size: 12px; color: var(--text-3); }
+.sitem.on { color: var(--blue); }
+.seg-thumb {
+  position: absolute; top: 5px; bottom: 5px; z-index: 0;
+  width: 86px;
+  border-radius: var(--r-pill);
+  background: var(--bg); box-shadow: 0 1px 4px rgba(23, 32, 54, 0.08), 0 3px 12px rgba(23, 32, 54, 0.07);
+  transition: transform 0.34s var(--spring), left 0.34s var(--spring);
+}
+.seg-thumb.seg-fast { left: 5px; transform: none; }
+.seg-thumb.seg-plan { left: 5px; transform: translateX(89px); }
+.seg-thumb.seg-careful { left: 5px; transform: translateX(178px); }
+.hint { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--text-3); transition: color .18s; }
+.hint.on { color: var(--text-2); }
 
-.sugs { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+.sugs { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .sug {
-  display: flex; align-items: center; gap: 11px;
-  padding: 12px 12px 12px 11px;
-  border: 1px solid var(--border); border-radius: var(--r-card);
-  background: var(--bg); text-align: left;
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 12px 11px 11px;
+  border: 1px solid var(--border); border-radius: 16px;
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+  text-align: left;
+  transition: transform 0.3s var(--spring), border-color .18s ease, box-shadow .18s ease;
 }
-.sug:active { background: var(--fill); }
+.sug:active { transform: scale(0.96); background: var(--fill); border-color: var(--border-strong); }
+@media (hover: hover) and (pointer: fine) {
+  .sug:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border-strong); }
+}
 .sicon {
   display: grid; place-items: center; flex-shrink: 0;
-  width: 32px; height: 32px; border-radius: 10px;
-  background: var(--blue-soft); color: var(--blue);
+  width: 37px; height: 37px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--blue-soft), color-mix(in srgb, var(--blue-soft) 62%, var(--bg)));
+  color: var(--blue);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue-border) 55%, transparent);
 }
-.stext { flex: 1; font-size: 14.5px; line-height: 1.4; color: var(--text); }
-.sarrow { color: var(--text-3); }
+.stext { flex: 1; min-width: 0; font-size: 14px; line-height: 1.45; color: var(--text); font-weight: 500; }
+.sarrow {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--fill); color: var(--text-3);
+  transition: background .16s, color .16s, transform .16s;
+}
+.sug:active .sarrow { background: var(--blue-soft); color: var(--blue); transform: translateX(2px); }
 </style>
 

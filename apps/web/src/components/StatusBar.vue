@@ -107,7 +107,11 @@ const runLabel = computed(() => {
 </template>
 
 <style scoped>
-.sbar { padding: 2px 16px 4px; background: var(--bg); }
+.sbar {
+  padding: 4px 18px 5px;
+  background: var(--bg);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
 .retry {
   display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
   font-size: 12px; color: var(--orange);

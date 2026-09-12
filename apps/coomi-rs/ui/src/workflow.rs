@@ -484,7 +484,8 @@ impl WorkflowScheduler {
 // ---------------------------------------------------------------------------
 
 /// 判断给定 cron 表达式是否命中「当前这一分钟」（按本地时区）。
-fn cron_matches_minute(expr: &str, _minute: u64) -> bool {
+/// `pub(crate)`：供定时快照调度（snapshot_schedule）复用同一匹配逻辑。
+pub(crate) fn cron_matches_minute(expr: &str, _minute: u64) -> bool {
     let now = chrono::Local::now();
     // 无秒 cron（5 段）只在分钟起点匹配，秒/纳秒必须归零再比对。
     let floor = now

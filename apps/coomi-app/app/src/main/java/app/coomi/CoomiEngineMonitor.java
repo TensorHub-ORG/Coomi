@@ -108,6 +108,8 @@ public class CoomiEngineMonitor extends Service {
         if (instance == null) return;
         if (foreground) {
             sTaskBackground = false;
+            // 回前台即撤掉任务完成通知并清 active 标记，避免残留状态吞掉下一次完成提醒。
+            sTaskNotificationActive = false;
             NotificationManager nm = (NotificationManager) instance.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) nm.cancel(TASK_NOTIFICATION_ID);
             instance.updateStatus(instance.mCurrentStatus);
@@ -124,6 +126,20 @@ public class CoomiEngineMonitor extends Service {
     /** Used by the chat Activity to decide whether leaving should enter PiP. */
     public static boolean hasRunningTasks() {
         return runningTaskCount() > 0;
+    }
+
+    // ── Settings（任务完成通知开关）──
+
+    /** 任务完成通知开关（app 设置，默认开）。存 SharedPreferences：coomi_prefs。 */
+    public static boolean isTaskNotifyEnabled(Context context) {
+        return context.getSharedPreferences(CoomiConstants.PREF_NAME, Context.MODE_PRIVATE)
+            .getBoolean(CoomiConstants.PREF_TASK_NOTIFY_ENABLED, true);
+    }
+
+    /** 写入任务完成通知开关（设置页经 JS bridge 调用）。 */
+    public static void setTaskNotifyEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(CoomiConstants.PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(CoomiConstants.PREF_TASK_NOTIFY_ENABLED, enabled).apply();
     }
 
     private static int runningTaskCount(String status) {
@@ -390,10 +406,16 @@ public class CoomiEngineMonitor extends Service {
         if (nm == null) return;
         // 批次二 #26：运行状态展示合并进常驻服务通知（1001 已内嵌「N 个任务执行中」），
         // 1002 只承担一件事——后台任务结束时的一次性提醒，不再进入轮询更新循环。
+        // 任务完成判定：running:N（N>0）→ done（0）且任务处于后台（sTaskBackground=true）时触发；
+        // sTaskNotificationActive 做去重，避免同一完成瞬间被重复通知。
         if (previousCount > 0 && currentCount == 0 && sTaskBackground) {
-            nm.notify(TASK_NOTIFICATION_ID, buildTaskNotification("后台任务已结束", false));
             sTaskNotificationActive = false;
+            if (isTaskNotifyEnabled(this)) {
+                nm.notify(TASK_NOTIFICATION_ID, buildTaskCompletionNotification());
+                sTaskNotificationActive = true;
+            }
         } else if (currentCount > 0 && sTaskNotificationActive) {
+            // 新任务开始：撤掉上一条任务完成通知，避免通知栏残留旧结果。
             nm.cancel(TASK_NOTIFICATION_ID);
             sTaskNotificationActive = false;
         }
@@ -440,8 +462,12 @@ public class CoomiEngineMonitor extends Service {
     }
 
     private Notification buildTaskNotification(String text, boolean ongoing) {
+        return buildTaskNotification("Coomi 任务", text, ongoing);
+    }
+
+    private Notification buildTaskNotification(String title, String text, boolean ongoing) {
         return new NotificationCompat.Builder(this, CoomiConstants.TASK_NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("Coomi 任务")
+            .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_service_notification)
             .setContentIntent(buildContentIntent(true))
@@ -452,6 +478,21 @@ public class CoomiEngineMonitor extends Service {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setShowWhen(true)
             .build();
+    }
+
+    /** 后台任务完成通知：标题「任务已完成」，正文带会话信息与回前台查看提示，点击打开主界面。 */
+    private Notification buildTaskCompletionNotification() {
+        String text = "后台任务已完成，可回前台查看结果";
+        String shortId = shortSessionId();
+        if (shortId != null) text += "（会话 " + shortId + "）";
+        return buildTaskNotification("任务已完成", text, false);
+    }
+
+    /** 会话 id 取前 8 位短码用于展示；无会话信息时返回 null。 */
+    private static String shortSessionId() {
+        String id = sTaskSessionId;
+        if (TextUtils.isEmpty(id)) return null;
+        return id.length() > 8 ? id.substring(0, 8) : id;
     }
 
     // ── WakeLock ──
