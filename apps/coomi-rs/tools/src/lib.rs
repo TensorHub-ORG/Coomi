@@ -1,5 +1,6 @@
 mod agents;
 mod env_facts;
+mod git_tool;
 mod patch;
 mod processes;
 
@@ -322,6 +323,17 @@ impl CoreTools {
             "install_skill" => self.install_skill(call, approval).await,
             "uninstall_mcp" => self.uninstall_mcp(call, approval).await,
             "uninstall_skill" => self.uninstall_skill(call, approval).await,
+            "git_status" | "git_diff" | "git_branches" | "git_log" | "git_stage"
+            | "git_commit" | "git_snapshot" | "git_restore" | "git_stash" => {
+                git_tool::run_git_tool(
+                    &self.cwd,
+                    self.config_home.as_deref(),
+                    &call.name,
+                    &call.arguments,
+                    Some(approval),
+                )
+                .await
+            }
             _ => {
                 if let Some(runtime) = &self.mcp_runtime
                     && let Some(result) = runtime.call(&call.name, call.arguments.clone()).await
@@ -2554,6 +2566,7 @@ impl ToolRuntime for CoreTools {
         if self.memory.is_some() {
             specs.extend(memory_specs());
         }
+        specs.extend(git_tool::git_tool_specs());
         specs
     }
 

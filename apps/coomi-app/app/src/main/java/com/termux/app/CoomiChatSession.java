@@ -22,6 +22,8 @@ import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.view.View;
@@ -76,6 +78,10 @@ public final class CoomiChatSession extends ContextWrapper {
     private boolean mLoadingFailed;
     private Consumer<Activity> mRequestAction;
     private WeakReference<CoomiChatRequestActivity> mRequestActivity = new WeakReference<>(null);
+    /** F8 语音陪伴 TTS：惰性初始化，speak 前按需创建；生命周期结束统一 shutdown。 */
+    private TextToSpeech mTts;
+    private String mTtsPending;
+    private float mTtsRate = 1.0f;
 
     public static CoomiChatSession get(Context context) {
         if (sInstance == null) sInstance = new CoomiChatSession(context.getApplicationContext());
@@ -127,6 +133,59 @@ public final class CoomiChatSession extends ContextWrapper {
     public void detachWebView() {
         if (mWebView != null && mWebView.getParent() instanceof ViewGroup)
             ((ViewGroup) mWebView.getParent()).removeView(mWebView);
+        shutdownTts();
+    }
+
+    // ── F8 语音陪伴：系统 TTS（惰性初始化，随会话生命周期释放） ──
+    private void ensureTts() {
+        if (mTts != null) return;
+        mTts = new TextToSpeech(getApplicationContext(), status -> {
+            if (status != TextToSpeech.SUCCESS) { mTts = null; return; }
+            String pending = mTtsPending;
+            mTtsPending = null;
+            if (pending != null) speakTts(pending);
+        });
+        mTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+            @Override public void onStart(String utteranceId) {}
+            @Override public void onDone(String utteranceId) { notifyTtsDone(); }
+            @Override public void onError(String utteranceId) { notifyTtsDone(); }
+        });
+    }
+
+    private void speakTts(String text) {
+        if (mTts == null) {
+            mTtsPending = text;
+            ensureTts();
+            return;
+        }
+        mTts.setSpeechRate(mTtsRate);
+        mTts.setPitch(1.0f);
+        mTts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "coomi-tts");
+    }
+
+    private void stopTts() {
+        if (mTts != null) mTts.stop();
+    }
+
+    private void setTtsRateInternal(float rate) {
+        mTtsRate = Math.max(0.5f, Math.min(2.0f, rate));
+        if (mTts != null) mTts.setSpeechRate(mTtsRate);
+    }
+
+    private void notifyTtsDone() {
+        runOnUiThread(() -> {
+            if (mWebView != null && mPageFinished)
+                mWebView.evaluateJavascript("window.dispatchEvent(new Event('coomi:tts-done'))", null);
+        });
+    }
+
+    private void shutdownTts() {
+        if (mTts != null) {
+            mTts.stop();
+            mTts.shutdown();
+            mTts = null;
+        }
+        mTtsPending = null;
     }
 
     public void useWindowContext(Context context) { mWebContext.setBaseContext(context); }
@@ -572,6 +631,25 @@ public final class CoomiChatSession extends ContextWrapper {
             CoomiEngineMonitor.setTaskStatus(status, sessionId, background);
         }
 
+        /** F8 语音陪伴：朗读文本（惰性初始化系统 TTS；init 未完成时暂存补读）。 */
+        @JavascriptInterface
+        public void speak(String text) {
+            if (text == null || text.trim().isEmpty()) return;
+            runOnUiThread(() -> speakTts(text));
+        }
+
+        /** F8 语音陪伴：停止当前朗读。 */
+        @JavascriptInterface
+        public void ttsStop() {
+            runOnUiThread(CoomiChatSession.this::stopTts);
+        }
+
+        /** F8 语音陪伴：设置语速（0.5–2.0，1.0 为正常）。 */
+        @JavascriptInterface
+        public void setTtsRate(double rate) {
+            runOnUiThread(() -> setTtsRateInternal((float) rate));
+        }
+
         /** 报错反馈：返回设备与 App 诊断信息（不含对话内容、不含 API Key）。 */
         @JavascriptInterface
         public String getDiagnostics() {
@@ -848,6 +926,18 @@ public final class CoomiChatSession extends ContextWrapper {
         @JavascriptInterface
         public void setDigitalLifeEnabled(boolean enabled) {
             CoomiTheme.setDigitalLifeEnabled(CoomiChatSession.this, enabled);
+        }
+
+        /** 任务完成通知开关（设置页）：读取 app 设置（SharedPreferences，默认开）。 */
+        @JavascriptInterface
+        public boolean getTaskNotifyEnabled() {
+            return CoomiEngineMonitor.isTaskNotifyEnabled(CoomiChatSession.this);
+        }
+
+        /** 任务完成通知开关（设置页）：写入 app 设置（SharedPreferences）。 */
+        @JavascriptInterface
+        public void setTaskNotifyEnabled(boolean enabled) {
+            CoomiEngineMonitor.setTaskNotifyEnabled(CoomiChatSession.this, enabled);
         }
     }
 

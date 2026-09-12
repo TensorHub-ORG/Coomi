@@ -62,10 +62,16 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiSend<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> {
+  // axum 的 Json<T> 提取器对「Content-Type: application/json + 空 body」直接 400。
+  // 可选参数不传时（如 /api/git/ai/*、/api/git/stash/push）统一发送 {}，
+  // 让所有可选 body 端点保持健壮；DELETE 不附加 body。
+  const payload = body !== undefined
+    ? JSON.stringify(body)
+    : method === 'POST' || method === 'PUT' ? '{}' : undefined
   const r = await authedFetch(`${API_BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: payload,
   })
   if (!r.ok) {
     let msg = `${method} ${path} → ${r.status}`

@@ -46,12 +46,23 @@ use coomi_security::AccessMode;
 use coomi_security::HookRunner;
 use coomi_security::SecurityPolicy;
 use coomi_services::LoginResult;
+use coomi_services::AiGit;
 use coomi_services::CognitiveRuntime;
 use coomi_services::CognitiveTurnContext;
+use coomi_services::ContributionReport;
+use coomi_services::CredentialStore;
+use coomi_services::DayUsage;
+use coomi_services::GuestTool;
+use coomi_services::NetworkReport;
+use coomi_services::OpsEngine;
+use coomi_services::SearchHit;
+use coomi_services::StorageReport;
+use coomi_services::contribution_stats;
 use coomi_services::deepseek_login;
 use coomi_services::deepseek_login_by_mobile_sms;
 use coomi_services::deepseek_send_sms_code;
 use coomi_services::EndpointResolver;
+use coomi_services::export_session_markdown;
 use coomi_services::HttpModelProvider;
 use coomi_services::McpRuntime;
 use coomi_services::MemoryManager;
@@ -67,6 +78,7 @@ use coomi_services::ResourceKind;
 use coomi_services::ResourceRequest;
 use coomi_services::RuntimeBackendKind;
 use coomi_services::RuntimeManager;
+use coomi_services::search_sessions;
 use coomi_services::SkillRouteContext;
 use coomi_services::SkillRouter;
 use coomi_services::StdioCognitiveRuntime;
@@ -76,6 +88,18 @@ use coomi_services::TaskPriority;
 use coomi_services::TaskStatus;
 use coomi_services::generate_cognitive_token;
 use coomi_services::list_installed_skills;
+use coomi_services::BranchInfo;
+use coomi_services::CommitInfo;
+use coomi_services::DiffInfo;
+use coomi_services::GitEngine;
+use coomi_services::GitStatus;
+use coomi_services::ProjectInfo;
+use coomi_services::RemoteInfo;
+use coomi_services::RestoreReport;
+use coomi_services::Snapshot;
+use coomi_services::SnapshotPreview;
+use coomi_services::StashEntry;
+use coomi_services::usage_by_day;
 use coomi_telemetry::Telemetry;
 use coomi_tools::AgentScheduler;
 use coomi_tools::ConfiguredSubAgent;
@@ -492,6 +516,67 @@ fn begin_managed_task(
     Ok(())
 }
 
+/// 用户轮次开始前自动存档：会话首轮打 session 快照，其余轮次打 turn 快照，
+/// 支撑前端「一键还原按轮次列存档点」。
+/// 仅在 cwd 为 git 仓库、kind 为用户对话类任务时触发：
+/// 用户消息经 handle_command::send_message 进入时 task_kind 为 "agent"（普通对话）
+/// 或 "team"（团队会话）；agent_retry / agent_edit / compaction 等非用户新轮次一律跳过。
+/// 失败仅静默记录（eprintln），绝不影响对话主流程。
+async fn auto_snapshot_before_turn(
+    state: &AppState,
+    session_id: &str,
+    task_kind: &str,
+    summary: &str,
+) {
+    if !matches!(task_kind, "agent" | "team") {
+        return;
+    }
+    // 非 git 仓库（无 .git）不支持快照，静默跳过。
+    if !state.cwd.join(".git").exists() {
+        return;
+    }
+    let engine = git_engine(state);
+    // 摘要：折叠空白并截断 120 字符，空文本兜底 "user turn"。
+    let summary: String = summary
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(120)
+        .collect();
+    let summary = if summary.is_empty() {
+        "user turn".to_owned()
+    } else {
+        summary
+    };
+    let result = async {
+        let snapshots = engine.snapshot_list().await?;
+        // 轮次号 = 已有 turn-<session>- 前缀快照数 + 1。
+        let turn_prefix = format!("turn-{session_id}-");
+        let turn_number = snapshots
+            .iter()
+            .filter(|snap| snap.id.starts_with(&turn_prefix))
+            .count() as u64
+            + 1;
+        // 会话首轮：该会话还没有 session-<session> 快照时，同轮补一张 session 快照。
+        let session_marker = format!("session-{session_id}");
+        let has_session = snapshots.iter().any(|snap| snap.id == session_marker);
+        if !has_session {
+            engine
+                .snapshot_create("session", Some(session_id), None, &summary)
+                .await?;
+        }
+        engine
+            .snapshot_create("turn", Some(session_id), Some(turn_number), &summary)
+            .await?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if let Err(error) = result {
+        eprintln!("[snapshot] auto_snapshot_before_turn skipped: {error:#}");
+    }
+}
+
 struct BrowserTurnControl {
     task: Arc<SessionTask>,
     manager: Arc<TaskManager>,
@@ -774,6 +859,9 @@ pub async fn serve(
     let task_manager = Arc::new(TaskManager::open(&home)?);
     let restored_tasks = load_task_checkpoints(&home, &task_manager);
     let configured_task_limit = configured_connection_settings(&home).max_concurrent_tasks;
+    // 定时快照调度器持有 home/cwd 的独立副本（state 构造会移走原值）。
+    let snapshot_home = home.clone();
+    let snapshot_cwd = cwd.clone();
     let workflow_scheduler = crate::workflow::WorkflowScheduler::new(&home.clone());
     let state = AppState {
         home,
@@ -791,6 +879,8 @@ pub async fn serve(
         studio_runs: Arc::new(StdMutex::new(HashMap::new())),
     };
     state.workflow_scheduler.start();
+    // 定时快照（P1-3）：后台循环每 15 秒检查分钟并命中 cron 打快照。
+    crate::snapshot_schedule::start_snapshot_scheduler(snapshot_home, snapshot_cwd);
     refresh_registry_cache_background(state.clone());
     crate::life::start_background(state.home.clone());
     // 引擎启动时补发上次会话遗留的未上报事件（如进程被系统杀掉前没来得及 flush）。
@@ -964,6 +1054,72 @@ pub async fn serve(
         .route("/api/studios/{id}/stop", post(studio_stop))
         .route("/api/studios/{id}/approve", post(studio_approve))
         .route("/api/studios/{id}/work-items", get(studio_work_items).put(studio_save_work_items))
+        // Git 面板与快照还原
+        .route("/api/git/check", get(git_check))
+        .route("/api/git/status", get(git_status))
+        .route("/api/git/diff", get(git_diff))
+        .route("/api/git/stage", post(git_stage))
+        .route("/api/git/unstage", post(git_unstage))
+        .route("/api/git/commit", post(git_commit))
+        .route("/api/git/branches", get(git_branches))
+        .route("/api/git/branch", post(git_branch_create))
+        .route("/api/git/checkout", post(git_checkout))
+        .route("/api/git/log", get(git_log))
+        .route("/api/git/stash", get(git_stash_list))
+        .route("/api/git/stash/push", post(git_stash_push))
+        .route("/api/git/stash/pop", post(git_stash_pop))
+        .route("/api/git/stash/drop", post(git_stash_drop))
+        .route("/api/git/remotes", get(git_remotes))
+        .route("/api/git/remote", post(git_remote_add))
+        .route("/api/git/fetch", post(git_fetch))
+        .route("/api/git/pull", post(git_pull))
+        .route("/api/git/push", post(git_push))
+        .route("/api/git/project-info", get(git_project_info))
+        .route(
+            "/api/git/snapshots",
+            get(git_snapshots_list).post(git_snapshot_create),
+        )
+        .route("/api/git/snapshots/{id}/preview", post(git_snapshot_preview))
+        .route("/api/git/snapshots/{id}/restore", post(git_snapshot_restore))
+        .route("/api/git/snapshots/{id}/update", post(git_snapshot_update))
+        .route("/api/git/snapshots/{id}/diff", get(git_snapshot_diff))
+        .route("/api/git/snapshots/{id}", delete(git_snapshot_delete))
+        .route(
+            "/api/git/snapshots/schedule",
+            get(git_snapshot_schedule_get).put(git_snapshot_schedule_put),
+        )
+        .route("/api/git/compare", post(git_compare))
+        .route("/api/git/backup", post(git_backup))
+        // Wave 2 服务接线：运维诊断 / 凭据管理 / AI 助手 / 数据工具
+        .route("/api/git/network-diagnostics", get(git_network_diagnostics))
+        .route("/api/git/storage", get(git_storage))
+        .route("/api/git/log-bundle", post(git_log_bundle))
+        .route("/api/git/guest-tools", get(git_guest_tools))
+        .route(
+            "/api/git/credentials",
+            get(git_credentials_list).post(git_credentials_save),
+        )
+        .route(
+            "/api/git/credentials/{service}/{key}",
+            delete(git_credentials_delete),
+        )
+        .route("/api/git/remote/test", post(git_remote_test))
+        .route("/api/git/ai/commit-message", post(git_ai_commit_message))
+        .route("/api/git/ai/summarize", post(git_ai_summarize))
+        .route("/api/git/ai/review", post(git_ai_review))
+        .route("/api/git/ai/adversarial-review", post(git_ai_adversarial_review))
+        .route("/api/git/ai/root-cause", post(git_ai_root_cause))
+        .route("/api/git/ai/compare", post(git_ai_compare))
+        .route("/api/git/ai/fix/suggest", post(git_ai_fix_suggest))
+        .route("/api/git/ai/fix/apply", post(git_ai_fix_apply))
+        .route("/api/git/ai/conflict", post(git_ai_conflict))
+        .route("/api/git/ai/readme", post(git_ai_readme))
+        .route("/api/git/pr/describe", post(git_pr_describe))
+        .route("/api/git/pr/create", post(git_pr_create))
+        .route("/api/git/contributions", get(git_contributions))
+        .route("/api/sessions/search", get(sessions_search))
+        .route("/api/sessions/{id}/export", post(session_export_markdown))
+        .route("/api/usage/by-day", get(usage_by_day_handler))
         .route("/ws/session/{session_id}", get(websocket_route))
         .fallback_service(files)
         // Local bridge: only allow same-origin browser access (the Android WebView and
@@ -6445,6 +6601,8 @@ async fn handle_command(
                 context.send_error(envelope_id, format!("failed to create task: {error:#}"));
                 return;
             }
+            // 用户轮次开始前自动存档（turn/session 快照），失败不影响主流程。
+            auto_snapshot_before_turn(state, session_id, task_kind, prompt).await;
             persist_task_checkpoints(state);
             context.send_ack(envelope_id);
             let turn_state = state.clone();
@@ -9449,6 +9607,1571 @@ fn unix_time() -> f64 {
         .unwrap_or_default()
 }
 
+// ---------------------------------------------------------------------------
+// Git 面板与快照还原 REST API
+// ---------------------------------------------------------------------------
+
+/// 每请求构造一个 GitEngine（home=快照索引目录，cwd=工作区/仓库根）。
+/// 传入 home 作为 PRoot Linux 运行时目录：git 优先在 guest 内执行
+/// （Android 宿主通常没有 git 二进制），运行时不可用自动回退宿主。
+fn git_engine(state: &AppState) -> GitEngine {
+    GitEngine::new(state.home.clone(), state.cwd.clone())
+        .with_runtime_home(state.home.clone())
+}
+
+/// 在快照索引中查找指定 id；不存在返回 404。
+async fn require_snapshot(engine: &GitEngine, id: &str) -> Result<Snapshot, ApiError> {
+    let list = engine.snapshot_list().await.map_err(ApiError::from)?;
+    list.into_iter()
+        .find(|snap| snap.id == id)
+        .ok_or_else(|| ApiError::not_found(format!("snapshot not found: {id}")))
+}
+
+/// 直接执行 git 命令（GitEngine 未覆盖的场景：remote add / 任意 ref 间 diff）。
+/// 优先经 PRoot Linux 运行时在 guest 内执行（`runtime_home` 可用时），运行时
+/// 不可用回退宿主直接执行；参数化执行、LC_ALL=C，与 services 侧 git 调用风格
+/// 一致。命令不存在视为 500，命令失败（非零退出码）视为 400 并携带 stderr。
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    runtime_home: Option<&Path>,
+) -> Result<String, ApiError> {
+    let (code, stdout, stderr) = coomi_services::run_git(cwd, args, &[], runtime_home)
+        .await
+        .map_err(|error| ApiError::internal(format!("failed to run git: {error}")))?;
+    if code != 0 {
+        return Err(ApiError::bad_request(format!(
+            "git {} failed: {}",
+            args.first().copied().unwrap_or(""),
+            stderr.trim()
+        )));
+    }
+    Ok(stdout)
+}
+
+/// 两个 ref（commit/HEAD/快照 ref）之间的差异，输出 stat + diff 文本，
+/// 截断策略与 GitEngine::diff 一致（200KB）。
+async fn git_diff_between(
+    cwd: &Path,
+    from: &str,
+    to: &str,
+    context: usize,
+    runtime_home: Option<&Path>,
+) -> Result<DiffInfo, ApiError> {
+    let stat = run_git(
+        cwd,
+        &["diff", "--stat", "--no-ext-diff", from, to],
+        runtime_home,
+    )
+    .await?;
+    let full = run_git(
+        cwd,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-color",
+            &format!("--unified={context}"),
+            from,
+            to,
+        ],
+        runtime_home,
+    )
+    .await?;
+    const MAX_DIFF_BYTES: usize = 200 * 1024;
+    let truncated = full.len() > MAX_DIFF_BYTES;
+    let diff = if truncated {
+        let mut cut = full;
+        cut.truncate(MAX_DIFF_BYTES);
+        cut.push_str("\n... [diff truncated]");
+        cut
+    } else {
+        full
+    };
+    Ok(DiffInfo { stat, diff, truncated })
+}
+
+/// compare 的 ref 规格："snapshot:<id>" → 校验存在并映射为快照 ref；"head" → HEAD。
+async fn resolve_compare_ref(engine: &GitEngine, spec: &str) -> Result<String, ApiError> {
+    if spec.eq_ignore_ascii_case("head") {
+        return Ok("HEAD".to_owned());
+    }
+    if let Some(id) = spec.strip_prefix("snapshot:") {
+        require_snapshot(engine, id).await?;
+        return Ok(format!("refs/coomi/snap/{id}"));
+    }
+    Err(ApiError::bad_request(format!("invalid ref spec: {spec}")))
+}
+
+// -- 请求体 / 查询参数 ---------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStageBody {
+    paths: Option<Vec<String>>,
+    all: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCommitBody {
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitBranchBody {
+    name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCheckoutBody {
+    branch: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GitStashPushBody {
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitStashIndexBody {
+    index: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitRemoteBody {
+    name: String,
+    url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitPullBody {
+    remote: String,
+    branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitPushBody {
+    remote: String,
+    branch: String,
+    token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitDiffQuery {
+    path: Option<String>,
+    cached: Option<bool>,
+    context: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLogQuery {
+    path: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotCreateBody {
+    kind: String,
+    session_id: Option<String>,
+    turn: Option<u64>,
+    summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotUpdateBody {
+    note: Option<String>,
+    locked: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCompareBody {
+    from: String,
+    to: String,
+}
+
+/// PUT /api/git/snapshots/schedule 请求体：字段均可缺省；`cron` 用双层 Option 区分
+/// 「未传（保持原值）」与「显式 null（清除定时触发）」，非法 cron 由处理器校验。
+#[derive(Debug, Default, Deserialize)]
+struct SnapshotScheduleUpdate {
+    enabled: Option<bool>,
+    cron: Option<Option<String>>,
+    retain: Option<usize>,
+}
+
+// -- 端点 -----------------------------------------------------------------
+
+/// GET /api/git/check → {ok, version}
+async fn git_check(State(state): State<AppState>) -> Json<Value> {
+    let engine = git_engine(&state);
+    let version = engine.check_git().await;
+    Json(json!({ "ok": version.is_some(), "version": version }))
+}
+
+/// GET /api/git/status → GitStatus
+async fn git_status(State(state): State<AppState>) -> Result<Json<GitStatus>, ApiError> {
+    let engine = git_engine(&state);
+    let status = engine.status().await.map_err(ApiError::from)?;
+    Ok(Json(status))
+}
+
+/// GET /api/git/diff?path=&cached=&context= → DiffInfo
+async fn git_diff(
+    State(state): State<AppState>,
+    Query(query): Query<GitDiffQuery>,
+) -> Result<Json<DiffInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let info = engine
+        .diff(
+            query.path.as_deref(),
+            query.cached.unwrap_or(false),
+            query.context.unwrap_or(3),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+/// POST /api/git/stage {paths?, all?}
+async fn git_stage(
+    State(state): State<AppState>,
+    Json(body): Json<GitStageBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let paths = body.paths.unwrap_or_default();
+    engine
+        .stage(&paths, body.all.unwrap_or(false))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// POST /api/git/unstage {paths?, all?}
+async fn git_unstage(
+    State(state): State<AppState>,
+    Json(body): Json<GitStageBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let paths = body.paths.unwrap_or_default();
+    engine
+        .unstage(&paths, body.all.unwrap_or(false))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// POST /api/git/commit {message} → {hash}
+async fn git_commit(
+    State(state): State<AppState>,
+    Json(body): Json<GitCommitBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let hash = engine.commit(&body.message).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "hash": hash })))
+}
+
+/// GET /api/git/branches → BranchInfo
+async fn git_branches(State(state): State<AppState>) -> Result<Json<BranchInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let info = engine.branches().await.map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+/// POST /api/git/branch {name}：新建并切换
+async fn git_branch_create(
+    State(state): State<AppState>,
+    Json(body): Json<GitBranchBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .create_branch(&body.name)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "branch": body.name, "output": output })))
+}
+
+/// POST /api/git/checkout {branch}
+async fn git_checkout(
+    State(state): State<AppState>,
+    Json(body): Json<GitCheckoutBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.checkout(&body.branch).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "branch": body.branch, "output": output })))
+}
+
+/// GET /api/git/log?path=&limit= → CommitInfo[]
+async fn git_log(
+    State(state): State<AppState>,
+    Query(query): Query<GitLogQuery>,
+) -> Result<Json<Vec<CommitInfo>>, ApiError> {
+    let engine = git_engine(&state);
+    let commits = engine
+        .log(query.path.as_deref(), query.limit.unwrap_or(30))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(commits))
+}
+
+/// GET /api/git/stash → StashEntry[]
+async fn git_stash_list(State(state): State<AppState>) -> Result<Json<Vec<StashEntry>>, ApiError> {
+    let engine = git_engine(&state);
+    let entries = engine.stash_list().await.map_err(ApiError::from)?;
+    Ok(Json(entries))
+}
+
+/// POST /api/git/stash/push {message?}
+async fn git_stash_push(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<GitStashPushBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .stash_push(body.message.as_deref())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// POST /api/git/stash/pop {index}
+async fn git_stash_pop(
+    State(state): State<AppState>,
+    Json(body): Json<GitStashIndexBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.stash_pop(body.index).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// POST /api/git/stash/drop {index}
+async fn git_stash_drop(
+    State(state): State<AppState>,
+    Json(body): Json<GitStashIndexBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.stash_drop(body.index).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// GET /api/git/remotes → RemoteInfo[]
+async fn git_remotes(State(state): State<AppState>) -> Result<Json<Vec<RemoteInfo>>, ApiError> {
+    let engine = git_engine(&state);
+    let remotes = engine.remotes().await.map_err(ApiError::from)?;
+    Ok(Json(remotes))
+}
+
+/// POST /api/git/remote {name, url}：git remote add
+async fn git_remote_add(
+    State(state): State<AppState>,
+    Json(body): Json<GitRemoteBody>,
+) -> Result<Json<Value>, ApiError> {
+    let name = body.name.trim();
+    let url = body.url.trim();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("remote name cannot be empty"));
+    }
+    if url.is_empty() {
+        return Err(ApiError::bad_request("remote url cannot be empty"));
+    }
+    let output = run_git(&state.cwd, &["remote", "add", name, url], Some(&state.home)).await?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// POST /api/git/fetch
+async fn git_fetch(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.fetch().await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// POST /api/git/pull {remote, branch}
+async fn git_pull(
+    State(state): State<AppState>,
+    Json(body): Json<GitPullBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .pull(&body.remote, &body.branch)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// POST /api/git/push {remote, branch, token?}
+async fn git_push(
+    State(state): State<AppState>,
+    Json(body): Json<GitPushBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .push(&body.remote, &body.branch, body.token.as_deref())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+/// GET /api/git/project-info → ProjectInfo
+async fn git_project_info(State(state): State<AppState>) -> Result<Json<ProjectInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let info = engine.project_info().await.map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+/// GET /api/git/snapshots → Snapshot[]
+async fn git_snapshots_list(State(state): State<AppState>) -> Result<Json<Vec<Snapshot>>, ApiError> {
+    let engine = git_engine(&state);
+    let list = engine.snapshot_list().await.map_err(ApiError::from)?;
+    Ok(Json(list))
+}
+
+/// POST /api/git/snapshots {kind, sessionId?, turn?, summary} → Snapshot
+async fn git_snapshot_create(
+    State(state): State<AppState>,
+    Json(body): Json<SnapshotCreateBody>,
+) -> Result<Json<Snapshot>, ApiError> {
+    match body.kind.as_str() {
+        "turn" if body.session_id.is_none() || body.turn.is_none() => {
+            return Err(ApiError::bad_request(
+                "snapshot kind \"turn\" requires sessionId and turn",
+            ));
+        }
+        "session" if body.session_id.is_none() => {
+            return Err(ApiError::bad_request(
+                "snapshot kind \"session\" requires sessionId",
+            ));
+        }
+        "turn" | "session" | "manual" | "pre-restore" => {}
+        _ => {
+            return Err(ApiError::bad_request(format!(
+                "invalid snapshot kind: {}",
+                body.kind
+            )));
+        }
+    }
+    if body.summary.trim().is_empty() {
+        return Err(ApiError::bad_request("snapshot summary cannot be empty"));
+    }
+    let engine = git_engine(&state);
+    let snap = engine
+        .snapshot_create(
+            &body.kind,
+            body.session_id.as_deref(),
+            body.turn,
+            &body.summary,
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(snap))
+}
+
+/// POST /api/git/snapshots/{id}/preview → SnapshotPreview
+async fn git_snapshot_preview(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<SnapshotPreview>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    let preview = engine.snapshot_preview(&id).await.map_err(ApiError::from)?;
+    Ok(Json(preview))
+}
+
+/// POST /api/git/snapshots/{id}/restore → RestoreReport
+async fn git_snapshot_restore(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<RestoreReport>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    let report = engine.snapshot_restore(&id).await.map_err(ApiError::from)?;
+    Ok(Json(report))
+}
+
+/// POST /api/git/snapshots/{id}/update {note?, locked?} → Snapshot
+async fn git_snapshot_update(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<SnapshotUpdateBody>,
+) -> Result<Json<Snapshot>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    let snap = engine
+        .snapshot_update(&id, body.note.as_deref(), body.locked)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(snap))
+}
+
+/// DELETE /api/git/snapshots/{id}
+async fn git_snapshot_delete(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    engine.snapshot_delete(&id).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// GET /api/git/snapshots/schedule → SnapshotSchedule（定时快照配置）
+async fn git_snapshot_schedule_get(
+    State(state): State<AppState>,
+) -> Result<Json<crate::snapshot_schedule::SnapshotSchedule>, ApiError> {
+    Ok(Json(crate::snapshot_schedule::load_schedule(&state.home)))
+}
+
+/// PUT /api/git/snapshots/schedule {enabled?, cron?, retain?} → SnapshotSchedule
+/// 只更新请求中出现的字段；`cron: null` 表示清除定时触发；非法 cron 返回 400。
+async fn git_snapshot_schedule_put(
+    State(state): State<AppState>,
+    Json(body): Json<SnapshotScheduleUpdate>,
+) -> Result<Json<crate::snapshot_schedule::SnapshotSchedule>, ApiError> {
+    let mut config = crate::snapshot_schedule::load_schedule(&state.home);
+    if let Some(enabled) = body.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(cron) = body.cron {
+        if let Some(expr) = cron.as_deref() {
+            if !crate::snapshot_schedule::is_valid_cron(expr) {
+                return Err(ApiError::bad_request(format!(
+                    "invalid cron expression: {expr}"
+                )));
+            }
+        }
+        config.cron = cron;
+    }
+    if let Some(retain) = body.retain {
+        config.retain = retain;
+    }
+    crate::snapshot_schedule::save_schedule(&state.home, &config).map_err(ApiError::from)?;
+    Ok(Json(config))
+}
+
+/// GET /api/git/snapshots/{id}/diff → DiffInfo（该快照 vs HEAD）
+async fn git_snapshot_diff(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<DiffInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let snap = require_snapshot(&engine, &id).await?;
+    let info = git_diff_between(&state.cwd, &snap.sha, "HEAD", 3, Some(&state.home)).await?;
+    Ok(Json(info))
+}
+
+/// POST /api/git/compare {from, to} → DiffInfo（from/to ∈ "snapshot:<id>" | "head"）
+async fn git_compare(
+    State(state): State<AppState>,
+    Json(body): Json<GitCompareBody>,
+) -> Result<Json<DiffInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let from = resolve_compare_ref(&engine, &body.from).await?;
+    let to = resolve_compare_ref(&engine, &body.to).await?;
+    let info = git_diff_between(&state.cwd, &from, &to, 3, Some(&state.home)).await?;
+    Ok(Json(info))
+}
+
+/// POST /api/git/backup → {path}（git bundle 打包到 home/backups）
+async fn git_backup(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let dest_dir = state.home.join("backups");
+    let path = engine.bundle(&dest_dir).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "path": path.display().to_string() })))
+}
+
+// ---------------------------------------------------------------------------
+// Wave 2 服务接线：运维诊断 / 凭据管理 / AI 助手 / 数据工具 REST API
+// ---------------------------------------------------------------------------
+
+/// 每请求构造 OpsEngine（home=数据目录，cwd=工作区）。
+fn ops_engine(state: &AppState) -> OpsEngine {
+    OpsEngine::new(state.home.clone(), state.cwd.clone())
+}
+
+/// 每请求从 ProviderRegistry 读取配置构造 AiGit；拿不到令牌时退化为
+/// AiGit::default()，其内部降级逻辑保证不报错。
+fn ai_git(state: &AppState) -> AiGit {
+    match ProviderRegistry::load(&providers_path(&state.home))
+        .and_then(|registry| registry.resolve(None))
+    {
+        Ok(config) => AiGit::from_provider(&config),
+        Err(_) => AiGit::default(),
+    }
+}
+
+/// 写入临时 git credential helper 脚本（token 经环境变量 COOMI_GIT_TOKEN 注入，
+/// 用完即删；参考 git_engine.rs write_credential_helper 的写法）。
+fn write_credential_helper(home: &Path, token: &str) -> Result<PathBuf, ApiError> {
+    let dir = home.join("diagnostics");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| ApiError::internal(format!("create diagnostics dir: {error}")))?;
+    let path = dir.join(format!(
+        "coomi-cred-helper-{}-{}",
+        Uuid::new_v4(),
+        token.len()
+    ));
+    let script = "#!/bin/sh\necho \"username=oauth2\"\necho \"password=${COOMI_GIT_TOKEN}\"\n";
+    std::fs::write(&path, script)
+        .map_err(|error| ApiError::internal(format!("write credential helper: {error}")))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .map_err(|error| ApiError::internal(format!("helper metadata: {error}")))?
+            .permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(&path, perms)
+            .map_err(|error| ApiError::internal(format!("helper chmod: {error}")))?;
+    }
+    Ok(path)
+}
+
+// -- 请求体 / 查询参数 ---------------------------------------------------
+
+/// 可空 JSON body 提取器：请求体缺失/为空时回退 `Default`。
+///
+/// axum 的 `Json<T>` 提取器对「Content-Type: application/json + 空 body」直接
+/// 返回 400（JsonRejection），而前端在可选参数不传时可能不发送 body
+/// （如 `/api/git/ai/*`、`/api/git/stash/push`）。本提取器把「无 body 或无法解析」
+/// 视为「全部默认值」，保证端点语义为全可选；body 正常时行为与 `Json<T>` 一致。
+#[derive(Debug, Default)]
+struct OptionalJson<T>(T);
+
+impl<T, S> axum::extract::FromRequest<S> for OptionalJson<T>
+where
+    T: serde::de::DeserializeOwned + Default,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        match Json::<T>::from_request(req, state).await {
+            Ok(Json(value)) => Ok(OptionalJson(value)),
+            Err(_) => Ok(OptionalJson(T::default())),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCredentialBody {
+    service: String,
+    key: String,
+    token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitRemoteTestBody {
+    url: String,
+    token: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiContextBody {
+    context: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiSinceBody {
+    since: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiPathBody {
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AiConflictBody {
+    path: String,
+}
+
+/// POST /api/git/ai/compare 请求体：两个分支/提交引用均必填。
+#[derive(Debug, Deserialize)]
+struct AiCompareBody {
+    branch_a: String,
+    branch_b: String,
+}
+
+/// POST /api/git/ai/root-cause 请求体：commit 可选，缺省取 HEAD。
+#[derive(Debug, Default, Deserialize)]
+struct AiCommitBody {
+    commit: Option<String>,
+}
+
+/// 校验并规范化 A/B 分支参数：trim 后任一为空返回 None（纯函数便于测试）。
+fn parse_ab_branches(branch_a: &str, branch_b: &str) -> Option<(String, String)> {
+    let a = branch_a.trim();
+    let b = branch_b.trim();
+    if a.is_empty() || b.is_empty() {
+        None
+    } else {
+        Some((a.to_owned(), b.to_owned()))
+    }
+}
+
+/// 规范化 commit 参数：trim 后为空回退 "HEAD"（纯函数便于测试）。
+fn resolve_commit_arg(commit: Option<&str>) -> String {
+    commit
+        .map(str::trim)
+        .filter(|commit| !commit.is_empty())
+        .unwrap_or("HEAD")
+        .to_owned()
+}
+
+/// POST /api/git/ai/fix/apply 请求体：patch 必填；path/commit/message 可选。
+#[derive(Debug, Deserialize)]
+struct AiFixApplyBody {
+    /// 待应用的 unified diff 补丁（来自 AI 输出，apply 前会先 --check）。
+    patch: String,
+    /// 提交阶段暂存的目标文件；缺省时暂存全部改动。
+    path: Option<String>,
+    /// 是否应用后自动提交。
+    #[serde(default)]
+    commit: bool,
+    /// 提交信息；缺省时由 AiGit::suggest_commit_message 生成。
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContributionsQuery {
+    since_days: Option<u64>,
+}
+
+/// POST /api/git/pr/describe 请求体：base 必填，head 缺省用当前分支。
+#[derive(Debug, Deserialize)]
+struct PrDescribeBody {
+    base: String,
+    head: Option<String>,
+}
+
+/// POST /api/git/pr/create 请求体：base 必填；其余可选
+/// （head 缺省用当前分支；head_repo 缺省自动取当前 remote 的 fork 所有者；
+/// remote 缺省取 origin/第一个，作为 head（fork）仓库来源；
+/// upstream 缺省取名为 upstream 的 remote，再回退 remote；token 缺省从凭据存储读取）。
+#[derive(Debug, Deserialize)]
+struct PrCreateBody {
+    base: String,
+    head: Option<String>,
+    /// 跨仓库（fork→上游）PR 时填写 fork 仓库所有者；格式 `owner` 或 `owner/repo`，
+    /// 内部只取 owner 拼成平台 API 的 `owner:branch`。留空=自动取当前 remote 的 owner。
+    head_repo: Option<String>,
+    title: Option<String>,
+    body: Option<String>,
+    /// head（fork）仓库来源的 remote 名；缺省取 origin/第一个。留空时目标仓库
+    /// 取 upstream 参数或名为 upstream 的 remote。
+    remote: Option<String>,
+    /// 合并目标（base 所在）仓库：可为 remote 名（如 upstream）或完整 URL
+    /// （https://github.com/owner/repo.git）。缺省优先名为 upstream 的 remote，
+    /// 再回退 `remote` 参数/origin/第一个（同仓库 PR）。
+    upstream: Option<String>,
+    token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionSearchQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+// -- 端点 -----------------------------------------------------------------
+
+/// GET /api/git/network-diagnostics → NetworkReport
+async fn git_network_diagnostics(
+    State(state): State<AppState>,
+) -> Result<Json<NetworkReport>, ApiError> {
+    let report = ops_engine(&state).network_diagnostics().await;
+    Ok(Json(report))
+}
+
+/// GET /api/git/storage → StorageReport
+async fn git_storage(State(state): State<AppState>) -> Result<Json<StorageReport>, ApiError> {
+    let report = ops_engine(&state).storage_analysis().await;
+    Ok(Json(report))
+}
+
+/// POST /api/git/log-bundle → {path}
+async fn git_log_bundle(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let path = ops_engine(&state).log_bundle().await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "path": path.display().to_string() })))
+}
+
+/// GET /api/git/guest-tools → GuestTool[]
+async fn git_guest_tools(State(state): State<AppState>) -> Result<Json<Vec<GuestTool>>, ApiError> {
+    let tools = ops_engine(&state).guest_tools().await;
+    Ok(Json(tools))
+}
+
+/// GET /api/git/credentials → 各 service 的 key 清单（不暴露 token）
+async fn git_credentials_list(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<(String, Vec<String>)>>, ApiError> {
+    let store = CredentialStore::new(state.home.clone());
+    Ok(Json(store.list_keys()))
+}
+
+/// POST /api/git/credentials {service, key, token} → {ok: true}
+async fn git_credentials_save(
+    State(state): State<AppState>,
+    Json(body): Json<GitCredentialBody>,
+) -> Result<Json<Value>, ApiError> {
+    if body.service.trim().is_empty() || body.key.trim().is_empty() || body.token.trim().is_empty()
+    {
+        return Err(ApiError::bad_request("service, key and token are required"));
+    }
+    let store = CredentialStore::new(state.home.clone());
+    store
+        .save(&body.service, &body.key, &body.token)
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// DELETE /api/git/credentials/{service}/{key} → {ok: true}
+async fn git_credentials_delete(
+    State(state): State<AppState>,
+    AxumPath((service, key)): AxumPath<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let store = CredentialStore::new(state.home.clone());
+    store.delete(&service, &key).map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// POST /api/git/remote/test {url, token?} → {ok, error?}
+/// 参数化执行 `git ls-remote <url> HEAD`（优先经 PRoot Linux 运行时，guest 内
+/// workspace bind 为 /workspace，故 `credential.helper=<path>` 需映射为 guest
+/// 路径）；token 存在时经临时 credential helper 注入 COOMI_GIT_TOKEN（用完即删），
+/// 超时 15 秒。
+async fn git_remote_test(
+    State(state): State<AppState>,
+    Json(body): Json<GitRemoteTestBody>,
+) -> Result<Json<Value>, ApiError> {
+    let url = body.url.trim().to_string();
+    if url.is_empty() {
+        return Err(ApiError::bad_request("url is required"));
+    }
+    let token = body
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty());
+    let helper = match token {
+        Some(token) => Some(write_credential_helper(&state.home, token)?),
+        None => None,
+    };
+    let envs: Vec<(&str, &str)> = match (&helper, token) {
+        (Some(_), Some(token)) => vec![("COOMI_GIT_TOKEN", token)],
+        _ => Vec::new(),
+    };
+    let args: Vec<String> = match &helper {
+        Some(path) => {
+            // guest 内 credential helper 脚本与 workspace 同步可见于 /workspace/.git。
+            let helper_arg = format!(
+                "credential.helper={}",
+                coomi_services::map_guest_path(&state.cwd, &path.to_string_lossy())
+            );
+            vec![
+                "-c".to_string(),
+                helper_arg,
+                "ls-remote".to_string(),
+                url.clone(),
+                "HEAD".to_string(),
+            ]
+        }
+        None => vec!["ls-remote".to_string(), url.clone(), "HEAD".to_string()],
+    };
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let result = tokio::time::timeout(
+        Duration::from_secs(15),
+        coomi_services::run_git(&state.cwd, &arg_refs, &envs, Some(&state.home)),
+    )
+    .await;
+    if let Some(path) = helper {
+        let _ = std::fs::remove_file(&path);
+    }
+    let payload = match result {
+        Ok(Ok((code, _stdout, _stderr))) if code == 0 => json!({ "ok": true }),
+        Ok(Ok((_code, _stdout, stderr))) => json!({
+            "ok": false,
+            "error": stderr.trim().to_string(),
+        }),
+        Ok(Err(error)) => json!({ "ok": false, "error": format!("failed to run git: {error}") }),
+        Err(_) => json!({ "ok": false, "error": "timeout after 15s".to_string() }),
+    };
+    Ok(Json(payload))
+}
+
+/// POST /api/git/ai/commit-message {context?} → {text}
+/// AiGit 内部在 chat_once 中持有 std::sync::MutexGuard 跨越 await，其方法 future
+/// 非 Send，不满足 axum handler 约束；故在 spawn_blocking 线程上的当前线程
+/// runtime 内同步执行（engine/ai/context 均移入闭包）。
+async fn git_ai_commit_message(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiContextBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let context = body.context;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.suggest_commit_message(&engine, context.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/summarize {since?} → {text}
+async fn git_ai_summarize(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiSinceBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let since = body.since;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.summarize_changes(&engine, since.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/review {path?} → {text}
+async fn git_ai_review(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiPathBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let path = body.path;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.code_review(&engine, path.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/fix/suggest {path?} → {issues: [...]}
+/// 结构化问题清单（每项带可应用补丁），模型不可用/解析失败时为空数组。
+async fn git_ai_fix_suggest(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiPathBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let path = body.path;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let issues = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.suggest_fixes(&engine, path.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "issues": issues })))
+}
+
+/// POST /api/git/ai/fix/apply {patch, path?, commit?, message?} →
+/// {ok: true, snapshot_id, commit_hash}
+/// 流程：修复前自动备份快照 → apply_patch（内部先 git apply --check）→
+/// 可选暂存并提交（message 缺省时由模型生成提交信息）。失败时已生成快照，
+/// 可回滚；git 操作与 AI 调用均为参数化执行，不经 shell。
+async fn git_ai_fix_apply(
+    State(state): State<AppState>,
+    Json(body): Json<AiFixApplyBody>,
+) -> Result<Json<Value>, ApiError> {
+    let patch = body.patch.trim().to_string();
+    if patch.is_empty() {
+        return Err(ApiError::bad_request("patch is required"));
+    }
+    let engine = git_engine(&state);
+    // 1. 修复前自动备份：任何后续失败都可从该快照回滚。
+    let snapshot = engine
+        .snapshot_create("pre-fix", None, None, "before ai fix")
+        .await
+        .map_err(ApiError::from)?;
+    // 2. 应用补丁（apply_patch 内部先 --check 干跑，未通过不落地修改）。
+    engine.apply_patch(&patch).await.map_err(|error| {
+        ApiError::internal(format!(
+            "应用补丁失败（快照 {} 可回滚）：{error:#}",
+            snapshot.id
+        ))
+    })?;
+    // 3. 可选：暂存并提交。
+    let mut commit_hash = None;
+    if body.commit {
+        let paths: Vec<String> = body
+            .path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(|path| vec![path.to_owned()])
+            .unwrap_or_default();
+        if paths.is_empty() {
+            // 未指定文件时暂存全部改动。
+            engine.stage(&[], true).await.map_err(ApiError::from)?;
+        } else {
+            engine.stage(&paths, false).await.map_err(ApiError::from)?;
+        }
+        let message = match body.message {
+            Some(message) if !message.trim().is_empty() => message.trim().to_owned(),
+            _ => {
+                // 生成提交信息（AiGit future 非 Send，走当前线程 runtime）。
+                let engine_for_ai = git_engine(&state);
+                let ai = ai_git(&state);
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+                tokio::task::spawn_blocking(move || {
+                    rt.block_on(ai.suggest_commit_message(&engine_for_ai, None))
+                        .map_err(ApiError::from)
+                })
+                .await
+                .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??
+            }
+        };
+        let hash = engine.commit(&message).await.map_err(ApiError::from)?;
+        commit_hash = Some(hash);
+    }
+    Ok(Json(json!({
+        "ok": true,
+        "snapshot_id": snapshot.id,
+        "commit_hash": commit_hash,
+    })))
+}
+
+/// POST /api/git/ai/conflict {path} → {text}
+async fn git_ai_conflict(
+    State(state): State<AppState>,
+    Json(body): Json<AiConflictBody>,
+) -> Result<Json<Value>, ApiError> {
+    let path = body.path.trim().to_string();
+    if path.is_empty() {
+        return Err(ApiError::bad_request("path is required"));
+    }
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.resolve_conflict(&engine, &path)).map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/readme → {text}
+async fn git_ai_readme(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.generate_readme(&engine)).map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/compare {branch_a, branch_b} → {text}
+/// A/B 实验模式：以 merge-base 为基线对比两个分支/提交引用的实现方案，
+/// 输出中文对比报告（方案差异 / 影响文件 / 实现取舍 / 推荐结论）。
+/// 模型不可用或 diff 获取失败时由 AiGit 内部降级为提交历史 + 合并 stat
+/// 摘要（Ok）；空引用由参数校验直接 400。
+async fn git_ai_compare(
+    State(state): State<AppState>,
+    Json(body): Json<AiCompareBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (branch_a, branch_b) = parse_ab_branches(&body.branch_a, &body.branch_b)
+        .ok_or_else(|| ApiError::bad_request("branch_a and branch_b are required"))?;
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.compare_implementations(&engine, &branch_a, &branch_b))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/adversarial-review {path?} → {text}
+/// 对抗式评审：以「挑剔的资深审查者」身份专门找常规审查易遗漏的盲点
+/// （边界条件 / 错误处理 / 安全 / 并发与性能 / 兼容性），输出中文 Markdown。
+/// 输入与 code_review 相同（工作区未提交 diff）；模型不可用由 AiGit 内部降级。
+async fn git_ai_adversarial_review(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiPathBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let path = body.path;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.adversarial_review(&engine, path.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/ai/root-cause {commit?} → {text}
+/// 变更根因分析：对单个提交（缺省 HEAD）输出动机 / 触发背景 / 对外影响 /
+/// 是否引入风险。commit 不存在或模型不可用由 AiGit 内部降级为中文提示（Ok）。
+async fn git_ai_root_cause(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiCommitBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let commit = resolve_commit_arg(body.commit.as_deref());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.root_cause(&engine, Some(&commit)))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+// ---------------------------------------------------------------------------
+// 远程 PR 集成（P1-4）：描述生成 + 平台创建
+// ---------------------------------------------------------------------------
+
+/// POST /api/git/pr/describe {base, head?} → {text}
+/// 生成 base..head 的中文 PR 描述（标题+正文）。head 缺省用当前分支。
+/// AiGit future 非 Send，沿用 spawn_blocking + 当前线程 runtime 模式。
+async fn git_pr_describe(
+    State(state): State<AppState>,
+    Json(body): Json<PrDescribeBody>,
+) -> Result<Json<Value>, ApiError> {
+    let base = body.base.trim().to_string();
+    if base.is_empty() {
+        return Err(ApiError::bad_request("base is required"));
+    }
+    let engine = git_engine(&state);
+    let head = resolve_pr_head(&engine, body.head.as_deref()).await?;
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.generate_pr_description(&engine, &base, &head))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+/// POST /api/git/pr/create {base, head?, title?, body?, remote?, upstream?, token?} → {url, number}
+/// 流程：确定合并目标仓库（upstream 参数 → 名为 upstream 的 remote → remote/origin）
+/// → 解析 owner/repo（支持 github.com / gitee.com / atomgit.com）→ 组装 head 字段
+/// （跨仓库 = fork_owner:branch）→ 用平台 REST API 创建 PR。token 缺省时从凭据存储
+/// 读取（service = 平台小写名，key = "token"）。网络请求全部走 reqwest。
+async fn git_pr_create(
+    State(state): State<AppState>,
+    Json(body): Json<PrCreateBody>,
+) -> Result<Json<Value>, ApiError> {
+    let base = body.base.trim().to_string();
+    if base.is_empty() {
+        return Err(ApiError::bad_request("base is required"));
+    }
+    let engine = git_engine(&state);
+    let head = resolve_pr_head(&engine, body.head.as_deref()).await?;
+    let remotes = engine.remotes().await.map_err(ApiError::from)?;
+
+    // 1. 合并目标仓库（base 所在；fork 场景即上游）：upstream 参数 / upstream remote / remote。
+    let base_remote = resolve_pr_base_remote(&remotes, body.upstream.as_deref(), body.remote.as_deref())?;
+    let platform = coomi_services::detect_platform(&base_remote.url);
+    let api_base = match platform.as_str() {
+        "GitHub" => "https://api.github.com",
+        "Gitee" => "https://gitee.com/api/v5",
+        "AtomGit" => "https://atomgit.com/api/v5",
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "unsupported platform for PR creation: {other}"
+            )));
+        }
+    };
+    let (owner, repo) = parse_remote_repo(&base_remote.url).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "cannot parse owner/repo from target remote url: {}",
+            base_remote.url
+        ))
+    })?;
+
+    // 2. head（fork）仓库：显式 head_repo 优先，否则自动取当前 remote 的 owner。
+    let head_owner = resolve_pr_head_owner(&remotes, body.remote.as_deref(), body.head_repo.as_deref())?;
+    let head_field = match head_owner {
+        Some(owner) => pr_head_field(&head, Some(&owner)),
+        None => head.clone(),
+    };
+
+    // 3. token：请求体优先，缺省从凭据存储读取（service=平台小写，key="token"）。
+    let token = match body.token.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        Some(token) => token.to_owned(),
+        None => {
+            let store = CredentialStore::new(state.home.clone());
+            store.get(&platform.to_ascii_lowercase(), "token").ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "no token provided and no saved credential for {platform}"
+                ))
+            })?
+        }
+    };
+
+    let payload = create_remote_pr(
+        api_base,
+        &owner,
+        &repo,
+        &base,
+        &head_field,
+        body.title.as_deref(),
+        body.body.as_deref(),
+        &token,
+        &platform,
+    )
+    .await?;
+    Ok(Json(payload))
+}
+
+/// 解析 PR 合并目标仓库（base 所在仓库）：
+/// 1. `upstream` 参数：优先按 remote 名匹配，否则作为完整 URL（含协议或 git@）；
+/// 2. 缺省：名为 `upstream` 的 remote；
+/// 3. 再回退 `remote` 参数/origin/第一个（同仓库 PR）。
+fn resolve_pr_base_remote(
+    remotes: &[RemoteInfo],
+    upstream: Option<&str>,
+    remote: Option<&str>,
+) -> Result<RemoteInfo, ApiError> {
+    if let Some(value) = upstream.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(found) = remotes.iter().find(|r| r.name == value) {
+            return Ok(found.clone());
+        }
+        if !(value.contains("://") || value.starts_with("git@")) {
+            return Err(ApiError::bad_request(format!(
+                "upstream 不是已配置的 remote 名，且缺少协议前缀（请输入 https://... 或 git@... 完整地址）：{value}"
+            )));
+        }
+        return Ok(RemoteInfo {
+            name: "upstream".to_owned(),
+            url: value.to_owned(),
+            platform: coomi_services::detect_platform(value),
+        });
+    }
+    if let Some(found) = remotes.iter().find(|r| r.name == "upstream") {
+        return Ok(found.clone());
+    }
+    match remote.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => remotes
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
+            .ok_or_else(|| ApiError::bad_request(format!("remote not found: {name}"))),
+        None => remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| remotes.first())
+            .cloned()
+            .ok_or_else(|| ApiError::bad_request("no git remote configured")),
+    }
+}
+
+/// 解析 head 仓库所有者（fork 场景）：`head_repo` 显式提供（owner 或 owner/repo）时
+/// 取 owner；否则自动从 `remote` 参数/origin/第一个 remote 的 URL 解析 owner
+/// （同仓库 PR 场景解析出的 owner 与目标仓库相同，平台 API 同样接受）。
+fn resolve_pr_head_owner(
+    remotes: &[RemoteInfo],
+    remote: Option<&str>,
+    head_repo: Option<&str>,
+) -> Result<Option<String>, ApiError> {
+    if let Some(value) = head_repo.map(str::trim).filter(|value| !value.is_empty()) {
+        let owner = value.split('/').next().unwrap_or(value).trim();
+        if owner.is_empty() {
+            return Err(ApiError::bad_request("head_repo owner is empty"));
+        }
+        return Ok(Some(owner.to_owned()));
+    }
+    let head_remote = match remote.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => remotes
+            .iter()
+            .find(|r| r.name == name)
+            .ok_or_else(|| ApiError::bad_request(format!("remote not found: {name}")))?,
+        None => remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| remotes.first())
+            .ok_or_else(|| ApiError::bad_request("no git remote configured"))?,
+    };
+    Ok(parse_remote_repo(&head_remote.url).map(|(owner, _)| owner))
+}
+
+/// 组装平台 API 的 head 字段：同仓库 PR 传 `branch`；跨仓库 PR（head_repo 提供 fork
+/// 所有者）传 `fork_owner:branch`。GitHub / Gitee 均支持该格式。
+fn pr_head_field(head: &str, head_repo: Option<&str>) -> String {
+    match head_repo.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(repo) => format!("{}:{}", repo.split('/').next().unwrap_or(repo), head),
+        None => head.to_owned(),
+    }
+}
+
+/// head 缺省用当前分支（trim 后为空同样视为缺省）。
+async fn resolve_pr_head(engine: &GitEngine, head: Option<&str>) -> Result<String, ApiError> {
+    match head.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(head) => Ok(head.to_owned()),
+        None => engine
+            .branches()
+            .await
+            .map_err(ApiError::from)?
+            .current
+            .ok_or_else(|| {
+                ApiError::bad_request("cannot determine current branch; please specify head")
+            }),
+    }
+}
+
+/// 调用平台 REST API 创建 PR，返回 `{url, number}`。
+/// - GitHub：POST https://api.github.com/repos/{owner}/{repo}/pulls（Bearer + JSON）。
+/// - Gitee：POST https://gitee.com/api/v5/repos/{owner}/{repo}/pulls（access_token + 表单）。
+/// owner/repo 在 URL 路径中做百分号编码；base/head 分支名在请求体（JSON/表单）中
+/// 由 reqwest 负责编码。失败返回带平台原始信息的明确错误。
+async fn create_remote_pr(
+    api_base: &str,
+    owner: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+    title: Option<&str>,
+    body: Option<&str>,
+    token: &str,
+    platform: &str,
+) -> Result<Value, ApiError> {
+    let endpoint = format!(
+        "{api_base}/repos/{}/{}/pulls",
+        urlencode(owner),
+        urlencode(repo)
+    );
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| ApiError::internal(format!("build http client: {error}")))?;
+    let title = title.map(str::trim).filter(|t| !t.is_empty()).unwrap_or("").to_owned();
+    let body = body.map(str::trim).filter(|b| !b.is_empty()).unwrap_or("").to_owned();
+    if title.is_empty() && body.is_empty() {
+        return Err(ApiError::bad_request(
+            "title and body are empty; call /api/git/pr/describe first to generate one",
+        ));
+    }
+    let response = if platform == "Gitee" {
+        client
+            .post(&endpoint)
+            .form(&[
+                ("access_token", token),
+                ("title", title.as_str()),
+                ("head", head),
+                ("base", base),
+                ("body", body.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|error| ApiError::internal(format!("Gitee PR request failed: {error}")))?
+    } else if platform == "AtomGit" {
+        // AtomGit 采用 Gitee 兼容的 API v5，但认证走 Authorization: token 头。
+        client
+            .post(&endpoint)
+            .header("Authorization", format!("token {token}"))
+            .header("User-Agent", "Coomi")
+            .json(&json!({
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            }))
+            .send()
+            .await
+            .map_err(|error| ApiError::internal(format!("AtomGit PR request failed: {error}")))?
+    } else {
+        client
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("User-Agent", "Coomi")
+            .json(&json!({
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            }))
+            .send()
+            .await
+            .map_err(|error| ApiError::internal(format!("GitHub PR request failed: {error}")))?
+    };
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(ApiError::bad_request(format!(
+            "{platform} PR 创建失败 HTTP {status}: {}",
+            truncate_platform_error(&text)
+        )));
+    }
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|error| ApiError::internal(format!("parse {platform} PR response: {error}")))?;
+    let url = value
+        .get("html_url")
+        .or_else(|| value.get("url"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::internal(format!("{platform} PR response missing url")))?;
+    let number = value
+        .get("number")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| ApiError::internal(format!("{platform} PR response missing number")))?;
+    Ok(json!({ "url": url, "number": number }))
+}
+
+/// 从 remote URL 解析 owner/repo（纯函数，便于测试）。支持：
+/// - https 形式：`https://github.com/owner/repo.git`、`https://gitee.com/owner/repo`
+/// - scp 形式：`git@github.com:owner/repo.git`
+fn parse_remote_repo(url: &str) -> Option<(String, String)> {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let rest = rest.strip_prefix("git@").unwrap_or(rest);
+    let path = if let Some(idx) = rest.find(':') {
+        // scp 形式：host:owner/repo.git
+        &rest[idx + 1..]
+    } else {
+        // https 形式：host/owner/repo.git，取第一个 '/' 之后的部分。
+        let start = rest.find('/')?;
+        &rest[start + 1..]
+    };
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let mut parts = path.split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim();
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_owned(), repo.to_owned()))
+}
+
+/// URL 路径段百分号编码（保留 RFC 3986 unreserved 字符；UTF-8 逐字节编码）。
+fn urlencode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// 截断平台错误响应文本（避免超长 HTML/JSON 塞进错误消息）。
+fn truncate_platform_error(text: &str) -> String {
+    const MAX: usize = 500;
+    let text = text.trim();
+    if text.chars().count() <= MAX {
+        return text.to_owned();
+    }
+    let mut truncated: String = text.chars().take(MAX).collect();
+    truncated.push_str("…");
+    truncated
+}
+
+/// GET /api/git/contributions?sinceDays= → ContributionReport
+async fn git_contributions(
+    State(state): State<AppState>,
+    Query(query): Query<ContributionsQuery>,
+) -> Result<Json<ContributionReport>, ApiError> {
+    let engine = git_engine(&state);
+    let report = contribution_stats(&engine, query.since_days)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(report))
+}
+
+/// POST /api/sessions/{id}/export → {path}
+async fn session_export_markdown(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(ApiError::bad_request("session id is required"));
+    }
+    let path = export_session_markdown(&state.home, id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "path": path.display().to_string() })))
+}
+
+/// GET /api/sessions/search?q=&limit= → SearchHit[]
+async fn sessions_search(
+    State(state): State<AppState>,
+    Query(query): Query<SessionSearchQuery>,
+) -> Result<Json<Vec<SearchHit>>, ApiError> {
+    let hits = search_sessions(
+        &state.home,
+        query.q.as_deref().unwrap_or(""),
+        query.limit.unwrap_or(50),
+    )
+    .await
+    .map_err(ApiError::from)?;
+    Ok(Json(hits))
+}
+
+/// GET /api/usage/by-day → DayUsage[]
+async fn usage_by_day_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DayUsage>>, ApiError> {
+    let days = usage_by_day(&state.home).await.map_err(ApiError::from)?;
+    Ok(Json(days))
+}
+
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
@@ -9518,6 +11241,168 @@ mod tests {
     use coomi_services::MemoryManager;
     use coomi_services::MemoryScope;
     use coomi_services::MemoryType;
+
+    // -- 远程 PR 纯函数（不发起网络请求） ----------------------------------
+
+    #[test]
+    fn parse_ab_branches_trims_and_requires_both() {
+        assert_eq!(
+            parse_ab_branches(" feature-a ", "feature-b"),
+            Some(("feature-a".to_string(), "feature-b".to_string()))
+        );
+        assert_eq!(parse_ab_branches("", "feature-b"), None);
+        assert_eq!(parse_ab_branches("feature-a", "   "), None);
+        assert_eq!(parse_ab_branches("", ""), None);
+    }
+
+    #[test]
+    fn resolve_commit_arg_defaults_to_head() {
+        assert_eq!(resolve_commit_arg(None), "HEAD");
+        assert_eq!(resolve_commit_arg(Some("")), "HEAD");
+        assert_eq!(resolve_commit_arg(Some("   ")), "HEAD");
+        assert_eq!(
+            resolve_commit_arg(Some(" abc123 ")),
+            "abc123".to_string()
+        );
+    }
+
+    #[test]
+    fn parse_remote_repo_handles_https_and_scp_urls() {
+        // GitHub https + .git 后缀
+        assert_eq!(
+            parse_remote_repo("https://github.com/owner/repo.git"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+        // GitHub scp 形式
+        assert_eq!(
+            parse_remote_repo("git@github.com:owner/repo.git"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+        // Gitee https 无 .git 后缀
+        assert_eq!(
+            parse_remote_repo("https://gitee.com/owner/repo"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+        // 带尾部斜杠
+        assert_eq!(
+            parse_remote_repo("https://github.com/owner/repo/"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+        // 非法输入 → None
+        assert_eq!(parse_remote_repo("https://github.com/owner"), None);
+        assert_eq!(parse_remote_repo(""), None);
+        assert_eq!(parse_remote_repo("not a url"), None);
+    }
+
+    #[test]
+    fn urlencode_keeps_unreserved_and_encodes_slashes() {
+        assert_eq!(urlencode("owner"), "owner");
+        assert_eq!(urlencode("a/b c"), "a%2Fb%20c");
+        assert_eq!(urlencode("feature/foo"), "feature%2Ffoo");
+    }
+
+    #[test]
+    fn pr_head_field_same_repo_or_fork() {
+        // 同仓库：直接传分支名。
+        assert_eq!(pr_head_field("feature/x", None), "feature/x");
+        assert_eq!(pr_head_field("feature/x", Some("")), "feature/x");
+        assert_eq!(pr_head_field("feature/x", Some("   ")), "feature/x");
+        // 跨仓库：只取 fork 所有者，拼成 owner:branch。
+        assert_eq!(pr_head_field("feature/x", Some("myname")), "myname:feature/x");
+        assert_eq!(pr_head_field("feature/x", Some("myname/coomi")), "myname:feature/x");
+        assert_eq!(
+            pr_head_field("feature/x", Some("  myname/repo  ")),
+            "myname:feature/x"
+        );
+    }
+
+    #[test]
+    fn pr_base_remote_prefers_upstream_then_origin() {
+        let remotes = vec![
+            RemoteInfo {
+                name: "origin".into(),
+                url: "https://github.com/myname/coomi.git".into(),
+                platform: "GitHub".into(),
+            },
+            RemoteInfo {
+                name: "upstream".into(),
+                url: "https://github.com/owner/coomi.git".into(),
+                platform: "GitHub".into(),
+            },
+            RemoteInfo {
+                name: "fork".into(),
+                url: "https://atomgit.com/myname/coomi.git".into(),
+                platform: "AtomGit".into(),
+            },
+        ];
+        // 未传 upstream：优先名为 upstream 的 remote。
+        let base = resolve_pr_base_remote(&remotes, None, None).unwrap();
+        assert_eq!(base.url, "https://github.com/owner/coomi.git");
+        // upstream 参数 = remote 名。
+        let base = resolve_pr_base_remote(&remotes, Some("fork"), None).unwrap();
+        assert_eq!(base.url, "https://atomgit.com/myname/coomi.git");
+        assert_eq!(base.platform, "AtomGit");
+        // upstream 参数 = 完整 URL（gitee / atomgit）。
+        let base =
+            resolve_pr_base_remote(&remotes, Some("https://gitee.com/owner/coomi.git"), None)
+                .unwrap();
+        assert_eq!(base.url, "https://gitee.com/owner/coomi.git");
+        assert_eq!(base.platform, "Gitee");
+        // 无 upstream remote 时回退 remote 参数/origin。
+        let only_origin = vec![remotes[0].clone()];
+        let base = resolve_pr_base_remote(&only_origin, None, Some("origin")).unwrap();
+        assert_eq!(base.url, "https://github.com/myname/coomi.git");
+        // upstream 既非 remote 名也非完整 URL → 错误。
+        assert!(resolve_pr_base_remote(&remotes, Some("owner/coomi"), None).is_err());
+        // 无任何 remote → 错误。
+        assert!(resolve_pr_base_remote(&[], None, None).is_err());
+    }
+
+    #[test]
+    fn pr_head_owner_uses_head_repo_then_current_remote_owner() {
+        let remotes = vec![
+            RemoteInfo {
+                name: "origin".into(),
+                url: "https://github.com/myname/coomi.git".into(),
+                platform: "GitHub".into(),
+            },
+            RemoteInfo {
+                name: "upstream".into(),
+                url: "https://github.com/owner/coomi.git".into(),
+                platform: "GitHub".into(),
+            },
+        ];
+        // 显式 head_repo（owner 或 owner/repo）优先。
+        assert_eq!(
+            resolve_pr_head_owner(&remotes, None, Some("someone")).unwrap(),
+            Some("someone".to_string())
+        );
+        assert_eq!(
+            resolve_pr_head_owner(&remotes, None, Some("someone/repo")).unwrap(),
+            Some("someone".to_string())
+        );
+        // 缺省自动取当前 remote（origin）的 owner。
+        assert_eq!(
+            resolve_pr_head_owner(&remotes, None, None).unwrap(),
+            Some("myname".to_string())
+        );
+        // remote 参数指定其它 remote。
+        assert_eq!(
+            resolve_pr_head_owner(&remotes, Some("upstream"), None).unwrap(),
+            Some("owner".to_string())
+        );
+        // 无任何 remote → 错误。
+        assert!(resolve_pr_head_owner(&[], None, None).is_err());
+    }
+
+    #[test]
+    fn truncate_platform_error_keeps_short_and_marks_long() {
+        assert_eq!(truncate_platform_error("short error"), "short error");
+        let long = "x".repeat(1000);
+        let truncated = truncate_platform_error(&long);
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.chars().count() <= 501);
+    }
 
     #[test]
     fn stale_websocket_cannot_detach_replacement_connection() {
