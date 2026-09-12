@@ -177,7 +177,8 @@ function openDashboard() {
           </button>
         </div>
         <p v-if="isEmpty" class="empty">
-          还没有历史会话。<br />随便说点什么，标题会用你的第一句话。
+          <CoomiIcon name="chat" :size="22" class="empty-ic" />
+          <span>还没有历史会话，随便说点什么，<br />标题会用你的第一句话。</span>
         </p>
         <template v-for="g in sessions.groups" :key="g.label">
           <p class="sec-label">{{ g.label }}</p>
@@ -263,7 +264,7 @@ function openDashboard() {
 
 .scrim {
   position: absolute; inset: 0;
-  background: rgba(17, 22, 31, .34);
+  background: rgba(17, 22, 31, .28);
   opacity: 0; transition: opacity .28s ease;
 }
 .drawer-root.open .scrim { opacity: 1; }
@@ -280,12 +281,17 @@ function openDashboard() {
 }
 .drawer-root.open .panel { transform: none; }
 
-.dhead { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; }
+.dhead { display: flex; align-items: center; gap: 6px; padding: 12px 10px 8px 12px; }
 .sfield {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
-  height: 38px; padding: 0 10px 0 11px;
-  border-radius: var(--r-pill); background: var(--fill); color: var(--text-3);
+  height: 40px; padding: 0 10px 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  color: var(--text-3);
+  transition: border-color .15s, background .15s;
 }
+.sfield:focus-within { border-color: var(--blue-border); background: var(--bg); }
 .sfield input {
   flex: 1; min-width: 0; border: 0; background: none; outline: none;
   font: inherit; font-size: 14.5px; color: var(--text);
@@ -315,14 +321,23 @@ function openDashboard() {
 }
 
 .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px 10px; -webkit-overflow-scrolling: touch; }
-.empty { margin: 26px 12px; font-size: 13.5px; line-height: 1.8; color: var(--text-3); }
+.empty {
+  margin: 26px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  font-size: 13.5px; line-height: 1.8; color: var(--text-3); text-align: center;
+}
+.empty-ic { color: var(--text-3); opacity: .55; }
 
 .row {
+  position: relative;
   display: flex; align-items: center; gap: 4px;
   padding: 9px 6px 9px 10px; border-radius: var(--r-md);
 }
 .row:active { background: var(--fill); }
-.row.cur { background: var(--blue-soft); }
+.row.cur { background: var(--blue-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue-border) 45%, transparent); }
+.row.cur::before {
+  content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 3px; background: var(--blue);
+}
 .rmain { flex: 1; min-width: 0; }
 .rtitle {
   font-size: 14.8px; color: var(--text);

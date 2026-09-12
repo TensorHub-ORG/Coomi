@@ -52,7 +52,9 @@ const openSessionFromNative = (event: Event) => {
   if (id) void session.openSession(id)
 }
 
-const { following, follow, jumpToBottom } = useAutoScroll(scrollHost)
+// 空态（无消息）时禁止贴底：首屏 logo / 标题必须从顶部开始看，
+// 否则 follow() 会把滚动条滚到 scrollHeight，整个空态被裁掉一半。
+const { following, follow, jumpToBottom } = useAutoScroll(scrollHost, () => session.timeline.length > 0)
 
 function syncScrollHost() {
   const virtualEl = virtualScroller.value?.$el as HTMLElement | undefined
@@ -62,6 +64,67 @@ function syncScrollHost() {
 }
 
 const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline))
+
+// ── 会话内搜索：关键词匹配时间线消息，跳转并高亮 ──
+const searchOpen = ref(false)
+const searchQuery = ref('')
+const searchResults = ref<number[]>([])
+const searchIndex = ref(0)
+const highlightIndex = ref<number | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let hlTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 提取单个时间线块的搜索文本（消息内容或工具卡摘要）。 */
+function blockText(block: TimelineBlockItem): string {
+  if (block.t === 'one') {
+    const item = block.item as { content?: string }
+    return item.content ?? ''
+  }
+  return block.cards.map(card => (card as { summary?: string }).summary ?? '').join('\n')
+}
+
+function runSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    const q = searchQuery.value.trim().toLowerCase()
+    if (!q) { searchResults.value = []; searchIndex.value = 0; return }
+    const hits: number[] = []
+    blocks.value.forEach((b, i) => { if (blockText(b).toLowerCase().includes(q)) hits.push(i) })
+    searchResults.value = hits
+    searchIndex.value = 0
+    if (hits.length) jumpToResult(0)
+  }, 200)
+}
+
+function jumpToResult(offset: number) {
+  const n = searchResults.value.length
+  if (!n) return
+  searchIndex.value = (searchIndex.value + offset + n) % n
+  const idx = searchResults.value[searchIndex.value]
+  highlightIndex.value = idx
+  // vue-virtual-scroller 类型未公开 scrollToItem 实例方法，运行时存在，做类型收窄。
+  const vs = virtualScroller.value as unknown as { scrollToItem: (index: number) => void } | null
+  vs?.scrollToItem(idx)
+  if (hlTimer) clearTimeout(hlTimer)
+  hlTimer = setTimeout(() => { if (highlightIndex.value === idx) highlightIndex.value = null }, 1800)
+}
+
+function openSearch() {
+  searchOpen.value = true
+  searchQuery.value = ''
+  searchResults.value = []
+  searchIndex.value = 0
+  void nextTick(() => searchInput.value?.focus())
+}
+
+function closeSearch() {
+  searchOpen.value = false
+  searchQuery.value = ''
+  searchResults.value = []
+  searchIndex.value = 0
+  highlightIndex.value = null
+}
 
 /** 生命体未读问候的触发类型 → 药丸标题（morning/egg 直接展示类型文案）。 */
 const LIFE_TRIGGER_LABELS: Record<string, string> = {
@@ -187,6 +250,25 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
       <TopBar :floating="props.floating" @menu="openDrawer" />
       <UxProgramBar />
 
+      <div v-if="searchOpen" class="search-bar">
+        <CoomiIcon name="search" :size="15" />
+        <input
+          ref="searchInput"
+          v-model="searchQuery"
+          placeholder="搜索当前会话…"
+          autocomplete="off" autocapitalize="off" spellcheck="false"
+          @input="runSearch"
+          @keydown.enter.prevent="jumpToResult(1)"
+          @keydown.up.prevent="jumpToResult(-1)"
+          @keydown.down.prevent="jumpToResult(1)"
+          @keydown.esc="closeSearch"
+        />
+        <span class="search-count">{{ searchResults.length ? `${searchIndex + 1}/${searchResults.length}` : (searchQuery.trim() ? '无匹配' : '') }}</span>
+        <button class="search-nav" aria-label="上一个" @click="jumpToResult(-1)"><CoomiIcon name="arrowUp" :size="14" /></button>
+        <button class="search-nav" aria-label="下一个" @click="jumpToResult(1)"><CoomiIcon name="arrowDown" :size="14" /></button>
+        <button class="search-close" aria-label="关闭搜索" @click="closeSearch"><CoomiIcon name="close" :size="14" /></button>
+      </div>
+
       <main ref="scroller" class="stream">
         <div v-if="session.timeline.length === 0" ref="content" class="inner empty-inner">
           <EmptyState v-if="session.timeline.length === 0" />
@@ -207,10 +289,14 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
               :size-dependencies="[item, item.t === 'one' ? item.item : item.cards]"
               :data-index="index"
               class="virtual-item"
+              :class="{ 'search-hit': highlightIndex === index }"
               emit-resize
               @resize="follow"
             >
-              <TimelineBlock :block="item" />
+              <!-- 入场动画放内层：外层节点由虚拟滚动管理 transform，动画会覆盖定位 -->
+              <div class="rise-in" :style="{ '--i': Math.min(index, 6) }">
+                <TimelineBlock :block="item" />
+              </div>
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
@@ -219,6 +305,12 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
       <Transition name="pop">
         <button v-if="!following" class="to-bottom" aria-label="回到底部" @click="jumpToBottom">
           <CoomiIcon name="arrowDown" :size="18" />
+        </button>
+      </Transition>
+
+      <Transition name="pop">
+        <button v-if="blocks.length > 0" class="search-toggle" aria-label="搜索会话" title="搜索当前会话" @click="openSearch">
+          <CoomiIcon name="search" :size="16" />
         </button>
       </Transition>
 
@@ -270,6 +362,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 
 <style scoped>
 .chat {
+  position: relative;
   height: 100%;
   min-height: 0;
   background-color: transparent;
@@ -279,9 +372,15 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   background-position: center;
   background-size: cover;
 }
+/* 环境光：顶部一层极淡的品牌色径向光晕，给白色界面一点"呼吸感"；
+   覆盖在自定义聊天背景之上、主内容之下，所有主题都安全。 */
+.chat::before {
+  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(130% 52% at 50% -6%, color-mix(in srgb, var(--blue) 7%, transparent), transparent 62%);
+}
 
 .shell {
-  position: relative;
+  position: relative; z-index: 1;
   display: flex; flex-direction: column; height: 100%; min-height: 0;
   background: transparent;
   transform-origin: left center;
@@ -318,12 +417,49 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 .to-bottom {
   position: absolute; left: 50%; bottom: 116px; z-index: 8;
   display: grid; place-items: center;
-  width: 38px; height: 38px; margin-left: -19px;
+  width: 40px; height: 40px; margin-left: -20px;
   border: 1px solid var(--border); border-radius: 50%;
   background: var(--bg); color: var(--text-2);
   box-shadow: var(--shadow-2);
+  transition: transform .12s ease, background .15s;
 }
-.to-bottom:active { background: var(--fill); }
+.to-bottom:active { background: var(--fill); transform: scale(.94); }
+.search-toggle {
+  position: absolute; left: 50%; bottom: 116px; z-index: 8;
+  display: grid; place-items: center;
+  width: 40px; height: 40px; margin-left: -60px;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--bg); color: var(--text-2);
+  box-shadow: var(--shadow-2);
+  transition: transform .12s ease, background .15s;
+}
+.search-toggle:active { background: var(--fill); transform: scale(.94); }
+.search-bar {
+  position: absolute; z-index: 9; top: 54px; left: 10px; right: 10px;
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 15px;
+  background: var(--bg); box-shadow: var(--shadow-2);
+  animation: coomi-cascade .16s ease both;
+}
+.search-bar input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text); font-size: 14px; }
+.search-bar input::placeholder { color: var(--text-3); }
+.search-count { flex-shrink: 0; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.search-nav, .search-close {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 26px; height: 26px; border: 0; border-radius: 50%;
+  background: var(--fill); color: var(--text-2);
+}
+.search-nav:active, .search-close:active { background: var(--fill-press); }
+.virtual-item.search-hit { animation: search-flash 1.8s ease; }
+@keyframes search-flash {
+  0%, 55% {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 60%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--blue) 7%, transparent);
+  }
+  100% { box-shadow: none; }
+}
 .pop-enter-active, .pop-leave-active { transition: opacity .18s ease, transform .18s ease; }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(8px) scale(.9); }
 

@@ -486,6 +486,22 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   /**
+   * F8 语音陪伴：AI 回复完成后自动朗读（默认关）；语速 0.5–2.0（1.0 正常）。
+   * 纯前端偏好 + 原生 TTS 桥（CoomiAndroid.speak/setTtsRate）联动。
+   */
+  const ttsAutoRead = ref(localStorage.getItem('coomi.ttsAutoRead') === '1')
+  const ttsRate = ref(readStoredRate())
+  function setTtsAutoRead(enabled: boolean) {
+    ttsAutoRead.value = enabled
+    localStorage.setItem('coomi.ttsAutoRead', enabled ? '1' : '0')
+  }
+  function setTtsRate(rate: number) {
+    const clamped = Math.min(2, Math.max(0.5, rate))
+    ttsRate.value = clamped
+    localStorage.setItem('coomi.ttsRate', String(clamped))
+  }
+
+  /**
    * 定制身份提示词：用户设置的专属身份/定位指令，保存后注入系统提示词，
    * 让 AI 认知自己的身份与定位。引擎 settings.json 是权威值；
    * localStorage 只做 UI 缓存。
@@ -661,6 +677,7 @@ export const useConfigStore = defineStore('config', () => {
     currentProviderId, currentModel, currentProvider, mergedProviders,
     fetchProviders, selectModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, togglePlanMode,
     toggleGlobalMemory, syncGlobalMemoryFromEngine, setDigitalLifeEnabled, syncDigitalLifeEnabled, fetchCustomPrompt, saveCustomPrompt,
+    ttsAutoRead, ttsRate, setTtsAutoRead, setTtsRate,
     upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels, fetchSubAgentSettings, saveSubAgentSettings, fetchCollaborationSettings, saveCollaborationSettings,
   }
 })
@@ -668,4 +685,9 @@ export const useConfigStore = defineStore('config', () => {
 function readStoredInt(key: string, min: number, max: number, fallback: number): number {
   const value = Number(localStorage.getItem(key))
   return Number.isInteger(value) && value >= min && value <= max ? value : fallback
+}
+
+function readStoredRate(): number {
+  const value = Number(localStorage.getItem('coomi.ttsRate'))
+  return Number.isFinite(value) && value >= 0.5 && value <= 2 ? value : 1
 }

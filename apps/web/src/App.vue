@@ -24,11 +24,12 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <RouterView v-slot="{ Component, route }">
-    <component
-      :is="Component"
-      v-if="route.name === 'chat'"
-      :floating="floating"
-    />
-    <component :is="Component" v-else />
+    <Transition name="view" mode="out-in">
+      <component
+        :is="Component"
+        :key="route.name"
+        :floating="route.name === 'chat' ? floating : undefined"
+      />
+    </Transition>
   </RouterView>
 </template>

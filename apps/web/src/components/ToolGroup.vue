@@ -54,23 +54,23 @@ const cls = computed(() => (active.value ? 'run' : failed.value ? 'err' : 'ok'))
 
 <style scoped>
 .group {
-  border: 1px solid var(--border); border-radius: var(--r-md);
-  background: var(--fill); overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--r-card);
+  background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden;
 }
 .group.run { border-color: var(--blue-border); }
 .group.err { border-color: var(--danger-border); }
 
 .ghead {
   display: flex; align-items: center; gap: 9px;
-  width: 100%; min-height: 44px; padding: 7px 11px;
+  width: 100%; min-height: 46px; padding: 8px 12px;
   border: 0; background: none; text-align: left;
 }
-.ghead:active { background: var(--fill-press); }
+.ghead:active { background: var(--fill); }
 
 .gicon {
   display: grid; place-items: center; flex-shrink: 0;
-  width: 27px; height: 27px; border-radius: 8px;
-  background: var(--bg); color: var(--text-2);
+  width: 29px; height: 29px; border-radius: 9px;
+  background: var(--fill); color: var(--text-2);
 }
 .gicon.run { color: var(--blue); }
 .gicon.err { color: var(--danger); }
@@ -85,10 +85,10 @@ const cls = computed(() => (active.value ? 'run' : failed.value ? 'err' : 'ok'))
 .gchev { flex-shrink: 0; color: var(--text-3); transition: transform .18s; }
 .gchev.open { transform: rotate(90deg); }
 
-.peek { display: flex; align-items: center; gap: 5px; padding: 0 11px 10px; }
+.peek { display: flex; align-items: center; gap: 5px; padding: 0 12px 10px; }
 .pchip {
-  padding: 2px 8px; border-radius: var(--r-pill);
-  background: var(--bg); border: 1px solid var(--border);
+  padding: 2px 9px; border-radius: var(--r-pill);
+  background: var(--fill); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   font-family: var(--font-mono); font-size: 10.8px; color: var(--text-2);
 }
 .pmore { font-size: 11px; color: var(--text-3); }

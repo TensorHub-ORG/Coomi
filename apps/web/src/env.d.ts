@@ -31,6 +31,9 @@ interface Window {
     setThemeMode?(mode: string): void
     getDigitalLifeEnabled?(): boolean
     setDigitalLifeEnabled?(enabled: boolean): void
+    /** 任务完成通知开关（原生侧 SharedPreferences，默认开）。 */
+    getTaskNotifyEnabled?(): boolean
+    setTaskNotifyEnabled?(enabled: boolean): void
     getAppearanceConfig?(): string
     /** 当前安装的 versionCode（检查更新页对比用）。 */
     getAppVersionCode?(): number
@@ -43,6 +46,10 @@ interface Window {
     setTestUpdateDotEnabled?(enabled: boolean): void
     /** F8 语音陪伴 TTS 朗读（text 为纯文本；无桥时前端静默降级，仅留日志）。 */
     speak?(text: string): void
+    /** F8 语音陪伴：停止当前朗读。 */
+    ttsStop?(): void
+    /** F8 语音陪伴：设置语速（0.5–2.0，1.0 为正常；缺省 1.0）。 */
+    setTtsRate?(rate: number): void
   }
 }
 

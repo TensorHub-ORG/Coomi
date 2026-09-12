@@ -53,6 +53,11 @@ public final class CoomiConstants {
     public static final String COOMI_WORKSPACE = TermuxConstants.TERMUX_HOME_DIR_PATH + "/coomi";
     public static final String COOMI_INBOX = COOMI_WORKSPACE + "/inbox";
 
+    // Prefs
+    public static final String PREF_NAME = "coomi_prefs";
+    /** 任务完成通知开关（app 设置，默认开；存 SharedPreferences coomi_prefs）。 */
+    public static final String PREF_TASK_NOTIFY_ENABLED = "coomi.task_notify_enabled";
+
     // Steps
     public static final int STEP_DEPLOY = 0;
     public static final int STEP_AUTH = 1;

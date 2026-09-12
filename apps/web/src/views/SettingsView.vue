@@ -10,6 +10,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { useConnectionStore } from '@/stores/connection'
 import { authedFetch } from '@/bridge/http'
+import { hasNativeTts } from '@/bridge/tts'
 import type { PermissionMode } from '@/protocol/commands'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
@@ -19,6 +20,7 @@ const config = useConfigStore()
 const session = useSessionStore()
 const sessions = useSessionsStore()
 const connection = useConnectionStore()
+
 const connectionDraft = ref<ConnectionSettings>({ ...config.connectionSettings })
 const reconnectInitialSeconds = ref(config.connectionSettings.reconnectInitialDelayMs / 1000)
 const reconnectMaxSeconds = ref(config.connectionSettings.reconnectMaxDelayMs / 1000)
@@ -105,6 +107,18 @@ async function toggleTelemetry() {
   }
 }
 
+/** 任务完成通知开关：原生侧 SharedPreferences（默认开）；桌面/浏览器无桥时隐藏整组。 */
+const taskNotifySupported = ref(false)
+const taskNotifyEnabled = ref(true)
+function toggleTaskNotify() {
+  const next = !taskNotifyEnabled.value
+  taskNotifyEnabled.value = next
+  try { window.CoomiAndroid?.setTaskNotifyEnabled?.(next) } catch { /* 本地状态仍可用 */ }
+}
+
+/** F8 语音陪伴：仅原生 TTS 桥存在时显示整组设置（桌面/浏览器自动隐藏）。 */
+const nativeTts = ref(hasNativeTts())
+
 const MODE_ICON: Record<PermissionMode, string> = { ask: 'shield', auto: 'bolt', full: 'plusCircle' }
 
 /** provider × model 拍平成一维列表，省掉一层嵌套标题。 */
@@ -133,6 +147,10 @@ onMounted(async () => {
       telemetryEnabled.value = data.enabled ?? true
     }
   } catch { /* 旧引擎进程：接口不存在，保持默认开启 */ }
+  taskNotifySupported.value = typeof window.CoomiAndroid?.getTaskNotifyEnabled === 'function'
+  if (taskNotifySupported.value) {
+    try { taskNotifyEnabled.value = window.CoomiAndroid?.getTaskNotifyEnabled?.() ?? true } catch { /* 使用默认值 */ }
+  }
 })
 
 </script>
@@ -255,6 +273,43 @@ onMounted(async () => {
         </button>
       </div>
 
+      <p v-if="taskNotifySupported" class="sec-label">通知</p>
+      <div v-if="taskNotifySupported" class="group">
+        <button class="row" @click="toggleTaskNotify">
+          <span class="ri" :class="{ on: taskNotifyEnabled }"><CoomiIcon name="bell" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">任务完成通知</span>
+            <span class="rsub">{{ taskNotifyEnabled ? '后台任务完成时在通知栏提醒，点击可回前台查看结果' : '已关闭：任务完成时不再发送通知' }}</span>
+          </span>
+          <span class="sw" :class="{ on: taskNotifyEnabled }" />
+        </button>
+      </div>
+
+      <p v-if="nativeTts" class="sec-label">语音朗读</p>
+      <div v-if="nativeTts" class="group">
+        <button class="row" @click="config.setTtsAutoRead(!config.ttsAutoRead)">
+          <span class="ri" :class="{ on: config.ttsAutoRead }"><CoomiIcon name="volume2" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">AI 回复自动朗读</span>
+            <span class="rsub">{{ config.ttsAutoRead ? 'AI 发送新消息后自动朗读内容' : '关闭自动朗读' }}</span>
+          </span>
+          <span class="sw" :class="{ on: config.ttsAutoRead }" />
+        </button>
+        <div class="row slider-row">
+          <span class="ri"><CoomiIcon name="tachometer" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">朗读语速 {{ config.ttsRate.toFixed(1) }}x</span>
+            <span class="rsub">拖动调整朗读速度（0.5 - 2.0 倍）</span>
+          </span>
+          <input
+            type="range" min="0.5" max="2" step="0.1"
+            :value="config.ttsRate"
+            @input="config.setTtsRate(Number(($event.target as HTMLInputElement).value))"
+            class="slider" aria-label="朗读语速"
+          />
+        </div>
+      </div>
+
       <p class="sec-label">模型</p>
       <div class="group model-list">
         <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先到下面配置 Provider。</p>
@@ -272,6 +327,30 @@ onMounted(async () => {
           <span class="ri"><CoomiIcon name="chat" :size="17" /></span>
           <span class="rt"><span class="rmain">会话历史</span></span>
           <span class="rside">{{ sessions.metas.length }}</span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+      </div>
+
+      <p class="sec-label">版本管理</p>
+      <div class="group">
+        <button class="row" @click="router.push('/git')">
+          <span class="ri"><CoomiIcon name="git" :size="17" /></span>
+          <span class="rt"><span class="rmain">Git 面板</span><span class="rsub">改动、分支、历史、Stash 与远端同步</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/restore')">
+          <span class="ri"><CoomiIcon name="clock" :size="17" /></span>
+          <span class="rt"><span class="rmain">一键还原</span><span class="rsub">按快照预览差异并回退工作区</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/ops')">
+          <span class="ri"><CoomiIcon name="wrench" :size="17" /></span>
+          <span class="rt"><span class="rmain">运维诊断</span><span class="rsub">网络连通、存储分析与凭据管理</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/data')">
+          <span class="ri"><CoomiIcon name="grep" :size="17" /></span>
+          <span class="rt"><span class="rmain">数据工具</span><span class="rsub">贡献统计、用量与会话导出搜索</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
       </div>
@@ -300,6 +379,7 @@ onMounted(async () => {
 .option { min-width: 0; height: 38px; padding: 0 4px; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 13px; }
 .option.selected { background: var(--blue-soft); color: var(--blue); font-weight: 650; }
 .option-note { margin: 6px 4px 0; font-size: 11.5px; color: var(--text-3); }
+.option-note.ok { color: var(--ok); }
 .row {
   display: flex; align-items: center; gap: 11px;
   width: 100%; min-height: 56px; padding: 11px 13px;
@@ -338,8 +418,7 @@ onMounted(async () => {
 .arw { flex-shrink: 0; color: var(--text-3); }
 .empty { padding: 15px 14px; font-size: 13px; line-height: 1.6; color: var(--text-3); }
 
-.sw {
-  position: relative; flex-shrink: 0;
+.sw { position: relative; flex-shrink: 0;
   width: 44px; height: 26px; border-radius: 13px;
   background: var(--border-strong); transition: background .2s;
 }
@@ -350,6 +429,33 @@ onMounted(async () => {
 }
 .sw.on { background: var(--blue); }
 .sw.on::after { transform: translateX(18px); }
+
+/* F8 语音陪伴：朗读语速滑杆 */
+.slider-row { min-height: 64px; }
+.slider-row .rt { flex: 1; }
+.slider {
+  flex-shrink: 0; width: 118px; height: 26px;
+  appearance: none; -webkit-appearance: none; background: transparent;
+  cursor: pointer; touch-action: none;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 3px;
+  background: var(--border-strong);
+}
+.slider::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin-top: -7.5px; border-radius: 50%;
+  background: var(--blue); box-shadow: var(--shadow-1);
+  border: none; transition: transform .12s;
+}
+.slider::-webkit-slider-thumb:active { transform: scale(1.12); }
+.slider::-moz-range-track {
+  height: 5px; border-radius: 3px; background: var(--border-strong);
+}
+.slider::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--blue); box-shadow: var(--shadow-1); border: none;
+}
 
 .foot { display: flex; align-items: center; justify-content: center; gap: 9px; margin-top: 22px; }
 .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-3); }

@@ -7,11 +7,11 @@
  * 新段落出现时自己做一次 8px 上浮。整条消息整体重排会闪，切块之后不会。
  * marked 的调用同时被 60ms 节流，流式期间不会一秒解析几十次 markdown。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { AssistantMessage, UserMessage } from '@/stores/viewModel'
 import { useSessionStore } from '@/stores/session'
 import { renderMarkdown } from '@/utils/markdown'
-import { speak } from '@/bridge/tts'
+import { speak, stopSpeaking } from '@/bridge/tts'
 import { apiSend } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
@@ -52,6 +52,19 @@ function editUserMessage() {
 function undoAssistant() {
   const mid = (props.msg as { mid?: string }).mid ?? ''
   session.requestUndo(mid)
+}
+
+/** 引用追问：把本条回复（截断到 400 字）转为引用块，追加进输入框供继续提问。
+ *  Composer 监听 `coomi:quote-message` 事件完成追加。 */
+function quoteMessage() {
+  const raw = props.msg.content
+  const quoted = (raw.length > 400 ? raw.slice(0, 400) + '…' : raw)
+    .split('\n')
+    .map(line => `> ${line}`)
+    .join('\n')
+  window.dispatchEvent(new CustomEvent('coomi:quote-message', {
+    detail: { sessionId: session.sessionId, text: `${quoted}\n\n` },
+  }))
 }
 
 /**
@@ -179,10 +192,21 @@ function stripMarkdown(text: string): string {
     .trim()
 }
 
-/** F8 语音陪伴：朗读整条消息（流式中不提供，内容还没定稿）。 */
+/** F8 语音陪伴：朗读整条消息（流式中不提供，内容还没定稿）；
+ *  朗读中再次点击 = 停止（原生侧 QUEUE_FLUSH 打断）。 */
+const speaking = ref(false)
 function readAloud() {
-  speak(stripMarkdown(props.msg.content))
+  if (speaking.value) {
+    stopSpeaking()
+    speaking.value = false
+    return
+  }
+  if (speak(stripMarkdown(props.msg.content))) speaking.value = true
 }
+/** 原生朗读完成/出错时复位朗读状态（所有存活气泡统一复位）。 */
+function onTtsDone() { speaking.value = false }
+onMounted(() => window.addEventListener('coomi:tts-done', onTtsDone))
+onBeforeUnmount(() => window.removeEventListener('coomi:tts-done', onTtsDone))
 
 const saving = ref(false)
 const savedText = ref('')
@@ -231,8 +255,8 @@ async function saveToMemory() {
           <span>{{ isMorning ? '早安播报' : '每日彩蛋' }}</span>
         </span>
         <button v-if="!streaming" class="act speak-act" @click="readAloud">
-          <CoomiIcon name="play" :size="13" />
-          <span>朗读</span>
+          <CoomiIcon :name="speaking ? 'stop' : 'play'" :size="13" />
+          <span>{{ speaking ? '停止' : '朗读' }}</span>
         </button>
       </div>
       <div v-for="(h, i) in blocks" :key="i" class="md blk card-blk cascade" v-html="h" @click="onBlockClick" />
@@ -250,8 +274,8 @@ async function saveToMemory() {
       <div v-if="isLife" class="life-head">
         <div class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
         <button v-if="!streaming" class="act speak-act" @click="readAloud">
-          <CoomiIcon name="play" :size="13" />
-          <span>朗读</span>
+          <CoomiIcon :name="speaking ? 'stop' : 'play'" :size="13" />
+          <span>{{ speaking ? '停止' : '朗读' }}</span>
         </button>
       </div>
       <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" @click="onBlockClick" />
@@ -263,6 +287,16 @@ async function saveToMemory() {
       <button class="act" @click="copyAll">
         <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
         <span>{{ copied ? '已复制' : '复制' }}</span>
+      </button>
+      <!-- F8 语音陪伴：普通助手消息也可朗读/停止。 -->
+      <button v-if="!streaming" class="act" @click="readAloud">
+        <CoomiIcon :name="speaking ? 'stop' : 'play'" :size="15" />
+        <span>{{ speaking ? '停止' : '朗读' }}</span>
+      </button>
+      <!-- 引用追问：把本条回复追加为输入框引用，基于它继续提问。 -->
+      <button v-if="!streaming" class="act" @click="quoteMessage">
+        <CoomiIcon name="chat" :size="15" />
+        <span>追问</span>
       </button>
       <!-- 回撤会清空整轮执行：只在输出完成后提供，流式中不出现。 -->
       <button v-if="isLastAssistant && !streaming" class="act" @click="undoAssistant">
@@ -279,10 +313,11 @@ async function saveToMemory() {
 .bubble {
   max-width: 100%;
   padding: 10px 15px;
-  border-radius: 19px 19px 7px 19px;
+  border-radius: 20px 20px 7px 20px;
   background: var(--blue); color: #fff;
   font-size: 15.5px; line-height: 1.55; word-break: break-word;
   white-space: pre-wrap; text-align: left;
+  box-shadow: 0 1px 2px rgba(23, 32, 54, 0.06), 0 3px 10px color-mix(in srgb, var(--blue) 16%, transparent);
 }
 
 .assistant { max-width: 100%; color: var(--text); }
@@ -317,14 +352,21 @@ async function saveToMemory() {
 
 .user-wrap { display: flex; flex-direction: column; align-items: flex-end; max-width: 84%; }
 .user-acts { justify-content: flex-end; }
-.acts { display: flex; gap: 4px; margin-top: 8px; }
+/* 操作按钮组：收进一个浅色胶囊里，不再"裸奔"在消息下方。 */
+.acts {
+  display: inline-flex; align-items: center; gap: 1px;
+  margin-top: 9px; padding: 3px 4px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+}
 .act {
   display: inline-flex; align-items: center; gap: 5px;
-  height: 30px; padding: 0 10px;
+  height: 28px; padding: 0 9px;
   border: 0; border-radius: var(--r-pill); background: none;
   font-size: 12.5px; color: var(--text-3);
+  transition: background .15s, color .15s;
 }
-.act:active { background: var(--fill); color: var(--blue); }
+.act:active { background: var(--bg); color: var(--blue); }
 
 /* ── 生命体消息头部：tag 居左 + 朗读居右 ── */
 .life-head {

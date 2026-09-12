@@ -14,7 +14,11 @@ const SAME_POS_PX = 2
 /** 「回到底部」的平滑滚动期间不判定脱离 —— 那一路的 scroll 事件都是我们自己发的。 */
 const SMOOTH_MS = 800
 
-export function useAutoScroll(target: Ref<HTMLElement | null>) {
+/**
+ * @param shouldFollow 是否允许「贴底」滚动。空态等场景传 false 时，
+ *        follow() 只把滚动条归零（保持顶部），避免首屏 logo/标题被滚掉。
+ */
+export function useAutoScroll(target: Ref<HTMLElement | null>, shouldFollow: () => boolean = () => true) {
   const following = ref(true)
   let raf = 0
   /** 我们自己最后一次把 scrollTop 写成了多少。 */
@@ -35,6 +39,8 @@ export function useAutoScroll(target: Ref<HTMLElement | null>) {
   function onScroll() {
     const el = boundTarget
     if (!el) return
+    // 空态：不参与「贴底/脱离/重新跟随」判定，用户自由滚动。
+    if (!shouldFollow()) return
     const d = distanceFromBottom(el)
     if (following.value) {
       const moved = Math.abs(el.scrollTop - pinnedTop) > SAME_POS_PX
@@ -44,7 +50,7 @@ export function useAutoScroll(target: Ref<HTMLElement | null>) {
     }
   }
 
-  /** 内容变化后调用；只在跟随态生效。 */
+  /** 内容变化后调用；只在跟随态生效。空态（shouldFollow=false）时保持顶部。 */
   function follow() {
     if (!following.value) return
     if (raf) return
@@ -52,6 +58,14 @@ export function useAutoScroll(target: Ref<HTMLElement | null>) {
       raf = 0
       const el = boundTarget
       if (!el || !following.value) return
+      if (!shouldFollow()) {
+        // 空态：内容高度可能超过一屏，但用户应从顶部开始看，不能贴底。
+        if (el.scrollTop !== 0) {
+          el.scrollTop = 0
+          pinnedTop = 0
+        }
+        return
+      }
       el.scrollTop = el.scrollHeight
       pinnedTop = el.scrollTop
     })

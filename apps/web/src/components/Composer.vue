@@ -8,14 +8,18 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PERMISSION_MODES, REASONING_EFFORTS, useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
+import { useSessionsStore } from '@/stores/sessions'
+import { gitLog, gitStatus, type CommitInfo } from '@/bridge/git'
+import type { SessionMeta } from '@/stores/sessions'
 import { useRouter } from 'vue-router'
 import CoomiIcon from './CoomiIcon.vue'
 
 const session = useSessionStore()
 const config = useConfigStore()
+const sessionsStore = useSessionsStore()
 const router = useRouter()
 
-/** 斜杠指令：点击后填入输入框，可编辑后发送。 */
+/** 斜杠指令：点击后填入输入框，可编辑后发送。hint 存在时作为默认任务文本一并填入。 */
 const SLASH_COMMANDS = [
   { name: '/loop', desc: '循环执行直到完成' },
   { name: '/plan', desc: '进入计划模式' },
@@ -23,6 +27,14 @@ const SLASH_COMMANDS = [
   { name: '/skills', desc: '查看可用技能' },
   { name: '/memory', desc: '查看 Coomi 内建持久记忆' },
   { name: '/compact', desc: '立即压缩当前上下文' },
+  // 工程向快捷任务（对应引擎 /api/git/* 能力；hint 为默认任务文本，可编辑后发送）
+  { name: '/review', desc: '审查当前未提交改动', hint: '审查当前未提交改动，输出结构化问题清单' },
+  { name: '/fix', desc: '一键修复当前改动问题', hint: '修复当前未提交改动中发现的问题' },
+  { name: '/pr', desc: '生成 PR 描述并创建', hint: '基础分支 main' },
+  { name: '/compare', desc: '对比快照与当前状态', hint: '对比最近快照与当前工作区' },
+  { name: '/summary', desc: '总结当前会话', hint: '总结当前会话的进展与关键结论' },
+  { name: '/adversarial', desc: '对抗式评审当前改动', hint: '对当前未提交改动做对抗式评审' },
+  { name: '/root-cause', desc: '分析最近变更根因', hint: '分析最近一次提交的动机与影响' },
 ]
 
 const text = ref('')
@@ -76,6 +88,13 @@ function tapPrimary() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // @ 候选面板激活时：方向键导航、Enter 选中、Esc 关闭。
+  if (atOpen.value) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); atIndex.value = (atIndex.value + 1) % Math.max(atCandidates.value.length, 1); return }
+    if (e.key === 'ArrowUp') { e.preventDefault(); atIndex.value = (atIndex.value - 1 + Math.max(atCandidates.value.length, 1)) % Math.max(atCandidates.value.length, 1); return }
+    if (e.key === 'Enter') { e.preventDefault(); const c = atCandidates.value[atIndex.value]; if (c) pickAt(c); return }
+    if (e.key === 'Escape') { e.preventDefault(); atOpen.value = false; return }
+  }
   // Enter 默认换行（需求：换行键就换行）；Ctrl/Cmd+Enter 仍可快捷发送。
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit() }
 }
@@ -95,21 +114,121 @@ async function insert(t: string) {
 }
 
 /** 斜杠指令插入（批次五 #20）：不覆盖已输入内容——
- * 无输入 → `cmd `；已有普通输入 → `cmd <原输入>`；已是别的指令 → 只替换指令头。 */
-async function insertSlash(cmd: string) {
+ * 无输入 → `cmd `；已有普通输入 → `cmd <原输入>`；已是别的指令 → 只替换指令头。
+ * 指令带 hint 时把默认任务文本一并填入（如 `/pr 基础分支 main`）。 */
+async function insertSlash(cmd: { name: string; hint?: string }) {
+  const tail = cmd.hint ? `${cmd.name} ${cmd.hint}` : `${cmd.name} `
   const existing = text.value.replace(/^\s+/, '')
   if (!existing) {
-    text.value = cmd + ' '
+    text.value = tail
   } else if (existing.startsWith('/')) {
     const rest = existing.replace(/^\/\S+\s*/, '')
-    text.value = rest ? `${cmd} ${rest}` : cmd + ' '
+    text.value = rest ? `${tail} ${rest}` : tail
   } else {
-    text.value = `${cmd} ${existing}`
+    text.value = `${tail} ${existing}`
   }
   quickOpen.value = false
   await nextTick()
   autoGrow()
   textarea.value?.focus()
+}
+
+// ── @ 快捷上下文注入：输入 @ 弹出 文件/提交/会话 候选 ──
+type AtTab = 'files' | 'commits' | 'sessions'
+interface AtItem {
+  kind: 'file' | 'commit' | 'session'
+  icon: string
+  label: string
+  sub: string
+  insert: string
+}
+const AT_TABS: Array<{ key: AtTab; label: string }> = [
+  { key: 'files', label: '文件' },
+  { key: 'commits', label: '提交' },
+  { key: 'sessions', label: '会话' },
+]
+const atOpen = ref(false)
+const atTab = ref<AtTab>('files')
+const atQuery = ref('')
+const atCandidates = ref<AtItem[]>([])
+const atIndex = ref(0)
+let atData: { files: string[]; commits: CommitInfo[]; sessions: SessionMeta[] } | null = null
+
+/** 输入时检测光标前的 `@`：@ 后跟合法查询字符即打开候选面板。 */
+function onInput() {
+  autoGrow()
+  const el = textarea.value
+  const caret = el?.selectionStart ?? text.value.length
+  const before = text.value.slice(0, caret)
+  const at = before.lastIndexOf('@')
+  if (at >= 0) {
+    const query = before.slice(at + 1)
+    if (query.length <= 24 && !/\s/.test(query)) {
+      atQuery.value = query
+      atOpen.value = true
+      void loadAtCandidates()
+      return
+    }
+  }
+  if (atOpen.value) atOpen.value = false
+}
+
+async function loadAtCandidates() {
+  if (!atData) {
+    const sessions = sessionsStore.metas.slice(0, 30)
+    atData = { files: [], commits: [], sessions }
+    try {
+      const [st, log] = await Promise.all([
+        gitStatus().catch(() => null),
+        gitLog({ limit: 15 }).catch(() => [] as CommitInfo[]),
+      ])
+      if (st) {
+        const seen = new Set<string>()
+        atData.files = [...st.staged, ...st.unstaged, ...st.untracked]
+          .map(f => f.path)
+          .filter((p): p is string => Boolean(p) && !seen.has(p) && Boolean(seen.add(p)))
+      }
+      if (Array.isArray(log)) atData.commits = log
+    } catch { /* 数据源不可用时仅展示会话 */ }
+  }
+  const q = atQuery.value.toLowerCase()
+  const all: AtItem[] = []
+  if (atTab.value === 'files') {
+    for (const p of atData.files) {
+      if (!q || p.toLowerCase().includes(q)) all.push({ kind: 'file', icon: 'fileRead', label: p, sub: '改动文件', insert: `@${p}` })
+    }
+  } else if (atTab.value === 'commits') {
+    for (const c of atData.commits) {
+      const label = `${c.short} ${c.subject}`
+      if (!q || label.toLowerCase().includes(q)) all.push({ kind: 'commit', icon: 'link', label, sub: '提交', insert: `@${c.short}` })
+    }
+  } else {
+    for (const s of atData.sessions) {
+      const label = s.title || s.preview?.slice(0, 24) || '未命名会话'
+      if (!q || label.toLowerCase().includes(q)) all.push({ kind: 'session', icon: 'chat', label, sub: '会话', insert: `@${label}` })
+    }
+  }
+  atCandidates.value = all.slice(0, 30)
+  atIndex.value = 0
+}
+
+function switchAtTab(tab: AtTab) {
+  atTab.value = tab
+  atIndex.value = 0
+  void loadAtCandidates()
+}
+
+/** 选中候选：用引用文本替换光标前的 `@查询`，并保留光标后内容。 */
+function pickAt(item: AtItem) {
+  const el = textarea.value
+  const caret = el?.selectionStart ?? text.value.length
+  const before = text.value.slice(0, caret)
+  const at = before.lastIndexOf('@')
+  const after = text.value.slice(caret)
+  const head = at >= 0 ? before.slice(0, at) : before
+  text.value = `${head}${item.insert} ${after}`.trimStart()
+  atOpen.value = false
+  void nextTick(() => { autoGrow(); textarea.value?.focus() })
 }
 
 function toggleQuick() { quickOpen.value = !quickOpen.value }
@@ -141,11 +260,22 @@ function onPrefillDraft(event: Event) {
   text.value = detail.text
   void nextTick(autoGrow)
 }
+
+/** 引用追问（MessageBubble「追问」按钮）：把引用块追加到输入框最前，已有输入保留在其后。 */
+function onQuoteMessage(event: Event) {
+  const detail = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail ?? {}
+  if ((detail.sessionId && detail.sessionId !== session.sessionId) || typeof detail.text !== 'string') return
+  const base = text.value.trimEnd()
+  text.value = base ? `${detail.text}${base}` : detail.text
+  quickOpen.value = false
+  void nextTick(() => { autoGrow(); textarea.value?.focus() })
+}
 onMounted(() => {
   window.addEventListener('coomi:file-transfer-progress', onTransferProgress)
   window.addEventListener('coomi:files-imported', onFilesImported)
   window.addEventListener('coomi:file-exported', onFileExported)
   window.addEventListener('coomi:prefill-draft', onPrefillDraft)
+  window.addEventListener('coomi:quote-message', onQuoteMessage)
   window.addEventListener('resize', autoGrow)
   loadDraft()
 })
@@ -154,6 +284,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:files-imported', onFilesImported)
   window.removeEventListener('coomi:file-exported', onFileExported)
   window.removeEventListener('coomi:prefill-draft', onPrefillDraft)
+  window.removeEventListener('coomi:quote-message', onQuoteMessage)
   window.removeEventListener('resize', autoGrow)
   saveDraft()
 })
@@ -204,7 +335,21 @@ watch(text, () => {
       <CoomiIcon name="subtask" :size="14" />
       <span>协作第 {{ session.collaboration.cycle }} 轮 · {{ session.collaboration.phase === 'reviewer' ? '审查模型' : '改码模型' }}{{ session.collaboration.status === 'running' ? '处理中' : session.collaboration.status }}</span>
     </div>
-    <div v-if="quickOpen || lifeStatsOpen" class="quick-scrim" @click="quickOpen = false; lifeStatsOpen = false" />
+    <div v-if="quickOpen || lifeStatsOpen || atOpen" class="quick-scrim" @click="quickOpen = false; lifeStatsOpen = false; atOpen = false" />
+    <div v-if="atOpen" class="at-menu">
+      <div class="at-tabs">
+        <button v-for="t in AT_TABS" :key="t.key" :class="{ on: atTab === t.key }" @click="switchAtTab(t.key)">{{ t.label }}</button>
+      </div>
+      <div class="at-list">
+        <button v-for="(item, i) in atCandidates" :key="item.kind + item.label" class="at-item" :class="{ on: i === atIndex }"
+          @mousedown.prevent @click="pickAt(item)" @mouseenter="atIndex = i">
+          <CoomiIcon :name="item.icon" :size="14" />
+          <span class="at-label">{{ item.label }}</span>
+          <span class="at-sub">{{ item.sub }}</span>
+        </button>
+        <p v-if="!atCandidates.length" class="at-empty">没有匹配项</p>
+      </div>
+    </div>
     <div v-if="quickOpen" class="quick">
       <p class="qhead reasoning-head">推理强度</p>
       <div class="reasoning-options"><button v-for="item in REASONING_EFFORTS" :key="item.value" :class="{ selected: config.reasoningEffort === item.value }" @click="session.setReasoningEffort(item.value)">{{ item.label }}</button></div>
@@ -214,7 +359,7 @@ watch(text, () => {
         <button class="qchip file" @click="authorizeFolder"><CoomiIcon name="folder" :size="15" />授权目录</button>
       </div>
       <div class="slash-list">
-        <button v-for="c in SLASH_COMMANDS" :key="c.name" class="slash-item" @click="insertSlash(c.name)">
+        <button v-for="c in SLASH_COMMANDS" :key="c.name" class="slash-item" @click="insertSlash(c)">
           <code>{{ c.name }}</code><span>{{ c.desc }}</span>
         </button>
       </div>
@@ -246,8 +391,8 @@ watch(text, () => {
           class="input"
           :class="{ scrollable: textareaScrollable }"
           rows="1"
-          :placeholder="session.isBusy ? '插队补充指令…' : '给 Coomi 下达任务…'"
-          @input="autoGrow"
+          :placeholder="session.isBusy ? '插队补充指令…' : '输入问题或任务…'"
+          @input="onInput"
           @keydown="onKeydown"
         />
       </div>
@@ -289,32 +434,33 @@ watch(text, () => {
 </template>
 
 <style scoped>
-.composer { position: relative; flex-shrink: 0; padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); }
+.composer { position: relative; flex-shrink: 0; padding: 6px 12px calc(var(--safe-bottom) + 10px); background: var(--bg); }
 .edit-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin: 0 2px 6px; padding: 6px 12px;
-  border: 1px solid color-mix(in srgb, var(--blue) 40%, var(--border));
-  border-radius: var(--r-pill);
+  margin: 0 2px 8px; padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--blue) 38%, var(--border));
+  border-radius: 13px;
   background: var(--blue-soft); color: var(--blue);
-  font-size: 12px;
+  font-size: 12.5px;
 }
-.edit-banner button { border: 0; background: none; color: var(--blue); font-weight: 650; }
-.transfer { display: flex; align-items: center; gap: 8px; margin: 0 2px 6px; font-size: 11.5px; color: var(--text-2); }
+.edit-banner button { border: 0; background: none; color: var(--blue); font-weight: 680; }
+.transfer { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 11.5px; color: var(--text-2); }
 .transfer span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfer progress { width: 76px; height: 4px; accent-color: var(--blue); }
 .collaboration-status {
-  display:flex; align-items:center; gap:6px; margin:0 2px 6px; padding:6px 10px;
-  border:1px solid color-mix(in srgb, var(--blue) 35%, var(--border)); border-radius:var(--r-pill);
+  display:flex; align-items:center; gap:6px; margin:0 2px 8px; padding:7px 12px;
+  border:1px solid color-mix(in srgb, var(--blue) 35%, var(--border)); border-radius:13px;
   background:var(--blue-soft); color:var(--blue); font-size:11.5px;
 }
 
 .field {
   position: relative;
-  padding: 4px 6px 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 26px;
-  background: var(--fill);
-  transition: border-color .18s, box-shadow .28s ease;
+  padding: 6px 8px 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 24px;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(23, 32, 54, 0.03), 0 4px 16px rgba(23, 32, 54, 0.05);
+  transition: border-color .18s, box-shadow .28s ease, background .18s ease;
 }
 .life-orbit {
   position: absolute; z-index: 2; top: -13px; left: 50%;
@@ -339,19 +485,19 @@ watch(text, () => {
 @media (prefers-reduced-motion: reduce) {
   .orbit.outer, .orbit.inner { animation-duration: 6s; }
 }
-.field:focus-within { border-color: var(--blue-border); background: var(--bg); }
 .field:focus-within {
-  border-color: color-mix(in srgb, var(--blue) 55%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent),
-    0 0 14px color-mix(in srgb, var(--blue) 22%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 62%, var(--border));
+  background: var(--bg);
+  box-shadow: 0 0 0 3.5px color-mix(in srgb, var(--blue) 13%, transparent),
+    0 6px 24px color-mix(in srgb, var(--blue) 9%, transparent);
 }
 .field.busy { border-color: var(--border-strong); }
 
-.input-clip { overflow: hidden; border-radius: 18px 18px 8px 8px; }
+.input-clip { overflow: hidden; border-radius: 17px 17px 8px 8px; }
 .input {
   display: block; width: 100%; max-height: 132px; overflow-y: hidden;
   padding: 9px 10px 5px 6px; border: 0; background: none; outline: none; resize: none;
-  font: inherit; font-size: 15.5px; line-height: 1.5; color: var(--text);
+  font: inherit; font-size: 16px; line-height: 1.5; color: var(--text);
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
 .input.scrollable { overflow-y: auto; }
@@ -362,29 +508,62 @@ watch(text, () => {
 .input.scrollable::-webkit-scrollbar-track { margin-block: 12px 7px; background: transparent; }
 .input.scrollable::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--border-strong); }
 
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 0 0 2px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 0 0 2px; }
 .spacer { flex: 1; }
 
 .act {
-  display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px;
+  display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px;
   border: 0; border-radius: 50%; background: none; color: var(--text-2);
+  transition: background .15s, transform .07s;
 }
-.act:active { background: var(--fill-press); }
+.act:active { background: var(--fill-press); transform: scale(.93); }
 
 .send {
   display: grid; place-items: center; flex-shrink: 0;
-  width: 36px; height: 36px;
+  width: 38px; height: 38px;
   border: 0; border-radius: 50%;
-  background: var(--blue); color: #fff;
-  transition: background .16s, transform .06s;
+  background: linear-gradient(135deg, var(--blue), color-mix(in srgb, var(--blue) 82%, var(--blue-press)));
+  color: #fff;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--blue) 32%, transparent);
+  transition: background .16s, transform .06s, box-shadow .16s, opacity .16s;
 }
-.send.jump { background: var(--orange); }
-.send.stop { background: var(--text); }
-.send:disabled { background: var(--border-strong); pointer-events: none; }
-.send:active { transform: scale(.92); }
+.send.jump { background: linear-gradient(135deg, var(--orange), color-mix(in srgb, var(--orange) 80%, #a04a2e)); }
+.send.stop { background: var(--text); box-shadow: none; }
+.send:disabled { background: var(--fill-strong); color: var(--text-3); box-shadow: none; pointer-events: none; }
+.send:active { transform: scale(.9); }
 
 /* 指令面板浮层：可滚动卡片 */
 .quick-scrim { position: fixed; inset: 0; z-index: 1; }
+
+/* @ 快捷上下文候选面板 */
+.at-menu {
+  position: absolute; z-index: 2; left: 10px; right: 10px; bottom: calc(100% + 4px);
+  max-height: min(46vh, 320px); overflow-y: auto;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border); border-radius: var(--r-card);
+  background: var(--bg); box-shadow: var(--shadow-2);
+  animation: coomi-cascade .18s ease both;
+}
+.at-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+.at-tabs button {
+  height: 28px; padding: 0 12px; border-radius: 999px;
+  background: var(--fill); color: var(--text-2); font-size: 12.5px;
+}
+.at-tabs button.on { background: var(--blue-soft); color: var(--blue); font-weight: 650; }
+.at-list { display: flex; flex-direction: column; gap: 1px; }
+.at-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 8px; border: 0; border-radius: 9px;
+  background: none; text-align: left; color: var(--text-2);
+}
+.at-item.on { background: var(--blue-soft); color: var(--blue); }
+.at-item .at-label {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 12.5px; color: inherit;
+}
+.at-item .at-sub { flex-shrink: 0; font-size: 11px; color: var(--text-3); }
+.at-empty { padding: 10px 8px; font-size: 12.5px; color: var(--text-3); text-align: center; }
+
 .quick {
   position: absolute; z-index: 2; left: 10px; right: 10px; bottom: calc(100% + 4px);
   /* 批次五 #18：放宽到 70vh，推理强度 + 全部斜杠命令默认一屏可见，不再藏在滚动下面 */
