@@ -659,7 +659,7 @@
             <span class="download-arrow" aria-hidden="true">↓</span>
             <span data-download-label="desktop">下载 Windows 版</span>
           </a>
-          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.4.8-test.3.apk" data-stat-action="download-test">下载测试版</a>
+          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.4.8-test.4.apk" data-stat-action="download-test">下载测试版</a>
         </div>
         <p class="star-link"><a href="https://github.com/TensorHub-ORG/Coomi" target="_blank" rel="noreferrer">去 GitHub 上为我们点颗星 →</a></p>
       </div>
@@ -919,6 +919,17 @@
               </details>
       </div>
       <div data-channel-panel="test" hidden>
+<h2 class="changelog-title">v1.4.8-test.4 更新说明【测试】</h2>
+<p class="changelog-sub">2026-09-13 发布</p>
+<ul class="changelog-list">
+<li>输入框底部按钮按容器宽度整体缩放，字体、图标、加号和发送保持单行；会话模式名称统一为“普通 / 协同”。</li>
+<li>上下文用量圆环新增四分之一环形快捷工具带，包含版本工具、常用提示词、辅助会话与小窗聊天。工具卡片采用统一的右上角圆形缺口布局；点击外部关闭卡片，点击圆环叉号收起工具带；小窗状态自动隐藏入口。</li>
+<li>Git 面板采用简洁状态行和列表布局；修复数据工具图表样式误覆盖页头导致返回按钮消失的问题。Git、还原、诊断与数据工具可在卡片内操作。</li>
+<li>常用提示词支持内置指令、自定义名称、分类标签、编辑、删除与填入输入框。控制台“会话与体验”新增管理入口；提示词保存在引擎文件中，支持重启后恢复。</li>
+<li>辅助会话拥有独立模型、上下文、工具调用、审批和提问；按需读取主会话记录，关闭卡片后继续执行，并作为子会话归档。修复异步切换、文件传输回调和提示词保存竞争造成的串会话或数据覆盖风险。</li>
+<li>OpenCode 区分 Zen / Go 配置，按模型匹配 Chat Completions、Responses、Anthropic 或 Gemini 协议，修复部分模型无法调用的问题。</li>
+</ul>
+
 
         
               <h2 class="changelog-title">v1.4.8-test.3 更新说明【测试】</h2>

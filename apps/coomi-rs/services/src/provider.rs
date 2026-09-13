@@ -2404,6 +2404,70 @@ fn nested_u64(value: Option<&Value>, key: &str) -> u64 {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn opencode_routed_requests_round_trip_tools_over_local_http() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (base, model, suffix, auth, field, reply) in [
+            ("https://opencode.ai/zen/v1", "gpt-5.5", "responses", "authorization: bearer test-key", "input",
+                json!({"output":[{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{\"path\":\"README.md\"}"}]})),
+            ("https://opencode.ai/zen/go/v1", "minimax-m2.5", "messages", "x-api-key: test-key", "messages",
+                json!({"content":[{"type":"tool_use","id":"call-1","name":"read_file","input":{"path":"README.md"}}]})),
+            ("https://opencode.ai/zen/v1", "gemini-3.1-pro", "models/gemini-3.1-pro:generateContent", "x-goog-api-key: test-key", "contents",
+                json!({"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"README.md"}}}]}}]})),
+            ("https://opencode.ai/zen/go/v1", "kimi-k2.6", "chat/completions", "authorization: bearer test-key", "messages",
+                json!({"choices":[{"message":{"content":"","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}]}}]})),
+        ] {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join("providers.json");
+            crate::ProviderDocument {
+                active: "opencode".into(), extra: BTreeMap::new(),
+                providers: BTreeMap::from([("opencode".into(), crate::ProviderSettings {
+                    base_url: base.into(), model: model.into(), api_key: "test-key".into(),
+                    ..crate::ProviderSettings::default()
+                })]),
+            }.save(&path).expect("fixture");
+            let mut config = crate::ProviderRegistry::load(&path).expect("registry").resolve(None).expect("route");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("local server");
+            config.base_url = format!("http://{}/v1", listener.local_addr().expect("address"));
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.expect("accept");
+                let mut bytes = Vec::new();
+                let (headers, body) = loop {
+                    let mut chunk = [0; 4096];
+                    let count = socket.read(&mut chunk).await.expect("request bytes");
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&chunk[..count]);
+                    if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
+                        let length = headers.lines().find_map(|line| line.strip_prefix("content-length: "))
+                            .expect("content length").parse::<usize>().expect("length");
+                        if bytes.len() >= end + 4 + length {
+                            break (headers, serde_json::from_slice::<Value>(&bytes[end + 4..end + 4 + length]).expect("request JSON"));
+                        }
+                    }
+                };
+                let reply = reply.to_string();
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
+                socket.write_all(response.as_bytes()).await.expect("response");
+                (headers, body)
+            });
+            let provider = HttpModelProvider::new(config).expect("provider");
+            let result = tokio::time::timeout(Duration::from_secs(5), provider.complete(ModelRequest {
+                model: model.into(), messages: vec![ChatMessage::user("Read README.md")],
+                tools: vec![coomi_engine::ToolSpec { name: "read_file".into(), description: "Read a file".into(), parameters: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}) }],
+                reasoning_effort: None,
+            })).await.expect("request deadline").expect("completion");
+            let (headers, body) = server.await.expect("server result");
+            assert!(headers.starts_with(&format!("post /v1/{} ", suffix.to_ascii_lowercase())), "{headers}");
+            assert!(headers.contains(auth), "expected {auth}");
+            assert!(body[field].is_array(), "{body}");
+            assert!(body["tools"].is_array(), "{body}");
+            assert_eq!(result.tool_calls.len(), 1, "{model}");
+            assert_eq!(result.tool_calls[0].name, "read_file");
+            assert_eq!(result.tool_calls[0].arguments, json!({"path":"README.md"}));
+        }
+    }
+
     struct IgnoreStream;
 
     impl ModelStreamObserver for IgnoreStream {

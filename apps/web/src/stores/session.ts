@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, shallowRef, watch } from 'vue'
+import { ref, computed, shallowRef, watch, inject, hasInjectionContext, type InjectionKey, type Ref } from 'vue'
 import { createTransport, type Transport } from '@/bridge'
 import { authedFetch, apiGet } from '@/bridge/http'
 import { isDemoMode } from '@/bridge/demoMode'
@@ -8,7 +8,7 @@ import type { ReasoningEffortStats } from '@/protocol/events'
 import type { ReasoningEffort } from '@/protocol/commands'
 import type { InboundEnvelope } from '@/protocol/commands'
 import { nextId } from '@/bridge/envelope'
-import { useConnectionStore } from './connection'
+import { useConnectionStore, useScopedConnectionStore } from './connection'
 import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { isGlobalSession as isGlobalSessionId } from '@/bridge/life'
@@ -17,12 +17,13 @@ import { speak } from '@/bridge/tts'
 import { router } from '@/router'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
 
-export const useSessionStore = defineStore('session', () => {
-  const connection = useConnectionStore()
+function defineSessionStore(storeId: string, auxiliary = false) {
+return defineStore(storeId, () => {
+  const connection = auxiliary ? useScopedConnectionStore(storeId) : useConnectionStore()
   const config = useConfigStore()
   const sessions = useSessionsStore()
 
-  const sessionId = ref(readActiveSessionId())
+  const sessionId = ref(auxiliary ? createSessionId() : readActiveSessionId())
   const mode = ref<'agent' | 'team' | 'life'>(sessions.find(sessionId.value)?.mode ?? 'agent')
   const timeline = ref<Timelineitem[]>(sessions.loadTranscript(sessionId.value))
   const runState = ref<RunState>('idle')
@@ -106,8 +107,8 @@ export const useSessionStore = defineStore('session', () => {
     return null
   })
 
-  persistActiveSessionId(sessionId.value)
-  if (typeof window !== 'undefined') {
+  if (!auxiliary) persistActiveSessionId(sessionId.value)
+  if (!auxiliary && typeof window !== 'undefined') {
     ;(window as Window & { __coomiActiveSessionId?: string }).__coomiActiveSessionId = sessionId.value
   }
 
@@ -183,8 +184,8 @@ export const useSessionStore = defineStore('session', () => {
         if (providerId && model) {
           t.send({ command: 'select_model', provider_id: providerId, model })
         }
-        t.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
-        t.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
+        if (!auxiliary) t.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
+        if (!auxiliary) t.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
       }
     })
     t.onMessage(env => {
@@ -301,6 +302,7 @@ export const useSessionStore = defineStore('session', () => {
         runState.value = 'awaiting_question'
         break
       case 'file_transfer_request':
+        if (auxiliary) auxiliaryTransfers.set(ev.request_id, paths => completeFileTransfer(ev.request_id, paths))
         if (ev.operation === 'import') {
           window.CoomiAndroid?.importFilesForRequest?.(ev.request_id)
         } else if (ev.path) {
@@ -374,7 +376,7 @@ export const useSessionStore = defineStore('session', () => {
           resetTurnFeedbackSignals()
         }
         persistSoon(); break
-      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); void router.push(ev.route); break
+      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); if (!auxiliary) void router.push(ev.route); break
       case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); turnCancelled = true; pushNotice('warn', '已停止本轮执行'); disarmStallWatch(); break
       case 'bg_task_detached': pushNotice('info', `↪ 已转入后台任务 #${ev.task_id}（${ev.tool_name}）`); break
       case 'bg_task_completed': pushNotice(ev.is_error ? 'error' : 'success', `${ev.is_error ? '✕' : '✓'} 后台任务 #${ev.task_id} ${ev.is_error ? '失败' : '完成'}`); break
@@ -439,7 +441,7 @@ export const useSessionStore = defineStore('session', () => {
         persistSoon()
         // F8 语音陪伴：开启自动朗读时，回合正常结束后朗读最后一条助手消息
         // （用户主动停止的不读，避免把未定稿内容念出来）。
-        if (config.ttsAutoRead && !turnCancelled) {
+        if (!auxiliary && config.ttsAutoRead && !turnCancelled) {
           const last = timeline.value[timeline.value.length - 1]
           if (last?.kind === 'assistant' && last.content.trim()) speak(stripMarkdownForTts(last.content))
         }
@@ -479,12 +481,12 @@ export const useSessionStore = defineStore('session', () => {
 
   function activateSession(id: string) {
     sessionId.value = id
-    if (typeof window !== 'undefined') {
+    if (!auxiliary && typeof window !== 'undefined') {
       ;(window as Window & { __coomiActiveSessionId?: string }).__coomiActiveSessionId = id
     }
     mode.value = resolveLifeMode(id)
     collaboration.value = { active: false, phase: '', cycle: 0, cycles: 0, status: '', review: '' }
-    persistActiveSessionId(id)
+    if (!auxiliary) persistActiveSessionId(id)
     lifeAutoSent = false
   }
 
@@ -493,7 +495,7 @@ export const useSessionStore = defineStore('session', () => {
    * 历史会话即使曾被切成 life，关闭全局开关后也强制回到 agent（人格只活在它该在的地方）。
    */
   function resolveLifeMode(id: string): 'agent' | 'team' | 'life' {
-    if (config.digitalLifeEnabled && (isGlobalSessionId(id) || config.lifeGlobalMode)) return 'life'
+    if (!auxiliary && config.digitalLifeEnabled && (isGlobalSessionId(id) || config.lifeGlobalMode)) return 'life'
     return sessions.find(id)?.mode === 'team' ? 'team' : 'agent'
   }
 
@@ -595,7 +597,7 @@ export const useSessionStore = defineStore('session', () => {
   function setPermissionMode(mode: 'ask' | 'auto' | 'full') { config.setPermissionMode(mode); transport.value?.send({ command: 'set_permission_mode', mode }) }
   function togglePlanMode() { const entering = !config.planMode; config.togglePlanMode(); transport.value?.send({ command: entering ? 'enter_plan_mode' : 'exit_plan_mode' }) }
   async function selectModel(providerId: string, model: string) {
-    if (!(await config.validateAndSelectModel(providerId, model))) {
+    if (!auxiliary && !(await config.validateAndSelectModel(providerId, model))) {
       pushNotice('error', config.lastError || '模型凭据验证失败，未切换模型')
       return
     }
@@ -787,6 +789,10 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function deleteSession(id: string) {
+    if (sessions.childrenOf(id).length) {
+      pushNotice('warn', '请先删除该会话下的辅助对话')
+      return
+    }
     // 先停掉待落盘的持久化定时器：被删会话不应再写回（否则会“复活”成空标题的新会话）。
     if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
     if (id === sessionId.value) {
@@ -1099,6 +1105,32 @@ export const useSessionStore = defineStore('session', () => {
 
   return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, collaboration, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, clearSessionData, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, pushNotice, prepareTurnFeedback, sendTurnFeedback, finishTurnFeedback }
 })
+}
+
+const useMainSessionStore = defineSessionStore('session')
+export type SessionStore = ReturnType<typeof useMainSessionStore>
+export const SessionScope: InjectionKey<Ref<SessionStore | null>> = Symbol('session-scope')
+export function useSessionStore(): SessionStore {
+  const scoped = hasInjectionContext() ? inject(SessionScope, null) : null
+  return scoped?.value ?? useMainSessionStore()
+}
+const auxiliaryStores = new Map<string, ReturnType<typeof defineSessionStore>>()
+const auxiliaryTransfers = new Map<string, (paths: string[]) => void>()
+export function completePendingFileTransfer(requestId: string, paths: string[]): boolean {
+  const complete = auxiliaryTransfers.get(requestId)
+  if (!complete) return false
+  auxiliaryTransfers.delete(requestId)
+  complete(paths)
+  return true
+}
+export function useAuxiliarySessionStore(id: string): SessionStore {
+  let definition = auxiliaryStores.get(id)
+  if (!definition) {
+    definition = defineSessionStore(`auxiliary:${id}`, true)
+    auxiliaryStores.set(id, definition)
+  }
+  return definition()
+}
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }
 

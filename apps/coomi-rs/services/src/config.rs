@@ -27,6 +27,35 @@ pub enum RemoteCompactionMode {
 }
 
 impl ProviderKind {
+    /// OpenCode is a multi-protocol gateway. Its Go and Zen catalogs do not
+    /// always use the same protocol for the same model (notably MiniMax).
+    /// Only route the official endpoints; custom gateways keep their settings.
+    pub fn for_opencode(base_url: &str, model: &str) -> Option<Self> {
+        let url = reqwest::Url::parse(base_url.trim()).ok()?;
+        if url.host_str()? != "opencode.ai" {
+            return None;
+        }
+        let path = url.path().trim_end_matches('/');
+        let go = match path {
+            "/zen/go/v1" => true,
+            "/zen/v1" => false,
+            _ => return None,
+        };
+        let model = model.trim().to_ascii_lowercase();
+        Some(if model.starts_with("gpt-") || model.starts_with("grok-") || model.starts_with("muse-spark-") {
+            Self::OpenAiResponses
+        } else if model.starts_with("claude-")
+            || model.starts_with("qwen3.")
+            || (go && model.starts_with("minimax-"))
+        {
+            Self::AnthropicMessages
+        } else if model.starts_with("gemini-") {
+            Self::GeminiNative
+        } else {
+            Self::OpenAiCompatible
+        })
+    }
+
     fn from_config(provider_type: &str, tool_protocol: Option<&str>) -> Result<Self> {
         let value = tool_protocol
             .filter(|value| !value.trim().is_empty())
@@ -186,6 +215,7 @@ impl ProviderRegistry {
                 &provider.provider_type,
                 provider.tool_protocol.as_deref(),
             )?;
+            let kind = ProviderKind::for_opencode(&provider.base_url, &provider.model).unwrap_or(kind);
             let display = if provider.display.trim().is_empty() {
                 id.clone()
             } else {
@@ -235,7 +265,8 @@ impl ProviderRegistry {
                 max_output_tokens: provider.max_output_tokens.unwrap_or(8_192),
                 supports_remote_compaction: provider
                     .supports_remote_compaction
-                    .unwrap_or(kind == ProviderKind::OpenAiResponses),
+                    .unwrap_or(kind == ProviderKind::OpenAiResponses
+                        && ProviderKind::for_opencode(&provider.base_url, &provider.model).is_none()),
                 supports_vision: manual_vision,
                 supports_native_tools: provider.supports_native_tools,
                 supports_web_search: provider.supports_web_search,
@@ -388,6 +419,11 @@ impl ProviderRegistry {
 }
 
 fn apply_model_context_window(provider: &mut ProviderConfig) {
+    if let Some(kind) = ProviderKind::for_opencode(&provider.base_url, &provider.model) {
+        provider.kind = kind;
+        // OpenCode documents inference routes, but no Responses compact API.
+        provider.capabilities.supports_remote_compaction = false;
+    }
     if let Some(window) = provider.model_context_windows.get(&provider.model) {
         provider.capabilities.context_window = *window;
     }
@@ -495,6 +531,37 @@ pub fn deepseek_account_settings(api_key: &str, model: &str) -> ProviderSettings
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_registry_routes_models_by_product_and_preserves_custom_gateways() {
+        for (base, model, expected) in [
+            ("https://opencode.ai/zen/v1", "gpt-5.5", ProviderKind::OpenAiResponses),
+            ("https://opencode.ai/zen/v1", "claude-sonnet-4-6", ProviderKind::AnthropicMessages),
+            ("https://opencode.ai/zen/v1", "gemini-3.1-pro", ProviderKind::GeminiNative),
+            ("https://opencode.ai/zen/v1", "minimax-m2.5", ProviderKind::OpenAiCompatible),
+            ("https://opencode.ai/zen/go/v1", "minimax-m2.5", ProviderKind::AnthropicMessages),
+            ("https://opencode.ai/zen/go/v1", "grok-4.6", ProviderKind::OpenAiResponses),
+            ("https://opencode.ai/zen/go/v1", "qwen3.7-plus", ProviderKind::AnthropicMessages),
+            ("https://opencode.ai/zen/go/v1", "kimi-k2.6", ProviderKind::OpenAiCompatible),
+            ("https://opencode.ai.example/zen/v1", "gpt-5.5", ProviderKind::OpenAiCompatible),
+        ] {
+            let directory = tempfile::tempdir().expect("temporary directory");
+            let path = directory.path().join("providers.json");
+            let mut provider = ProviderSettings {
+                base_url: base.into(), model: model.into(), api_key: "test-key".into(),
+                ..ProviderSettings::default()
+            };
+            provider.fast_model = Some("glm-5".into());
+            ProviderDocument { active: "opencode".into(), providers: BTreeMap::from([("opencode".into(), provider)]), extra: BTreeMap::new() }
+                .save(&path).expect("save fixture");
+            let registry = ProviderRegistry::load(&path).expect("registry");
+            let primary = registry.resolve(None).expect("primary");
+            assert_eq!(primary.kind, expected, "{base} {model}");
+            assert_eq!(primary.base_url, base, "must not switch billing product");
+            assert_eq!(registry.resolve(Some("opencode:glm-5")).expect("switch model").kind, ProviderKind::OpenAiCompatible);
+            assert_eq!(registry.resolve(Some(&format!("opencode:{model}"))).expect("switch back").kind, expected);
+        }
+    }
 
     #[test]
     fn deepseek_account_provider_has_fixed_models() {

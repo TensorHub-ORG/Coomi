@@ -130,6 +130,7 @@ public class CoomiDashboardActivity extends Activity {
         mCheckUpdateDesc = findViewById(R.id.txt_check_update_desc);
         mUpdateDot = findViewById(R.id.dot_update);
         mHomeSettingsButton = findViewById(R.id.btn_home_settings);
+        findViewById(R.id.btn_prompt_library).setOnClickListener(v -> openCoomiRoute("#/prompts"));
         mCheckUpdateDesc.setText(getString(R.string.coomi_dash_check_update_desc, BuildConfig.VERSION_NAME));
         checkUpdateSilently();
         mBackupButton = findViewById(R.id.btn_backup_data);

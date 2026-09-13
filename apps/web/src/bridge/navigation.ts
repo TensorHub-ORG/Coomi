@@ -30,6 +30,7 @@ export function installSystemBackHandler(router: Router): void {
     else if (route.startsWith('/studio/')) goBack(router, '/studio')
     else if (
       route === '/hooks'
+      || route === '/prompts'
       || route === '/life'
       || route === '/memory'
       || route === '/runtime'

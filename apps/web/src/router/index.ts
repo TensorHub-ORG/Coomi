@@ -7,6 +7,7 @@ export const router = createRouter({
     { path: '/sessions', name: 'sessions', component: () => import('@/views/SessionsView.vue') },
     { path: '/tasks', name: 'tasks', component: () => import('@/views/TasksView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
+    { path: '/prompts', name: 'prompts', component: () => import('@/views/PromptsView.vue') },
     { path: '/appearance', name: 'appearance', component: () => import('@/views/AppearanceView.vue') },
     { path: '/persona', name: 'persona', component: () => import('@/views/PersonaView.vue') },
     { path: '/providers', name: 'providers', component: () => import('@/views/ProvidersView.vue') },

@@ -7,7 +7,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PERMISSION_MODES, REASONING_EFFORTS, useConfigStore } from '@/stores/config'
-import { useSessionStore } from '@/stores/session'
+import { completePendingFileTransfer, useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { gitLog, gitStatus, type CommitInfo } from '@/bridge/git'
 import type { SessionMeta } from '@/stores/sessions'
@@ -244,6 +244,7 @@ function onTransferProgress(event: Event) {
 function onFilesImported(event: Event) {
   const detail = (event as CustomEvent<{ paths?: string[]; requestId?: string }>).detail ?? {}
   const paths = detail.paths ?? []
+  if (detail.requestId && completePendingFileTransfer(detail.requestId, paths)) return
   transferText.value = paths.length ? `已导入 ${paths.length} 个文件` : '文件导入完成'
   transferProgress.value = 100
   if (detail.requestId) session.completeFileTransfer(detail.requestId, paths)
@@ -252,6 +253,7 @@ function onFilesImported(event: Event) {
 }
 function onFileExported(event: Event) {
   const detail = (event as CustomEvent<{ requestId?: string; path?: string }>).detail ?? {}
+  if (detail.requestId && completePendingFileTransfer(detail.requestId, detail.path ? [detail.path] : [])) return
   if (detail.requestId) session.completeFileTransfer(detail.requestId, detail.path ? [detail.path] : [])
 }
 function onPrefillDraft(event: Event) {
@@ -398,36 +400,37 @@ watch(text, () => {
       </div>
 
       <div class="bar">
-        <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode()">
-          <CoomiIcon name="target" :size="14" />
-          <span>计划</span>
-        </button>
-        <button class="pill" :class="{ on: session.mode === 'team' }" title="切换协同审查协作模式" @click="cycleSessionMode">
-          <CoomiIcon name="subtask" :size="14" />
-          <span>{{ session.mode === 'team' ? '协作' : '单模型' }}</span>
-        </button>
-        <button class="pill" :class="{ on: config.permissionMode === 'auto', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode">
-          <CoomiIcon name="shield" :size="14" />
-          <span>{{ modeLabel }}</span>
-        </button>
+        <div class="bar-left">
+          <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode()">
+            <CoomiIcon name="target" :size="14" />
+            <span>计划</span>
+          </button>
+          <button class="pill" :class="{ on: session.mode === 'team' }" title="切换协同审查协作模式" @click="cycleSessionMode">
+            <CoomiIcon name="subtask" :size="14" />
+            <span>{{ session.mode === 'team' ? '协同' : '普通' }}</span>
+          </button>
+          <button class="pill" :class="{ on: config.permissionMode === 'auto', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode">
+            <CoomiIcon name="shield" :size="14" />
+            <span>{{ modeLabel }}</span>
+          </button>
+        </div>
 
-        <span class="spacer" />
-
-        <button class="act" aria-label="快捷指令" @click="toggleQuick">
-          <CoomiIcon name="plusCircle" :size="21" />
-        </button>
-
-        <button
-          class="send"
-          :class="{ jump: isJumpIn, stop: showStop }"
-          :disabled="!canSend && !session.isBusy"
-          :aria-label="showStop ? '停止' : isJumpIn ? '插队' : '发送'"
-          @click="tapPrimary"
-        >
-          <CoomiIcon v-if="showStop" name="stop" :size="17" />
-          <CoomiIcon v-else-if="isJumpIn" name="subtask" :size="18" />
-          <CoomiIcon v-else name="arrowUp" :size="18" />
-        </button>
+        <div class="bar-right">
+          <button class="act" aria-label="快捷指令" @click="toggleQuick">
+            <CoomiIcon name="plusCircle" :size="21" />
+          </button>
+          <button
+            class="send"
+            :class="{ jump: isJumpIn, stop: showStop }"
+            :disabled="!canSend && !session.isBusy"
+            :aria-label="showStop ? '停止' : isJumpIn ? '插队' : '发送'"
+            @click="tapPrimary"
+          >
+            <CoomiIcon v-if="showStop" name="stop" :size="17" />
+            <CoomiIcon v-else-if="isJumpIn" name="subtask" :size="18" />
+            <CoomiIcon v-else name="arrowUp" :size="18" />
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -454,6 +457,7 @@ watch(text, () => {
 }
 
 .field {
+  container-type: inline-size;
   position: relative;
   padding: 6px 8px 7px 10px;
   border: 1px solid var(--border-strong);
@@ -508,8 +512,18 @@ watch(text, () => {
 .input.scrollable::-webkit-scrollbar-track { margin-block: 12px 7px; background: transparent; }
 .input.scrollable::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--border-strong); }
 
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 0 0 2px; }
-.spacer { flex: 1; }
+/* 按输入框容器宽度统一缩放文字、图标、按钮和间距，小窗也保持完整单行。 */
+.bar { display: flex; flex-wrap: nowrap; align-items: center; gap: .4em; padding: 3px 0 0; font-size: clamp(8px, 3.6cqw, 13px); }
+.bar-left { display: flex; flex-wrap: nowrap; align-items: center; gap: .4em; min-width: 0; flex: 1; }
+.bar-right { display: flex; flex-wrap: nowrap; align-items: center; gap: .3em; flex-shrink: 0; }
+.bar-left .pill {
+  height: 2.46em; padding: 0 .8em; font-size: inherit; gap: .38em;
+  flex-shrink: 0; min-width: 0; white-space: nowrap;
+}
+.bar-left :deep(svg) { width: 1.08em; height: 1.08em; flex-shrink: 0; }
+.bar-right .act { width: 2.77em; height: 2.77em; font-size: inherit; }
+.bar-right .send { width: 2.92em; height: 2.92em; font-size: inherit; }
+.bar-right :deep(svg) { width: 1.54em; height: 1.54em; }
 
 .act {
   display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px;

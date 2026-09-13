@@ -24,6 +24,7 @@ import {
   type SnapshotPreview,
 } from '@/bridge/git'
 
+const props = defineProps<{ embedded?: boolean }>()
 const router = useRouter()
 
 const snapshots = ref<Snapshot[]>([])
@@ -254,13 +255,14 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="一键还原" @back="goBack(router, '/settings')">
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" class="page-head" title="一键还原" @back="goBack(router, '/settings')">
       <template #right>
         <button class="icon-btn" aria-label="刷新" @click="load"><CoomiIcon name="refresh" :size="17" /></button>
       </template>
     </PageHead>
-    <main class="body">
+    <main v-show="!props.embedded || (!previewState && !editing && !deleteRequest)" class="body">
+      <div v-if="props.embedded" class="embedded-toolbar"><button class="mini-btn" aria-label="刷新" @click="load"><CoomiIcon name="refresh" :size="13" /> 刷新</button></div>
       <p class="scope-note">快照由引擎按轮次 / 会话自动创建，也可手动备份；还原前引擎会自动生成一份「还原前备份」快照。</p>
 
       <!-- 还原报告 -->
@@ -424,7 +426,8 @@ onMounted(() => {
 
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
-.body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
+.page-head { position: relative; z-index: 5; flex-shrink: 0; }
+.body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
 .scope-note { margin: 2px 2px 10px; padding: 10px 12px; border-left: 3px solid var(--blue); background: var(--blue-soft); color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
 .notice { margin: 0 0 10px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--ok-soft); color: var(--ok); font-size: 12.5px; line-height: 1.5; word-break: break-all; }
 .notice.err { background: var(--danger-soft); color: var(--danger); }
@@ -535,4 +538,45 @@ onMounted(() => {
 .preview-actions { display: flex; gap: 10px; padding-top: 12px; }
 .preview-actions .btn { flex: 1; min-height: 42px; }
 .btn-danger-solid { background: var(--danger); color: #fff; }
+
+/* Tool content can live inside the launcher card or fill a routed page. */
+.page { min-width: 0; min-height: 0; overflow: hidden; container-type: inline-size; }
+.page.embedded { flex: 1; height: 100%; background: var(--bg); }
+.embedded .body { padding: 10px 12px 14px; }
+.embedded .card { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.embedded .card + .card { border-top: 1px solid var(--border); }
+.embedded .notice { background: var(--fill); }
+.embedded .tabs { background: transparent; padding: 0 0 6px; border-bottom: 1px solid var(--border); border-radius: 0; gap: 2px; }
+.embedded .tab { padding-inline: 8px; font-size: 11px; min-height: 32px; }
+.embedded .tab.on { background: var(--fill); color: var(--text); box-shadow: none; }
+.embedded .card-head { padding-inline: 0; }
+.embedded .card-title { font-size: 12.5px; }
+.embedded .card-side { font-size: 11px; }
+.embedded :is(input, select, textarea) { max-width: 100%; box-sizing: border-box; }
+.embedded :is(.inline-form, .filter-row, .card-actions, .sched-form, .compare-form) { padding-inline: 0; }
+.embedded :is(.text-input, .sel) { min-width: 0; flex-basis: 130px; }
+.embedded :is(.btn, .button) { font-size: 12px; padding-inline: 10px; }
+.embedded .embedded-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+@container (max-width: 340px) {
+  .card-head { flex-wrap: wrap; gap: 5px; }
+  .body { padding-inline: 10px; }
+  .card-side { font-size: 11px; }
+  .range-meta { flex-direction: column; }
+  .usage-row { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .usage-tokens { grid-column: 1 / -1; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .compare-form { flex-direction: column; align-items: stretch; }
+  .compare-form .sel { flex-basis: auto; width: 100%; }
+}
+
+
+.embedded .scope-note { padding: 0 0 10px; border: 0; background: transparent; font-size: 12px; }
+.embedded .snap { border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--border); }
+.embedded .snap-actions { flex-wrap: wrap; }
+.embedded .sheet-mask { position: static; flex: 1; min-height: 0; overflow: auto; align-items: stretch; background: transparent; }
+.embedded .sheet { padding: 12px; border-radius: 0; background: var(--bg); }
+.embedded .preview-sheet { height: auto; min-height: 0; }
+.embedded .preview-actions { flex-wrap: wrap; }
+.embedded .report-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.embedded .report-num { overflow-wrap: anywhere; }
 </style>

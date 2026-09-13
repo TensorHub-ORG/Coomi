@@ -321,8 +321,13 @@ onMounted(async () => {
           <CoomiIcon v-if="isCurrent(r.providerId, r.model)" name="check" :size="17" class="tick" />
         </button>
       </div>
-      <p class="sec-label">配置</p>
+      <p class="sec-label">会话与体验</p>
       <div class="group">
+        <button class="row" @click="router.push('/prompts')">
+          <span class="ri"><CoomiIcon name="pencil" :size="17" /></span>
+          <span class="rt"><span class="rmain">常用提示词指令</span><span class="rsub">管理自定义提示词、分类标签与内置指令</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
         <button class="row" @click="router.push('/sessions')">
           <span class="ri"><CoomiIcon name="chat" :size="17" /></span>
           <span class="rt"><span class="rmain">会话历史</span></span>

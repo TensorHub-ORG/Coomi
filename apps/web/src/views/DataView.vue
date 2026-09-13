@@ -10,6 +10,7 @@ import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { goBack } from '@/bridge/navigation'
+import { apiGet } from '@/bridge/http'
 import { useSessionsStore } from '@/stores/sessions'
 import {
   contributionStats,
@@ -21,6 +22,7 @@ import {
   type SearchHit,
 } from '@/bridge/data'
 
+const props = defineProps<{ embedded?: boolean }>()
 const router = useRouter()
 const sessions = useSessionsStore()
 
@@ -118,9 +120,29 @@ async function runSearch() {
   }
 }
 
-/** 点击命中跳转 /sessions 并携带 query 参数（无深层联动）。 */
-function goHit(hit: SearchHit) {
-  void router.push({ path: '/sessions', query: { q: searchQ.value.trim() } })
+const selectedHit = ref<SearchHit | null>(null)
+const hitMessages = ref<{ role: string; content: string | null }[]>([])
+const hitBusy = ref(false)
+const hitError = ref('')
+let hitRequest = 0
+async function goHit(hit: SearchHit) {
+  if (!props.embedded) {
+    void router.push({ path: '/sessions', query: { q: searchQ.value.trim() } })
+    return
+  }
+  const request = ++hitRequest
+  selectedHit.value = hit
+  hitMessages.value = []
+  hitError.value = ''
+  hitBusy.value = true
+  try {
+    const session = await apiGet<{ messages: { role: string; content: string | null }[] }>(`/api/sessions/${encodeURIComponent(hit.session_id)}`)
+    if (request === hitRequest) hitMessages.value = session.messages ?? []
+  } catch (e) {
+    if (request === hitRequest) hitError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    if (request === hitRequest) hitBusy.value = false
+  }
 }
 
 // ── 会话导出 ───────────────────────────────────────────────
@@ -156,15 +178,28 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="数据工具" @back="goBack(router, '/settings')" />
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" class="page-head" title="数据工具" @back="goBack(router, '/settings')" />
     <main class="body">
-      <div class="tabs">
+      <section v-if="props.embedded && selectedHit" class="hit-detail">
+        <div class="card-head">
+          <button class="mini-btn" @click="selectedHit = null">返回搜索</button>
+          <span class="card-side mono">{{ selectedHit.session_id.slice(0, 8) }}</span>
+        </div>
+        <p v-if="hitBusy" class="empty">加载会话中…</p>
+        <p v-if="hitError" class="notice err">{{ hitError }}</p>
+        <article v-for="(message, i) in hitMessages" :key="i" class="message-row" :class="{ matched: i === selectedHit.message_index }">
+          <span class="hit-meta">{{ message.role }} · #{{ i + 1 }}</span>
+          <p>{{ message.content || '（工具调用）' }}</p>
+        </article>
+        <p v-if="!hitBusy && !hitError && !hitMessages.length" class="empty">暂无消息</p>
+      </section>
+      <div v-show="!props.embedded || !selectedHit" class="tabs">
         <button v-for="t in TABS" :key="t.key" class="tab" :class="{ on: activeTab === t.key }" @click="activeTab = t.key">{{ t.label }}</button>
       </div>
 
       <!-- ── 贡献统计 ── -->
-      <section v-if="activeTab === 'contrib'" class="tab-panel">
+      <section v-if="activeTab === 'contrib' && (!props.embedded || !selectedHit)" class="tab-panel">
         <div class="card">
           <div class="card-head">
             <span class="card-title">贡献统计</span>
@@ -201,7 +236,7 @@ onMounted(() => {
                 <div class="day-bars">
                   <div v-for="d in contrib.by_day" :key="d.date" class="day-col" :title="`${d.date}：${d.commits} 次`">
                     <span class="bar-val">{{ d.commits }}</span>
-                    <span class="bar"><i :style="{ height: barHeight(d.commits) }" /></span>
+                    <span class="day-bar"><i :style="{ height: barHeight(d.commits) }" /></span>
                     <span class="day-label">{{ d.date.slice(5) }}</span>
                   </div>
                 </div>
@@ -212,7 +247,7 @@ onMounted(() => {
       </section>
 
       <!-- ── 用量统计 ── -->
-      <section v-if="activeTab === 'usage'" class="tab-panel">
+      <section v-if="activeTab === 'usage' && (!props.embedded || !selectedHit)" class="tab-panel">
         <div class="card">
           <div class="card-head">
             <span class="card-title">按天用量（倒序）</span>
@@ -234,7 +269,7 @@ onMounted(() => {
       </section>
 
       <!-- ── 会话搜索 ── -->
-      <section v-if="activeTab === 'search'" class="tab-panel">
+      <section v-if="activeTab === 'search' && (!props.embedded || !selectedHit)" class="tab-panel">
         <div class="card">
           <div class="card-head"><span class="card-title">会话全文搜索</span></div>
           <form class="filter-row" @submit.prevent="runSearch">
@@ -244,7 +279,7 @@ onMounted(() => {
             </button>
           </form>
           <p v-if="searchError" class="notice err">{{ searchError }}</p>
-          <p v-if="hits.length" class="hit-count">共 {{ hits.length }} 条命中，点击跳转会话历史</p>
+          <p v-if="hits.length" class="hit-count">共 {{ hits.length }} 条命中，{{ props.embedded ? '点击查看会话' : '点击跳转会话历史' }}</p>
           <p v-else-if="!searchBusy && searchQ" class="empty">没有匹配「{{ searchQ }}」的内容</p>
           <div v-for="h in hits" :key="h.session_id + '-' + h.message_index" class="hit-row" @click="goHit(h)">
             <span class="hit-meta mono">{{ h.session_id.slice(0, 8) }}… · 消息 #{{ h.message_index + 1 }}</span>
@@ -255,7 +290,7 @@ onMounted(() => {
       </section>
 
       <!-- ── 会话导出 ── -->
-      <section v-if="activeTab === 'export'" class="tab-panel">
+      <section v-if="activeTab === 'export' && (!props.embedded || !selectedHit)" class="tab-panel">
         <div class="card">
           <div class="card-head"><span class="card-title">会话导出</span></div>
           <p class="export-copy">将会话导出为 Markdown 文件（含消息与工具调用），写入引擎 home/exports/ 目录。</p>
@@ -279,6 +314,7 @@ onMounted(() => {
 
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
+.page-head { position: relative; z-index: 5; flex-shrink: 0; }
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
 
 /* ── 标签页 ── */
@@ -322,8 +358,8 @@ onMounted(() => {
 .day-bars { display: flex; align-items: flex-end; gap: 2px; margin-top: 6px; padding-top: 8px; overflow-x: auto; padding-bottom: 2px; }
 .day-col { flex: 0 0 18px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .bar-val { color: var(--text-3); font-size: 9px; font-variant-numeric: tabular-nums; }
-.bar { display: flex; align-items: flex-end; width: 8px; height: 56px; border-radius: 3px; background: var(--fill-strong); overflow: hidden; }
-.bar i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--blue); min-height: 2px; }
+.day-bar { display: flex; align-items: flex-end; width: 8px; height: 56px; border-radius: 3px; background: var(--fill-strong); overflow: hidden; }
+.day-bar i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--blue); min-height: 2px; }
 .day-label { color: var(--text-3); font-size: 9px; white-space: nowrap; }
 
 /* ── 用量统计 ── */
@@ -346,4 +382,44 @@ onMounted(() => {
 /* ── 会话导出 ── */
 .export-copy { margin: 0; padding: 10px 13px 0; color: var(--text-2); font-size: 12.5px; line-height: 1.65; }
 .export-path { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 13px 12px; color: var(--ok); font-size: 12px; line-height: 1.5; word-break: break-all; }
+
+/* Tool content can live inside the launcher card or fill a routed page. */
+.page { min-width: 0; min-height: 0; overflow: hidden; container-type: inline-size; }
+.page.embedded { flex: 1; height: 100%; background: var(--bg); }
+.embedded .body { padding: 10px 12px 14px; }
+.embedded .card { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.embedded .card + .card { border-top: 1px solid var(--border); }
+.embedded .notice { background: var(--fill); }
+.embedded .tabs { background: transparent; padding: 0 0 6px; border-bottom: 1px solid var(--border); border-radius: 0; gap: 2px; }
+.embedded .tab { padding-inline: 8px; font-size: 11px; min-height: 32px; }
+.embedded .tab.on { background: var(--fill); color: var(--text); box-shadow: none; }
+.embedded .card-head { padding-inline: 0; }
+.embedded .card-title { font-size: 12.5px; }
+.embedded .card-side { font-size: 11px; }
+.embedded :is(input, select, textarea) { max-width: 100%; box-sizing: border-box; }
+.embedded :is(.inline-form, .filter-row, .card-actions, .sched-form, .compare-form) { padding-inline: 0; }
+.embedded :is(.text-input, .sel) { min-width: 0; flex-basis: 130px; }
+.embedded :is(.btn, .button) { font-size: 12px; padding-inline: 10px; }
+.embedded .embedded-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+@container (max-width: 340px) {
+  .card-head { flex-wrap: wrap; gap: 5px; }
+  .body { padding-inline: 10px; }
+  .card-side { font-size: 11px; }
+  .range-meta { flex-direction: column; }
+  .usage-row { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .usage-tokens { grid-column: 1 / -1; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .compare-form { flex-direction: column; align-items: stretch; }
+  .compare-form .sel { flex-basis: auto; width: 100%; }
+}
+
+
+.hit-detail .mini-btn { min-height: 30px; padding: 0 9px; background: var(--fill); border-radius: 6px; color: var(--text-2); font-size: 12px; }
+.message-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.message-row.matched { background: var(--fill); }
+.message-row p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font-size: 12px; line-height: 1.65; }
+.embedded .author-row { padding-inline: 0; gap: 6px; }
+.embedded .usage-row { padding-inline: 0; }
+.embedded .day-block { padding-inline: 0; min-width: 0; }
+.embedded .range-meta { padding-inline: 0; }
 </style>

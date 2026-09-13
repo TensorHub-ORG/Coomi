@@ -25,6 +25,7 @@ import {
   type StorageReport,
 } from '@/bridge/ops'
 
+const props = defineProps<{ embedded?: boolean }>()
 const router = useRouter()
 
 // ── 标签页 ─────────────────────────────────────────────────
@@ -220,8 +221,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="运维诊断" @back="goBack(router, '/settings')" />
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" class="page-head" title="运维诊断" @back="goBack(router, '/settings')" />
     <main class="body">
       <div class="tabs">
         <button v-for="t in TABS" :key="t.key" class="tab" :class="{ on: activeTab === t.key }" @click="activeTab = t.key">{{ t.label }}</button>
@@ -404,7 +405,8 @@ onMounted(() => {
 
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
-.body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
+.page-head { position: relative; z-index: 5; flex-shrink: 0; }
+.body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
 
 /* ── 标签页（可横向滚动） ── */
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; padding: 4px; border-radius: var(--r-md); background: var(--fill-strong); overflow-x: auto; scrollbar-width: none; }
@@ -487,4 +489,35 @@ onMounted(() => {
 
 /* ── 远端连通测试 ── */
 .remote-result { display: flex; align-items: center; gap: 8px; padding: 2px 13px 12px; }
+
+/* Tool content can live inside the launcher card or fill a routed page. */
+.page { min-width: 0; min-height: 0; overflow: hidden; container-type: inline-size; }
+.page.embedded { flex: 1; height: 100%; background: var(--bg); }
+.embedded .body { padding: 10px 12px 14px; }
+.embedded .card { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.embedded .card + .card { border-top: 1px solid var(--border); }
+.embedded .notice { background: var(--fill); }
+.embedded .tabs { background: transparent; padding: 0 0 6px; border-bottom: 1px solid var(--border); border-radius: 0; gap: 2px; }
+.embedded .tab { padding-inline: 8px; font-size: 11px; min-height: 32px; }
+.embedded .tab.on { background: var(--fill); color: var(--text); box-shadow: none; }
+.embedded .card-head { padding-inline: 0; }
+.embedded .card-title { font-size: 12.5px; }
+.embedded .card-side { font-size: 11px; }
+.embedded :is(input, select, textarea) { max-width: 100%; box-sizing: border-box; }
+.embedded :is(.inline-form, .filter-row, .card-actions, .sched-form, .compare-form) { padding-inline: 0; }
+.embedded :is(.text-input, .sel) { min-width: 0; flex-basis: 130px; }
+.embedded :is(.btn, .button) { font-size: 12px; padding-inline: 10px; }
+.embedded .embedded-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+@container (max-width: 340px) {
+  .card-head { flex-wrap: wrap; gap: 5px; }
+  .body { padding-inline: 10px; }
+  .card-side { font-size: 11px; }
+  .range-meta { flex-direction: column; }
+  .usage-row { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .usage-tokens { grid-column: 1 / -1; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .compare-form { flex-direction: column; align-items: stretch; }
+  .compare-form .sel { flex-basis: auto; width: 100%; }
+}
+
 </style>

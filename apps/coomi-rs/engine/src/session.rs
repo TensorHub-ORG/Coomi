@@ -33,6 +33,9 @@ pub enum SessionMode {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Session {
     pub id: Uuid,
+    /// Independent auxiliary conversation; only this parent transcript may be read.
+    #[serde(default)]
+    pub parent_session_id: Option<Uuid>,
     pub provider_id: String,
     pub model: String,
     pub cwd: PathBuf,
@@ -71,6 +74,7 @@ impl Session {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
+            parent_session_id: None,
             provider_id: provider_id.into(),
             model: model.into(),
             cwd,
@@ -561,6 +565,28 @@ fn summarize_assistant(content: &str, head_tail: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auxiliary_parent_survives_reload_checkpoint_and_clear() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(home.path());
+        let parent = Session::new("provider", "main-model", home.path().to_path_buf());
+        store.save(&parent).unwrap();
+        let mut child = Session::new("provider", "child-model", home.path().to_path_buf());
+        child.parent_session_id = Some(parent.id);
+        child.messages.push(ChatMessage::user("independent task"));
+        store.save(&child).unwrap();
+        let mut restored = store.load(child.id).unwrap();
+        assert_eq!(restored.parent_session_id, Some(parent.id));
+        restored.clear_data();
+        store.save_checkpoint(&restored).unwrap();
+        assert_eq!(store.load(child.id).unwrap().parent_session_id, Some(parent.id));
+        assert_eq!(store.load(parent.id).unwrap().model, "main-model");
+        assert!(store.load(parent.id).unwrap().messages.is_empty());
+        let mut old = serde_json::to_value(parent).unwrap();
+        old.as_object_mut().unwrap().remove("parent_session_id");
+        assert!(serde_json::from_value::<Session>(old).unwrap().parent_session_id.is_none());
+    }
 
     #[test]
     fn saves_lists_and_loads_sessions() {

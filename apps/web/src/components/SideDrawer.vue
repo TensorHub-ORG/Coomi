@@ -130,6 +130,10 @@ function openDashboard() {
   if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
   else window.location.href = 'coomi://dashboard'
 }
+function openAuxiliary(parentId: string, sessionId: string) {
+  window.dispatchEvent(new CustomEvent('coomi:open-auxiliary', { detail: { parentId, sessionId } }))
+  emit('close')
+}
 </script>
 
 <template>
@@ -171,6 +175,7 @@ function openDashboard() {
               <span v-if="session.lifeUnread.length" class="global-badge" aria-label="生命体未读消息">{{ session.lifeUnread.length }}</span>
               <span v-if="globalRunning" class="rspin" aria-label="后台运行中" />
             </p>
+            <button v-for="child in sessions.childrenOf(GLOBAL_SESSION_ID)" :key="child.id" class="aux-child" @click.stop="openAuxiliary(GLOBAL_SESSION_ID, child.id)">↳ {{ child.title }} <span v-if="sessions.isRunning(child.id)" class="rspin" aria-label="运行中" /></button>
           </div>
           <button class="rmore" aria-label="更多" @click.stop="menuFor = globalMeta">
             <CoomiIcon name="more" :size="17" />
@@ -207,6 +212,7 @@ function openDashboard() {
                 </template>
                 <span v-if="sessions.isRunning(m.id)" class="rspin" aria-label="后台运行中" />
               </p>
+              <button v-for="child in sessions.childrenOf(m.id)" :key="child.id" class="aux-child" @click.stop="openAuxiliary(m.id, child.id)">↳ {{ child.title }} <span v-if="sessions.isRunning(child.id)" class="rspin" aria-label="运行中" /></button>
             </div>
             <button class="rmore" aria-label="更多" @click.stop="menuFor = m">
               <CoomiIcon name="more" :size="17" />
@@ -248,8 +254,8 @@ function openDashboard() {
             <button class="sheet-item" @click="doPin">
               <CoomiIcon name="pin" :size="18" /><span>{{ menuFor.pinned ? '取消置顶' : '置顶' }}</span>
             </button>
-            <button class="sheet-item danger" @click="doDelete">
-              <CoomiIcon name="trash" :size="18" /><span>删除会话</span>
+            <button class="sheet-item danger" :disabled="sessions.childrenOf(menuFor.id).length > 0" @click="doDelete">
+              <CoomiIcon name="trash" :size="18" /><span>{{ sessions.childrenOf(menuFor.id).length ? '请先删除辅助对话' : '删除会话' }}</span>
             </button>
           </template>
           <button class="sheet-cancel" @click="closeMenu">取消</button>
@@ -259,6 +265,9 @@ function openDashboard() {
 </template>
 
 <style scoped>
+.aux-child { display: block; width: 100%; text-align: left; padding: 7px 4px 4px 12px; border: 0; background: transparent; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.aux-children { width: 100%; padding-left: 18px; }
+
 .drawer-root { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
 .drawer-root.open { pointer-events: auto; }
 

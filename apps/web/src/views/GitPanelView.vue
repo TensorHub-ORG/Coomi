@@ -63,7 +63,19 @@ import {
   type StashEntry,
 } from '@/bridge/git'
 
+const props = defineProps<{ embedded?: boolean }>()
 const router = useRouter()
+const confirmation = ref<{ message: string; resolve: (accepted: boolean) => void } | null>(null)
+function requestConfirmation(message: string): Promise<boolean> {
+  if (!props.embedded) return Promise.resolve(window.confirm(message))
+  confirmation.value?.resolve(false)
+  return new Promise(resolve => { confirmation.value = { message, resolve } })
+}
+function answerConfirmation(accepted: boolean) {
+  confirmation.value?.resolve(accepted)
+  confirmation.value = null
+}
+onBeforeUnmount(() => answerConfirmation(false))
 
 // ── 状态栏数据 ──────────────────────────────────────────────
 const status = ref<GitStatus | null>(null)
@@ -116,17 +128,9 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'changes', label: '改动' },
   { key: 'branches', label: '分支' },
   { key: 'history', label: '历史' },
-  { key: 'stash', label: '临时收纳' },
-  { key: 'remotes', label: '同步' },
+  { key: 'stash', label: '贮藏' },
+  { key: 'remotes', label: '远程' },
 ]
-/** 每个标签页的大白话说明（显示在面板顶部，帮助小白理解）。 */
-const TAB_DESC: Record<Tab, string> = {
-  changes: '这里是你还没保存的改动。点文件名可看详情，点「保存」选中，最后写一句话并点「保存改动」。',
-  branches: '分支 = 项目的不同版本线，各干各的互不影响。当前在哪条线上，改的就是哪份代码。',
-  history: '每次「保存改动」都会记录在这里，点开可查看当时改了什么。',
-  stash: '把还没做完的改动临时收起来，忙完别的事再取回来。',
-  remotes: '把改动上传到 GitHub / Gitee 等网上仓库，或把网上的最新改动下载下来。',
-}
 const activeTab = ref<Tab>('changes')
 
 // ── 标签滑块：弹簧滑动指示条（活泼动效） ─────────────────────
@@ -169,10 +173,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncThumb))
 const statusSummary = computed(() => {
   const s = status.value
   if (!s) return ''
-  if (s.conflicted.length) return `有 ${s.conflicted.length} 处冲突需要先处理`
+  if (!s.is_repo) return '尚未建立 Git 仓库'
+  if (s.conflicted.length) return `${s.conflicted.length} 处冲突待解决`
   const total = s.staged.length + s.unstaged.length + s.untracked.length
-  if (total === 0) return '没有待保存的改动，工作区很干净'
-  return `有 ${total} 处改动等待保存`
+  if (total === 0) return '工作区干净'
+  return `${total} 处未提交改动`
 })
 
 const statusSub = computed(() => {
@@ -180,27 +185,27 @@ const statusSub = computed(() => {
   if (!s || !s.is_repo) return ''
   const parts: string[] = []
   if (s.branch) parts.push(`当前分支：${s.branch}`)
-  if (s.ahead > 0) parts.push(`比网上多 ${s.ahead} 个提交`)
-  if (s.behind > 0) parts.push(`落后网上 ${s.behind} 个提交`)
-  if (s.ahead === 0 && s.behind === 0) parts.push('与网上同步')
+  if (s.ahead > 0) parts.push(`领先远程 ${s.ahead}`)
+  if (s.behind > 0) parts.push(`落后远程 ${s.behind}`)
+  if (s.ahead === 0 && s.behind === 0) parts.push('与远程同步')
   return parts.join(' · ')
 })
 
-/** 高级功能折叠（定时快照 / PR / A/B 对比），默认收起，避免吓到小白。 */
+/** 高级功能折叠（定时快照 / PR / A/B 对比），默认收起。 */
 const advancedOpen = ref(false)
 
-/** 新手术语帮助（折叠块）。 */
+/** Git 术语帮助（折叠块）。 */
 const helpOpen = ref(false)
 /** PR 高级设置折叠（upstream / fork owner / token）。 */
 const prAdvancedOpen = ref(false)
 const HELP_ROWS: { term: string; def: string }[] = [
-  { term: '保存改动（提交）', def: '把当前改动记成一个版本，以后随时能找回。' },
-  { term: '保存（暂存）', def: '勾选要保存哪些改动，勾选后才能点「保存改动」。' },
-  { term: '分支', def: '项目的不同版本线，各干各的互不影响。' },
-  { term: '同步（远端）', def: '网上仓库（GitHub / Gitee 等），可上传或下载改动。' },
-  { term: 'PR', def: '把你的改动发给原作者审核，请他合并进项目。' },
-  { term: '临时收纳（Stash）', def: '把没做完的改动暂时收起来，之后再取回来。' },
-  { term: '冲突', def: '两边都改了同一处代码，需要你决定保留哪个。' },
+  { term: '提交（Commit）', def: '把当前改动记录为一个版本，可随时回看与还原。' },
+  { term: '暂存（Stage）', def: '勾选本次提交要包含的文件，暂存后随提交一起写入版本。' },
+  { term: '分支（Branch）', def: '相互独立的工作线，切换分支即切换对应版本。' },
+  { term: '远程（Remote）', def: 'GitHub / Gitee 等平台上的仓库副本，推送上传、拉取同步。' },
+  { term: 'PR（Pull Request）', def: '请求原项目维护者审核并合并你的分支改动。' },
+  { term: '贮藏（Stash）', def: '临时收起未提交的改动，稍后恢复继续处理。' },
+  { term: '冲突（Conflict）', def: '双方修改了同一处内容，需手动决定保留哪一侧。' },
 ]
 
 watch(activeTab, (tab) => {
@@ -233,13 +238,13 @@ function splitDiffLines(raw: string): DiffLine[] {
 type ChangeGroup = 'staged' | 'unstaged' | 'untracked' | 'conflicted'
 
 const GROUPS: { key: ChangeGroup; title: string; sub: string }[] = [
-  { key: 'staged', title: '即将保存的改动', sub: '已勾选，点「保存改动」就会一起存下来' },
-  { key: 'unstaged', title: '还没勾选的改动', sub: '已修改但还没选中，点「保存」即可勾选' },
-  { key: 'untracked', title: '新文件', sub: '新创建的文件，还没保存过' },
-  { key: 'conflicted', title: '冲突的文件', sub: '两边都改过同一处，需要先解决' },
+  { key: 'staged', title: '已暂存', sub: '将包含在本次提交中' },
+  { key: 'unstaged', title: '未暂存', sub: '已修改，暂存后随提交写入' },
+  { key: 'untracked', title: '未跟踪', sub: '新文件，尚未纳入版本控制' },
+  { key: 'conflicted', title: '冲突', sub: '合并冲突，需先解决' },
 ]
 
-/** 提交按钮旁的小白提示：当前没有勾选的改动。 */
+/** 无暂存改动时的提交提示。 */
 const stagedCount = computed(() => entriesOf('staged').length)
 
 function entriesOf(group: ChangeGroup): FileEntry[] {
@@ -370,7 +375,7 @@ const AI_KIND_OPTIONS: { kind: string; label: string; url: string; model: string
 ]
 const aiKindOption = computed(() => AI_KIND_OPTIONS.find(o => o.kind === aiConfig.value.kind) ?? AI_KIND_OPTIONS[0])
 
-/** 协议切换时自动填入该协议常见 base_url 与模型名（避免小白手填出错）。 */
+/** 协议切换时自动填入该协议常见 base_url 与模型名。 */
 function pickAiKind(kind: string) {
   const opt = AI_KIND_OPTIONS.find(o => o.kind === kind)
   if (!opt) return
@@ -805,7 +810,7 @@ async function createPr() {
   if (!base) { prError.value = '请输入基础分支'; return }
   if (prBusy.value) return
   const title = prTitle.value.trim() || extractTitle(prDescription.value)
-  if (!window.confirm(`确定要把改动提交给原作者吗？\n\n标题：${title || '（未填写）'}\n\n创建后可在 GitHub / Gitee 上继续修改。`)) return
+  if (!await requestConfirmation(`确定要把改动提交给原作者吗？\n\n标题：${title || '（未填写）'}\n\n创建后可在 GitHub / Gitee 上继续修改。`)) return
   prBusy.value = 'create'
   prError.value = ''
   try {
@@ -864,7 +869,7 @@ async function switchBranch(name: string) {
   if (switchingBranch.value) return
   const pending = status.value
   if (pending && (pending.staged.length + pending.unstaged.length + pending.untracked.length + pending.conflicted.length) > 0) {
-    if (!window.confirm(`当前还有未保存的改动。切换到「${name}」分支后这些改动会跟着走，如果两边改了同一处可能出错。\n\n建议先点「保存改动」把改动存下来再切换。确定继续切换吗？`)) return
+    if (!await requestConfirmation(`当前还有未保存的改动。切换到「${name}」分支后这些改动会跟着走，如果两边改了同一处可能出错。\n\n建议先点「保存改动」把改动存下来再切换。确定继续切换吗？`)) return
   }
   switchingBranch.value = name
   try {
@@ -960,7 +965,7 @@ async function stashPop(index: number) {
 
 async function stashDrop(index: number) {
   if (stashBusy.value) return
-  if (!window.confirm('确定要丢弃这条临时收纳吗？丢弃后无法找回。')) return
+  if (!await requestConfirmation('确定丢弃这条贮藏？丢弃后无法找回。')) return
   stashBusy.value = `drop:${index}`
   try {
     await gitStashDrop(index)
@@ -1060,14 +1065,22 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="Git 面板" @back="goBack(router, '/settings')">
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" class="page-head" title="Git 面板" @back="goBack(router, '/settings')">
       <template #right>
         <button class="icon-btn" aria-label="刷新" @click="loadAll"><CoomiIcon name="refresh" :size="17" /></button>
       </template>
     </PageHead>
-    <main class="body">
-      <!-- 顶部状态栏（大白话） -->
+    <section v-if="props.embedded && confirmation" class="inline-confirm">
+      <p>{{ confirmation.message }}</p>
+      <div class="config-actions">
+        <button class="btn" @click="answerConfirmation(false)">取消</button>
+        <button class="btn btn-primary" @click="answerConfirmation(true)">确认继续</button>
+      </div>
+    </section>
+    <main v-show="!props.embedded || (!aiConfigOpen && !confirmation)" class="body">
+      <div v-if="props.embedded" class="embedded-toolbar"><button class="mini-btn" aria-label="刷新" @click="loadAll"><CoomiIcon name="refresh" :size="13" /> 刷新</button></div>
+      <!-- 顶部状态栏 -->
       <section class="status-card">
         <div class="status-main">
           <span class="status-dot" :class="{ dirty: (status && (status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length) > 0) }" />
@@ -1083,11 +1096,11 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- 新手帮助：看懂 Git 术语 -->
+      <!-- Git 术语速查 -->
       <section class="help-card">
         <div class="help-head" @click="helpOpen = !helpOpen">
-          <CoomiIcon name="sparkle" :size="14" class="help-ic" />
-          <span class="help-title">第一次用？点这里看懂 Git</span>
+          <CoomiIcon name="fileRead" :size="14" class="help-ic" />
+          <span class="help-title">Git 术语速查</span>
           <CoomiIcon class="chev" :name="helpOpen ? 'chevronDown' : 'chevronRight'" :size="14" />
         </div>
         <div v-if="helpOpen" class="help-body">
@@ -1095,14 +1108,14 @@ onMounted(() => {
             <span class="help-term">{{ row.term }}</span>
             <span class="help-def">{{ row.def }}</span>
           </div>
-          <p class="help-tip">提示：本面板的每个按钮都尽量用了大白话；不认识的按钮可以先不点，最常用的就是「保存改动」。</p>
+          <p class="help-tip">面板内按钮均标注了作用，不确定的操作可先查看「历史」中的记录。</p>
         </div>
       </section>
 
-      <!-- 未在仓库：引导（大白话） -->
+      <!-- 非仓库引导 -->
       <section v-if="status && !hasRepo" class="init-card">
-        <p class="init-title">这里还不是代码仓库</p>
-        <p class="init-copy">代码仓库 = 记录你每次改动的存档点，能随时找回历史版本。要使用本面板，需要先把当前目录变成代码仓库（系统会执行 <code class="code-inline">git init</code>）。如果刚创建完目录，点下面的「刷新状态」再看看。</p>
+        <p class="init-title">当前目录不是 Git 仓库</p>
+        <p class="init-copy">Git 面板用于管理代码仓库的版本记录。请先在会话中让 Agent 执行 <code class="code-inline">git init</code> 初始化仓库，或切换到已包含仓库的工作目录，再点「刷新状态」重试。</p>
         <button class="btn btn-primary init-btn" @click="loadAll"><CoomiIcon name="refresh" :size="15" />刷新状态</button>
       </section>
 
@@ -1114,7 +1127,6 @@ onMounted(() => {
           <span class="tab-thumb" :style="thumbStyle" aria-hidden="true" />
           <button v-for="t in TABS" :key="t.key" :ref="(el) => setTabEl(t.key, el)" class="tab" :class="{ on: activeTab === t.key }" @click="activeTab = t.key">{{ t.label }}</button>
         </div>
-        <p class="tab-desc">{{ TAB_DESC[activeTab] }}</p>
 
         <!-- ── 改动 ── -->
         <section v-if="activeTab === 'changes'" class="tab-panel">
@@ -1122,18 +1134,18 @@ onMounted(() => {
           <div class="ai-card">
             <div class="ai-head" @click="aiPanelOpen = !aiPanelOpen">
               <CoomiIcon name="sparkle" :size="15" class="ai-ic" />
-              <span class="ai-title">AI 助手（帮你写说明、检查代码）</span>
+              <span class="ai-title">AI 助手</span>
               <span v-if="aiBusy" class="ai-state">生成中…</span>
               <span v-else-if="aiError" class="ai-state err">生成失败</span>
               <span v-else-if="aiText" class="ai-state">{{ AI_KIND_LABEL[aiKind] }}</span>
               <span v-else-if="aiConfig.enabled" class="ai-state ok">独立模型已启用</span>
               <span class="ai-actions" @click.stop>
-                <button class="mini-btn" :disabled="aiBusy" @click="doSummarize">总结改动</button>
-                <button class="mini-btn" :disabled="aiBusy" @click="doReview()">检查代码</button>
-                <button class="mini-btn" :disabled="aiBusy || aiAdversarialBusy" @click="doAdversarialReview">{{ aiAdversarialBusy ? '评审中…' : '挑毛病' }}</button>
+                <button class="mini-btn" :disabled="aiBusy" @click="doSummarize">变更总结</button>
+                <button class="mini-btn" :disabled="aiBusy" @click="doReview()">代码审查</button>
+                <button class="mini-btn" :disabled="aiBusy || aiAdversarialBusy" @click="doAdversarialReview">{{ aiAdversarialBusy ? '评审中…' : '深度评审' }}</button>
                 <span class="rc-group">
                   <input v-model="rootCauseCommit" class="rc-input mono" placeholder="某个提交的编号（留空=最近一次）" :disabled="aiBusy || aiRootCauseBusy" @keyup.enter="doRootCause" />
-                  <button class="mini-btn" :disabled="aiBusy || aiRootCauseBusy" @click="doRootCause">{{ aiRootCauseBusy ? '分析中…' : '找原因' }}</button>
+                  <button class="mini-btn" :disabled="aiBusy || aiRootCauseBusy" @click="doRootCause">{{ aiRootCauseBusy ? '分析中…' : '根因分析' }}</button>
                 </span>
                 <button class="mini-btn ai-config-btn" :class="{ on: aiConfig.enabled }" @click="aiConfigOpen = true">
                   <CoomiIcon name="settings" :size="13" />模型设置
@@ -1143,7 +1155,7 @@ onMounted(() => {
             </div>
             <div v-if="aiPanelOpen" class="ai-body">
               <p class="hint dim ai-model-tip">
-                AI 助手使用「独立的 Git AI 模型配置」（与全局模型互不影响）。点右上角「模型设置」填写 Base URL / API Key / 模型名并启用；未配置时输出为本地降级结果。
+                AI 助手使用独立的 Git AI 模型配置，与全局模型互不影响；未配置时输出为本地降级结果。
               </p>
               <p v-if="aiBusy" class="hint">AI 生成中…</p>
               <template v-else-if="aiError">
@@ -1208,8 +1220,8 @@ onMounted(() => {
                 </div>
                 <span class="group-count">{{ entriesOf(g.key).length }}</span>
                 <span class="group-actions">
-                  <button v-if="g.key === 'staged' && entriesOf(g.key).length" class="mini-btn" :disabled="actionBusy" @click="unstagePaths([], true)">全部取消</button>
-                  <button v-else-if="(g.key === 'unstaged' || g.key === 'untracked') && entriesOf(g.key).length" class="mini-btn" :disabled="actionBusy" @click="stagePaths([], true)">全部保存</button>
+                  <button v-if="g.key === 'staged' && entriesOf(g.key).length" class="mini-btn" :disabled="actionBusy" @click="unstagePaths([], true)">全部取消暂存</button>
+                  <button v-else-if="(g.key === 'unstaged' || g.key === 'untracked') && entriesOf(g.key).length" class="mini-btn" :disabled="actionBusy" @click="stagePaths([], true)">全部暂存</button>
                 </span>
               </div>
               <div v-if="!entriesOf(g.key).length" class="group-empty">这里没有改动</div>
@@ -1219,10 +1231,10 @@ onMounted(() => {
                   <span class="file-path mono" :title="entry.path">{{ entry.path }}</span>
                   <CoomiIcon class="chev" :name="isExpanded(g.key, entry.path) ? 'chevronDown' : 'chevronRight'" :size="14" />
                 </div>
-                <button v-if="g.key === 'staged'" class="mini-btn" :disabled="actionBusy" @click="unstagePaths([entry.path])">取消保存</button>
-                <button v-else class="mini-btn" :disabled="actionBusy" @click="stagePaths([entry.path])">保存</button>
-                <button v-if="g.key === 'conflicted'" class="mini-btn ai-mini" :disabled="aiBusy" @click="doConflict(entry.path)">冲突解决助手</button>
-                <button v-else class="mini-btn ai-mini" :disabled="aiBusy" @click="doReview(entry.path)">AI Review</button>
+                <button v-if="g.key === 'staged'" class="mini-btn" :disabled="actionBusy" @click="unstagePaths([entry.path])">取消暂存</button>
+                <button v-else class="mini-btn" :disabled="actionBusy" @click="stagePaths([entry.path])">暂存</button>
+                <button v-if="g.key === 'conflicted'" class="mini-btn ai-mini" :disabled="aiBusy" @click="doConflict(entry.path)">解决冲突</button>
+                <button v-else class="mini-btn ai-mini" :disabled="aiBusy" @click="doReview(entry.path)">AI 审查</button>
                 <div v-if="isExpanded(g.key, entry.path)" class="diff-box">
                   <p v-if="diffBusy(g.key, entry.path)" class="hint">diff 加载中…</p>
                   <p v-else-if="g.key === 'untracked'" class="hint dim">未跟踪文件没有差异内容，先暂存后再查看。</p>
@@ -1237,63 +1249,63 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- ── 提交卡片（核心路径，大白话引导）── -->
+          <!-- ── 提交卡片 ── -->
           <div class="commit-card">
             <div class="card-head">
-              <span class="card-title">保存这次改动</span>
-              <span class="card-side">{{ stagedCount }} 项已勾选</span>
+              <span class="card-title">提交更改</span>
+              <span class="card-side">{{ stagedCount }} 项已暂存</span>
             </div>
-            <p class="commit-guide">第 1 步：点文件旁的「保存」勾选要保存的改动（或点「全部保存」）。第 2 步：写一句话说明，点「保存改动」。</p>
+            <p class="commit-guide">先暂存要提交的文件，填写提交说明后点击「提交」。</p>
             <div class="commit-bar">
               <input v-model="commitMessage" class="commit-input" placeholder="写一句话，例如：修复了登录页面崩溃" @keyup.enter="commit" />
-              <button class="btn ai-btn" :disabled="aiBusy" @click="doCommitMessage">✨ 让 AI 帮我写</button>
-              <button class="btn btn-primary commit-btn" :disabled="committing || !stagedCount" @click="commit">{{ committing ? '保存中…' : '保存改动' }}</button>
+              <button class="btn ai-btn" :disabled="aiBusy" @click="doCommitMessage">AI 生成提交信息</button>
+              <button class="btn btn-primary commit-btn" :disabled="committing || !stagedCount" @click="commit">{{ committing ? '提交中…' : '提交' }}</button>
             </div>
-            <p v-if="!stagedCount" class="commit-hint">还没有勾选的改动：先在上方文件列表里点「保存」勾选要保存的内容。</p>
-            <p v-else class="commit-note">保存后可在「历史」里找到这个版本；想发到网上（GitHub / Gitee）去「同步」标签页。</p>
+            <p v-if="!stagedCount" class="commit-hint">暂无已暂存的改动，请先在上方文件列表中点「暂存」。</p>
+            <p v-else class="commit-note">提交后可在「历史」标签页查看；推送到远程仓库请到「远程」标签页。</p>
           </div>
 
           <!-- ── 高级功能（折叠，不常用可跳过）── -->
           <section class="adv-card">
             <div class="adv-head" @click="advancedOpen = !advancedOpen">
               <CoomiIcon name="wrench" :size="14" class="adv-ic" />
-              <span class="adv-title">高级功能（不常用，可跳过）</span>
+              <span class="adv-title">高级功能</span>
               <CoomiIcon class="chev" :name="advancedOpen ? 'chevronDown' : 'chevronRight'" :size="14" />
             </div>
             <template v-if="advancedOpen">
               <!-- ── 自动备份（定时快照）── -->
               <section class="card">
                 <div class="card-head">
-                  <span class="card-title">自动备份</span>
+                  <span class="card-title">定时快照</span>
                   <span v-if="scheduleLoading" class="card-side">加载中…</span>
                   <span v-else class="card-side">{{ scheduleEnabled ? '已启用' : '未启用' }}</span>
                 </div>
                 <div class="sched-row">
-                  <span>让引擎定时自动存一个版本</span>
+                  <span>按定时规则自动创建快照</span>
                   <button class="switch" :class="{ on: scheduleEnabled }" :disabled="scheduleLoading || scheduleSaving" @click="scheduleEnabled = !scheduleEnabled"><i /></button>
                 </div>
                 <div class="inline-form">
-                  <input v-model="scheduleCron" class="text-input mono" placeholder="定时规则，如 0 3 * * *（每天 3 点）" @keyup.enter="saveSchedule" />
+                  <input v-model="scheduleCron" class="text-input mono" placeholder="cron 表达式，如 0 3 * * *（每天 3 点）" @keyup.enter="saveSchedule" />
                 </div>
                 <div class="inline-form">
-                  <input v-model.number="scheduleRetain" class="text-input num-input" type="number" min="1" max="200" placeholder="保留几个版本（1-200）" @keyup.enter="saveSchedule" />
+                  <input v-model.number="scheduleRetain" class="text-input num-input" type="number" min="1" max="200" placeholder="保留数量（1-200）" @keyup.enter="saveSchedule" />
                   <button class="btn btn-primary" :disabled="scheduleSaving || scheduleLoading" @click="saveSchedule">{{ scheduleSaving ? '保存中…' : '保存设置' }}</button>
                 </div>
-                <p class="form-note">定时规则使用标准 cron 格式（分 时 日 月 周），不熟悉的话建议保持关闭。开启后引擎会按时自动存档，只保留最近 N 份。</p>
+                <p class="form-note">标准 cron 格式（分 时 日 月 周）。开启后引擎按时自动打快照，仅保留最近 N 份。</p>
                 <p v-if="scheduleError" class="notice err card-notice">{{ scheduleError }}</p>
               </section>
 
               <!-- ── 提交给原作者（PR）── -->
               <section class="card">
                 <div class="card-head">
-                  <span class="card-title">提交给原作者（PR）</span>
+                  <span class="card-title">创建 PR</span>
                   <span class="card-side">{{ branchList.length }} 个分支</span>
                 </div>
-                <p class="form-note pr-intro">把你的改动提交到 GitHub / Gitee / AtomGit 的原项目，请作者审核合并。适合给开源项目贡献代码。</p>
+                <p class="form-note pr-intro">向 GitHub / Gitee / AtomGit 原项目发起 Pull Request，请维护者审核合并。</p>
                 <div class="inline-form">
-                  <input v-model="prBase" class="text-input mono" placeholder="原项目的分支（一般填 main）" />
+                  <input v-model="prBase" class="text-input mono" placeholder="目标分支（一般为 main）" />
                   <select v-model="prHead" class="text-input" aria-label="目标分支">
-                    <option value="">你的分支（默认当前分支）</option>
+                    <option value="">源分支（默认当前分支）</option>
                     <option v-for="b in branchList" :key="b" :value="b">{{ b }}</option>
                   </select>
                 </div>
@@ -1328,17 +1340,17 @@ onMounted(() => {
                   <span class="pr-ok">PR #{{ prCreated.number }} 已创建</span>
                   <a class="pr-link" :href="prCreated.url" target="_blank" rel="noopener"><CoomiIcon name="external" :size="13" />{{ prCreated.url }}</a>
                 </div>
-                <p class="form-note">描述由 AI 生成中文标题与正文；创建 PR 需要 GitHub / Gitee 等平台的访问令牌，没填时会用已保存的令牌。</p>
+                <p class="form-note">AI 生成中文标题与正文；创建 PR 需要平台访问令牌，未填时使用已保存的令牌。</p>
                 <p v-if="prError" class="notice err card-notice">{{ prError }}</p>
               </section>
 
               <!-- ── 对比两个分支（A/B）── -->
               <section class="card">
                 <div class="card-head">
-                  <span class="card-title">对比两个分支</span>
+                  <span class="card-title">分支对比（A/B）</span>
                   <span class="card-side">{{ branchList.length }} 个分支</span>
                 </div>
-                <p class="form-note">同时做了两套方案时，选两个分支让 AI 对比差异并给出建议。</p>
+                <p class="form-note">选择两个分支，由 AI 对比两套方案的差异并给出建议。</p>
                 <div class="inline-form">
                   <select v-model="abBranchA" class="text-input" aria-label="分支 A">
                     <option value="" disabled>方案 A（分支）</option>
@@ -1370,10 +1382,10 @@ onMounted(() => {
         <section v-if="activeTab === 'branches'" class="tab-panel">
           <div class="card">
             <div class="card-head">
-              <span class="card-title">分支（项目的不同版本线）</span>
+              <span class="card-title">分支</span>
               <span class="card-side mono" v-if="branchInfo?.current">当前在：{{ branchInfo.current }}</span>
             </div>
-            <p class="form-note card-note">点下面任意一行即可切换到那个分支。切换前如果有没保存的改动，系统会先问你。</p>
+            <p class="form-note card-note">点击分支名即可切换；存在未提交改动时会先确认。</p>
             <div v-if="!branchInfo?.branches?.length" class="empty">还没有分支</div>
             <div v-for="b in branchInfo?.branches ?? []" :key="b" class="branch-row" :class="{ cur: b === branchInfo?.current }" @click="switchBranch(b)">
               <CoomiIcon name="git" :size="15" class="br-ic" />
@@ -1384,8 +1396,8 @@ onMounted(() => {
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">新建一条版本线</span></div>
-            <p class="form-note card-note">新开一条分支后，改坏也不影响原来的版本。分支名建议用简短英文，如：fix-login。</p>
+            <div class="card-head"><span class="card-title">新建分支</span></div>
+            <p class="form-note card-note">在新分支上修改不影响其他分支。建议使用简短英文名，如 fix-login。</p>
             <div class="inline-form">
               <input v-model="newBranchName" class="text-input mono" placeholder="分支名，如 fix-login" @keyup.enter="createBranch" />
               <button class="btn btn-primary" :disabled="switchingBranch !== ''" @click="createBranch">创建并切换</button>
@@ -1395,9 +1407,9 @@ onMounted(() => {
 
         <!-- ── 历史 ── -->
         <section v-if="activeTab === 'history'" class="tab-panel">
-          <p class="form-note card-note">每次「保存改动」都会记录在这里，点开可查看当时改了什么。</p>
+          <p class="form-note card-note">每次提交都会记录在这里，点击可查看该次变更内容。</p>
           <p v-if="logLoading" class="hint">加载中…</p>
-          <p v-else-if="!commits.length" class="hint">还没有保存过任何版本</p>
+          <p v-else-if="!commits.length" class="hint">暂无提交记录</p>
           <div v-else class="card commit-list">
             <div v-for="c in commits" :key="c.hash" class="commit-row" :class="{ expanded: expandedCommit === c.hash }" @click="toggleCommit(c)">
               <div class="commit-main">
@@ -1424,27 +1436,27 @@ onMounted(() => {
         <section v-if="activeTab === 'stash'" class="tab-panel">
           <div class="card">
             <div class="card-head">
-              <span class="card-title">临时收纳（Stash）</span>
+              <span class="card-title">贮藏（Stash）</span>
               <span class="card-side">{{ stashes.length }} 条</span>
             </div>
-            <p class="form-note card-note">把还没做完的改动暂时收起来，忙完别的事再取回来。</p>
-            <div v-if="!stashes.length" class="empty">还没有临时收纳的内容</div>
+            <p class="form-note card-note">暂时收起未提交的改动，之后可随时恢复。</p>
+            <div v-if="!stashes.length" class="empty">暂无贮藏记录</div>
             <div v-for="s in stashes" :key="s.index" class="stash-row">
               <div class="stash-main">
                 <span class="hash mono">stash@{ {{ s.index }} }</span>
                 <span class="subject">{{ s.message || '无消息' }}</span>
               </div>
               <div class="stash-actions">
-                <button class="mini-btn" :disabled="stashBusy !== ''" @click="stashPop(s.index)">取回</button>
+                <button class="mini-btn" :disabled="stashBusy !== ''" @click="stashPop(s.index)">恢复</button>
                 <button class="mini-btn danger" :disabled="stashBusy !== ''" @click="stashDrop(s.index)">丢弃</button>
               </div>
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">把改动临时收起来</span></div>
+            <div class="card-head"><span class="card-title">新建贮藏</span></div>
             <div class="inline-form">
               <input v-model="stashMessage" class="text-input" placeholder="备注（可选）" @keyup.enter="stashPush" />
-              <button class="btn btn-primary" :disabled="stashBusy !== ''" @click="stashPush">收起来</button>
+              <button class="btn btn-primary" :disabled="stashBusy !== ''" @click="stashPush">贮藏</button>
             </div>
           </div>
         </section>
@@ -1453,11 +1465,11 @@ onMounted(() => {
         <section v-if="activeTab === 'remotes'" class="tab-panel">
           <div class="card">
             <div class="card-head">
-              <span class="card-title">网上仓库（GitHub / Gitee 等）</span>
+              <span class="card-title">远程仓库</span>
               <span class="card-side">{{ remotes.length }} 个</span>
             </div>
-            <p class="form-note card-note">这里记录你的代码在网上的"家"。上传改动叫「上传」，下载最新改动叫「下载」。</p>
-            <div v-if="!remotes.length" class="empty">还没有配置网上仓库</div>
+            <p class="form-note card-note">推送（Push）上传本地提交，拉取（Pull）同步远程更新。</p>
+            <div v-if="!remotes.length" class="empty">尚未配置远程仓库</div>
             <div v-for="r in remotes" :key="r.name" class="remote-row">
               <div class="remote-main">
                 <span class="remote-name mono">{{ r.name }}</span>
@@ -1467,8 +1479,8 @@ onMounted(() => {
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">添加网上仓库</span></div>
-            <p class="form-note card-note">在网上（GitHub / Gitee 等）新建一个仓库后，把它的地址填到这里。名称填 origin 表示"我的主仓库"。</p>
+            <div class="card-head"><span class="card-title">添加远程仓库</span></div>
+            <p class="form-note card-note">先在 GitHub / Gitee 等平台创建仓库，再将其地址添加到这里。origin 是默认远程名。</p>
             <div class="inline-form">
               <input v-model="remoteName" class="text-input mono" placeholder="名称（一般填 origin）" />
               <input v-model="remoteUrl" class="text-input mono" placeholder="网址（https://… 或 git@…）" @keyup.enter="addRemote" />
@@ -1476,23 +1488,23 @@ onMounted(() => {
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">同步改动</span></div>
-            <p class="form-note card-note">「下载」把网上的最新改动拿到本地；「上传」把你保存的版本发到网上。</p>
+            <div class="card-head"><span class="card-title">同步</span></div>
+            <p class="form-note card-note">拉取将远程更新同步到本地，推送将本地提交上传到远程。</p>
             <div class="sync-block">
-              <button class="btn" :disabled="remoteBusy !== ''" @click="doFetch"><CoomiIcon name="refresh" :size="15" />刷新网上信息</button>
+              <button class="btn" :disabled="remoteBusy !== ''" @click="doFetch"><CoomiIcon name="refresh" :size="15" />Fetch</button>
             </div>
             <div class="inline-form">
-              <input v-model="pullRemote" class="text-input mono" placeholder="网上仓库（默认 origin）" />
+              <input v-model="pullRemote" class="text-input mono" placeholder="远程（默认 origin）" />
               <input v-model="pullBranch" class="text-input mono" placeholder="分支名（如 main）" @keyup.enter="doPull" />
               <button class="btn btn-primary" :disabled="remoteBusy !== ''" @click="doPull">下载最新改动</button>
             </div>
             <div class="inline-form">
-              <input v-model="pushRemote" class="text-input mono" placeholder="网上仓库（默认 origin）" />
+              <input v-model="pushRemote" class="text-input mono" placeholder="远程（默认 origin）" />
               <input v-model="pushBranch" class="text-input mono" placeholder="要上传的分支（如 main）" />
               <input v-model="pushToken" class="text-input mono" type="password" placeholder="访问令牌（选填）" @keyup.enter="doPush" />
-              <button class="btn btn-primary" :disabled="remoteBusy !== ''" @click="doPush">上传我的改动</button>
+              <button class="btn btn-primary" :disabled="remoteBusy !== ''" @click="doPush">推送（Push）</button>
             </div>
-            <p class="form-note">上传时可填访问令牌（GitHub / Gitee 生成的 token），只本次使用，不会保存。</p>
+            <p class="form-note">推送可填访问令牌（GitHub / Gitee 生成的 token），仅本次使用，不会保存。</p>
           </div>
         </section>
       </template>
@@ -1501,7 +1513,7 @@ onMounted(() => {
     </main>
 
     <!-- ── Git AI 独立模型配置弹层 ── -->
-    <Teleport to="body">
+    <Teleport to="body" :disabled="props.embedded">
       <Transition name="sheet-fade">
         <div v-if="aiConfigOpen" class="ai-config-mask" @click.self="aiConfigOpen = false">
           <div class="ai-config-sheet">
@@ -1563,23 +1575,24 @@ onMounted(() => {
 
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
-.body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
+.page-head { position: relative; z-index: 5; flex-shrink: 0; }
+.body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
 
 /* ── 状态栏 ── */
-.status-card { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; padding: 12px 13px; border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); }
-.status-main { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
-.status-dot.dirty { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); }
-.status-summary { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.35; }
-.status-sub { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.55; }
+.status-card { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--border) 62%, transparent); border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); }
+.status-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
+.status-dot.dirty { background: var(--warn); }
+.status-summary { font-size: 13.5px; font-weight: 650; color: var(--text); line-height: 1.35; }
+.status-sub { margin: 0; font-size: 12px; color: var(--text-3); line-height: 1.55; }
 .version { margin-left: auto; font-size: 11.5px; color: var(--text-3); }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.chip { padding: 2px 8px; border-radius: var(--r-pill); background: var(--blue-soft); color: var(--blue); font-size: 11px; font-weight: 550; }
+.chip { padding: 2px 8px; border-radius: var(--r-pill); background: var(--fill-strong); color: var(--text-2); font-size: 11px; font-weight: 550; }
 
-.init-card { margin-bottom: 10px; padding: 14px; border-radius: var(--r-card); background: var(--orange-soft); color: var(--text-2); }
-.init-title { margin: 0 0 4px; font-size: 14px; font-weight: 650; color: var(--orange); }
+.init-card { margin-bottom: 10px; padding: 13px; border: 1px solid color-mix(in srgb, var(--border) 62%, transparent); border-radius: var(--r-card); background: var(--bg); color: var(--text-2); box-shadow: var(--shadow-1); }
+.init-title { margin: 0 0 4px; font-size: 13.5px; font-weight: 650; color: var(--text); }
 .init-copy { margin: 0 0 10px; font-size: 12.5px; line-height: 1.65; }
-.code-inline { padding: 1px 6px; border-radius: 5px; background: var(--orange-border); font-family: var(--font-mono); font-size: 12px; }
+.code-inline { padding: 1px 6px; border-radius: 5px; background: var(--fill-strong); font-family: var(--font-mono); font-size: 12px; }
 .init-btn { min-height: 36px; padding: 0 14px; font-size: 13px; }
 
 /* ── 提示 ── */
@@ -1611,14 +1624,14 @@ onMounted(() => {
 }
 
 /* ── 卡片 ── */
-.card { border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
+.card { border: 1px solid color-mix(in srgb, var(--border) 62%, transparent); border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
 .card-head { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 8px 13px; border-bottom: 1px solid var(--border); }
 .card-title { font-size: 13.5px; font-weight: 650; color: var(--text); }
 .card-side { margin-left: auto; font-size: 12px; color: var(--text-3); }
 
 /* ── 改动分组 ── */
 .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 10px; }
-.group-col { border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
+.group-col { border: 1px solid color-mix(in srgb, var(--border) 62%, transparent); border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
 .group-head { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 7px 11px; border-bottom: 1px solid var(--border); }
 .group-title { font-size: 13px; font-weight: 650; color: var(--text); }
 .group-count { padding: 1px 7px; border-radius: var(--r-pill); background: var(--fill-strong); color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -1649,9 +1662,9 @@ onMounted(() => {
 .dl-plain { color: var(--code-text); }
 
 /* ── AI 助手面板 ── */
-.ai-card { border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
+.ai-card { border: 1px solid color-mix(in srgb, var(--border) 62%, transparent); border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
 .ai-head { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 8px 11px; flex-wrap: wrap; }
-.ai-ic { color: var(--blue); flex-shrink: 0; }
+.ai-ic { color: var(--text-3); flex-shrink: 0; }
 .ai-title { font-size: 13px; font-weight: 650; color: var(--text); }
 .ai-state { font-size: 11px; color: var(--text-3); }
 .ai-state.err { color: var(--danger); }
@@ -1761,33 +1774,30 @@ onMounted(() => {
 .pr-link { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); font-size: 12px; word-break: break-all; }
 .card-notice { margin: 0 13px 12px; }
 
-/* ── 小白友好：新手术语帮助 ── */
-.help-card { margin-bottom: 10px; border-radius: var(--r-card); background: var(--blue-soft); overflow: hidden; }
-.help-head { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 13px; cursor: pointer; }
-.help-ic { color: var(--blue); flex-shrink: 0; }
-.help-title { flex: 1; font-size: 13px; font-weight: 650; color: var(--blue); }
+/* ── 术语速查 ── */
+.help-card { margin-bottom: 10px; border-radius: var(--r-card); background: var(--fill-strong); overflow: hidden; }
+.help-head { display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 0 13px; cursor: pointer; }
+.help-ic { color: var(--text-3); flex-shrink: 0; }
+.help-title { flex: 1; font-size: 13px; font-weight: 650; color: var(--text-2); }
 .help-body { padding: 2px 13px 12px; }
-.help-row { display: flex; gap: 10px; padding: 5px 0; border-top: 1px solid color-mix(in srgb, var(--blue) 14%, transparent); }
+.help-row { display: flex; gap: 10px; padding: 5px 0; border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent); }
 .help-row:first-child { border-top: none; }
 .help-term { flex-shrink: 0; min-width: 104px; font-size: 12px; font-weight: 650; color: var(--text); }
 .help-def { font-size: 12px; color: var(--text-2); line-height: 1.55; }
 .help-tip { margin: 8px 0 0; font-size: 11.5px; color: var(--text-3); line-height: 1.6; }
 
-/* ── 小白友好：标签页说明 ── */
-.tab-desc { margin: 0 2px 10px; font-size: 12px; color: var(--text-2); line-height: 1.6; }
-
-/* ── 小白友好：改动分组 ── */
+/* ── 改动分组 ── */
 .group-head-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .group-sub { font-size: 10.5px; color: var(--text-3); line-height: 1.4; }
 
-/* ── 小白友好：提交卡片 ── */
-.commit-card { border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
+/* ── 提交卡片 ── */
+.commit-card { border: 1px solid color-mix(in srgb, var(--border) 62%, transparent); border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
 .commit-guide { margin: 0; padding: 9px 13px 2px; font-size: 12px; color: var(--text-2); line-height: 1.65; }
 .commit-card .commit-bar { margin: 0; padding: 9px 13px; }
 .commit-hint { margin: 0; padding: 0 13px 12px; font-size: 11.5px; color: var(--warn); line-height: 1.6; }
 .commit-card .commit-note { margin: 0; padding: 0 13px 12px; }
 
-/* ── 小白友好：高级功能折叠 ── */
+/* ── 高级功能折叠 ── */
 .adv-card { border-radius: var(--r-card); background: var(--fill-strong); overflow: hidden; }
 .adv-head { display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 0 13px; cursor: pointer; }
 .adv-ic { color: var(--text-3); flex-shrink: 0; }
@@ -1799,7 +1809,7 @@ onMounted(() => {
 .adv-detail-title { display: flex; align-items: center; gap: 5px; margin: 0; padding: 10px 13px 2px; font-size: 12px; color: var(--text-3); cursor: pointer; }
 .adv-detail .inline-form { padding-top: 8px; }
 
-/* ── 其他小白文案 ── */
+/* ── 杂项 ── */
 .card-note { padding-top: 9px; }
 .pr-intro { padding-top: 9px; }
 
@@ -1890,4 +1900,71 @@ onMounted(() => {
 .ai-state.ok { color: var(--ok); }
 .ai-config-btn { color: var(--text-2); }
 .ai-config-btn.on { background: var(--blue-soft); color: var(--blue); }
+
+/* Tool content can live inside the launcher card or fill a routed page. */
+.page { min-width: 0; min-height: 0; overflow: hidden; container-type: inline-size; }
+.page.embedded { flex: 1; height: 100%; background: var(--bg); }
+.embedded .body { padding: 10px 12px 14px; }
+.embedded .card { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.embedded .card + .card { border-top: 1px solid var(--border); }
+.embedded .notice { background: var(--fill); }
+.embedded .tabs { background: transparent; padding: 0 0 6px; border-bottom: 1px solid var(--border); border-radius: 0; gap: 2px; }
+.embedded .tab { padding-inline: 8px; font-size: 11px; min-height: 32px; }
+.embedded .tab.on { background: var(--fill); color: var(--text); box-shadow: none; }
+.embedded .card-head { padding-inline: 0; }
+.embedded .card-title { font-size: 12.5px; }
+.embedded .card-side { font-size: 11px; }
+.embedded :is(input, select, textarea) { max-width: 100%; box-sizing: border-box; }
+.embedded :is(.inline-form, .filter-row, .card-actions, .sched-form, .compare-form) { padding-inline: 0; }
+.embedded :is(.text-input, .sel) { min-width: 0; flex-basis: 130px; }
+.embedded :is(.btn, .button) { font-size: 12px; padding-inline: 10px; }
+.embedded .embedded-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.embedded-toolbar .mini-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 5px 9px; border-radius: var(--r-sm); background: var(--fill); color: var(--text-2); font-size: 11px; white-space: nowrap; }
+@container (max-width: 340px) {
+  .card-head { flex-wrap: wrap; gap: 5px; }
+  .body { padding-inline: 10px; }
+  .card-side { font-size: 11px; }
+  .range-meta { flex-direction: column; }
+  .usage-row { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .usage-tokens { grid-column: 1 / -1; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .compare-form { flex-direction: column; align-items: stretch; }
+  .compare-form .sel { flex-basis: auto; width: 100%; }
+}
+
+
+/* Quiet sections use the same neutral surfaces as the usage menu. */
+.page :is(.status-card, .init-card, .card, .group-col, .ai-card, .commit-card, .help-card, .adv-card) {
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+}
+.status-card { padding: 6px 0 12px; border-bottom: 1px solid var(--border) !important; }
+.page :is(.help-head, .adv-head) { padding-inline: 0; }
+.page :is(.help-card, .adv-card, .ai-card, .commit-card) { border-bottom: 1px solid var(--border); }
+.page :is(.notice, .branch-row.cur) { background: var(--fill); }
+.page :is(.ai-mini, .ai-config-btn.on, .chip-btn, .status-chip) { background: var(--fill); color: var(--text-2); }
+.page .btn.primary { background: var(--blue); box-shadow: none; }
+.groups { grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); }
+.embedded .tab-thumb { background: var(--fill); box-shadow: none; top: 0; bottom: 6px; }
+.embedded .tab.on { background: transparent; }
+.embedded .commit-bar { position: static; background: transparent; flex-wrap: wrap; padding-inline: 0; }
+.embedded .commit-input { flex-basis: 100%; }
+.embedded .rc-group { width: 100%; min-width: 0; }
+.embedded .rc-input { flex: 1; min-width: 0; width: auto; }
+.embedded .ai-actions { width: 100%; justify-content: flex-start; margin: 0; }
+.embedded .ai-config-mask { position: static; display: flex; flex: 1; min-height: 0; overflow: auto; background: transparent; align-items: stretch; }
+.embedded .ai-config-sheet { max-height: none; max-width: none; border-radius: 0; background: var(--bg); box-shadow: none; padding: 0 0 12px; }
+.embedded .config-actions { flex-wrap: wrap; padding-inline: 12px; }
+.embedded .config-actions .btn { flex: 1 1 80px; }
+.inline-confirm { flex: 1; min-height: 0; padding: 12px; overflow: auto; }
+.inline-confirm p { white-space: pre-wrap; font-size: 12px; line-height: 1.7; }
+@container (max-width: 390px) {
+  .commit-main { grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }
+  .commit-main .author { display: none; }
+  .commit-main .date { grid-column: 2; grid-row: 2; padding-bottom: 6px; }
+  .help-row { flex-direction: column; gap: 3px; }
+  .stash-row { flex-wrap: wrap; }
+  .stash-main { flex-basis: 100%; }
+  .issue-head { flex-wrap: wrap; }
+  .issue-summary { flex-basis: 100%; white-space: normal; }
+}
 </style>
