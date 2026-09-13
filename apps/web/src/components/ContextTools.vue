@@ -12,6 +12,8 @@ const tools = [
   { id: 'version', label: '版本工具', icon: 'git' },
   { id: 'prompts', label: '提示词', icon: 'pencil' },
   { id: 'auxiliary', label: '辅助会话', icon: 'chat' },
+  { id: 'usage', label: '上下文用量', icon: 'tachometer' },
+  { id: 'files', label: '文件管理', icon: 'folder' },
   { id: 'floating', label: '小窗', icon: 'floatingWindow' },
 ] as const
 type Tool = typeof tools[number]['id']
@@ -22,17 +24,18 @@ const versionViews = {
   data: defineAsyncComponent(() => import('@/views/DataView.vue')),
 }
 const AuxiliaryChat = defineAsyncComponent(() => import('./AuxiliaryChat.vue'))
+const FileManager = defineAsyncComponent(() => import('@/views/FileManagerView.vue'))
 const versionTabs = [{ id: 'git', label: 'Git 面板' }, { id: 'restore', label: '一键还原' }, { id: 'ops', label: '运维诊断' }, { id: 'data', label: '数据工具' }] as const
 const version = ref<keyof typeof versionViews>('git')
 const opened = ref(false), active = ref<Tool | 'usage' | null>(null)
 const anchor = ref<HTMLButtonElement | null>(null)
+const closeAnchor = ref<HTMLButtonElement | null>(null)
 const card = ref<HTMLElement | null>(null)
 const initialChild = ref('')
 let mounted = true
 let auxiliaryRequest = 0
 const bounds = ref({ x: 0, y: 0, width: 360, height: 640 })
-const radius = computed(() => Math.min(152, Math.max(112, bounds.value.width * .405)))
-const ringInner = computed(() => radius.value - 54)
+const radius = computed(() => Math.min(136, Math.max(124, bounds.value.width * .35)))
 const notch = computed(() => radius.value + 6)
 const title = computed(() => active.value === 'usage' ? '上下文用量' : tools.find(t => t.id === active.value)?.label ?? '')
 const nativeFloating = computed(() => typeof window.CoomiAndroid?.openFloatingWindow === 'function')
@@ -52,7 +55,7 @@ function measure() {
 }
 function toggle() {
   auxiliaryRequest++
-  if (opened.value) { opened.value = false; active.value = null }
+  if (opened.value) { opened.value = false; active.value = null; void nextTick(() => anchor.value?.focus()) }
   else { measure(); opened.value = true; emit('open') }
 }
 function choose(id: Tool) {
@@ -66,7 +69,7 @@ function outside(event: PointerEvent) {
   active.value = null
 }
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && active.value) { event.preventDefault(); active.value = null; anchor.value?.focus() }
+  if (event.key === 'Escape' && active.value) { event.preventDefault(); active.value = null; closeAnchor.value?.focus() }
 }
 function fill(text: string) {
   window.dispatchEvent(new CustomEvent('coomi:prefill-draft', { detail: { sessionId: session.sessionId, text } }))
@@ -109,21 +112,50 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:open-auxiliary', openAuxiliary)
   unregisterOverlay('context-tool-card')
 })
-function position(index: number) {
-  const angle = (168.75 - index * 22.5) * Math.PI / 180
-  const distance = (radius.value + ringInner.value) / 2
-  return { left: `${radius.value + Math.cos(angle) * distance}px`, top: `${Math.sin(angle) * distance}px` }
-}
+// All three rows share the usage ring's centre. The whole sector is a hit target,
+// including the space around its label; clipping keeps adjacent targets separate.
+const sectors = computed(() => tools.map((tool, index) => {
+  const row = index < 3 ? 2 : index < 5 ? 1 : 0
+  const count = row + 1
+  const slot = index < 3 ? index : index < 5 ? index - 3 : 0
+  const step = (radius.value - 22) / 3
+  const inner = 22 + row * step + 1
+  const outer = 22 + (row + 1) * step - 1
+  const start = 180 - slot * 90 / count - 1
+  const end = 180 - (slot + 1) * 90 / count + 1
+  const point = (r: number, degrees: number) => {
+    const angle = degrees * Math.PI / 180
+    return [radius.value + Math.cos(angle) * r, Math.sin(angle) * r]
+  }
+  const points = []
+  for (let n = 0; n <= 24; n++) points.push(point(outer, start + (end - start) * n / 24))
+  for (let n = 0; n <= 24; n++) points.push(point(inner, end + (start - end) * n / 24))
+  const centre = point((inner + outer) / 2, (start + end) / 2)
+  const left = Math.min(...points.map(p => p[0])), top = Math.min(...points.map(p => p[1]))
+  const width = Math.max(...points.map(p => p[0])) - left, height = Math.max(...points.map(p => p[1])) - top
+  return { ...tool, row, style: {
+    left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,
+    clipPath: `polygon(${points.map(p => `${(p[0] - left) / width * 100}% ${(p[1] - top) / height * 100}%`).join(',')})`,
+    '--label-x': `${centre[0] - left}px`, '--label-y': `${centre[1] - top}px`,
+  } }
+}))
 </script>
 <template>
   <div class="context-tools" data-context-tools>
     <button v-if="!floating && !opened" class="entry" aria-label="展开快捷工具" :aria-expanded="opened" @click="toggle"><CoomiIcon name="more" :size="21" /></button>
-    <button ref="anchor" class="context-anchor" :class="{ expanded: opened }" :aria-label="opened ? '关闭快捷工具带' : '上下文用量'" :aria-expanded="opened" @click="opened ? toggle() : emit('usage')">
+    <button ref="anchor" class="context-anchor" :class="{ expanded: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="上下文用量" :aria-expanded="opened" @click="opened ? toggle() : emit('usage')">
       <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15" pathLength="100" /><circle class="value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${usagePercent} ${100 - usagePercent}`" /></svg>
       <CoomiIcon v-if="opened" class="close-mark" name="close" :size="15" />
     </button>
     <Teleport to="body">
+      <Transition name="orbit-veil"><div v-if="opened && active" class="orbit-backdrop" aria-hidden="true" @pointerdown="active = null" /></Transition>
+      <Transition name="orbit-reveal" :duration="280">
       <div v-if="opened" class="orbit-layer" :style="overlayStyle" data-context-tools>
+        <button ref="closeAnchor" class="context-anchor orbit-anchor" aria-label="关闭快捷工具带" aria-expanded="true" @click="toggle">
+          <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15" pathLength="100" /><circle class="value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${usagePercent} ${100 - usagePercent}`" /></svg>
+          <CoomiIcon class="close-mark" name="close" :size="15" />
+        </button>
+        <Transition name="card-reveal" mode="out-in">
         <section v-if="active" ref="card" class="orbit-card" :class="{ compact: active === 'usage' || active === 'floating' }" role="dialog" :aria-label="title" aria-modal="false">
           <header class="card-heading"><span class="eyebrow">快捷工具</span><h2>{{ title }}</h2><button class="usage-link" @click="showUsage">上下文 {{ usagePercent }}%<CoomiIcon name="chevronRight" :size="12" /></button><button class="card-close" aria-label="关闭工具卡片" @click="active = null">收起卡片</button></header>
           <div class="card-content">
@@ -134,41 +166,47 @@ function position(index: number) {
             </template>
             <PromptLibrary v-else-if="active === 'prompts'" @fill="fill" />
             <AuxiliaryChat v-else-if="active === 'auxiliary'" :parent-id="session.sessionId" :initial-session-id="initialChild" />
+            <FileManager v-else-if="active === 'files'" embedded />
             <div v-else class="floating-content"><CoomiIcon name="floatingWindow" :size="30" /><h3>小窗聊天</h3><p>{{ nativeFloating ? '将当前聊天移入悬浮窗口，切换应用时也能继续查看进展。' : '小窗聊天可在 Android 应用中使用。' }}</p><button v-if="nativeFloating" class="floating-action" @click="openFloating">打开悬浮窗口</button></div>
           </div>
         </section>
+        </Transition>
         <nav class="orbit-band" aria-label="快捷工具带">
-          <svg class="band-surface" :viewBox="`0 0 ${radius} ${radius}`" aria-hidden="true"><path :d="`M 0 0 A ${radius} ${radius} 0 0 0 ${radius} ${radius} L ${radius} ${ringInner} A ${ringInner} ${ringInner} 0 0 1 ${radius - ringInner} 0 Z`" /></svg>
-          <button v-for="(tool,index) in tools" :key="tool.id" class="orbit-tool" :class="{ selected: active === tool.id }" :style="position(index)" :aria-label="tool.label" :aria-pressed="active === tool.id" @click="choose(tool.id)"><CoomiIcon :name="tool.icon" :size="18" /><span>{{ tool.label }}</span></button>
+          <button v-for="tool in sectors" :key="tool.id" class="orbit-tool" :class="{ selected: active === tool.id }" :style="tool.style" :data-row="tool.row" :aria-label="tool.label" :aria-pressed="active === tool.id" @click="choose(tool.id)"><span class="tool-label"><CoomiIcon :name="tool.icon" :size="16" /><span>{{ tool.id === 'usage' ? '用量' : tool.label }}</span></span></button>
         </nav>
       </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
 <style scoped>
-.context-tools { display:flex; align-items:center; gap:2px; margin-left:auto; }
+.context-tools { display:flex; align-items:center; gap:2px; margin-left:auto; flex-shrink:0; }
 .entry,.context-anchor { width:40px; height:40px; border:0; border-radius:50%; display:grid; place-items:center; background:transparent; color:var(--text-2); flex-shrink:0; }
 .entry:active { background:var(--fill); }
-.context-anchor { position:relative; }
-.context-anchor.expanded { z-index:43; background:var(--bg); }
+.context-anchor { position:relative; transform:translate(4px,-3px); }
+.context-anchor.expanded { visibility:hidden; }
+.context-anchor.orbit-anchor { position:absolute; left:var(--anchor-x); top:var(--anchor-y); transform:translate(-50%,-50%); z-index:2; background:var(--bg); pointer-events:auto; }
 .context-anchor > svg { width:30px; height:30px; transform:rotate(-90deg); }
 .context-anchor circle { fill:none; stroke-width:3.8; }
 .track { stroke:var(--border-strong); }.value { stroke:var(--blue); stroke-linecap:round; }
 .context-anchor :deep(.close-mark) { position:absolute; width:15px; height:15px; transform:none; }
 .orbit-layer { position:fixed; inset:0; z-index:40; pointer-events:none; }
-.orbit-band { position:absolute; left:calc(var(--anchor-x) - var(--orbit-radius)); top:var(--anchor-y); width:var(--orbit-radius); height:var(--orbit-radius); filter:drop-shadow(0 3px 6px rgba(23,32,54,.09)); }
-.band-surface { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
-.band-surface path { fill:var(--bg); stroke:var(--border); stroke-width:1; }
-.orbit-tool { position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; width:42px; height:43px; transform:translate(-50%,-50%); border-radius:12px; color:var(--text-2); background:transparent; pointer-events:auto; }
-.orbit-tool span { font-size:9px; white-space:nowrap; font-weight:550; }
+.orbit-backdrop { position:fixed; inset:0; z-index:39; background:rgba(25,35,52,.07); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); }
+.orbit-band { position:absolute; left:calc(var(--anchor-x) - var(--orbit-radius)); top:var(--anchor-y); width:var(--orbit-radius); height:var(--orbit-radius); filter:drop-shadow(0 2px 4px rgba(23,32,54,.1)); transform-origin:top right; }
+.orbit-tool { position:absolute; inset:0; width:100%; height:100%; border:0; padding:0; color:var(--text-2); background:var(--bg); pointer-events:auto; transition:background 160ms ease,color 160ms ease; }
+.tool-label { position:absolute; left:var(--label-x); top:var(--label-y); transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:2px; pointer-events:none; }
+.tool-label > span { font-size:9px; line-height:1.15; white-space:nowrap; font-weight:550; }
 .orbit-tool.selected { background:var(--blue-soft); color:var(--blue); }
+.orbit-tool:focus-visible { background:var(--blue-soft-2); color:var(--blue); }
+@media(hover:hover) { .orbit-tool:hover { background:var(--blue-soft); color:var(--blue); } }
 .orbit-card { position:absolute; top:var(--anchor-y); left:calc(var(--anchor-x) - var(--card-width)); width:var(--card-width); height:var(--card-height); display:flex; flex-direction:column; border:1px solid var(--border); border-radius:var(--r-card); background:var(--bg); box-shadow:var(--shadow-2); pointer-events:auto; overflow:hidden; mask-image:radial-gradient(circle at top right,transparent var(--notch),black calc(var(--notch) + 1px)); }
-.card-heading { min-height:var(--notch); flex-shrink:0; width:calc(100% - var(--notch)); min-width:100px; padding:18px 0 12px 15px; display:flex; flex-direction:column; align-items:flex-start; gap:7px; }
+.card-heading { min-height:var(--notch); flex-shrink:0; width:calc(100% - var(--notch)); min-width:0; padding:14px 0 10px 15px; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
 .eyebrow { font-size:10px; color:var(--text-3); letter-spacing:.08em; }
 h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:nowrap; }
 .usage-link { display:flex; align-items:center; gap:2px; color:var(--blue); font-size:11px; white-space:nowrap; padding:3px 0; background:transparent; }
 .card-close { color:var(--text-3); font-size:11px; background:transparent; padding:4px 0; }
 .card-content { flex:1; min-height:0; padding:0 12px 12px; display:flex; flex-direction:column; overflow:hidden; }
+.card-content :deep(.prompt-library),.card-content :deep(.transcript),.card-content :deep(.usage-details),.card-content :deep(.embedded .body),.floating-content { scrollbar-gutter:stable; padding-right:12px; overscroll-behavior:contain; }
 .orbit-card.compact { height:auto; max-height:var(--card-height); }
 .compact .card-content { flex:0 1 auto; max-height:calc(var(--card-height) - var(--notch)); }
 .compact :deep(.usage-title) { display:none; }
@@ -179,5 +217,15 @@ h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:now
 .floating-content { padding:20px 10px; text-align:center; color:var(--text-2); overflow:auto; }
 .floating-content p { font-size:13px; line-height:1.7; }.floating-content h3 {font-size:15px}
 .floating-action { background:var(--blue); color:white; padding:10px 18px; border-radius:var(--r-pill); font-size:13px; }
-@media(max-width:320px) { .card-content {padding-inline:8px} .card-heading {padding-left:10px} h2 {font-size:14px} .orbit-tool {width:36px;height:36px} .orbit-tool span {font-size:8px} }
+.orbit-reveal-enter-active .orbit-band,.orbit-reveal-leave-active .orbit-band { transition:transform 280ms cubic-bezier(.2,.8,.2,1),opacity 220ms ease; }
+.orbit-reveal-enter-from .orbit-band,.orbit-reveal-leave-to .orbit-band { transform:scale(.84) rotate(-7deg); opacity:0; }
+.card-reveal-enter-active,.card-reveal-leave-active,.orbit-reveal-leave-active .orbit-card { transition:transform 220ms cubic-bezier(.2,.8,.2,1),opacity 180ms ease; transform-origin:top right; }
+.card-reveal-enter-from,.card-reveal-leave-to,.orbit-reveal-leave-to .orbit-card { transform:translate(0,-6px) scale(.985); opacity:0; }
+.orbit-veil-enter-active,.orbit-veil-leave-active { transition:opacity 220ms ease; }
+.orbit-veil-enter-from,.orbit-veil-leave-to { opacity:0; }
+@media(max-width:320px) { .card-content {padding-inline:8px} .card-heading {padding-left:10px} h2 {font-size:14px} .tool-label > span {font-size:8px} }
+@media(prefers-reduced-motion:reduce) {
+  .orbit-reveal-enter-active .orbit-band,.orbit-reveal-leave-active .orbit-band,.card-reveal-enter-active,.card-reveal-leave-active,.orbit-reveal-leave-active .orbit-card,.orbit-veil-enter-active,.orbit-veil-leave-active,.orbit-tool { transition:none; }
+  .orbit-reveal-enter-from .orbit-band,.orbit-reveal-leave-to .orbit-band,.card-reveal-enter-from,.card-reveal-leave-to,.orbit-reveal-leave-to .orbit-card { transform:none; }
+}
 </style>

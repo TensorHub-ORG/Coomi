@@ -335,9 +335,9 @@ function browseInFileManager() {
 .usage-value { stroke: var(--blue); stroke-linecap: round; transition: stroke-dasharray .22s ease; }
 
 .center {
-  position: absolute; left: 50%; transform: translateX(-50%);
+  position: relative; flex: 1; min-width: 0;
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  height: 36px; padding: 0 12px; max-width: 60%;
+  height: 36px; padding: 0 6px;
   border: 0; border-radius: var(--r-pill); background: none; color: var(--text);
   transition: background .15s;
 }
