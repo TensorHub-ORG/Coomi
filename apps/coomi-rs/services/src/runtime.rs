@@ -82,6 +82,15 @@ impl RuntimeManifest {
             "unsupported runtime manifest version"
         );
         anyhow::ensure!(
+            !self.runtime_version.is_empty()
+                && !matches!(self.runtime_version.as_str(), "." | "..")
+                && self
+                    .runtime_version
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')),
+            "invalid runtime version directory name"
+        );
+        anyhow::ensure!(
             self.architecture == "arm64-v8a",
             "unsupported runtime architecture"
         );
@@ -132,6 +141,13 @@ struct DownloadState {
     etag: Option<String>,
     downloaded: u64,
     expected_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct InstallRecovery {
+    state: RuntimeState,
+    replaced_version: Option<String>,
+    preserved_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -487,10 +503,7 @@ impl RuntimeBackend for ProotLinuxBackend {
                 // PRoot otherwise falls back to the compile-time Termux temp
                 // path (/data/data/com.termux/...), which does not exist in
                 // the standalone Coomi package.
-                environment.insert(
-                    "PROOT_TMP_DIR".into(),
-                    tmp.to_string_lossy().into_owned(),
-                );
+                environment.insert("PROOT_TMP_DIR".into(), tmp.to_string_lossy().into_owned());
                 environment.insert(
                     "LD_LIBRARY_PATH".into(),
                     self.version_root()
@@ -513,7 +526,9 @@ impl RuntimeBackend for ProotLinuxBackend {
                 "test -x /usr/bin/apt && test -x /usr/bin/python3".into(),
             ],
         )?;
-        let output = command.into_tokio().output().await?;
+        let output = command
+            .output_limited(Duration::from_secs(30), 64 * 1024)
+            .await?;
         anyhow::ensure!(
             output.status.success(),
             "guest health check failed: {}",
@@ -560,7 +575,11 @@ if command -v curl >/dev/null 2>&1; then echo "__curl__$(curl --version 2>&1 | h
         &["-c".into(), script.trim().into()],
         &BTreeMap::new(),
     ) {
-        Ok(command) => command.output_limited(Duration::from_secs(20), 64 * 1024).await,
+        Ok(command) => {
+            command
+                .output_limited(Duration::from_secs(20), 64 * 1024)
+                .await
+        }
         Err(error) => Err(error),
     };
     let mut facts = GuestFacts {
@@ -687,11 +706,17 @@ impl RuntimeManager {
             matches!(
                 state.status,
                 RuntimeInstallStatus::NotInstalled
+                    | RuntimeInstallStatus::Ready
                     | RuntimeInstallStatus::NeedsRepair
                     | RuntimeInstallStatus::UpdateAvailable
             ),
             "runtime installation is already in progress"
         );
+        self.save_install_recovery(&InstallRecovery {
+            state: state.clone(),
+            replaced_version: None,
+            preserved_version: None,
+        })?;
         state.status = RuntimeInstallStatus::Downloading;
         state.error = None;
         self.save_state(&state)?;
@@ -699,6 +724,11 @@ impl RuntimeManager {
     }
 
     pub fn fail_install(&self, error: impl Into<String>) -> Result<RuntimeState> {
+        if let Some(mut state) = self.restore_install_recovery()? {
+            state.error = Some(error.into());
+            self.save_state(&state)?;
+            return Ok(state);
+        }
         let mut state = self.state()?;
         state.status = if state.active_version.is_some() {
             RuntimeInstallStatus::NeedsRepair
@@ -707,6 +737,53 @@ impl RuntimeManager {
         };
         state.error = Some(error.into());
         self.save_state(&state)?;
+        Ok(state)
+    }
+
+    fn save_install_recovery(&self, recovery: &InstallRecovery) -> Result<()> {
+        save_json(&self.root.join("install-recovery.json"), recovery)
+    }
+
+    fn restore_install_recovery(&self) -> Result<Option<RuntimeState>> {
+        let path = self.root.join("install-recovery.json");
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let mut recovery: InstallRecovery = serde_json::from_slice(&fs::read(&path)?)?;
+        if let (Some(original), Some(preserved)) =
+            (&recovery.replaced_version, &recovery.preserved_version)
+            && self.root.join("versions").join(preserved).is_dir()
+        {
+            // The process may have died between either rename and state
+            // publication. Point back to the intact old tree in either case.
+            if recovery.state.active_version.as_ref() == Some(original) {
+                recovery.state.active_version = Some(preserved.clone());
+            }
+            if recovery.state.previous_version.as_ref() == Some(original) {
+                recovery.state.previous_version = Some(preserved.clone());
+            }
+        }
+        self.save_state(&recovery.state)?;
+        fs::remove_file(path)?;
+        Ok(Some(recovery.state))
+    }
+
+    /// Invoke once after acquiring the engine process lock, before accepting
+    /// requests. Ordinary open/state reads must never reset a live installer.
+    pub fn recover_interrupted_install(&self) -> Result<RuntimeState> {
+        let state = self.state()?;
+        if matches!(
+            state.status,
+            RuntimeInstallStatus::Downloading | RuntimeInstallStatus::Initializing
+        ) {
+            return self.fail_install("runtime installation was interrupted; retry is available");
+        }
+        // Ready was durably published; a journal left behind by process death
+        // after publication must not roll back the successful installation.
+        let journal = self.root.join("install-recovery.json");
+        if journal.is_file() {
+            fs::remove_file(journal)?;
+        }
         Ok(state)
     }
 
@@ -736,6 +813,14 @@ impl RuntimeManager {
         name: &str,
         artifact: &RuntimeArtifact,
     ) -> Result<PathBuf> {
+        if cfg!(target_os = "android") {
+            let manager = self.clone();
+            let name = name.to_owned();
+            let artifact = artifact.clone();
+            return tokio::task::spawn_blocking(move || manager.bundled_artifact(&name, &artifact))
+                .await
+                .context("bundled runtime verifier stopped")?;
+        }
         artifact.validate()?;
         anyhow::ensure!(
             name.chars()
@@ -827,16 +912,42 @@ impl RuntimeManager {
         Ok(target)
     }
 
+    /// Android's required runtime comes from the APK, never a remote fallback.
+    pub fn bundled_artifact(&self, name: &str, artifact: &RuntimeArtifact) -> Result<PathBuf> {
+        artifact.validate()?;
+        anyhow::ensure!(
+            !name.is_empty()
+                && !matches!(name, "." | "..")
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')),
+            "invalid runtime artifact name"
+        );
+        let path = self.root.join("downloads").join(name);
+        verify_artifact(&path, artifact).context(
+            "APK 内置运行包缺失或损坏，请释放存储空间并重启应用，以从 APK 重新部署（无需下载）",
+        )?;
+        Ok(path)
+    }
+
     pub fn install(
         &self,
         manifest: &RuntimeManifest,
         host_file: &Path,
         rootfs_tar: &Path,
+        validate_guest: impl FnOnce(&ProotLinuxBackend) -> Result<()>,
     ) -> Result<RuntimeState> {
         manifest.validate()?;
         verify_artifact(host_file, &manifest.host)?;
         verify_artifact(rootfs_tar, &manifest.rootfs)?;
         let mut state = self.state()?;
+        if !self.root.join("install-recovery.json").is_file() {
+            self.save_install_recovery(&InstallRecovery {
+                state: state.clone(),
+                replaced_version: None,
+                preserved_version: None,
+            })?;
+        }
         state.status = RuntimeInstallStatus::Initializing;
         state.error = None;
         self.save_state(&state)?;
@@ -856,24 +967,49 @@ impl RuntimeManager {
         fs::create_dir_all(&rootfs)?;
         unpack_archive(open_archive(rootfs_tar)?, &rootfs)?;
         anyhow::ensure!(rootfs.join("bin/sh").is_file(), "rootfs has no /bin/sh");
+        // Prepare the candidate before publishing it. The saved active version
+        // still refers to the old image (or none on first install).
+        Self::write_guest_dns(&rootfs)?;
+        validate_guest(&ProotLinuxBackend {
+            runtime_root: self.root.clone(),
+            version: format!("{}.staging", manifest.runtime_version),
+        })
+        .context("candidate guest health check failed")?;
         let destination = self.root.join("versions").join(&manifest.runtime_version);
+        let mut preserved = None;
         if destination.exists() {
-            fs::remove_dir_all(&destination)?;
+            // Keep installed packages and guest changes available for rollback.
+            let backup_version = format!(
+                "{}.preserved-{}",
+                manifest.runtime_version,
+                uuid::Uuid::new_v4()
+            );
+            let backup = self.root.join("versions").join(&backup_version);
+            let mut recovery: InstallRecovery =
+                serde_json::from_slice(&fs::read(self.root.join("install-recovery.json"))?)?;
+            recovery.replaced_version = Some(manifest.runtime_version.clone());
+            recovery.preserved_version = Some(backup_version.clone());
+            self.save_install_recovery(&recovery)?;
+            fs::rename(&destination, &backup)?;
+            preserved = Some((backup_version, backup));
         }
-        fs::rename(&staging, &destination)?;
-        // 清理 Termux 时代遗留的登录脚本（可能引用 /root/.cargo/env 等失效路径），
-        // 避免 guest 登录 shell（-lc）加载它们导致环境问题。
-        let guest_home = self.root.join("home");
-        for name in [".profile", ".bashrc", ".bash_profile", ".zshrc"] {
-            let _ = fs::remove_file(guest_home.join(name));
+        if let Err(error) = fs::rename(&staging, &destination) {
+            if let Some((_, backup)) = &preserved {
+                fs::rename(backup, &destination).context("failed to restore preserved runtime")?;
+            }
+            return Err(error.into());
         }
-        self.ensure_guest_dns()?;
         state.previous_version = state.active_version.take();
+        if state.previous_version.as_deref() == Some(manifest.runtime_version.as_str()) {
+            state.previous_version = preserved.map(|(version, _)| version);
+        }
         state.active_version = Some(manifest.runtime_version.clone());
         state.backend = RuntimeBackendKind::ProotLinux;
         state.status = RuntimeInstallStatus::Ready;
         state.installed_at_ms = Some(now_ms());
         self.save_state(&state)?;
+        // Publication is complete even if deleting this recovery hint fails.
+        let _ = fs::remove_file(self.root.join("install-recovery.json"));
         Ok(state)
     }
 
@@ -886,6 +1022,10 @@ impl RuntimeManager {
             return Ok(());
         };
         let rootfs = self.root.join("versions").join(&version).join("rootfs");
+        Self::write_guest_dns(&rootfs)
+    }
+
+    fn write_guest_dns(rootfs: &Path) -> Result<()> {
         fs::create_dir_all(rootfs.join("etc"))?;
         let resolv = rootfs.join("etc").join("resolv.conf");
         // Ubuntu 自带的 /etc/resolv.conf 是指向 systemd-resolved stub 的符号链接
@@ -904,14 +1044,12 @@ impl RuntimeManager {
         Ok(())
     }
 
-    pub fn migrate_legacy_home(&self, legacy_home: &Path) -> Result<u64> {        let destination = self.root.join("home");
+    pub fn migrate_legacy_home(&self, legacy_home: &Path) -> Result<u64> {
+        let destination = self.root.join("home");
         fs::create_dir_all(&destination)?;
         let copied = copy_user_tree(legacy_home, &destination)?;
-        // Termux 时代的登录脚本（.profile/.bashrc 等）在 guest 里会引用 /root/.cargo/env 等
-        // 不存在的路径，污染登录 shell（-lc）。迁移后统一清掉，让 guest 使用干净默认。
-        for name in [".profile", ".bashrc", ".bash_profile", ".zshrc"] {
-            let _ = fs::remove_file(destination.join(name));
-        }
+        // copy_user_tree excludes legacy shell profiles. Existing guest
+        // profiles belong to the user and must survive migration and repair.
         Ok(copied)
     }
 
@@ -1018,12 +1156,20 @@ fn unpack_archive(reader: Box<dyn Read>, destination: &Path) -> Result<()> {
     for (path, link) in hard_links {
         let target = destination.join(&link);
         let output = destination.join(&path);
-        anyhow::ensure!(target.is_file(), "hard link target is missing: {}", link.display());
+        anyhow::ensure!(
+            target.is_file(),
+            "hard link target is missing: {}",
+            link.display()
+        );
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::copy(&target, &output).with_context(|| {
-            format!("failed to expand hard link {} -> {}", path.display(), link.display())
+            format!(
+                "failed to expand hard link {} -> {}",
+                path.display(),
+                link.display()
+            )
         })?;
         if let Ok(permissions) = fs::metadata(&target).map(|metadata| metadata.permissions()) {
             let _ = fs::set_permissions(&output, permissions);
@@ -1076,6 +1222,9 @@ fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
     serde_json::to_writer_pretty(&mut file, value)?;
     file.write_all(b"\n")?;
     file.sync_all()?;
+    // Unix rename atomically replaces the old file. Removing it first creates
+    // a process-death window with no state/journal at all on Android.
+    #[cfg(not(unix))]
     if path.exists() {
         fs::remove_file(path)?;
     }
@@ -1135,6 +1284,378 @@ fn now_ms() -> u64 {
 mod tests {
     use super::*;
 
+    fn install_fixture(directory: &Path) -> (RuntimeManifest, PathBuf, PathBuf) {
+        let archive = |name: &str, entry: &str| {
+            let path = directory.join(name);
+            let gzip = flate2::write::GzEncoder::new(
+                File::create(&path).expect("create archive"),
+                flate2::Compression::fast(),
+            );
+            let mut tar = tar::Builder::new(gzip);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(5);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(&mut header, entry, &b"test!"[..])
+                .expect("append file");
+            tar.into_inner()
+                .expect("finish tar")
+                .finish()
+                .expect("finish gzip");
+            path
+        };
+        let host = archive("host.tar.gz", "bin/proot");
+        let rootfs = archive("rootfs.tar.gz", "bin/sh");
+        let artifact = |path: &Path| RuntimeArtifact {
+            url: "https://example.test/offline.tar".into(),
+            sha256: sha256_file(path).expect("hash fixture"),
+            size: fs::metadata(path).expect("archive metadata").len(),
+        };
+        (
+            RuntimeManifest {
+                version: RUNTIME_STATE_VERSION,
+                runtime_version: "ubuntu-test-1".into(),
+                architecture: "arm64-v8a".into(),
+                proot_commit: "b".repeat(40),
+                proot_license: "GPL-2.0-or-later".into(),
+                host: artifact(&host),
+                rootfs: artifact(&rootfs),
+                environment: BTreeMap::new(),
+            },
+            host,
+            rootfs,
+        )
+    }
+
+    #[test]
+    fn first_offline_install_initializes_guest_dns() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("offline install");
+        let dns = manager
+            .root
+            .join("versions/ubuntu-test-1/rootfs/etc/resolv.conf");
+        assert!(
+            fs::read_to_string(dns)
+                .expect("guest DNS")
+                .contains("nameserver ")
+        );
+    }
+
+    #[test]
+    fn failed_update_restores_previous_ready_runtime() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        let ready = manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("first install");
+        manager
+            .begin_install()
+            .expect("begin update of ready runtime");
+        let restored = manager
+            .fail_install("candidate failed health check")
+            .expect("restore runtime");
+        assert_eq!(restored.status, RuntimeInstallStatus::Ready);
+        assert_eq!(restored.active_version, ready.active_version);
+        assert!(
+            manager
+                .root
+                .join("versions/ubuntu-test-1/rootfs/bin/sh")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn failed_candidate_health_never_publishes_ready_or_replaces_old_image() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        let ready = manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("first install");
+        let package = manager
+            .root
+            .join("versions/ubuntu-test-1/rootfs/custom-package");
+        fs::write(&package, "custom package").expect("package");
+        manager.begin_install().expect("begin update");
+        let error = manager
+            .install(&manifest, &host, &rootfs, |candidate| {
+                assert!(candidate.version.ends_with(".staging"));
+                assert_eq!(manager.state()?.status, RuntimeInstallStatus::Initializing);
+                assert_eq!(fs::read_to_string(&package)?, "custom package");
+                anyhow::bail!("guest cannot execute")
+            })
+            .expect_err("unhealthy guest rejected");
+        let restored = manager
+            .fail_install(format!("{error:#}"))
+            .expect("restore old runtime");
+        assert_eq!(restored.status, RuntimeInstallStatus::Ready);
+        assert_eq!(restored.active_version, ready.active_version);
+        assert_eq!(
+            fs::read_to_string(package).expect("package survived"),
+            "custom package"
+        );
+    }
+
+    #[test]
+    fn startup_recovers_both_sides_of_runtime_publication_crash_window() {
+        for candidate_published in [false, true] {
+            let home = tempfile::tempdir().expect("temporary home");
+            let manager = RuntimeManager::open(home.path()).expect("open runtime");
+            let (manifest, host, rootfs) = install_fixture(home.path());
+            let ready = manager
+                .install(&manifest, &host, &rootfs, |_| Ok(()))
+                .expect("first install");
+            let original = manager.root.join("versions/ubuntu-test-1");
+            fs::write(original.join("rootfs/custom-package"), "custom package").expect("package");
+            manager.begin_install().expect("begin update");
+            manager
+                .save_install_recovery(&InstallRecovery {
+                    state: ready,
+                    replaced_version: Some("ubuntu-test-1".into()),
+                    preserved_version: Some("ubuntu-test-1.preserved-test".into()),
+                })
+                .expect("journal before rename");
+            fs::rename(
+                &original,
+                manager.root.join("versions/ubuntu-test-1.preserved-test"),
+            )
+            .expect("preserve old image");
+            if candidate_published {
+                fs::create_dir_all(&original).expect("published candidate");
+            }
+            let restarted = RuntimeManager::open(home.path()).expect("restart");
+            assert_eq!(
+                restarted.state().expect("live state reads").status,
+                RuntimeInstallStatus::Downloading
+            );
+            let recovered = restarted
+                .recover_interrupted_install()
+                .expect("startup recovery");
+            assert_eq!(recovered.status, RuntimeInstallStatus::Ready);
+            assert_eq!(
+                recovered.active_version.as_deref(),
+                Some("ubuntu-test-1.preserved-test")
+            );
+            assert_eq!(
+                fs::read_to_string(
+                    restarted
+                        .root
+                        .join("versions")
+                        .join(recovered.active_version.expect("active"))
+                        .join("rootfs/custom-package")
+                )
+                .expect("package survived"),
+                "custom package"
+            );
+        }
+    }
+
+    #[test]
+    fn interrupted_first_install_can_retry_without_stale_busy_state() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        manager.begin_install().expect("begin install");
+        let restarted = RuntimeManager::open(home.path()).expect("restart");
+        assert_eq!(
+            restarted
+                .recover_interrupted_install()
+                .expect("recover")
+                .status,
+            RuntimeInstallStatus::NotInstalled
+        );
+        restarted.begin_install().expect("retry install");
+    }
+
+    #[test]
+    fn ready_publication_wins_over_leftover_recovery_journal() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        let ready = manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("install");
+        manager
+            .save_install_recovery(&InstallRecovery {
+                state: RuntimeState::default(),
+                replaced_version: None,
+                preserved_version: None,
+            })
+            .expect("simulate crash before journal removal");
+        assert_eq!(
+            manager.recover_interrupted_install().expect("recovery"),
+            ready
+        );
+        assert!(!manager.root.join("install-recovery.json").exists());
+    }
+
+    #[test]
+    fn corrupt_recovery_journal_is_reported_without_overwriting_user_state() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let before = manager.begin_install().expect("begin install");
+        let journal = manager.root.join("install-recovery.json");
+        fs::write(&journal, "damaged journal").expect("damage journal");
+        assert!(manager.recover_interrupted_install().is_err());
+        assert_eq!(manager.state().expect("preserved state"), before);
+        assert_eq!(
+            fs::read_to_string(journal).expect("preserved journal"),
+            "damaged journal"
+        );
+    }
+
+    #[test]
+    fn missing_or_corrupt_bundled_archive_fails_locally_without_deleting_it() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, _, _) = install_fixture(home.path());
+        assert!(
+            manager
+                .bundled_artifact("host.tar.gz", &manifest.host)
+                .is_err()
+        );
+        let cached = manager.root.join("downloads/host.tar.gz");
+        fs::write(&cached, "corrupt cache").expect("corrupt cache");
+        let error = manager
+            .bundled_artifact("host.tar.gz", &manifest.host)
+            .expect_err("local failure");
+        assert!(error.to_string().contains("APK"));
+        assert_eq!(
+            fs::read_to_string(cached).expect("cache retained"),
+            "corrupt cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn verified_bundled_archives_install_without_contacting_download_url() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        // example.test is intentionally unreachable: a verified bundled cache
+        // must satisfy installation without constructing a network request.
+        fs::copy(host, manager.root.join("downloads/proot-host-arm64.tar.gz"))
+            .expect("bundle host");
+        fs::copy(
+            rootfs,
+            manager.root.join("downloads/ubuntu-rootfs-arm64.tar.gz"),
+        )
+        .expect("bundle rootfs");
+        let host = manager
+            .download_artifact("proot-host-arm64.tar.gz", &manifest.host)
+            .await
+            .expect("offline host");
+        let rootfs = manager
+            .download_artifact("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
+            .await
+            .expect("offline rootfs");
+        assert_eq!(
+            manager
+                .install(&manifest, &host, &rootfs, |_| Ok(()))
+                .expect("offline install")
+                .status,
+            RuntimeInstallStatus::Ready
+        );
+    }
+
+    #[test]
+    fn corrupt_archive_does_not_change_active_runtime_or_packages() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        let before = manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("first install");
+        let package = manager
+            .root
+            .join("versions/ubuntu-test-1/rootfs/custom-package");
+        fs::write(&package, "user package").expect("custom package");
+        let mut bytes = fs::read(&rootfs).expect("read archive");
+        bytes[0] ^= 1;
+        fs::write(&rootfs, bytes).expect("corrupt same-size archive");
+        assert!(
+            manager
+                .install(&manifest, &host, &rootfs, |_| Ok(()))
+                .is_err()
+        );
+        assert_eq!(manager.state().expect("state"), before);
+        assert_eq!(
+            fs::read_to_string(package).expect("package"),
+            "user package"
+        );
+    }
+
+    #[test]
+    fn reinstall_preserves_custom_packages_in_rollback_version() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("first install");
+        fs::write(
+            manager
+                .root
+                .join("versions/ubuntu-test-1/rootfs/custom-package"),
+            "user package",
+        )
+        .expect("custom package");
+        let state = manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("reinstall");
+        let previous = state.previous_version.expect("preserved version");
+        assert_ne!(previous, manifest.runtime_version);
+        assert_eq!(
+            fs::read_to_string(
+                manager
+                    .root
+                    .join("versions")
+                    .join(previous)
+                    .join("rootfs/custom-package")
+            )
+            .expect("preserved package"),
+            "user package"
+        );
+        manager.rollback().expect("rollback to customized runtime");
+    }
+
+    #[test]
+    fn install_and_migration_preserve_custom_guest_profile() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let manager = RuntimeManager::open(home.path()).expect("open runtime");
+        fs::create_dir_all(manager.root.join("home")).expect("guest home");
+        let profile = manager.root.join("home/.profile");
+        fs::write(&profile, "export MY_CUSTOM_SETTING=yes").expect("profile");
+        manager
+            .migrate_legacy_home(&home.path().join("absent"))
+            .expect("migration");
+        assert!(
+            profile.is_file(),
+            "migration must preserve guest customization"
+        );
+        let (manifest, host, rootfs) = install_fixture(home.path());
+        manager
+            .install(&manifest, &host, &rootfs, |_| Ok(()))
+            .expect("install");
+        assert_eq!(
+            fs::read_to_string(profile).expect("profile"),
+            "export MY_CUSTOM_SETTING=yes"
+        );
+    }
+
+    #[test]
+    fn rejects_runtime_versions_that_escape_version_directory() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let (mut manifest, _, _) = install_fixture(home.path());
+        for version in ["", ".", "..", "../home", "a/b", "a\\b", "/tmp"] {
+            manifest.runtime_version = version.into();
+            assert!(manifest.validate().is_err(), "accepted version {version:?}");
+        }
+    }
+
     #[test]
     fn termux_resolves_linux_shell_names_inside_prefix() {
         let prefix = Path::new("/data/data/com.coomi.android/files/usr");
@@ -1182,11 +1703,17 @@ mod tests {
             .expect("Termux command");
         assert_eq!(command.program, backend.prefix.join("bin/sh"));
         assert_eq!(
-            command.environment.get("LD_LIBRARY_PATH").map(String::as_str),
+            command
+                .environment
+                .get("LD_LIBRARY_PATH")
+                .map(String::as_str),
             Some(backend.prefix.join("lib").to_string_lossy().as_ref())
         );
         assert_eq!(
-            command.environment.get("COOMI_RUNTIME_BACKEND").map(String::as_str),
+            command
+                .environment
+                .get("COOMI_RUNTIME_BACKEND")
+                .map(String::as_str),
             Some("termux")
         );
     }

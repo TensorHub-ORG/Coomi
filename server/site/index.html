@@ -659,7 +659,7 @@
             <span class="download-arrow" aria-hidden="true">↓</span>
             <span data-download-label="desktop">下载 Windows 版</span>
           </a>
-          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.4.8-test.5.apk" data-stat-action="download-test">下载测试版</a>
+          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.4.8-test.6.apk" data-stat-action="download-test">下载测试版</a>
         </div>
         <p class="star-link"><a href="https://github.com/TensorHub-ORG/Coomi" target="_blank" rel="noreferrer">去 GitHub 上为我们点颗星 →</a></p>
       </div>
@@ -919,6 +919,18 @@
               </details>
       </div>
       <div data-channel-panel="test" hidden>
+<h2 class="changelog-title">v1.4.8-test.6 更新说明【测试】</h2>
+<p class="changelog-sub">2026-09-14 发布</p>
+<ul class="changelog-list">
+<li>优化三层扇形工具区：统一浅色底板和圆角按钮，移除厚重分割边框，使用清晰短标签，修复窄屏及放大字体时图标文字裁切。</li>
+<li>移除会话内搜索悬浮按钮，保留键盘搜索快捷键。</li>
+<li>修复流式输出闪烁：增量更新消息 DOM，避免已显示文本被重复替换，取消虚拟列表复用时重复播放的入场动画；同时修复代码块闭合、列表及引用链接显示。</li>
+<li>核心引擎、终端引导和 Ubuntu 镜像完整内置，Android 初始化使用本地内置包；新增构建及 APK 内容校验，启动时检查并从内置资源修复损坏的缓存。</li>
+<li>修复启动命令超时失效、登录脚本干扰内部启动和重启时跳过环境初始化的问题，保留用户自定义 shell 配置。</li>
+<li>Ubuntu 候选环境通过运行检查后才切换为就绪，安装失败或中断可恢复已有环境；重新部署保留旧环境及自定义软件，修复首次安装 DNS 初始化。</li>
+<li>增加保留同一包名与签名的回退包构建参数。Android 不允许已有低版本码 APK 直接覆盖高版本；需要将稳定旧代码重打包为更高安装版本码，数据兼容性仍需验证。</li>
+</ul>
+
 <h2 class="changelog-title">v1.4.8-test.5 更新说明【测试】</h2>
 <p class="changelog-sub">2026-09-14 发布</p>
 <ul class="changelog-list">

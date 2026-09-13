@@ -79,7 +79,9 @@ const envBadgeLabel = computed(() => {
   const doctor = runtimeInfo.value
   const runtime = doctor?.runtime
   if (runtime?.status === 'ready') {
-    return doctor?.facts?.sh ? 'Debian 12 · proot' : '环境异常'
+    const version = runtime.active_version ?? ''
+    const system = version.includes('ubuntu') ? 'Ubuntu 24.04' : version.includes('debian') ? 'Debian 12' : 'Linux'
+    return doctor?.facts?.sh ? `${system} · proot` : '环境异常'
   }
   if (doctor?.termux_available) return 'Termux 降级'
   return '运行环境未就绪'

@@ -19,7 +19,6 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Arrays;
@@ -51,7 +50,7 @@ public class CoomiService extends Service {
     private volatile boolean mUpdateInProgress;
     /** Cancels health/install callbacks when the service is torn down. */
     private volatile boolean mDestroyed;
-    private Thread mRuntimeInstallThread;
+    private volatile Thread mRuntimeInstallThread;
 
     private static String prefix() { return TermuxConstants.TERMUX_PREFIX_DIR_PATH; }
     private static String home() { return TermuxConstants.TERMUX_HOME_DIR_PATH; }
@@ -80,19 +79,13 @@ public class CoomiService extends Service {
     private CommandResult execTermux(String command) {
         try {
             String shell = termuxEnvironment()
-                + "exec " + shellQuote(prefix() + "/bin/bash") + " -lc " + shellQuote(command);
+                + "exec " + shellQuote(prefix() + "/bin/bash") + " --noprofile --norc -c " + shellQuote(command);
             ProcessBuilder builder = new ProcessBuilder("/system/bin/sh", "-c", shell);
             builder.redirectErrorStream(true);
             Process process = builder.start();
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) output.append(line).append('\n');
-            }
-            boolean exited = process.waitFor(CMD_TIMEOUT_SEC, TimeUnit.SECONDS);
-            if (!exited) process.destroyForcibly();
-            int code = exited ? process.exitValue() : -1;
-            return new CommandResult(code == 0, output.toString().trim(), "", code);
+            CoomiProcessRunner.Result result = CoomiProcessRunner.collect(process, CMD_TIMEOUT_SEC, TimeUnit.SECONDS);
+            return new CommandResult(result.exitCode == 0, result.output,
+                result.exitCode == -1 ? "Termux command timed out" : "", result.exitCode);
         } catch (Exception e) {
             Logger.logError(LOG_TAG, "Termux command failed: " + e.getMessage());
             return new CommandResult(false, "", e.getMessage(), -1);
@@ -130,7 +123,8 @@ public class CoomiService extends Service {
             try {
                 ensureTermuxProperties();
                 ensureRuntimeManifestCurrent();
-                ensureBundledRuntimeArtifactsCurrent();
+                // Deployment/start stage archives before launching the engine.
+                // Do not copy the rootfs while first-run bootstrap is extracting.
             } catch (Exception error) {
                 Logger.logError(LOG_TAG, "Bundled Runtime V2 deployment failed: " + error.getMessage());
             }
@@ -237,8 +231,7 @@ public class CoomiService extends Service {
             try {
                 File binary = nativeBinary();
                 File web = ensureCurrentWebAssets();
-                ensureRuntimeManifestCurrent();
-                ensureBundledRuntimeArtifactsCurrent();
+                stageBundledRuntimeForStartup();
                 if (!binary.isFile()) {
                     callback.onError("APK 中缺少 ARM64 coomi-rs 二进制：" + binary.getAbsolutePath());
                     return;
@@ -316,12 +309,9 @@ public class CoomiService extends Service {
     /** 幂等合并写入：仅替换两个标记之间的托管块，块外用户内容原样保留。 */
     private void writeShellBlock(File file, String body) throws Exception {
         String existing = file.exists() ? readText(file) : "";
-        // 旧版（无块标记）整文件都是 Coomi 生成的：整体迁移为新格式。
-        // 旧版本来就是覆盖写，用户内容无从保留，一次性迁移后进入块保护。
-        if (!existing.isEmpty() && !existing.contains(SHELL_BLOCK_START)
-            && existing.contains("# Created by Coomi Android")) {
-            existing = "";
-        }
+        // Legacy generated profiles may contain later user additions. Keep them
+        // intact and append the managed block; a header does not imply ownership
+        // of every command in the file.
         String block = SHELL_BLOCK_START + "\n" + body + SHELL_BLOCK_END + "\n";
         if (existing.contains(SHELL_BLOCK_START)) {
             int start = existing.indexOf(SHELL_BLOCK_START);
@@ -522,13 +512,7 @@ public class CoomiService extends Service {
             // Runtime V2 资产暂存（Ubuntu rootfs 311MB）失败（典型：存储不足）
             // 不应阻止引擎启动——引擎可继续用当前已装 Runtime 运行，
             // 自动升级会在空间释放后的下次启动重试暂存。
-            try {
-                ensureRuntimeManifestCurrent();
-                ensureBundledRuntimeArtifactsCurrent();
-            } catch (Exception stagingError) {
-                Logger.logError(LOG_TAG, "Runtime V2 staging failed, engine continues with current runtime: "
-                    + stagingError.getMessage());
-            }
+            stageBundledRuntimeForStartup();
 
             int port = findFreePort();
             String token = generateToken();
@@ -642,73 +626,51 @@ public class CoomiService extends Service {
         Logger.logInfo(LOG_TAG, "Runtime V2 manifest deployed to " + target.getAbsolutePath());
     }
 
-    /**
-     * Seed the signed APK's verified runtime archives into RuntimeManager's download cache.
-     * A per-APK stamp avoids copying the 150+ MB rootfs on every service start.
-     */
-    private synchronized void ensureBundledRuntimeArtifactsCurrent() throws Exception {
-        File directory = new File(CoomiConstants.RUNTIME_V2_DOWNLOAD_DIR);
-        if (!directory.isDirectory() && !directory.mkdirs()) {
-            throw new IllegalStateException("cannot create Runtime V2 download directory");
+    /** Keep the engine available so a staging failure can be explained in Runtime settings. */
+    private void stageBundledRuntimeForStartup() {
+        try {
+            ensureRuntimeManifestCurrent();
+            ensureBundledRuntimeArtifactsCurrent();
+        } catch (Exception stagingError) {
+            Logger.logError(LOG_TAG, "Runtime V2 staging failed; engine remains available. "
+                + "Free storage and restart the app to restore bundled archives: " + stagingError.getMessage());
         }
-        File stamp = new File(directory, ".bundled-app-stamp");
-        String expectedStamp = CoomiBootstrap.appStamp(this);
-        String actualStamp = stamp.isFile() ? readText(stamp).trim() : "";
-        File host = new File(CoomiConstants.RUNTIME_V2_HOST_PATH);
-        File rootfs = new File(CoomiConstants.RUNTIME_V2_ROOTFS_PATH);
-        if (expectedStamp.equals(actualStamp) && host.isFile() && rootfs.isFile()) {
-            // 批次八：清理旧格式暂存残留（Debian 时代的 151MB staged 包），释放空间。
-            File legacyStaged = new File(CoomiConstants.RUNTIME_V2_DOWNLOAD_DIR, "debian-rootfs-arm64.tar.gz");
-            if (legacyStaged.isFile()) legacyStaged.delete();
-            return;
-        }
-        // 存储预检：复制 Ubuntu rootfs（311MB）前确认可用空间充足，避免写到一半
-        // 磁盘满留下半截文件并反复重试。不足时跳过本次暂存（非致命，引擎照常启动）。
-        long required = 512L * 1024 * 1024;
-        long usable = directory.getUsableSpace();
-        if (usable > 0 && usable < required) {
-            throw new java.io.IOException("insufficient storage for runtime staging: need ~"
-                + required + " bytes, usable " + usable);
-        }
+    }
 
-        copyAssetAtomically(CoomiConstants.RUNTIME_V2_HOST_ASSET, host);
-        copyAssetAtomically(CoomiConstants.RUNTIME_V2_ROOTFS_ASSET, rootfs);
-        writeFileAtomically(stamp, expectedStamp.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    /** Verify each cached archive against the signed APK manifest, repairing only invalid files. */
+    private synchronized void ensureBundledRuntimeArtifactsCurrent() throws Exception {
+        org.json.JSONObject manifest;
+        try (InputStream input = getAssets().open(CoomiConstants.RUNTIME_V2_MANIFEST_ASSET)) {
+            manifest = new org.json.JSONObject(new String(readFully(input), java.nio.charset.StandardCharsets.UTF_8));
+        }
+        ensureRuntimeArtifact(CoomiConstants.RUNTIME_V2_HOST_ASSET,
+            new File(CoomiConstants.RUNTIME_V2_HOST_PATH), manifest.getJSONObject("host"));
+        ensureRuntimeArtifact(CoomiConstants.RUNTIME_V2_ROOTFS_ASSET,
+            new File(CoomiConstants.RUNTIME_V2_ROOTFS_PATH), manifest.getJSONObject("rootfs"));
         Logger.logInfo(LOG_TAG, "Bundled Runtime V2 artifacts are ready for offline installation");
     }
 
-    private void copyAssetAtomically(String assetName, File target) throws Exception {
-        File parent = target.getParentFile();
-        if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) {
-            throw new IllegalStateException("cannot create parent for " + target.getAbsolutePath());
-        }
-        File temporary = new File(parent, target.getName() + ".asset.tmp");
-        try (InputStream input = getAssets().open(assetName);
-             FileOutputStream output = new FileOutputStream(temporary, false)) {
-            byte[] buffer = new byte[128 * 1024];
-            int count;
-            long total = 0;
-            while ((count = input.read(buffer)) >= 0) {
-                if (count == 0) continue;
-                output.write(buffer, 0, count);
-                total += count;
-            }
-            output.getFD().sync();
-            if (total == 0) throw new IllegalStateException("APK asset is empty: " + assetName);
-        }
-        if (temporary.exists() && !temporary.renameTo(target)) {
-            temporary.delete();
-            throw new java.io.IOException("failed to move " + temporary + " -> " + target);
+    private void ensureRuntimeArtifact(String assetName, File target, org.json.JSONObject metadata) throws Exception {
+        boolean repaired = CoomiRuntimeArtifacts.ensure(target, metadata.getLong("size"), metadata.getString("sha256"),
+            () -> getAssets().open(assetName), (temporary, destination) -> {
+                try { Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath()); }
+                catch (ErrnoException error) { throw new java.io.IOException("cannot replace bundled runtime cache", error); }
+            });
+        if (repaired) {
+            Logger.logInfo(LOG_TAG, "Restored verified bundled runtime archive: " + target.getName());
         }
     }
 
     /** Start the persistent Rust installation state machine once the local API is healthy. */
     private void startBundledRuntimeInstallWhenReady(Process process, int port, String token) {
         Thread previous = mRuntimeInstallThread;
-        if (previous != null && previous.isAlive()) return;
+        // The previous process's health/HTTP worker may still be exiting. It
+        // must not suppress installation for this new engine and its new token.
+        if (previous != null) previous.interrupt();
         Thread installThread = new Thread(() -> {
             for (int attempt = 0; attempt < 180; attempt++) {
-                if (mDestroyed || mEngineProcess != process || !process.isAlive()) return;
+                if (Thread.currentThread().isInterrupted() || mDestroyed
+                    || mEngineProcess != process || !process.isAlive()) return;
                 if (checkHealth(port)) break;
                 try {
                     Thread.sleep(500);
@@ -717,7 +679,8 @@ public class CoomiService extends Service {
                     return;
                 }
             }
-            if (mDestroyed || mEngineProcess != process || !process.isAlive()) return;
+            if (Thread.currentThread().isInterrupted() || mDestroyed
+                || mEngineProcess != process || !process.isAlive()) return;
             if (!checkHealth(port)) {
                 Logger.logError(LOG_TAG, "Runtime V2 auto-install skipped because the engine did not become healthy");
                 return;
@@ -761,6 +724,8 @@ public class CoomiService extends Service {
     }
 
     private void stopEngineSync() {
+        Thread installThread = mRuntimeInstallThread;
+        if (installThread != null) installThread.interrupt();
         Process process = mEngineProcess;
         if (process != null) {
             process.destroy();

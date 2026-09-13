@@ -34,8 +34,11 @@ const card = ref<HTMLElement | null>(null)
 const initialChild = ref('')
 let mounted = true
 let auxiliaryRequest = 0
+let anchorObserver: ResizeObserver | null = null
+let measureFrame = 0
 const bounds = ref({ x: 0, y: 0, width: 360, height: 640 })
-const radius = computed(() => Math.min(136, Math.max(124, bounds.value.width * .35)))
+// Keep a real touch target even in narrow windows; shrinking this fan clips text.
+const radius = ref(136)
 const notch = computed(() => radius.value + 6)
 const title = computed(() => active.value === 'usage' ? '上下文用量' : tools.find(t => t.id === active.value)?.label ?? '')
 const nativeFloating = computed(() => typeof window.CoomiAndroid?.openFloatingWindow === 'function')
@@ -49,9 +52,16 @@ function measure() {
   const rect = anchor.value?.getBoundingClientRect()
   if (!rect) return
   const viewport = window.visualViewport
-  bounds.value = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
+  const next = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
     width: viewport?.width ?? innerWidth,
     height: (viewport?.height ?? innerHeight) + (viewport?.offsetTop ?? 0) }
+  if (Object.keys(next).some(key => next[key as keyof typeof next] !== bounds.value[key as keyof typeof next])) bounds.value = next
+}
+function afterAncestorMotion(event: Event) {
+  // Router entry transforms move the anchor without resizing it. Opening the
+  // tools during that transition otherwise freezes the fan at its initial Y.
+  if (opened.value && event.target instanceof Element && anchor.value
+      && event.target.contains(anchor.value)) measure()
 }
 function toggle() {
   auxiliaryRequest++
@@ -87,6 +97,23 @@ async function openAuxiliary(event: Event) {
   measure(); opened.value = true; active.value = 'auxiliary'; initialChild.value = detail.sessionId; emit('open')
 }
 watch(() => props.floating, floating => { if (floating) { auxiliaryRequest++; opened.value = false; active.value = null } })
+watch(opened, async value => {
+  cancelAnimationFrame(measureFrame)
+  if (!value) return
+  await nextTick()
+  if (!mounted || !opened.value) return
+  measure()
+  closeAnchor.value?.focus()
+  // Follow an in-flight route entry transform until the opening motion settles.
+  // ResizeObserver alone cannot see transforms; stop polling after this burst.
+  const until = performance.now() + 400
+  const followOpening = () => {
+    if (!mounted || !opened.value) return
+    measure()
+    if (performance.now() < until) measureFrame = requestAnimationFrame(followOpening)
+  }
+  measureFrame = requestAnimationFrame(followOpening)
+})
 watch(() => session.sessionId, () => { active.value = null; initialChild.value = '' })
 watch(active, value => {
   if (value) registerOverlay('context-tool-card', () => { active.value = null })
@@ -94,55 +121,53 @@ watch(active, value => {
 })
 onMounted(() => {
   measure()
+  // Font loading, model labels and safe-area changes can resize the header
+  // without a viewport resize. Keep the teleported fan on its actual anchor.
+  if (typeof ResizeObserver !== 'undefined' && anchor.value) {
+    anchorObserver = new ResizeObserver(measure)
+    anchorObserver.observe(anchor.value)
+    const header = anchor.value.closest('header')
+    if (header) anchorObserver.observe(header, { box: 'border-box' })
+  }
   window.addEventListener('resize', measure)
   window.visualViewport?.addEventListener('resize', measure)
   window.visualViewport?.addEventListener('scroll', measure)
   document.addEventListener('pointerdown', outside, true)
   document.addEventListener('keydown', keydown)
+  document.addEventListener('transitionend', afterAncestorMotion, true)
+  document.addEventListener('animationend', afterAncestorMotion, true)
   window.addEventListener('coomi:open-auxiliary', openAuxiliary)
 })
 onBeforeUnmount(() => {
   mounted = false
   auxiliaryRequest++
+  cancelAnimationFrame(measureFrame)
+  anchorObserver?.disconnect()
+  anchorObserver = null
   window.removeEventListener('resize', measure)
   window.visualViewport?.removeEventListener('resize', measure)
   window.visualViewport?.removeEventListener('scroll', measure)
   document.removeEventListener('pointerdown', outside, true)
   document.removeEventListener('keydown', keydown)
+  document.removeEventListener('transitionend', afterAncestorMotion, true)
+  document.removeEventListener('animationend', afterAncestorMotion, true)
   window.removeEventListener('coomi:open-auxiliary', openAuxiliary)
   unregisterOverlay('context-tool-card')
 })
-// All three rows share the usage ring's centre. The whole sector is a hit target,
-// including the space around its label; clipping keeps adjacent targets separate.
+// Flat fan surface; labels live in independent rounded targets, never inside
+// a polygon clip. Short labels leave space for Android's enlarged text setting.
+const shortLabels: Record<Tool, string> = { version: '版本', prompts: '提示', auxiliary: '辅助', usage: '用量', files: '文件', floating: '小窗' }
 const sectors = computed(() => tools.map((tool, index) => {
   const row = index < 3 ? 2 : index < 5 ? 1 : 0
-  const count = row + 1
-  const slot = index < 3 ? index : index < 5 ? index - 3 : 0
-  const step = (radius.value - 22) / 3
-  const inner = 22 + row * step + 1
-  const outer = 22 + (row + 1) * step - 1
-  const start = 180 - slot * 90 / count - 1
-  const end = 180 - (slot + 1) * 90 / count + 1
-  const point = (r: number, degrees: number) => {
-    const angle = degrees * Math.PI / 180
-    return [radius.value + Math.cos(angle) * r, Math.sin(angle) * r]
-  }
-  const points = []
-  for (let n = 0; n <= 24; n++) points.push(point(outer, start + (end - start) * n / 24))
-  for (let n = 0; n <= 24; n++) points.push(point(inner, end + (start - end) * n / 24))
-  const centre = point((inner + outer) / 2, (start + end) / 2)
-  const left = Math.min(...points.map(p => p[0])), top = Math.min(...points.map(p => p[1]))
-  const width = Math.max(...points.map(p => p[0])) - left, height = Math.max(...points.map(p => p[1])) - top
+  const [x, y] = [[-112, 30], [-82, 82], [-30, 112], [-70, 30], [-30, 70], [-30, 30]][index]!
   return { ...tool, row, style: {
-    left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,
-    clipPath: `polygon(${points.map(p => `${(p[0] - left) / width * 100}% ${(p[1] - top) / height * 100}%`).join(',')})`,
-    '--label-x': `${centre[0] - left}px`, '--label-y': `${centre[1] - top}px`,
+    left: `${radius.value + x!}px`, top: `${y}px`,
   } }
 }))
 </script>
 <template>
   <div class="context-tools" data-context-tools>
-    <button v-if="!floating && !opened" class="entry" aria-label="展开快捷工具" :aria-expanded="opened" @click="toggle"><CoomiIcon name="more" :size="21" /></button>
+    <button v-if="!floating" class="entry" :class="{ concealed: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="展开快捷工具" :aria-expanded="opened" @click="toggle"><CoomiIcon name="more" :size="21" /></button>
     <button ref="anchor" class="context-anchor" :class="{ expanded: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="上下文用量" :aria-expanded="opened" @click="opened ? toggle() : emit('usage')">
       <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15" pathLength="100" /><circle class="value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${usagePercent} ${100 - usagePercent}`" /></svg>
       <CoomiIcon v-if="opened" class="close-mark" name="close" :size="15" />
@@ -172,7 +197,8 @@ const sectors = computed(() => tools.map((tool, index) => {
         </section>
         </Transition>
         <nav class="orbit-band" aria-label="快捷工具带">
-          <button v-for="tool in sectors" :key="tool.id" class="orbit-tool" :class="{ selected: active === tool.id }" :style="tool.style" :data-row="tool.row" :aria-label="tool.label" :aria-pressed="active === tool.id" @click="choose(tool.id)"><span class="tool-label"><CoomiIcon :name="tool.icon" :size="16" /><span>{{ tool.id === 'usage' ? '用量' : tool.label }}</span></span></button>
+          <svg class="fan-surface" :viewBox="`0 0 ${radius} ${radius}`" aria-hidden="true"><path :d="`M 0 0 A ${radius} ${radius} 0 0 0 ${radius} ${radius} L ${radius} 22 A 22 22 0 0 1 ${radius - 22} 0 Z`" /></svg>
+          <button v-for="tool in sectors" :key="tool.id" class="orbit-tool" :class="{ selected: active === tool.id }" :style="tool.style" :data-row="tool.row" :aria-label="tool.label" :title="tool.label" :aria-pressed="active === tool.id" @click="choose(tool.id)"><span class="tool-label"><CoomiIcon :name="tool.icon" :size="16" /><span>{{ shortLabels[tool.id] }}</span></span></button>
         </nav>
       </div>
       </Transition>
@@ -183,6 +209,7 @@ const sectors = computed(() => tools.map((tool, index) => {
 .context-tools { display:flex; align-items:center; gap:2px; margin-left:auto; flex-shrink:0; }
 .entry,.context-anchor { width:40px; height:40px; border:0; border-radius:50%; display:grid; place-items:center; background:transparent; color:var(--text-2); flex-shrink:0; }
 .entry:active { background:var(--fill); }
+.entry.concealed { visibility:hidden; }
 .context-anchor { position:relative; transform:translate(4px,-3px); }
 .context-anchor.expanded { visibility:hidden; }
 .context-anchor.orbit-anchor { position:absolute; left:var(--anchor-x); top:var(--anchor-y); transform:translate(-50%,-50%); z-index:2; background:var(--bg); pointer-events:auto; }
@@ -192,10 +219,12 @@ const sectors = computed(() => tools.map((tool, index) => {
 .context-anchor :deep(.close-mark) { position:absolute; width:15px; height:15px; transform:none; }
 .orbit-layer { position:fixed; inset:0; z-index:40; pointer-events:none; }
 .orbit-backdrop { position:fixed; inset:0; z-index:39; background:rgba(25,35,52,.07); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); }
-.orbit-band { position:absolute; left:calc(var(--anchor-x) - var(--orbit-radius)); top:var(--anchor-y); width:var(--orbit-radius); height:var(--orbit-radius); filter:drop-shadow(0 2px 4px rgba(23,32,54,.1)); transform-origin:top right; }
-.orbit-tool { position:absolute; inset:0; width:100%; height:100%; border:0; padding:0; color:var(--text-2); background:var(--bg); pointer-events:auto; transition:background 160ms ease,color 160ms ease; }
-.tool-label { position:absolute; left:var(--label-x); top:var(--label-y); transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:2px; pointer-events:none; }
-.tool-label > span { font-size:9px; line-height:1.15; white-space:nowrap; font-weight:550; }
+.orbit-band { position:absolute; left:calc(var(--anchor-x) - var(--orbit-radius)); top:var(--anchor-y); width:var(--orbit-radius); height:var(--orbit-radius); filter:drop-shadow(0 2px 5px rgba(23,32,54,.05)); transform-origin:top right; }
+.fan-surface { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.fan-surface path { fill:var(--bg); stroke:var(--border); stroke-width:.75; }
+.orbit-tool { position:absolute; width:40px; height:38px; transform:translate(-50%,-50%); border:0; border-radius:10px; padding:0; color:var(--text-2); background:transparent; pointer-events:auto; display:grid; place-items:center; transition:background 160ms ease,color 160ms ease; }
+.tool-label { display:flex; flex-direction:column; align-items:center; gap:3px; pointer-events:none; }
+.tool-label > span { font-size:11px; line-height:1.15; white-space:nowrap; font-weight:550; }
 .orbit-tool.selected { background:var(--blue-soft); color:var(--blue); }
 .orbit-tool:focus-visible { background:var(--blue-soft-2); color:var(--blue); }
 @media(hover:hover) { .orbit-tool:hover { background:var(--blue-soft); color:var(--blue); } }
@@ -223,7 +252,8 @@ h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:now
 .card-reveal-enter-from,.card-reveal-leave-to,.orbit-reveal-leave-to .orbit-card { transform:translate(0,-6px) scale(.985); opacity:0; }
 .orbit-veil-enter-active,.orbit-veil-leave-active { transition:opacity 220ms ease; }
 .orbit-veil-enter-from,.orbit-veil-leave-to { opacity:0; }
-@media(max-width:320px) { .card-content {padding-inline:8px} .card-heading {padding-left:10px} h2 {font-size:14px} .tool-label > span {font-size:8px} }
+@media(max-width:320px) { .card-content {padding-inline:8px} .card-heading {padding-left:10px} h2 {font-size:14px} }
+@media(max-width:280px) { h2 {font-size:12px} .card-heading .usage-link {display:none} }
 @media(prefers-reduced-motion:reduce) {
   .orbit-reveal-enter-active .orbit-band,.orbit-reveal-leave-active .orbit-band,.card-reveal-enter-active,.card-reveal-leave-active,.orbit-reveal-leave-active .orbit-card,.orbit-veil-enter-active,.orbit-veil-leave-active,.orbit-tool { transition:none; }
   .orbit-reveal-enter-from .orbit-band,.orbit-reveal-leave-to .orbit-band,.card-reveal-enter-from,.card-reveal-leave-to,.orbit-reveal-leave-to .orbit-card { transform:none; }

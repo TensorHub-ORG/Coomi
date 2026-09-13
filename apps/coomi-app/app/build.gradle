@@ -6,6 +6,19 @@ def coomiDevBuild = System.getenv("COOMI_DEV_BUILD") == "1"
 def coomiPackageName = coomiDevBuild ? "com.coomidev.android" : "com.coomi.android"
 def coomiAppName = coomiDevBuild ? "CoomiDev" : "Coomi"
 def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
+// A rollback release keeps the chosen stable source/versionName but must use a
+// newer Android versionCode. A project property takes precedence over the env.
+def coomiVersionCodeInput = providers.gradleProperty("coomiVersionCode")
+    .orElse(providers.environmentVariable("COOMI_VERSION_CODE")).orNull
+def coomiVersionCodeOverride = null
+if (coomiVersionCodeInput != null) {
+    if (!(coomiVersionCodeInput ==~ /[1-9][0-9]{0,9}/)
+            || coomiVersionCodeInput.toLong() > 2100000000L) {
+        throw new GradleException(
+            "coomiVersionCode / COOMI_VERSION_CODE must be an integer between 1 and 2100000000.")
+    }
+    coomiVersionCodeOverride = coomiVersionCodeInput.toInteger()
+}
 
 configurations.configureEach {
     resolutionStrategy.force "com.google.guava:guava:24.1-jre"
@@ -72,9 +85,10 @@ android {
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion coomiTargetSdk
         // Keep the executable Termux bootstrap security domain for v1.4.0.
-        versionCode 71
-        versionName "1.4.8-test.5"
+        versionCode 72
+        versionName "1.4.8-test.6"
 
+        if (coomiVersionCodeOverride != null) versionCode = coomiVersionCodeOverride
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
 
@@ -334,6 +348,7 @@ tasks.register("stageCoomiRustAndroid", Copy) {
 tasks.register("stageCoomiRuntimeV2", Copy) {
     group = "coomi build"
     description = "Bundle the verified ARM64 PRoot host and Ubuntu rootfs for offline installation."
+    inputs.file(file("src/main/assets/runtime-v2-manifest.json"))
     from(coomiRuntimeDist) {
         include "proot-host-arm64.tar.gz", "ubuntu-noble-arm64.tar.gz"
         into "runtime-v2"
@@ -342,10 +357,21 @@ tasks.register("stageCoomiRuntimeV2", Copy) {
     into coomiRuntimeAssetsDir
     doFirst {
         delete coomiRuntimeAssetsDir
-        ["proot-host-arm64.tar.gz", "ubuntu-noble-arm64.tar.gz"].each { name ->
+        def manifest = new groovy.json.JsonSlurper().parse(file("src/main/assets/runtime-v2-manifest.json"))
+        ["proot-host-arm64.tar.gz": "host", "ubuntu-noble-arm64.tar.gz": "rootfs"].each { name, key ->
             def artifact = new File(coomiRuntimeDist, name)
             if (!artifact.isFile() || artifact.length() == 0) {
                 throw new GradleException("Runtime V2 artifact is missing: ${artifact}")
+            }
+            def expected = manifest[key]
+            def digest = java.security.MessageDigest.getInstance("SHA-256")
+            artifact.withInputStream { input ->
+                byte[] buffer = new byte[1024 * 1024]
+                int count
+                while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+            }
+            if (artifact.length() != expected.size || digest.digest().encodeHex().toString() != expected.sha256) {
+                throw new GradleException("Bundled runtime artifact does not match manifest: ${name}")
             }
         }
     }
@@ -376,6 +402,16 @@ tasks.named("preBuild").configure {
 task versionName {
     doLast {
         print android.defaultConfig.versionName
+    }
+}
+
+tasks.register("printVersionInfo") {
+    group = "coomi build"
+    description = "Print the resolved package and version before building an APK."
+    doLast {
+        println "applicationId=${android.defaultConfig.applicationId}"
+        println "versionName=${android.defaultConfig.versionName}"
+        println "versionCode=${android.defaultConfig.versionCode}"
     }
 }
 

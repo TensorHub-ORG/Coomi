@@ -48,7 +48,30 @@ with sync_playwright() as p:
       return {radius: band.width, dx: band.right - (anchor.x + anchor.width / 2), dy: band.top - (anchor.y + anchor.height / 2)}
     }''')
     assert geometry['radius'] <= 140 and abs(geometry['dx']) < 1 and abs(geometry['dy']) < 1, geometry
+    # Header layout can change after opening (font/safe-area/model changes),
+    # with no window resize event. The teleported fan must follow its anchor.
+    header = page.locator('.topbar')
+    header.evaluate("e => e.style.paddingTop = '30px'")
+    page.wait_for_function('''() => {
+      const band = document.querySelector('.orbit-band').getBoundingClientRect();
+      const anchor = document.querySelector('.context-tools .context-anchor').getBoundingClientRect();
+      return Math.abs(band.top - anchor.y - anchor.height / 2) < 1;
+    }''')
+    header.evaluate("e => e.style.removeProperty('padding-top')")
+    page.wait_for_function('''() => {
+      const band = document.querySelector('.orbit-band').getBoundingClientRect();
+      const anchor = document.querySelector('.context-tools .context-anchor').getBoundingClientRect();
+      return Math.abs(band.top - anchor.y - anchor.height / 2) < 1;
+    }''')
     assert [page.locator(f'.orbit-tool[data-row="{row}"]').count() for row in [2, 1, 0]] == [3, 2, 1]
+    def assert_tool_labels_unclipped():
+        clipped = page.locator('.orbit-tool').evaluate_all('''buttons => buttons.filter(button => {
+          const label = button.querySelector('.tool-label'), r = label.getBoundingClientRect();
+          return [[r.left+1,r.top+1],[r.right-1,r.top+1],[r.left+1,r.bottom-1],[r.right-1,r.bottom-1]]
+            .some(([x,y]) => !button.contains(document.elementFromPoint(x,y)));
+        }).map(button => button.getAttribute('aria-label'))''')
+        assert not clipped, clipped
+    assert_tool_labels_unclipped()
     page.get_by_role('button', name='提示词', exact=True).click()
     expect(page.get_by_role('dialog', name='提示词', exact=True)).to_be_visible()
     expect(page.locator('.orbit-backdrop')).to_be_visible()
@@ -124,6 +147,13 @@ with sync_playwright() as p:
     for width in [240, 280, 320, 430]:
         page.set_viewport_size({'width': width, 'height': 640})
         page.get_by_role('button', name='展开快捷工具').click()
+        page.wait_for_timeout(300)
+        assert_tool_labels_unclipped()
+        enlarged_text = page.add_style_tag(content='.tool-label > span { font-size: 14px !important; }')
+        assert_tool_labels_unclipped()
+        if width == 240:
+            page.screenshot(path=str(artifacts / 'tools-240-large-text.png'))
+        enlarged_text.evaluate('(e)=>e.remove()')
         for label in ['版本工具', '提示词', '辅助会话', '上下文用量', '文件管理', '小窗']:
             button = page.get_by_role('navigation', name='快捷工具带').get_by_role('button', name=label, exact=True)
             button.click()

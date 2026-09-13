@@ -118,6 +118,13 @@ function openSearch() {
   void nextTick(() => searchInput.value?.focus())
 }
 
+function onSearchShortcut(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && blocks.value.length) {
+    event.preventDefault()
+    openSearch()
+  }
+}
+
 function closeSearch() {
   searchOpen.value = false
   searchQuery.value = ''
@@ -147,6 +154,7 @@ let ro: ResizeObserver | null = null
 
 onMounted(() => {
   session.connect()
+  window.addEventListener('keydown', onSearchShortcut)
   window.addEventListener('coomi:open-session', openSessionFromNative)
   window.addEventListener('coomi:flush-persistence', session.flushPersistence)
   // 记录引擎当前工作目录，会话列表据此把不同项目的会话隔离开。
@@ -189,6 +197,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:flush-persistence', session.flushPersistence)
   window.removeEventListener('focus', syncDigitalLifeMode)
   closeDrawer()
+  window.removeEventListener('keydown', onSearchShortcut)
+  if (searchTimer) clearTimeout(searchTimer)
+  if (hlTimer) clearTimeout(hlTimer)
   session.flushPersistence()
   if (runningPoll) { clearInterval(runningPoll); runningPoll = null }
   ro?.disconnect(); ro = null
@@ -293,10 +304,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
               emit-resize
               @resize="follow"
             >
-              <!-- 入场动画放内层：外层节点由虚拟滚动管理 transform，动画会覆盖定位 -->
-              <div class="rise-in" :style="{ '--i': Math.min(index, 6) }">
-                <TimelineBlock :block="item" />
-              </div>
+              <!-- Recycled rows stay visible when their message or height changes. -->
+              <TimelineBlock :block="item" />
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
@@ -305,12 +314,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
       <Transition name="pop">
         <button v-if="!following" class="to-bottom" aria-label="回到底部" @click="jumpToBottom">
           <CoomiIcon name="arrowDown" :size="18" />
-        </button>
-      </Transition>
-
-      <Transition name="pop">
-        <button v-if="blocks.length > 0" class="search-toggle" aria-label="搜索会话" title="搜索当前会话" @click="openSearch">
-          <CoomiIcon name="search" :size="16" />
         </button>
       </Transition>
 
@@ -424,16 +427,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   transition: transform .12s ease, background .15s;
 }
 .to-bottom:active { background: var(--fill); transform: scale(.94); }
-.search-toggle {
-  position: absolute; left: 50%; bottom: 116px; z-index: 8;
-  display: grid; place-items: center;
-  width: 40px; height: 40px; margin-left: -60px;
-  border: 1px solid var(--border); border-radius: 50%;
-  background: var(--bg); color: var(--text-2);
-  box-shadow: var(--shadow-2);
-  transition: transform .12s ease, background .15s;
-}
-.search-toggle:active { background: var(--fill); transform: scale(.94); }
 .search-bar {
   position: absolute; z-index: 9; top: 54px; left: 10px; right: 10px;
   display: flex; align-items: center; gap: 7px;

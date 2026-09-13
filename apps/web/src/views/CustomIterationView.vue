@@ -16,7 +16,7 @@ const PROMPT = `我准备在 Coomi 的手机虚拟 Linux 环境中进行 Coomi �
 开始后，你的第一个任务是先询问我本次使用 GitHub 还是 Gitee 作为开源协作平台（GitHub 仓库：https://github.com/TensorHub-ORG/Coomi；Gitee 仓库：https://gitee.com/tensorhub/coomi），确认后再按所选平台执行下面的步骤。
 
 请先检查本地开发环境：
-1. 确认当前命令运行在 Runtime V2 的 Debian ProotLinux 中，源码目录为 ~/custom_coomi，持久 Build Kit 挂载为 /opt/coomi-dev。
+1. 确认当前命令运行在内置 Ubuntu ProotLinux 中，源码目录为 ~/custom_coomi，持久 Build Kit 挂载为 /opt/coomi-dev。
 2. 这次迭代优先使用所选平台的云端 CI（GitHub Actions / Gitee Go）构建 APK，不要一开始在手机上安装 Android SDK/NDK 或尝试本地编译。
 3. 先检查 gh、Git、远程仓库和所选平台 CI 权限；如果缺少 gh 或认证失效，先完成认证并验证，不要把 Token 写入命令、日志或仓库。
 4. 本地环境只用于编辑、测试、提交和触发工作流。若需要诊断本地构建环境，再运行 coomidev-build doctor；不要把目录已创建当作工具链已就绪。

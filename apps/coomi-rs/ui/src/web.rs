@@ -879,6 +879,11 @@ pub async fn serve(
         studio_approvals: Arc::new(StdMutex::new(HashMap::new())),
         studio_runs: Arc::new(StdMutex::new(HashMap::new())),
     };
+    if let Err(error) = RuntimeManager::open(&state.home)
+        .and_then(|manager| manager.recover_interrupted_install())
+    {
+        eprintln!("[runtime] interrupted installation recovery failed: {error:#}");
+    }
     state.workflow_scheduler.start();
     // 定时快照（P1-3）：后台循环每 15 秒检查分钟并命中 cron 打快照。
     crate::snapshot_schedule::start_snapshot_scheduler(snapshot_home, snapshot_cwd);
@@ -5553,7 +5558,6 @@ fn spawn_runtime_install(
     let runtime_manager = manager.clone();
     let task_manager = Arc::clone(&state.task_manager);
     let task_id = record.id.clone();
-    let runtime_home = state.home.clone();
     tokio::spawn(async move {
         let _ = task_manager.transition(
             &task_id,
@@ -5567,32 +5571,40 @@ fn spawn_runtime_install(
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             };
-            task_manager.transition(
-                &task_id,
-                TaskStatus::Running,
-                Some("downloading verified runtime artifacts"),
-            )?;
-            runtime_manager.begin_install()?;
-            let host = runtime_manager
-                .download_artifact("proot-host-arm64.tar.gz", &manifest.host)
-                .await?;
-            let rootfs = runtime_manager
-                .download_artifact("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
-                .await?;
-            runtime_manager.install(&manifest, &host, &rootfs)?;
-            // 安装后执行级冒烟：proot 必须真正跑起 guest 二进制（含解释器/符号链接）才算成功，
-            // 避免残缺 rootfs 被标记为 Ready。
-            {
-                let backend = coomi_services::ProotLinuxBackend {
-                    runtime_root: runtime_home.join("runtime-v2"),
-                    version: manifest.runtime_version.clone(),
-                };
-                coomi_services::RuntimeBackend::health_check(&backend)
-                    .await
-                    .context("post-install guest health check failed")?;
+            let installation: Result<()> = async {
+                task_manager.transition(
+                    &task_id,
+                    TaskStatus::Running,
+                    Some("downloading verified runtime artifacts"),
+                )?;
+                runtime_manager.begin_install()?;
+                let host = runtime_manager
+                    .download_artifact("proot-host-arm64.tar.gz", &manifest.host)
+                    .await?;
+                let rootfs = runtime_manager
+                    .download_artifact("ubuntu-rootfs-arm64.tar.gz", &manifest.rootfs)
+                    .await?;
+                let installer = runtime_manager.clone();
+                let runtime = tokio::runtime::Handle::current();
+                // Keep hashing/unpacking off API workers and validate the staged
+                // guest before publishing Ready or moving the customized image.
+                tokio::task::spawn_blocking(move || {
+                    installer.install(&manifest, &host, &rootfs, |candidate| {
+                        runtime.block_on(coomi_services::RuntimeBackend::health_check(candidate))
+                    })
+                })
+                .await
+                .context("runtime installer worker stopped")??;
+                Ok(())
+            }
+            .await;
+            if let Err(error) = &installation {
+                // Restore the previous state while holding the install lease;
+                // another queued request must not overwrite the recovery journal.
+                runtime_manager.fail_install(format!("{error:#}"))?;
             }
             drop(lease);
-            Ok(())
+            installation
         }
         .await;
         match result {
@@ -5605,7 +5617,6 @@ fn spawn_runtime_install(
             }
             Err(error) => {
                 let summary = format!("{error:#}");
-                let _ = runtime_manager.fail_install(&summary);
                 let _ = task_manager.transition(&task_id, TaskStatus::Failed, Some(&summary));
             }
         }

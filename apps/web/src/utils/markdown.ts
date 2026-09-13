@@ -85,10 +85,7 @@ function sanitize(html: string): string {
   return doc.body.innerHTML
 }
 
-/**
- * 流式期间同一段文字会被反复渲染（MessageBubble 每 60ms 重建一次全部块），
- * 已经定稿的块没必要一遍遍解析，缓存住。
- */
+/** Cache repeated completed messages and identical render requests. */
 const CACHE_MAX = 240
 const cache = new Map<string, string>()
 
@@ -112,4 +109,5 @@ export function renderMarkdown(src: string): string {
 function decorateCodeBlocks(html: string): string {
   if (!html.includes('<pre>')) return html
   return html.replace(/<pre>/g, '<div class="code-wrap"><button type="button" class="code-copy" data-copy-code>复制</button><pre>')
+    .replace(/<\/pre>/g, '</pre></div>')
 }

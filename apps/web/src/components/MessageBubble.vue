@@ -1,12 +1,5 @@
 <script setup lang="ts">
-/**
- * 消息气泡。
- *
- * 助手消息按段落切块渲染 —— 这是「瀑布流」的关键：
- * 已经写完的段落是稳定 DOM，只有最后一块随 token 重绘，
- * 新段落出现时自己做一次 8px 上浮。整条消息整体重排会闪，切块之后不会。
- * marked 的调用同时被 60ms 节流，流式期间不会一秒解析几十次 markdown。
- */
+/** Sanitized markdown is patched in place every 60ms to preserve streaming DOM. */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { AssistantMessage, UserMessage } from '@/stores/viewModel'
 import { useSessionStore } from '@/stores/session'
@@ -15,12 +8,13 @@ import { speak, stopSpeaking } from '@/bridge/tts'
 import { apiSend } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
+import StableMarkdown from './StableMarkdown.vue'
 
 const props = defineProps<{ msg: AssistantMessage | UserMessage }>()
 const session = useSessionStore()
 
 const RATE = 60
-const blocks = ref<string[]>([])
+const html = ref('')
 const copied = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 let last = 0
@@ -103,33 +97,8 @@ const filePaths = computed(() => {
   return out
 })
 
-/** 按空行切块，但围栏代码块整体保留。 */
-function splitBlocks(text: string): string[] {
-  const out: string[] = []
-  let buf: string[] = []
-  let fence: string | null = null
-  const flush = () => {
-    const t = buf.join('\n').trim()
-    if (t) out.push(t)
-    buf = []
-  }
-  for (const line of text.split('\n')) {
-    const m = /^\s*(```+|~~~+)/.exec(line)
-    if (fence) {
-      buf.push(line)
-      if (m && line.trim().startsWith(fence)) { fence = null; flush() }
-      continue
-    }
-    if (m) { flush(); fence = m[1]; buf.push(line); continue }
-    if (line.trim() === '') { flush(); continue }
-    buf.push(line)
-  }
-  flush()
-  return out
-}
-
 function rebuild() {
-  blocks.value = splitBlocks(src.value).map(renderMarkdown)
+  html.value = renderMarkdown(src.value)
 }
 
 /** 批次五 #6：代码块「复制」按钮的事件委托（v-html 内容不带 Vue 绑定）。 */
@@ -169,7 +138,14 @@ function schedule() {
   timer = setTimeout(() => { timer = null; last = Date.now(); rebuild() }, wait)
 }
 
-watch(src, schedule, { immediate: true })
+// Recycled components must not display the previous message until a timer fires.
+watch(() => props.msg.id, () => {
+  if (timer) { clearTimeout(timer); timer = null }
+  copied.value = false
+  last = Date.now()
+  rebuild()
+}, { immediate: true })
+watch(src, schedule)
 watch(streaming, schedule)
 onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 
@@ -232,7 +208,7 @@ async function saveToMemory() {
 <template>
   <div v-if="isUser" class="row user">
     <div class="wrap user-wrap">
-      <div class="bubble cascade">{{ msg.content }}</div>
+      <div class="bubble">{{ msg.content }}</div>
       <div class="acts user-acts">
         <button class="act" @click="copyAll">
           <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
@@ -259,7 +235,7 @@ async function saveToMemory() {
           <span>{{ speaking ? '停止' : '朗读' }}</span>
         </button>
       </div>
-      <div v-for="(h, i) in blocks" :key="i" class="md blk card-blk cascade" v-html="h" @click="onBlockClick" />
+      <StableMarkdown class="md blk card-blk" :html="html" @click="onBlockClick" />
       <FileInline v-if="filePaths.length" :paths="filePaths" />
       <span v-if="streaming" class="stream-caret" />
       <div v-if="isEgg" class="life-card-foot">
@@ -278,7 +254,7 @@ async function saveToMemory() {
           <span>{{ speaking ? '停止' : '朗读' }}</span>
         </button>
       </div>
-      <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" @click="onBlockClick" />
+      <StableMarkdown class="md blk" :html="html" @click="onBlockClick" />
       <FileInline v-if="filePaths.length" :paths="filePaths" />
       <span v-if="streaming" class="stream-caret" />
     </template>
