@@ -18,6 +18,7 @@ const session = useSessionStore()
 const config = useConfigStore()
 const sessionsStore = useSessionsStore()
 const router = useRouter()
+const EFFORT_PARTICLES = { auto: 3, low: 2, medium: 4, high: 6, xhigh: 8 } as const
 
 /** 斜杠指令：点击后填入输入框，可编辑后发送。hint 存在时作为默认任务文本一并填入。 */
 const SLASH_COMMANDS = [
@@ -354,7 +355,14 @@ watch(text, () => {
     </div>
     <div v-if="quickOpen" class="quick">
       <p class="qhead reasoning-head">推理强度</p>
-      <div class="reasoning-options"><button v-for="item in REASONING_EFFORTS" :key="item.value" :class="{ selected: config.reasoningEffort === item.value }" @click="session.setReasoningEffort(item.value)">{{ item.label }}</button></div>
+      <div class="reasoning-options">
+        <button v-for="item in REASONING_EFFORTS" :key="item.value" :data-effort="item.value" :class="{ selected: config.reasoningEffort === item.value }" @click="session.setReasoningEffort(item.value)">
+          <span v-if="config.reasoningEffort === item.value" class="effort-particles" aria-hidden="true">
+            <i v-for="n in EFFORT_PARTICLES[item.value]" :key="n" class="effort-particle" />
+          </span>
+          <span class="effort-label">{{ item.label }}</span>
+        </button>
+      </div>
       <p class="qhead">指令</p>
       <div v-if="hasNative" class="file-actions">
         <button class="qchip file" @click="importFiles"><CoomiIcon name="fileRead" :size="15" />选择文件</button>
@@ -589,13 +597,30 @@ watch(text, () => {
 }
 .reasoning-head { margin-top: 3px; }
 .reasoning-options { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:4px; margin-bottom:8px; }
-.reasoning-options button { position:relative; min-width:0; height:32px; overflow:visible; isolation:isolate; border-radius:6px; background:var(--fill); color:var(--text-2); font-size:12px; }
-.reasoning-options button::after { content:''; position:absolute; z-index:-1; inset:-3px; border-radius:9px; opacity:0; background:radial-gradient(circle, color-mix(in srgb,var(--blue) 34%,transparent), transparent 68%); pointer-events:none; }
-.reasoning-options button.selected { background:var(--blue-soft); color:var(--blue); font-weight:650; }
-.reasoning-options button.selected::after { opacity:1; animation:reasoning-ripple 1.8s ease-out infinite; }
-.reasoning-options button:nth-child(2).selected::after { inset:-5px; }
-.reasoning-options button:nth-child(3).selected::after { inset:-8px; }
-.reasoning-options button:nth-child(4).selected::after, .reasoning-options button:nth-child(5).selected::after { inset:-11px; }
+.reasoning-options button { position:relative; min-width:0; height:32px; overflow:hidden; isolation:isolate; border-radius:7px; background:var(--fill); color:var(--text-2); font-size:12px; transition:background 160ms ease,color 160ms ease,box-shadow 160ms ease,transform 120ms ease; }
+.reasoning-options button.selected { background:color-mix(in srgb,var(--blue-soft) 84%,var(--bg)); color:var(--blue); font-weight:650; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blue) 13%,transparent); }
+.reasoning-options button:active { transform:scale(.96); }
+.effort-label { position:relative; z-index:2; }
+.effort-particles { position:absolute; z-index:1; inset:0; overflow:hidden; border-radius:inherit; pointer-events:none; }
+.effort-particle {
+  position:absolute; left:var(--px); top:var(--py); width:var(--particle-size); height:var(--particle-size);
+  border-radius:50%; background:color-mix(in srgb,var(--blue) 82%,white);
+  box-shadow:0 0 var(--particle-glow) color-mix(in srgb,var(--blue) 72%,transparent);
+  opacity:0; animation:effort-particle-rise var(--particle-speed) ease-in-out infinite;
+}
+.reasoning-options button[data-effort='auto'] { --particle-size:2px; --particle-glow:4px; --particle-alpha:.42; --particle-rise:-7px; --particle-speed:2.8s; }
+.reasoning-options button[data-effort='low'] { --particle-size:1.5px; --particle-glow:3px; --particle-alpha:.28; --particle-rise:-5px; --particle-speed:3.2s; }
+.reasoning-options button[data-effort='medium'] { --particle-size:2px; --particle-glow:4px; --particle-alpha:.48; --particle-rise:-7px; --particle-speed:2.7s; }
+.reasoning-options button[data-effort='high'] { --particle-size:2.5px; --particle-glow:5px; --particle-alpha:.68; --particle-rise:-9px; --particle-speed:2.25s; }
+.reasoning-options button[data-effort='xhigh'] { --particle-size:3px; --particle-glow:7px; --particle-alpha:.88; --particle-rise:-11px; --particle-speed:1.9s; }
+.effort-particle:nth-child(1) { --px:13%; --py:72%; --drift-x:-2px; animation-delay:-.2s; }
+.effort-particle:nth-child(2) { --px:76%; --py:67%; --drift-x:2px; animation-delay:-1.05s; }
+.effort-particle:nth-child(3) { --px:46%; --py:78%; --drift-x:-1px; animation-delay:-1.7s; }
+.effort-particle:nth-child(4) { --px:88%; --py:43%; --drift-x:-2px; animation-delay:-.65s; }
+.effort-particle:nth-child(5) { --px:27%; --py:48%; --drift-x:2px; animation-delay:-1.35s; }
+.effort-particle:nth-child(6) { --px:61%; --py:53%; --drift-x:1px; animation-delay:-.4s; }
+.effort-particle:nth-child(7) { --px:7%; --py:39%; --drift-x:2px; animation-delay:-1.55s; }
+.effort-particle:nth-child(8) { --px:94%; --py:78%; --drift-x:-1px; animation-delay:-.9s; }
 .life-stats-card { position:absolute; z-index:4; left:12px; right:12px; bottom:calc(100% + 10px); overflow:hidden; padding:11px 12px 12px; border:1px solid color-mix(in srgb,var(--blue) 35%,var(--border)); border-radius:13px; background:color-mix(in srgb,var(--bg) 94%,var(--blue-soft)); box-shadow:0 8px 28px color-mix(in srgb,var(--blue) 20%,transparent); animation:life-card-in .2s ease both; }
 .life-stats-card header { display:flex; align-items:center; justify-content:space-between; color:var(--text); font-size:12px; font-weight:650; }
 .life-stats-card header button { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--fill); color:var(--text-2); }
@@ -609,9 +634,14 @@ watch(text, () => {
 .wave-baseline { fill:none; stroke:var(--border-strong); stroke-width:1.4; vector-effect:non-scaling-stroke; opacity:.9; }
 .life-stats-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:7px 12px; }.life-stats-grid span { display:flex; justify-content:space-between; gap:8px; color:var(--text-3); font-size:11px; }.life-stats-grid strong { color:var(--text-2); font-weight:600; }
 @keyframes life-card-in { from { opacity:0; transform:translateY(5px) scale(.98); } to { opacity:1; transform:none; } }
-@keyframes reasoning-ripple { 0%,100% { transform:scale(.92); opacity:.35; } 50% { transform:scale(1.12); opacity:.9; } }
+@keyframes effort-particle-rise {
+  0%,100% { opacity:0; transform:translate3d(0,3px,0) scale(.45); }
+  22% { opacity:var(--particle-alpha); }
+  68% { opacity:var(--particle-alpha); }
+  88% { opacity:0; transform:translate3d(var(--drift-x),var(--particle-rise),0) scale(1.08); }
+}
 @keyframes life-wave-breathe { 0% { transform:translateX(-1.5px) scaleY(.9); opacity:.72; } 50% { transform:translateX(0) scaleY(1.04); opacity:1; } 100% { transform:translateX(1.5px) scaleY(.94); opacity:.8; } }
-@media (prefers-reduced-motion: reduce) { .wave { animation-duration:8s; } }
+@media (prefers-reduced-motion: reduce) { .wave { animation-duration:8s; } .effort-particle { animation:none; opacity:.24; } }
 .qhead { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-3); }
 .file-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
 .qchip.file { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); }

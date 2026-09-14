@@ -7,6 +7,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSessionsStore, type TaskDetail, type TaskInfo } from '@/stores/sessions'
 
 const router = useRouter()
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 const session = useSessionStore()
 const sessions = useSessionsStore()
 const detail = ref<TaskDetail | null>(null)
@@ -70,8 +71,8 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="任务中心" @back="router.push('/')" />
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" title="任务中心" @back="router.push('/')" />
     <main class="body">
       <div class="summary">
         <span><strong>{{ active.length }}</strong> 个任务运行中</span>
@@ -158,6 +159,9 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .body { flex: 1; overflow-y: auto; padding: 10px 12px calc(var(--safe-bottom) + 24px); }
+.page.embedded { min-height:0; background:transparent; }
+.embedded .body { padding:0 2px 14px; }
+.embedded .summary { padding-top:0; }
 .summary { display: flex; justify-content: space-between; align-items: baseline; min-height: 40px; padding: 8px 4px; color: var(--text-2); font-size: 13px; }
 .summary strong { color: var(--blue); font-size: 20px; }
 .sec-label { margin: 14px 4px 7px; }

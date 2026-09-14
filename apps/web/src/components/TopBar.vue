@@ -22,7 +22,6 @@ const session = useSessionStore()
 const connection = useConnectionStore()
 const router = useRouter()
 const modelOpen = ref(false)
-const usageOpen = ref(false)
 const pathPickerOpen = ref(false)
 const pathInput = ref('')
 const pathNotice = ref('')
@@ -106,7 +105,6 @@ onMounted(async () => {
 
 function toggleModel() {
   modelOpen.value = !modelOpen.value
-  usageOpen.value = false
   if (modelOpen.value) {
     const selected = modelGroups.value.find(group => group.items.some(item => (
       item.providerId === config.currentProviderId && item.model === config.currentModel
@@ -115,17 +113,11 @@ function toggleModel() {
   }
 }
 
-function toggleUsage() {
-  usageOpen.value = !usageOpen.value
-  modelOpen.value = false
-}
-
 // ── 会话标记路径（第三批 5：绑定为会话执行目录）──
 function openPathPicker() {
   pathInput.value = session.cwd || ''
   pathNotice.value = ''
   pathPickerOpen.value = true
-  usageOpen.value = false
 }
 
 function pickPath(path: string) {
@@ -186,17 +178,9 @@ function browseInFileManager() {
     </div>
     </Teleport>
 
-    <ContextTools :floating="props.floating" :usage-percent="usagePercent" @usage="toggleUsage" @open="usageOpen = false; modelOpen = false">
+    <ContextTools :floating="props.floating" :usage-percent="usagePercent" @open="modelOpen = false">
       <template #usage><UsageDetails :runtime-info="runtimeInfo" :env-badge-class="envBadgeClass" :env-badge-label="envBadgeLabel" :env-detail="envDetail" @path="openPathPicker" /></template>
     </ContextTools>
-
-    <Teleport to="body">
-    <button v-if="usageOpen" class="usage-scrim" aria-label="关闭上下文数据" @click="usageOpen = false" />
-    <div v-if="usageOpen" class="usage-menu">
-      <UsageDetails :runtime-info="runtimeInfo" :env-badge-class="envBadgeClass" :env-badge-label="envBadgeLabel" :env-detail="envDetail" @path="openPathPicker" />
-    </div>
-
-    </Teleport>
 
     <div v-if="pathPickerOpen" class="path-mask" @click="pathPickerOpen = false">
       <div class="path-sheet" @click.stop>
@@ -256,25 +240,6 @@ function browseInFileManager() {
 }
 .model-list { max-height: min(43vh, 322px); overflow-y: auto; padding-top: 5px; scrollbar-width: none; }
 .model-list::-webkit-scrollbar { display: none; }
-.usage-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: transparent; }
-.usage-menu {
-  position: absolute; z-index: 20; top: calc(var(--safe-top) + 49px); right: 8px;
-  width: min(92vw, 390px); max-height: min(72vh, 560px);
-  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
-  padding: 12px 13px; padding-right: 10px;
-  border: 1px solid var(--border); border-radius: var(--r-card);
-  background: var(--bg); box-shadow: var(--shadow-2);
-  transform-origin: top right; animation: usage-pop .2s cubic-bezier(.2, .9, .3, 1.15) both;
-}
-/* 滚动条内收：轨道上下留出圆角半径的边距，滑块不会伸进圆角视觉区 */
-.usage-menu::-webkit-scrollbar { width: 4px; }
-.usage-menu::-webkit-scrollbar-track { margin: 16px 0; background: transparent; }
-.usage-menu::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
-@keyframes usage-pop {
-  from { opacity: 0; transform: scale(.92) translateY(-6px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
 .path-mask { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.4); display: flex; align-items: flex-end; }
 .path-sheet {
   max-height: 100%; overflow-y: auto;
@@ -326,16 +291,6 @@ function browseInFileManager() {
 /* 顶栏流内子元素是 菜单/小窗/用量 三个：space-between 会把小窗按钮挤到正中间，
    被绝对定位的模型名盖住。margin-left:auto 让它靠右与用量按钮成组。 */
 .floating-button { margin-left: auto; margin-right: 2px; }
-.usage-button {
-  position: relative; display: grid; place-items: center; flex-shrink: 0;
-  width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--text-2);
-}
-.usage-button:active { background: var(--fill); }
-.usage-ring { width: 30px; height: 30px; transform: rotate(-90deg); }
-.usage-ring circle { fill: none; stroke-width: 3.8; }
-.usage-track { stroke: var(--border-strong); }
-.usage-value { stroke: var(--blue); stroke-linecap: round; transition: stroke-dasharray .22s ease; }
-
 .center {
   position: relative; flex: 1; min-width: 0;
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;

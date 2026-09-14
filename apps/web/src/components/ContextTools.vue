@@ -6,15 +6,17 @@ import CoomiIcon from './CoomiIcon.vue'
 import PromptLibrary from './PromptLibrary.vue'
 
 const props = defineProps<{ floating?: boolean; usagePercent: number }>()
-const emit = defineEmits<{ usage: []; open: [] }>()
+const emit = defineEmits<{ open: [] }>()
 const session = useSessionStore()
 const tools = [
   { id: 'version', label: '版本工具', icon: 'git' },
-  { id: 'prompts', label: '提示词', icon: 'pencil' },
-  { id: 'auxiliary', label: '辅助会话', icon: 'chat' },
-  { id: 'usage', label: '上下文用量', icon: 'tachometer' },
+  { id: 'tasks', label: '任务中心', icon: 'todo' },
   { id: 'files', label: '文件管理', icon: 'folder' },
   { id: 'floating', label: '小窗', icon: 'floatingWindow' },
+  { id: 'prompts', label: '提示词', icon: 'pencil' },
+  { id: 'auxiliary', label: '辅助会话', icon: 'chat' },
+  { id: 'memory', label: '持久记忆', icon: 'memory' },
+  { id: 'usage', label: '上下文用量', icon: 'tachometer' },
 ] as const
 type Tool = typeof tools[number]['id']
 const versionViews = {
@@ -25,6 +27,8 @@ const versionViews = {
 }
 const AuxiliaryChat = defineAsyncComponent(() => import('./AuxiliaryChat.vue'))
 const FileManager = defineAsyncComponent(() => import('@/views/FileManagerView.vue'))
+const TasksView = defineAsyncComponent(() => import('@/views/TasksView.vue'))
+const MemoryView = defineAsyncComponent(() => import('@/views/MemoryView.vue'))
 const versionTabs = [{ id: 'git', label: 'Git 面板' }, { id: 'restore', label: '一键还原' }, { id: 'ops', label: '运维诊断' }, { id: 'data', label: '数据工具' }] as const
 const version = ref<keyof typeof versionViews>('git')
 const opened = ref(false), active = ref<Tool | 'usage' | null>(null)
@@ -37,8 +41,8 @@ let auxiliaryRequest = 0
 let anchorObserver: ResizeObserver | null = null
 let measureFrame = 0
 const bounds = ref({ x: 0, y: 0, width: 360, height: 640 })
-// Keep a real touch target even in narrow windows; shrinking this fan clips text.
-const radius = ref(136)
+// 三层 4–3–1 极坐标布局需要保留真实触控尺寸；160px 仍能适配 240px 小窗。
+const radius = ref(160)
 const notch = computed(() => radius.value + 6)
 const title = computed(() => active.value === 'usage' ? '上下文用量' : tools.find(t => t.id === active.value)?.label ?? '')
 const nativeFloating = computed(() => typeof window.CoomiAndroid?.openFloatingWindow === 'function')
@@ -154,23 +158,30 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:open-auxiliary', openAuxiliary)
   unregisterOverlay('context-tool-card')
 })
-// Flat fan surface; labels live in independent rounded targets, never inside
-// a polygon clip. Short labels leave space for Android's enlarged text setting.
-const shortLabels: Record<Tool, string> = { version: '版本', prompts: '提示', auxiliary: '辅助', usage: '用量', files: '文件', floating: '小窗' }
+const shortLabels: Record<Tool, string> = {
+  version: '版本', tasks: '任务', files: '文件', floating: '小窗',
+  prompts: '提示', auxiliary: '辅助', memory: '记忆', usage: '用量',
+}
+// 圆心位于扇面右上角。每层只定义半径与角度，按钮沿同心弧均匀排布；
+// 最外层预留完整的按钮角点安全区，选中底色不会越过扇面边缘。
+const polarLayout = [
+  { row: 2, distance: 132, angles: [12, 34, 56, 78] },
+  { row: 1, distance: 91, angles: [20, 49, 77] },
+  { row: 0, distance: 50, angles: [34] },
+].flatMap(ring => ring.angles.map(angle => ({ ...ring, angle })))
 const sectors = computed(() => tools.map((tool, index) => {
-  const row = index < 3 ? 2 : index < 5 ? 1 : 0
-  const [x, y] = [[-112, 30], [-82, 82], [-30, 112], [-70, 30], [-30, 70], [-30, 30]][index]!
-  return { ...tool, row, style: {
-    left: `${radius.value + x!}px`, top: `${y}px`,
+  const point = polarLayout[index]!
+  const radians = point.angle * Math.PI / 180
+  return { ...tool, row: point.row, style: {
+    left: `${radius.value - point.distance * Math.cos(radians)}px`,
+    top: `${point.distance * Math.sin(radians)}px`,
   } }
 }))
 </script>
 <template>
   <div class="context-tools" data-context-tools>
-    <button v-if="!floating" class="entry" :class="{ concealed: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="展开快捷工具" :aria-expanded="opened" @click="toggle"><CoomiIcon name="more" :size="21" /></button>
-    <button ref="anchor" class="context-anchor" :class="{ expanded: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="上下文用量" :aria-expanded="opened" @click="opened ? toggle() : emit('usage')">
+    <button v-if="!floating" ref="anchor" class="context-anchor" :class="{ expanded: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="展开快捷工具" :aria-expanded="opened" title="快捷工具" @click="toggle">
       <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15" pathLength="100" /><circle class="value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${usagePercent} ${100 - usagePercent}`" /></svg>
-      <CoomiIcon v-if="opened" class="close-mark" name="close" :size="15" />
     </button>
     <Teleport to="body">
       <Transition name="orbit-veil"><div v-if="opened && active" class="orbit-backdrop" aria-hidden="true" @pointerdown="active = null" /></Transition>
@@ -191,6 +202,8 @@ const sectors = computed(() => tools.map((tool, index) => {
             </template>
             <PromptLibrary v-else-if="active === 'prompts'" @fill="fill" />
             <AuxiliaryChat v-else-if="active === 'auxiliary'" :parent-id="session.sessionId" :initial-session-id="initialChild" />
+            <TasksView v-else-if="active === 'tasks'" embedded />
+            <MemoryView v-else-if="active === 'memory'" embedded />
             <FileManager v-else-if="active === 'files'" embedded />
             <div v-else class="floating-content"><CoomiIcon name="floatingWindow" :size="30" /><h3>小窗聊天</h3><p>{{ nativeFloating ? '将当前聊天移入悬浮窗口，切换应用时也能继续查看进展。' : '小窗聊天可在 Android 应用中使用。' }}</p><button v-if="nativeFloating" class="floating-action" @click="openFloating">打开悬浮窗口</button></div>
           </div>
@@ -206,29 +219,41 @@ const sectors = computed(() => tools.map((tool, index) => {
   </div>
 </template>
 <style scoped>
-.context-tools { display:flex; align-items:center; gap:2px; margin-left:auto; flex-shrink:0; }
-.entry,.context-anchor { width:40px; height:40px; border:0; border-radius:50%; display:grid; place-items:center; background:transparent; color:var(--text-2); flex-shrink:0; }
-.entry:active { background:var(--fill); }
-.entry.concealed { visibility:hidden; }
-.context-anchor { position:relative; transform:translate(4px,-3px); }
+.context-tools { display:flex; align-items:center; margin-left:auto; flex-shrink:0; }
+.context-anchor { width:40px; height:40px; border:0; border-radius:50%; display:grid; place-items:center; background:transparent; color:var(--text-2); flex-shrink:0; position:relative; transform:translate(4px,-3px); transition:background 160ms ease,transform 160ms ease; }
+.context-anchor:active { background:var(--fill); transform:translate(4px,-3px) scale(.94); }
 .context-anchor.expanded { visibility:hidden; }
 .context-anchor.orbit-anchor { position:absolute; left:var(--anchor-x); top:var(--anchor-y); transform:translate(-50%,-50%); z-index:2; background:var(--bg); pointer-events:auto; }
+.context-anchor.orbit-anchor:active { transform:translate(-50%,-50%) scale(.94); }
 .context-anchor > svg { width:30px; height:30px; transform:rotate(-90deg); }
 .context-anchor circle { fill:none; stroke-width:3.8; }
 .track { stroke:var(--border-strong); }.value { stroke:var(--blue); stroke-linecap:round; }
 .context-anchor :deep(.close-mark) { position:absolute; width:15px; height:15px; transform:none; }
 .orbit-layer { position:fixed; inset:0; z-index:40; pointer-events:none; }
-.orbit-backdrop { position:fixed; inset:0; z-index:39; background:rgba(25,35,52,.07); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); }
-.orbit-band { position:absolute; left:calc(var(--anchor-x) - var(--orbit-radius)); top:var(--anchor-y); width:var(--orbit-radius); height:var(--orbit-radius); filter:drop-shadow(0 2px 5px rgba(23,32,54,.05)); transform-origin:top right; }
+.orbit-backdrop { position:fixed; inset:0; z-index:39; background:rgba(25,35,52,.06); -webkit-backdrop-filter:blur(5px); backdrop-filter:blur(5px); }
+.orbit-band {
+  position:absolute; left:calc(var(--anchor-x) - var(--orbit-radius)); top:var(--anchor-y);
+  width:var(--orbit-radius); height:var(--orbit-radius); overflow:hidden;
+  -webkit-clip-path:circle(100% at 100% 0); clip-path:circle(100% at 100% 0); transform-origin:top right;
+  background:radial-gradient(circle at 100% 0,
+    transparent 0 22px,
+    color-mix(in srgb,var(--blue-soft) 28%,var(--bg)) 23px 70px,
+    var(--border) 70.5px 71.5px,
+    color-mix(in srgb,var(--bg) 96%,var(--blue-soft)) 72px 111px,
+    var(--border) 111.5px 112.5px,
+    color-mix(in srgb,var(--bg) 97%,var(--fill)) 113px 159px);
+  filter:drop-shadow(0 7px 12px rgba(23,32,54,.12));
+}
 .fan-surface { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
-.fan-surface path { fill:var(--bg); stroke:var(--border); stroke-width:.75; }
-.orbit-tool { position:absolute; width:40px; height:38px; transform:translate(-50%,-50%); border:0; border-radius:10px; padding:0; color:var(--text-2); background:transparent; pointer-events:auto; display:grid; place-items:center; transition:background 160ms ease,color 160ms ease; }
+.fan-surface path { fill:none; stroke:var(--border-strong); stroke-width:.75; }
+.orbit-tool { position:absolute; width:38px; height:40px; overflow:hidden; transform:translate(-50%,-50%); border:0; border-radius:11px; padding:0; color:var(--text-2); background:transparent; pointer-events:auto; display:grid; place-items:center; transition:background 160ms ease,color 160ms ease,box-shadow 160ms ease,transform 160ms ease; }
 .tool-label { display:flex; flex-direction:column; align-items:center; gap:3px; pointer-events:none; }
 .tool-label > span { font-size:11px; line-height:1.15; white-space:nowrap; font-weight:550; }
-.orbit-tool.selected { background:var(--blue-soft); color:var(--blue); }
+.orbit-tool.selected { background:color-mix(in srgb,var(--blue-soft) 82%,var(--bg)); color:var(--blue); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blue) 16%,transparent),0 2px 7px color-mix(in srgb,var(--blue) 10%,transparent); }
+.orbit-tool:active { transform:translate(-50%,-50%) scale(.92); }
 .orbit-tool:focus-visible { background:var(--blue-soft-2); color:var(--blue); }
 @media(hover:hover) { .orbit-tool:hover { background:var(--blue-soft); color:var(--blue); } }
-.orbit-card { position:absolute; top:var(--anchor-y); left:calc(var(--anchor-x) - var(--card-width)); width:var(--card-width); height:var(--card-height); display:flex; flex-direction:column; border:1px solid var(--border); border-radius:var(--r-card); background:var(--bg); box-shadow:var(--shadow-2); pointer-events:auto; overflow:hidden; mask-image:radial-gradient(circle at top right,transparent var(--notch),black calc(var(--notch) + 1px)); }
+.orbit-card { position:absolute; top:var(--anchor-y); left:calc(var(--anchor-x) - var(--card-width)); width:var(--card-width); height:var(--card-height); display:flex; flex-direction:column; border:1px solid var(--border); border-radius:var(--r-card); background:color-mix(in srgb,var(--bg) 96%,transparent); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 12px 34px rgba(23,32,54,.14),0 2px 8px rgba(23,32,54,.06); pointer-events:auto; overflow:hidden; -webkit-mask-image:radial-gradient(circle at top right,transparent var(--notch),black calc(var(--notch) + 1px)); mask-image:radial-gradient(circle at top right,transparent var(--notch),black calc(var(--notch) + 1px)); }
 .card-heading { min-height:var(--notch); flex-shrink:0; width:calc(100% - var(--notch)); min-width:0; padding:14px 0 10px 15px; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
 .eyebrow { font-size:10px; color:var(--text-3); letter-spacing:.08em; }
 h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:nowrap; }

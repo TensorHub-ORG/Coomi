@@ -20,6 +20,7 @@ interface MemoryItem {
 }
 
 const router = useRouter()
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 const memories = ref<MemoryItem[]>([])
 const editing = ref<MemoryItem | null>(null)
 const editingExisting = ref(false)
@@ -111,13 +112,14 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="持久记忆" @back="goBack(router, 'dashboard')">
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" title="持久记忆" @back="goBack(router, 'dashboard')">
       <template #right>
         <button class="icon-btn" aria-label="新增记忆" @click="createMemory"><CoomiIcon name="plus" /></button>
       </template>
     </PageHead>
     <main class="body">
+      <div v-if="props.embedded" class="embedded-toolbar"><span>内建记忆库</span><button aria-label="新增记忆" @click="createMemory"><CoomiIcon name="plus" :size="17" />新增</button></div>
       <p class="scope-note">这里只管理 Coomi 内建持久记忆，与任何 MCP、Skill 或第三方记忆扩展无关。</p>
       <p v-if="loading" class="empty">加载中…</p>
       <p v-else-if="!memories.length" class="empty">暂无内建持久记忆</p>
@@ -171,6 +173,11 @@ onMounted(load)
 <style scoped>
 .page { height: 100%; display: flex; flex-direction: column; background: var(--page); color: var(--text); }
 .body { flex: 1; overflow-y: auto; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
+.page.embedded { position:relative; min-height:0; background:transparent; }
+.embedded .body { padding:0 2px 14px; }
+.embedded-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:40px; margin-bottom:8px; color:var(--text-3); font-size:12px; }
+.embedded-toolbar button { display:inline-flex; align-items:center; gap:5px; min-height:34px; padding:0 11px; border-radius:var(--r-pill); background:var(--blue-soft); color:var(--blue); font-size:12px; font-weight:600; }
+.embedded .scrim { position:absolute; z-index:4; border-radius:var(--r-card); overflow:hidden; }
 .scope-note { margin: 2px 2px 12px; padding: 10px 12px; border-left: 3px solid var(--blue); background: var(--blue-soft); color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
 .empty { padding: 32px 0; text-align: center; color: var(--text-3); }
 .memory { margin-bottom: 10px; padding: 13px; border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); }

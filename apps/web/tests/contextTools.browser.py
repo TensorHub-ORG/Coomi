@@ -28,8 +28,11 @@ with sync_playwright() as p:
     page.route('**/api/git/contributions*', lambda route: route.fulfill(json={'authors': [], 'total_commits': 0, 'first_commit_at': None, 'last_commit_at': None, 'by_day': []}))
     page.route('**/api/fs/list*', lambda route: route.fulfill(json={'path': '/', 'entries': [{'name': 'notes.md', 'is_dir': False, 'size': 20, 'modified': 0}]}))
     page.route('**/api/fs/raw*', lambda route: route.fulfill(body='File preview fixture'))
+    page.route('**/api/tasks', lambda route: route.fulfill(json={'tasks': [], 'running_count': 0, 'concurrency_limit': 5}))
+    page.route('**/api/memory', lambda route: route.fulfill(json={'memories': []}))
     page.goto(origin + '/?demo=1&autoplay=0')
     expect(page.get_by_role('button', name='展开快捷工具')).to_be_visible()
+    expect(page.locator('.context-tools > .entry')).to_have_count(0)
     for width in [240, 280, 320, 390, 430]:
         page.set_viewport_size({'width': width, 'height': 844})
         boxes = page.locator('.composer .bar button').evaluate_all('(els) => els.map(el => {const r=el.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}})')
@@ -39,15 +42,33 @@ with sync_playwright() as p:
         assert all(b['x'] >= 0 and b['x'] + b['w'] <= width for b in boxes), (width, boxes)
         assert page.locator('.composer .bar-left span').evaluate_all('(els)=>els.every(e=>e.scrollWidth <= e.clientWidth + 1)'), width
     page.set_viewport_size({'width': 390, 'height': 844})
+    page.get_by_role('button', name='快捷指令').click()
+    expect(page.get_by_text('推理强度', exact=True)).to_be_visible()
+    effort_particles = [('自动', 3), ('低', 2), ('中', 4), ('高', 6), ('超高', 8)]
+    for label, count in effort_particles:
+        effort = page.locator('.reasoning-options').get_by_role('button', name=label, exact=True)
+        effort.click()
+        expect(effort.locator('.effort-particle')).to_have_count(count)
+        assert effort.evaluate("e => getComputedStyle(e, '::after').animationName") == 'none'
+        particle_animation = effort.locator('.effort-particle').first.evaluate("e => getComputedStyle(e).animationName")
+        assert particle_animation.startswith('effort-particle-rise'), (label, particle_animation)
+    page.screenshot(path=str(artifacts / 'reasoning-particles-390.png'))
+    page.locator('.quick-scrim').click(position={'x': 4, 'y': 4})
     page.get_by_role('button', name='展开快捷工具').click()
     expect(page.get_by_role('navigation', name='快捷工具带')).to_be_visible()
-    expect(page.locator('.orbit-tool')).to_have_count(6)
-    page.wait_for_timeout(350)
+    expect(page.locator('.orbit-tool')).to_have_count(8)
+    page.wait_for_function('''() => {
+      const band = document.querySelector('.orbit-band')?.getBoundingClientRect();
+      const anchor = document.querySelector('.context-tools .context-anchor')?.getBoundingClientRect();
+      return band && anchor && band.width >= 159.5
+        && Math.abs(band.right - anchor.x - anchor.width / 2) < 1
+        && Math.abs(band.top - anchor.y - anchor.height / 2) < 1;
+    }''')
     geometry = page.locator('.orbit-band').evaluate('''e => {
       const band = e.getBoundingClientRect(), anchor = document.querySelector('.context-anchor').getBoundingClientRect();
       return {radius: band.width, dx: band.right - (anchor.x + anchor.width / 2), dy: band.top - (anchor.y + anchor.height / 2)}
     }''')
-    assert geometry['radius'] <= 140 and abs(geometry['dx']) < 1 and abs(geometry['dy']) < 1, geometry
+    assert geometry['radius'] <= 164 and abs(geometry['dx']) < 1 and abs(geometry['dy']) < 1, geometry
     # Header layout can change after opening (font/safe-area/model changes),
     # with no window resize event. The teleported fan must follow its anchor.
     header = page.locator('.topbar')
@@ -63,16 +84,36 @@ with sync_playwright() as p:
       const anchor = document.querySelector('.context-tools .context-anchor').getBoundingClientRect();
       return Math.abs(band.top - anchor.y - anchor.height / 2) < 1;
     }''')
-    assert [page.locator(f'.orbit-tool[data-row="{row}"]').count() for row in [2, 1, 0]] == [3, 2, 1]
+    assert [page.locator(f'.orbit-tool[data-row="{row}"]').count() for row in [2, 1, 0]] == [4, 3, 1]
+    def assert_tools_inside_fan():
+        outside = page.locator('.orbit-tool').evaluate_all('''buttons => {
+          const band = document.querySelector('.orbit-band').getBoundingClientRect();
+          const anchor = document.querySelector('.orbit-anchor').getBoundingClientRect();
+          const cx = anchor.x + anchor.width / 2, cy = anchor.y + anchor.height / 2;
+          return buttons.filter(button => {
+            const r = button.getBoundingClientRect();
+            return [[r.left,r.top],[r.right,r.top],[r.left,r.bottom],[r.right,r.bottom]]
+              .some(([x,y]) => x < band.left - .5 || x > band.right + .5 || y < band.top - .5
+                || y > band.bottom + .5 || Math.hypot(x-cx,y-cy) > band.width + .5);
+          }).map(button => button.getAttribute('aria-label'));
+        }''')
+        assert not outside, outside
+    assert_tools_inside_fan()
     def assert_tool_labels_unclipped():
         clipped = page.locator('.orbit-tool').evaluate_all('''buttons => buttons.filter(button => {
           const label = button.querySelector('.tool-label'), r = label.getBoundingClientRect();
           return [[r.left+1,r.top+1],[r.right-1,r.top+1],[r.left+1,r.bottom-1],[r.right-1,r.bottom-1]]
             .some(([x,y]) => !button.contains(document.elementFromPoint(x,y)));
-        }).map(button => button.getAttribute('aria-label'))''')
+        }).map(button => {
+          const r = button.querySelector('.tool-label').getBoundingClientRect();
+          return {label:button.getAttribute('aria-label'), rect:{x:r.x,y:r.y,w:r.width,h:r.height},
+            hits:[[r.left+1,r.top+1],[r.right-1,r.top+1],[r.left+1,r.bottom-1],[r.right-1,r.bottom-1]]
+              .map(([x,y]) => document.elementFromPoint(x,y)?.closest('.orbit-tool')?.getAttribute('aria-label') ?? null)};
+        })''')
         assert not clipped, clipped
     assert_tool_labels_unclipped()
     page.get_by_role('button', name='提示词', exact=True).click()
+    assert_tools_inside_fan()
     expect(page.get_by_role('dialog', name='提示词', exact=True)).to_be_visible()
     expect(page.locator('.orbit-backdrop')).to_be_visible()
     page.wait_for_timeout(300)
@@ -113,6 +154,12 @@ with sync_playwright() as p:
     page.get_by_role('button', name='辅助会话', exact=True).click()
     expect(page.get_by_role('button', name='开始辅助对话')).to_be_visible()
     page.screenshot(path=str(artifacts / 'auxiliary-390.png'))
+    page.get_by_role('navigation', name='快捷工具带').get_by_role('button', name='任务中心', exact=True).click()
+    expect(page.get_by_role('dialog', name='任务中心', exact=True)).to_be_visible()
+    expect(page.get_by_text('当前没有运行中的任务。', exact=True)).to_be_visible()
+    page.get_by_role('navigation', name='快捷工具带').get_by_role('button', name='持久记忆', exact=True).click()
+    expect(page.get_by_role('dialog', name='持久记忆', exact=True)).to_be_visible()
+    expect(page.get_by_text('暂无内建持久记忆', exact=True)).to_be_visible()
     page.get_by_role('button', name='提示词', exact=True).click()
     for width, height in [(280, 640), (320, 480), (390, 400)]:
         page.set_viewport_size({'width': width, 'height': height})
@@ -154,7 +201,7 @@ with sync_playwright() as p:
         if width == 240:
             page.screenshot(path=str(artifacts / 'tools-240-large-text.png'))
         enlarged_text.evaluate('(e)=>e.remove()')
-        for label in ['版本工具', '提示词', '辅助会话', '上下文用量', '文件管理', '小窗']:
+        for label in ['版本工具', '任务中心', '文件管理', '小窗', '提示词', '辅助会话', '持久记忆', '上下文用量']:
             button = page.get_by_role('navigation', name='快捷工具带').get_by_role('button', name=label, exact=True)
             button.click()
             expect(page.get_by_role('dialog', name=label, exact=True)).to_be_visible()
@@ -165,7 +212,7 @@ with sync_playwright() as p:
     page.evaluate("window.dispatchEvent(new CustomEvent('coomi:floating-state',{detail:true}))")
     expect(page.get_by_role('navigation', name='快捷工具带')).to_have_count(0)
     expect(page.get_by_role('button', name='展开快捷工具')).to_have_count(0)
-    expect(page.get_by_role('button', name='上下文用量', exact=True)).to_be_visible()
+    expect(page.locator('.context-tools button')).to_have_count(0)
     assert not errors, errors
     browser.close()
 print(json.dumps({'passed': True, 'artifacts': str(artifacts)}))
