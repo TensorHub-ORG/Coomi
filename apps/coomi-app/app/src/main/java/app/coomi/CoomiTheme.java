@@ -81,6 +81,7 @@ public final class CoomiTheme {
     private static final String PREF_BACKGROUND_URI_PREFIX = "coomi.appearance.background_uri.";
     private static final String PREF_SAVED_PALETTES = "coomi.appearance.saved_palettes";
     private static final String PREF_ACTIVE_PALETTE = "coomi.appearance.active_palette";
+    private static final String PREF_DISPLAY_SCALE = "coomi.appearance.display_scale";
     public static final int MAX_SAVED_PALETTES = 3;
     private static final String[] COLOR_KEYS = {
         "page", "surface", "fill", "border", "text", "text_secondary", "text_muted",
@@ -339,6 +340,7 @@ public final class CoomiTheme {
             .remove(PREF_MASK_PREFIX + SURFACE_CHAT)
             .remove(PREF_BACKGROUND_URI_PREFIX + SURFACE_CONSOLE)
             .remove(PREF_BACKGROUND_URI_PREFIX + SURFACE_CHAT)
+            .remove(PREF_DISPLAY_SCALE)
             .remove(PREF_ACTIVE_PALETTE);
         for (String key : COLOR_KEYS) editor.remove(PREF_COLOR_PREFIX + key);
         editor.apply();
@@ -392,6 +394,14 @@ public final class CoomiTheme {
         return preferences(context).getInt(PREF_MASK_PREFIX + surface, fallback);
     }
 
+    public static int getDisplayScale(Context context) {
+        return Math.max(75, Math.min(110, preferences(context).getInt(PREF_DISPLAY_SCALE, 100)));
+    }
+
+    public static void setDisplayScale(Context context, int percent) {
+        preferences(context).edit().putInt(PREF_DISPLAY_SCALE, Math.max(75, Math.min(110, percent))).apply();
+    }
+
     public static void setBackgroundMask(Context context, String surface, int value) {
         preferences(context).edit().putInt(PREF_MASK_PREFIX + surface, Math.max(0, Math.min(95, value))).apply();
     }
@@ -405,6 +415,7 @@ public final class CoomiTheme {
             root.put("colors", colors);
             root.put("chatBackground", hasBackground(context, SURFACE_CHAT));
             root.put("chatMask", getBackgroundMask(context, SURFACE_CHAT));
+            root.put("displayScale", getDisplayScale(context) / 100d);
             File background = backgroundFile(context, SURFACE_CHAT);
             Uri source = getBackgroundUri(context, SURFACE_CHAT);
             root.put("revision", background.exists() ? background.lastModified()

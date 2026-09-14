@@ -312,7 +312,8 @@ h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:now
 .card-close { color:var(--text-3); font-size:11px; background:transparent; padding:4px 0; }
 .card-content { flex:1; min-height:0; padding:0 0 8px; display:flex; flex-direction:column; overflow:hidden; }
 .card-content :deep(.prompt-library),.card-content :deep(.transcript),.card-content :deep(.usage-details),.card-content :deep(.embedded .body),.floating-content { scrollbar-gutter:stable; overscroll-behavior:contain; }
-.card-content :deep(.usage-details) { width:auto; margin-inline:12px; }
+.card-content :deep(.usage-details) { width:100%; box-sizing:border-box; padding:0; scrollbar-gutter:auto; }
+.card-content :deep(.usage-details > *) { width:100%; box-sizing:border-box; padding-inline:12px; }
 .orbit-card.compact { height:auto; max-height:var(--card-height); }
 .compact .card-content { flex:0 1 auto; max-height:calc(var(--card-height) - var(--notch)); }
 .compact :deep(.usage-title) { display:none; }
@@ -329,7 +330,7 @@ h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:now
 .card-reveal-enter-from,.card-reveal-leave-to,.orbit-reveal-leave-to .orbit-card { transform:translate(0,-6px) scale(.985); opacity:0; }
 .orbit-veil-enter-active,.orbit-veil-leave-active { transition:opacity 220ms ease; }
 .orbit-veil-enter-from,.orbit-veil-leave-to { opacity:0; }
-@media(max-width:320px) { .card-content {padding-inline:8px} .card-heading {padding-left:10px} h2 {font-size:14px} }
+@media(max-width:320px) { .card-heading {padding-left:10px} h2 {font-size:14px} }
 @media(max-width:280px) { h2 {font-size:12px} .card-heading .usage-link {display:none} }
 @media(prefers-reduced-motion:reduce) {
   .orbit-reveal-enter-active .orbit-band,.orbit-reveal-leave-active .orbit-band,.card-reveal-enter-active,.card-reveal-leave-active,.orbit-reveal-leave-active .orbit-card,.orbit-veil-enter-active,.orbit-veil-leave-active,.orbit-tool { transition:none; }

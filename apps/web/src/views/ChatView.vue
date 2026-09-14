@@ -91,7 +91,7 @@ watch(blocks, list => {
       // assistant 行会在首批流式增量到达时被虚拟列表重测并可能重建。
       // 若仍处于新块动画窗口，重建会再次播放 rise-in，形成可见闪烁。
       // 回复内容本身已通过增量渲染自然出现，因此只给用户消息和工具卡入场动效。
-      if (b.t !== 'one' || b.item.kind !== 'assistant') {
+      if (b.t !== 'one' || !['assistant', 'reasoning'].includes(b.item.kind)) {
         next.add(b.key)
         changed = true
       }

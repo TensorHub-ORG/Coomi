@@ -717,6 +717,15 @@ public final class CoomiChatSession extends ContextWrapper {
         }
 
         @JavascriptInterface
+        public void setDisplayScale(double scale) {
+            CoomiTheme.setDisplayScale(CoomiChatSession.this, (int) Math.round(scale * 100d));
+            runOnUiThread(() -> {
+                applyThemeToWebView();
+                sendBroadcast(new Intent(CoomiTheme.ACTION_THEME_CHANGED).setPackage(getPackageName()));
+            });
+        }
+
+        @JavascriptInterface
         public void importFiles() {
             mPendingImportRequestId = null;
             runOnUiThread(CoomiChatSession.this::launchImportPicker);

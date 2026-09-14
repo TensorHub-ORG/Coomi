@@ -24,7 +24,7 @@ const tick = computed(() => {
 </script>
 
 <template>
-  <div class="reasoning fade-in">
+  <div class="reasoning">
     <button type="button" class="toggle" :aria-expanded="block.expanded" @click.stop="toggle">
       <CoomiIcon name="sparkle" :size="14" class="spark" :class="{ live }" />
       <span v-if="live" class="ticker shimmer-text">{{ tick || '正在思考…' }}</span>
@@ -35,7 +35,7 @@ const tick = computed(() => {
       <CoomiIcon name="chevronRight" :size="13" class="chev" :class="{ open: block.expanded }" />
     </button>
     <!-- 批次五 #28：展开态双击内容区即可收起 -->
-    <div v-if="block.expanded" class="body" @dblclick="collapse">{{ block.content }}</div>
+    <div v-show="block.expanded" class="body" @dblclick="collapse">{{ block.content }}</div>
   </div>
 </template>
 

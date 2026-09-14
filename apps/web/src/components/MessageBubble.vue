@@ -9,6 +9,7 @@ import { apiSend } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
 import StableMarkdown from './StableMarkdown.vue'
+import AttachmentStrip from './AttachmentStrip.vue'
 
 const props = defineProps<{ msg: AssistantMessage | UserMessage }>()
 const session = useSessionStore()
@@ -35,11 +36,12 @@ const isLastUser = computed(() => isUser.value && session.lastUserMessage === pr
 const isLastAssistant = computed(() => isAssistant.value && session.lastAssistantMessage === props.msg)
 const streaming = computed(() => props.msg.kind === 'assistant' && props.msg.streaming)
 const src = computed(() => props.msg.content)
+const userAttachments = computed(() => props.msg.kind === 'user' ? props.msg.attachments ?? [] : [])
 
 /** 编辑：把该消息文本回填到输入框，发送时覆盖该轮重新执行。 */
 function editUserMessage() {
   const mid = (props.msg as { mid?: string }).mid ?? ''
-  session.startEditMessage(mid, props.msg.content)
+  session.startEditMessage(mid, props.msg.content, props.msg.kind === 'user' ? props.msg.attachments : [])
 }
 
 /** 回撤：先弹确认，清空该轮执行（含工具过程），回到这轮开始之前。 */
@@ -208,7 +210,8 @@ async function saveToMemory() {
 <template>
   <div v-if="isUser" class="row user">
     <div class="wrap user-wrap">
-      <div class="bubble">{{ msg.content }}</div>
+      <AttachmentStrip v-if="userAttachments.length" class="message-attachments" :items="userAttachments" />
+      <div v-if="msg.content" class="bubble">{{ msg.content }}</div>
       <div class="acts user-acts">
         <button class="act" @click="copyAll">
           <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
@@ -327,6 +330,7 @@ async function saveToMemory() {
 .assistant.life .blk + .blk { margin-top: 8px; }
 
 .user-wrap { display: flex; flex-direction: column; align-items: flex-end; max-width: 84%; }
+.message-attachments { justify-content: flex-end; margin-bottom: 7px; }
 .user-acts { justify-content: flex-end; }
 /* 操作区跟随消息表面，不叠加主题填充色；只有交互时显示轻反馈。 */
 .acts {

@@ -7,6 +7,7 @@ interface WindowEventMap {
 interface Window {
   __coomiHandleSystemBack?: () => boolean
   __coomiApplyAppearance?: (config: AppearanceConfig) => void
+  __coomiApplyDisplayScale?: (scale: number) => void
   __coomiFloating?: boolean
   CoomiAndroid?: {
     openDashboard(): void
@@ -29,6 +30,7 @@ interface Window {
     sendFeedback?(json: string, callbackId: string): void
     getThemeMode?(): string
     setThemeMode?(mode: string): void
+    setDisplayScale?(scale: number): void
     getDigitalLifeEnabled?(): boolean
     setDigitalLifeEnabled?(enabled: boolean): void
     /** 任务完成通知开关（原生侧 SharedPreferences，默认开）。 */
@@ -59,6 +61,7 @@ interface AppearanceConfig {
   chatBackground?: boolean
   chatMask?: number
   revision?: number
+  displayScale?: number
 }
 
 declare module '*.vue' {

@@ -13,6 +13,8 @@ import { gitLog, gitStatus, type CommitInfo } from '@/bridge/git'
 import type { SessionMeta } from '@/stores/sessions'
 import { useRouter } from 'vue-router'
 import CoomiIcon from './CoomiIcon.vue'
+import AttachmentStrip from './AttachmentStrip.vue'
+import { normalizeAttachments, type ChatAttachment } from '@/utils/attachments'
 
 const session = useSessionStore()
 const config = useConfigStore()
@@ -39,6 +41,7 @@ const SLASH_COMMANDS = [
 ]
 
 const text = ref('')
+const attachments = ref<ChatAttachment[]>([])
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const quickOpen = ref(false)
 const lifeStatsOpen = ref(false)
@@ -47,7 +50,7 @@ const transferProgress = ref(0)
 const textareaScrollable = ref(false)
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
 
-const canSend = computed(() => text.value.trim().length > 0)
+const canSend = computed(() => text.value.trim().length > 0 || attachments.value.length > 0)
 const isJumpIn = computed(() => session.isBusy && canSend.value)
 const showStop = computed(() => session.isBusy && !canSend.value)
 const modeLabel = computed(() => PERMISSION_MODES.find(m => m.mode === config.permissionMode)?.label ?? '')
@@ -76,8 +79,9 @@ async function submit() {
       return
     }
   }
-  session.sendMessage(text.value)
+  session.sendMessage(text.value, attachments.value)
   text.value = ''
+  attachments.value = []
   await nextTick()
   autoGrow()
 }
@@ -249,8 +253,14 @@ function onFilesImported(event: Event) {
   transferText.value = paths.length ? `已导入 ${paths.length} 个文件` : '文件导入完成'
   transferProgress.value = 100
   if (detail.requestId) session.completeFileTransfer(detail.requestId, paths)
-  else if (paths.length) void insert(`请读取这些已导入文件：\n${paths.join('\n')}`)
+  else if (paths.length) attachments.value = normalizeAttachments([
+    ...attachments.value.map(item => item.path),
+    ...paths,
+  ])
   setTimeout(() => { transferText.value = ''; transferProgress.value = 0 }, 2600)
+}
+function removeAttachment(path: string) {
+  attachments.value = attachments.value.filter(item => item.path !== path)
 }
 function onFileExported(event: Event) {
   const detail = (event as CustomEvent<{ requestId?: string; path?: string }>).detail ?? {}
@@ -258,9 +268,10 @@ function onFileExported(event: Event) {
   if (detail.requestId) session.completeFileTransfer(detail.requestId, detail.path ? [detail.path] : [])
 }
 function onPrefillDraft(event: Event) {
-  const detail = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail ?? {}
+  const detail = (event as CustomEvent<{ sessionId?: string; text?: string; attachments?: ChatAttachment[] }>).detail ?? {}
   if ((detail.sessionId && detail.sessionId !== session.sessionId) || typeof detail.text !== 'string') return
   text.value = detail.text
+  attachments.value = normalizeAttachments((detail.attachments ?? []).map(item => item.path))
   void nextTick(autoGrow)
 }
 
@@ -294,20 +305,27 @@ onBeforeUnmount(() => {
 
 // ── 草稿按会话持久化：每个会话（含新对话）各自保留输入框内容 ──
 const DRAFT_PREFIX = 'coomi.draft.'
+const DRAFT_ATTACHMENTS_PREFIX = 'coomi.draft.attachments.'
 let draftTimer: ReturnType<typeof setTimeout> | null = null
 
 function draftKey(id: string) { return DRAFT_PREFIX + id }
+function draftAttachmentsKey(id: string) { return DRAFT_ATTACHMENTS_PREFIX + id }
 
 function loadDraft() {
   let saved = ''
   try { saved = localStorage.getItem(draftKey(session.sessionId)) ?? '' } catch { /* ignore */ }
   text.value = saved
+  try {
+    const paths = JSON.parse(localStorage.getItem(draftAttachmentsKey(session.sessionId)) ?? '[]') as unknown
+    attachments.value = Array.isArray(paths) ? normalizeAttachments(paths.map(String)) : []
+  } catch { attachments.value = [] }
   void nextTick(autoGrow)
 }
 
 function saveDraft() {
   if (draftTimer) { clearTimeout(draftTimer); draftTimer = null }
   try { localStorage.setItem(draftKey(session.sessionId), text.value) } catch { /* ignore */ }
+  try { localStorage.setItem(draftAttachmentsKey(session.sessionId), JSON.stringify(attachments.value.map(item => item.path))) } catch { /* ignore */ }
 }
 
 // 切会话（含新建会话）时：先把旧会话的草稿存回【旧】key，再加载新会话草稿。
@@ -316,6 +334,7 @@ function saveDraft() {
 watch(() => session.sessionId, (next, prev) => {
   if (prev && prev !== next) {
     try { localStorage.setItem(draftKey(prev), text.value) } catch { /* ignore */ }
+    try { localStorage.setItem(draftAttachmentsKey(prev), JSON.stringify(attachments.value.map(item => item.path))) } catch { /* ignore */ }
   }
   loadDraft()
 })
@@ -323,6 +342,10 @@ watch(text, () => {
   if (draftTimer) clearTimeout(draftTimer)
   draftTimer = setTimeout(saveDraft, 200)
 })
+watch(attachments, () => {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(saveDraft, 200)
+}, { deep: true })
 </script>
 
 <template>
@@ -394,6 +417,7 @@ watch(text, () => {
         </div>
         <div class="life-stats-grid"><span>当前模式<strong>数字生命</strong></span><span>推理档位<strong>{{ REASONING_EFFORTS.find(i => i.value === config.reasoningEffort)?.label }}</strong></span><span>会话状态<strong>{{ session.isBusy ? '运行中' : '待命' }}</strong></span><span>动态流<strong>已连接</strong></span></div>
       </div>
+      <AttachmentStrip v-if="attachments.length" class="composer-attachments" :items="attachments" removable @remove="removeAttachment" />
       <div class="input-clip">
         <textarea
           ref="textarea"
@@ -504,6 +528,7 @@ watch(text, () => {
     0 6px 24px color-mix(in srgb, var(--blue) 9%, transparent);
 }
 .field.busy { border-color: var(--border-strong); }
+.composer-attachments { padding: 5px 5px 2px 3px; }
 
 .input-clip { overflow: hidden; border-radius: 17px 17px 8px 8px; }
 .input {

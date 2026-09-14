@@ -76,6 +76,7 @@ public class CoomiAppearanceActivity extends Activity {
         refreshChecks();
         bindCustomColors();
         bindSavedPalettes();
+        bindDisplayScale();
         bindBackgrounds();
         findViewById(R.id.btn_reset_appearance).setOnClickListener(v -> confirmReset());
         CoomiTheme.applyPageSystemBars(this);
@@ -100,6 +101,23 @@ public class CoomiAppearanceActivity extends Activity {
             radio.setEnabled(!customEnabled);
             radio.setChecked(!customEnabled && modes[index].equals(selected));
         }
+    }
+
+    private void bindDisplayScale() {
+        SeekBar seek = findViewById(R.id.seek_display_scale);
+        TextView value = findViewById(R.id.txt_display_scale);
+        int percent = CoomiTheme.getDisplayScale(this);
+        seek.setProgress(percent - 75);
+        value.setText(percent + "%");
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int next = 75 + progress;
+                value.setText(next + "%");
+                if (fromUser) CoomiTheme.setDisplayScale(CoomiAppearanceActivity.this, next);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { notifyAppearanceChanged(); }
+        });
     }
 
     private void bindCustomColors() {

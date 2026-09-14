@@ -23,6 +23,7 @@ const collaborationMessage = ref('')
 const collaborationError = ref('')
 
 const providers = computed(() => config.mergedProviders)
+const regularProviders = computed(() => providers.value.filter(provider => provider.id !== 'zhipu'))
 const configuredProviders = computed(() => config.providers.filter(provider => provider.hasKey && provider.models.length > 0))
 const configuredProviderOptions = computed(() => configuredProviders.value.map(provider => ({ value: provider.id, label: provider.name, note: provider.id })))
 const subAgentDirty = computed(() => JSON.stringify({ agents: subAgents.value, fallbackId: fallbackId.value, maxAgents: subAgentLimit.value }) !== savedSnapshot.value)
@@ -202,12 +203,20 @@ function backToDashboard() {
           <span class="tile blue"><CoomiIcon name="sparkle" :size="18" /></span>
           <span class="row-text">
             <span class="name">DeepSeek 账号登录</span>
-            <span class="meta">deepseek-login · 账号登录对话模型</span>
+            <span class="meta">实验性 · 官网账号额度 · 存在风控风险</span>
+          </span>
+          <CoomiIcon name="chevronRight" :size="16" class="arrow" />
+        </button>
+        <button class="provider-row" @click="router.push('/providers/zhipu')">
+          <span class="tile"><CoomiIcon name="key" :size="18" /></span>
+          <span class="row-text">
+            <span class="name">智谱账号 / API Key</span>
+            <span class="meta">官方 API / Coding Key · 账号套餐受使用范围限制</span>
           </span>
           <CoomiIcon name="chevronRight" :size="16" class="arrow" />
         </button>
         <button
-          v-for="provider in providers"
+          v-for="provider in regularProviders"
           :key="provider.id"
           class="provider-row"
           @click="openProvider(provider)"

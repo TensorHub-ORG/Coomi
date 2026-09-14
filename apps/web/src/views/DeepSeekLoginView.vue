@@ -3,11 +3,9 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
-import { useConfigStore } from '@/stores/config'
 import { apiSend, apiGet } from '@/bridge/http'
 
 const router = useRouter()
-const config = useConfigStore()
 const mode = ref<'password' | 'sms'>('password')
 const account = ref('')
 const password = ref('')
@@ -21,9 +19,9 @@ const message = ref('')
 const error = ref('')
 const loggedUser = ref<{ id: string; username: string; email?: string; mobile?: string } | null>(null)
 const isLogged = ref(false)
+const riskAccepted = ref(false)
 const selectedModel = ref<'deepseek-chat' | 'deepseek-reasoner'>('deepseek-chat')
 let countdownTimer: ReturnType<typeof setInterval> | null = null
-const DEEPSEEK_BASE = 'https://chat.deepseek.com'
 
 interface LoginResp {
   user?: { id: string; username: string; email?: string; mobile?: string }
@@ -77,6 +75,7 @@ async function switchModel() {
 }
 
 async function passwordLogin() {
+  if (!riskAccepted.value) { error.value = '请先确认已了解账号风险'; return }
   if (!account.value.trim() || !password.value) { error.value = '请输入邮箱/手机号和密码'; return }
   logging.value = true; error.value = ''; message.value = ''
   try {
@@ -89,6 +88,7 @@ async function passwordLogin() {
 }
 
 async function sendCode() {
+  if (!riskAccepted.value) { error.value = '请先确认已了解账号风险'; return }
   const number = mobile.value.replace(/\D/g, '')
   if (!number) { error.value = '请输入手机号'; return }
   sendingCode.value = true; error.value = ''; message.value = ''
@@ -101,6 +101,7 @@ async function sendCode() {
 }
 
 async function smsLogin() {
+  if (!riskAccepted.value) { error.value = '请先确认已了解账号风险'; return }
   const number = mobile.value.replace(/\D/g, '')
   if (!number || !code.value.trim()) { error.value = '请输入手机号和验证码'; return }
   logging.value = true; error.value = ''; message.value = ''
@@ -133,6 +134,11 @@ function backToProviders() { router.push('/providers') }
         <p>登录账号后，可在 Coomi 中使用 DeepSeek 对话模型。</p>
       </div>
 
+      <section class="risk-card">
+        <CoomiIcon name="alert" :size="17" />
+        <span><strong>实验性账号通道</strong>该功能调用 DeepSeek 官网私有接口并使用官网账号额度，接口可能随时变化，也可能触发风控、限流或账号异常。重要账号建议使用官方 API Key。</span>
+      </section>
+
       <!-- 模型选择器：始终可见 -->
       <section class="card model-selector">
         <span class="ms-label">默认模型</span>
@@ -153,6 +159,7 @@ function backToProviders() { router.push('/providers') }
       </section>
 
       <section v-else class="card">
+        <label class="risk-check"><input v-model="riskAccepted" type="checkbox" /><span>我已了解风险，仍要使用账号登录</span></label>
         <div class="login-tabs">
           <button :class="{ on: mode === 'password' }" @click="switchMode('password')">密码登录</button>
           <button :class="{ on: mode === 'sms' }" @click="switchMode('sms')">验证码登录</button>
@@ -160,12 +167,12 @@ function backToProviders() { router.push('/providers') }
         <template v-if="mode === 'password'">
           <label class="field"><span>邮箱或手机号</span><input v-model="account" type="text" placeholder="邮箱或手机号" autocapitalize="off" autocomplete="username" /></label>
           <label class="field"><span>密码</span><input v-model="password" type="password" placeholder="密码" autocomplete="current-password" @keyup.enter="passwordLogin" /></label>
-          <button class="btn primary" :disabled="logging" @click="passwordLogin">{{ logging ? '登录中…' : '登录 DeepSeek' }}</button>
+          <button class="btn primary" :disabled="logging || !riskAccepted" @click="passwordLogin">{{ logging ? '登录中…' : '登录 DeepSeek' }}</button>
         </template>
         <template v-else>
           <label class="field"><span>手机号</span><span class="phone-input"><input v-model="areaCode" class="area" inputmode="tel" aria-label="区号" /><input v-model="mobile" inputmode="tel" placeholder="手机号" autocomplete="tel" /></span></label>
-          <label class="field"><span>短信验证码</span><span class="code-input"><input v-model="code" inputmode="numeric" maxlength="8" placeholder="验证码" @keyup.enter="smsLogin" /><button :disabled="sendingCode || countdown > 0" @click="sendCode">{{ countdown > 0 ? `${countdown}s` : sendingCode ? '发送中…' : '获取验证码' }}</button></span></label>
-          <button class="btn primary" :disabled="logging" @click="smsLogin">{{ logging ? '登录中…' : '验证码登录' }}</button>
+          <label class="field"><span>短信验证码</span><span class="code-input"><input v-model="code" inputmode="numeric" maxlength="8" placeholder="验证码" @keyup.enter="smsLogin" /><button :disabled="sendingCode || countdown > 0 || !riskAccepted" @click="sendCode">{{ countdown > 0 ? `${countdown}s` : sendingCode ? '发送中…' : '获取验证码' }}</button></span></label>
+          <button class="btn primary" :disabled="logging || !riskAccepted" @click="smsLogin">{{ logging ? '登录中…' : '验证码登录' }}</button>
           <p class="hint">短信发送若触发 DeepSeek 安全验证，会显示对应错误信息。</p>
         </template>
       </section>
@@ -175,6 +182,7 @@ function backToProviders() { router.push('/providers') }
 
 <style scoped>
 .model-selector{display:flex;align-items:center;gap:12px;padding:12px 16px;margin-bottom:12px}
+.risk-card{display:flex;align-items:flex-start;gap:9px;margin-bottom:12px;padding:11px 12px;border:1px solid color-mix(in srgb,var(--orange) 30%,var(--border));border-radius:var(--r-card);background:color-mix(in srgb,var(--orange-soft) 58%,var(--bg));color:var(--text-2);font-size:12px;line-height:1.55}.risk-card :deep(svg){flex-shrink:0;margin-top:1px;color:var(--orange)}.risk-card span{display:flex;flex-direction:column;gap:2px}.risk-card strong{color:var(--text);font-size:12.5px}.risk-check{display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;color:var(--text-2);font-size:12px;line-height:1.45}.risk-check input{width:16px;height:16px;margin:1px 0 0;accent-color:var(--blue)}
 .ms-label{font-size:12px;color:var(--text-2);font-weight:600;flex-shrink:0}
 .ms-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:3px;border-radius:10px;background:var(--fill);flex:1}
 .ms-tabs button{height:32px;border:0;border-radius:8px;background:transparent;color:var(--text-3);font-size:12px;font-weight:600;transition:all .15s}

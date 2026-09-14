@@ -16,6 +16,8 @@ import { reportErrorToNative, sendFeedbackViaBridge } from '@/bridge/feedback'
 import { speak } from '@/bridge/tts'
 import { router } from '@/router'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
+import type { ChatAttachment } from '@/utils/attachments'
+import { buildAttachmentRequest, parseAttachmentRequest } from '@/utils/attachments'
 
 function defineSessionStore(storeId: string, auxiliary = false) {
 return defineStore(storeId, () => {
@@ -50,7 +52,7 @@ return defineStore(storeId, () => {
   /** 本次打开会话是否已做过开场问候（避免轮询重复触发投递）。 */
   let lifeAutoSent = false
   /** 编辑覆盖状态：非空表示输入框正处于「编辑上一条消息」模式。 */
-  const pendingEdit = ref<{ mid: string; content: string } | null>(null)
+  const pendingEdit = ref<{ mid: string; content: string; attachments: ChatAttachment[] } | null>(null)
   /** 回撤确认弹窗状态：非空表示等待用户确认回撤该轮。 */
   const undoConfirm = ref<{ mid: string } | null>(null)
 
@@ -535,9 +537,11 @@ return defineStore(storeId, () => {
     if (changed) persistSoon()
   }
 
-  function sendMessage(text: string) {
-    const trimmed = text.trim()
-    if (!trimmed) return
+  function sendMessage(text: string, attachments: ChatAttachment[] = []) {
+    const displayText = text.trim()
+    if (!displayText && !attachments.length) return
+    const transportText = buildAttachmentRequest(displayText, attachments)
+    const visibleAttachments = attachments.map(item => ({ ...item }))
     // 传输层已停摆时先重建连接，避免消息被静默丢弃（1006 重试耗尽后不自动恢复的历史问题）。
     if (transport.value && !transport.value.alive) {
       transport.value = null
@@ -556,31 +560,32 @@ return defineStore(storeId, () => {
         }
       }
       if (cutAt >= 0) timeline.value.splice(cutAt)
-      timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
+      timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: displayText, attachments: visibleAttachments })
       turnToolTrace = []
       turnCancelled = false
       runState.value = 'thinking'
       armStallWatch()
-      transport.value?.send({ command: 'edit_turn', msg_id: edit.mid, text: trimmed })
+      transport.value?.send({ command: 'edit_turn', msg_id: edit.mid, text: transportText })
       persistSoon()
       return
     }
     // 首条用户消息作为会话标题，抽屉里就不会全是「新对话」。
     const isFirst = !timeline.value.some(t => t.kind === 'user')
-    if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
+    const titleSeed = displayText || visibleAttachments.map(item => item.name).join('、')
+    if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(titleSeed) })
     if (isBusy.value) {
-      timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
+      timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: displayText, attachments: visibleAttachments })
       turnCancelled = false
-      transport.value?.send({ command: 'jump_in', text: trimmed })
+      transport.value?.send({ command: 'jump_in', text: transportText })
       persistSoon()
       return
     }
     turnToolTrace = []
     turnCancelled = false
-    timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
+    timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: displayText, attachments: visibleAttachments })
     runState.value = 'thinking'
     armStallWatch()
-    transport.value?.send({ command: 'send_message', text: trimmed })
+    transport.value?.send({ command: 'send_message', text: transportText })
     persistSoon()
   }
 
@@ -716,7 +721,8 @@ return defineStore(storeId, () => {
         continue
       }
       if (m.role === 'user') {
-        items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: m.content })
+        const restored = parseAttachmentRequest(m.content)
+        items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: restored.text, attachments: restored.attachments })
       } else if (m.role === 'assistant') {
         if (m.content) items.push({ kind: 'assistant', id: nextId(), mid: m.id ?? '', content: m.content, streaming: false, life: m.life_proactive === true })
         for (const tc of m.tool_calls ?? []) {
@@ -862,11 +868,11 @@ return defineStore(storeId, () => {
 
   /** 编辑单条消息正文（改文本），成功后从引擎重新拉取时间线。 */
   /** 进入编辑模式：把旧文本回填到输入框，发送时覆盖该轮重新执行。 */
-  function startEditMessage(mid: string, content: string) {
+  function startEditMessage(mid: string, content: string, attachments: ChatAttachment[] = []) {
     if (isBusy.value) return
-    pendingEdit.value = { mid, content }
+    pendingEdit.value = { mid, content, attachments: attachments.map(item => ({ ...item })) }
     window.dispatchEvent(new CustomEvent('coomi:prefill-draft', {
-      detail: { sessionId: sessionId.value, text: content },
+      detail: { sessionId: sessionId.value, text: content, attachments },
     }))
   }
 

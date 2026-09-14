@@ -1,8 +1,21 @@
 //! DeepSeek PoW 求解 —— 嵌入官方 sha3.wasm，用 wasmi 执行 wasm_solve。
 //! 算法 DeepSeekHashV1：prefix = salt + "_" + difficulty + "_"，wasm_solve 返回 float64 答案。
 
-use anyhow::{anyhow, Context, Result};
-use serde::{Deserialize, Serialize};
+use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Deserializer, Serialize, de};
+
+fn deserialize_string_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(value) => Ok(value),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        value => Err(de::Error::custom(format!(
+            "expected string or number, received {value}"
+        ))),
+    }
+}
 
 /// 官方 wasm（DeepSeek 前端 sha3_wasm_bg.7b9ca65ddd.wasm），独立无 imports。
 pub const SHA3_WASM: &[u8] = include_bytes!("sha3.wasm");
@@ -14,6 +27,7 @@ pub struct PowChallenge {
     pub algorithm: String,
     pub challenge: String,
     pub salt: String,
+    #[serde(deserialize_with = "deserialize_string_or_number")]
     pub difficulty: String,
     pub signature: String,
     #[serde(default)]

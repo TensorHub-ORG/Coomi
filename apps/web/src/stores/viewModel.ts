@@ -1,4 +1,5 @@
 import type { ToolAccess, UserQuestion } from '@/protocol/events'
+import type { ChatAttachment } from '@/utils/attachments'
 
 export type ToolCardStatus = 'starting' | 'running' | 'success' | 'error' | 'awaiting_approval' | 'cache_hit' | 'cancelled'
 
@@ -35,7 +36,7 @@ export interface AssistantMessage {
   /** 生命体主动消息的投递触发类型（morning/egg/milestone_stage/everyday），由 life_delivered 事件回填，气泡据此定制卡片渲染。 */
   lifeTrigger?: string
 }
-export interface UserMessage { kind: 'user'; id: string; mid: string; content: string }
+export interface UserMessage { kind: 'user'; id: string; mid: string; content: string; attachments?: ChatAttachment[] }
 export interface ReasoningBlock {
   kind: 'reasoning'
   id: string

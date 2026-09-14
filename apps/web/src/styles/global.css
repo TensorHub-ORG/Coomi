@@ -277,7 +277,7 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-#app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+#app { display: flex; flex-direction: column; height: var(--coomi-display-viewport-height, 100dvh); overflow: hidden; }
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; padding: 0; }
 input, textarea { font-family: inherit; color: inherit; }
 select { color-scheme: inherit; }

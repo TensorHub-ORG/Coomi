@@ -116,3 +116,19 @@ test('message actions use a theme-neutral transparent surface', async () => {
   assert.match(actions, /background:\s*transparent/)
   assert.doesNotMatch(actions, /background:\s*var\(--fill\)/)
 })
+
+test('reasoning disclosure does not replay a root entrance animation', async () => {
+  const reasoning = await readFile(new URL('../src/components/ReasoningBlock.vue', import.meta.url), 'utf8')
+  const chat = await readFile(new URL('../src/views/ChatView.vue', import.meta.url), 'utf8')
+  assert.doesNotMatch(reasoning, /class="reasoning fade-in"/)
+  assert.match(reasoning, /<div v-show="block\.expanded" class="body"/)
+  assert.match(chat, /!\['assistant', 'reasoning'\]\.includes\(b\.item\.kind\)/)
+})
+
+test('usage scroll container reaches the orbit card edge', async () => {
+  const tools = await readFile(new URL('../src/components/ContextTools.vue', import.meta.url), 'utf8')
+  const usageRule = tools.match(/\.card-content :deep\(\.usage-details\)\s*\{([^}]*)\}/)?.[1] ?? ''
+  assert.match(usageRule, /width:\s*100%/)
+  assert.match(usageRule, /padding:\s*0/)
+  assert.doesNotMatch(usageRule, /margin-inline/)
+})

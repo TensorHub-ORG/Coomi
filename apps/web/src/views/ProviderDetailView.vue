@@ -558,6 +558,10 @@ function openModelConfig() {
 
       <p v-if="message" class="notice ok">{{ message }}</p>
       <p v-if="error" class="notice err">{{ error }}</p>
+      <p v-if="providerId === 'zhipu'" class="provider-warning">
+        <CoomiIcon name="alert" :size="15" />
+        <span><strong>智谱 Coding Plan 使用提醒</strong>请填写智谱官方 API Key 或 Coding Key。账号套餐与 Coding Plan 可能限定支持的客户端和用途，超出范围可能触发限流或账号异常，请以智谱当前规则为准。</span>
+      </p>
 
       <div v-if="!isNew && provider" class="activate-area">
         <button
@@ -749,6 +753,10 @@ function openModelConfig() {
 .notice { margin: 0 0 10px; padding: 9px 11px; border-radius: var(--r-md); font-size: 12.5px; line-height: 1.55; }
 .notice.ok { color: var(--ok); background: var(--ok-soft); }
 .notice.err { color: var(--danger); background: var(--danger-soft); }
+.provider-warning { display:flex; align-items:flex-start; gap:8px; margin:0 0 11px; padding:10px 11px; border:1px solid color-mix(in srgb,var(--orange) 28%,var(--border)); border-radius:var(--r-md); background:color-mix(in srgb,var(--orange-soft) 54%,var(--bg)); color:var(--text-2); font-size:11.8px; line-height:1.55; }
+.provider-warning :deep(svg) { flex-shrink:0; margin-top:2px; color:var(--orange); }
+.provider-warning span { display:flex; flex-direction:column; gap:2px; }
+.provider-warning strong { color:var(--text); font-size:12.3px; }
 .activate-area { margin-bottom: 12px; }
 .activate-btn { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; }
 .activate-btn.is-current { border: 1px solid var(--ok); background: var(--ok-soft); color: var(--ok); opacity: 1; }
