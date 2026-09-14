@@ -651,7 +651,7 @@
           <button class="platform-tab" type="button" role="tab" aria-selected="false" data-platform="desktop" data-platform-tab>桌面端</button>
         </div>
         <div class="actions">
-          <a id="downloadButtonAndroid" class="button button-primary" href="https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.7.apk" data-stat-action="download" data-download-button="android">
+          <a id="downloadButtonAndroid" class="button button-primary" href="https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.8.apk" data-stat-action="download" data-download-button="android">
             <span class="download-arrow" aria-hidden="true">↓</span>
             <span data-download-label="android">下载 APK</span>
           </a>
@@ -703,19 +703,31 @@
             <div data-channel-panel="stable">
 
         
-              <h2 class="changelog-title">v1.4.7 更新说明【稳定】</h2>
-              <p class="changelog-sub">2026-09-09 发布</p>
+              <h2 class="changelog-title">v1.4.8 更新说明【稳定】</h2>
+              <p class="changelog-sub">2026-09-14 发布</p>
               <ul class="changelog-list">
+                <li><strong>会话连续性与流式稳定性</strong>：修复长会话压缩后消息顺序错乱造成的“忘记上一轮”问题；稳定思考过程、问题反馈、工具调用和正文的瀑布流更新，解决展开困难、结束状态错误与反复闪烁。</li>
+                <li><strong>上下文快捷工具中心</strong>：上下文用量圆环整合三层扇形工具区，可直接打开版本管理、提示词、用量、任务中心、辅助会话、记忆、隔离文件管理和小窗；优化扇形对齐、选中轮廓、动效、卡片缺口与滚动布局。</li>
+                <li><strong>提示词与新会话指令</strong>：常用提示词支持分类、搜索、编辑和一键填入；“启动首页”新增四条新会话快捷指令管理，可自定义图标、名称和内容，保存并切换多套方案或一键重置。</li>
+                <li><strong>辅助会话与任务管理</strong>：辅助会话作为主会话的独立子会话运行并归档，小窗卡片采用紧凑自适应瀑布流；任务详情在选中条目下方展开。</li>
+                <li><strong>版本、运维与数据工具</strong>：重做 Git、还原、运维诊断和数据工具界面，统一 Coomi 视觉与极简线稿图标，完善快照、分支、历史、同步、诊断和用量查看流程。</li>
+                <li><strong>内置运行环境可靠性</strong>：核心引擎、终端引导、Proot 与 Ubuntu 24.04 ARM64 环境随 APK 内置；完善冷启动、升级、环境校验、自修复、DNS 和安装中断恢复。</li>
+                <li><strong>提供商兼容性</strong>：完善 OpenCode 多协议模型路由，修复 DeepSeek 账号登录和智谱配置入口，并对高风险登录方式显示明确提醒。</li>
+                <li><strong>附件、外观与移动布局</strong>：附件标签、图片缩略图和文本共用限高滚动区；新增 75%–110% 软件显示比例，比例控件可在手机单屏完成设置，并统一主题、侧栏、待机页和卡片布局。</li>
+              </ul>
+
+              <details class="changelog-history">
+                <summary>展开全部更新记录</summary>
+                <div class="history-inner">
+<h3 class="history-version">v1.4.7 更新说明【稳定】</h3>
+<p class="changelog-sub">2026-09-09 发布</p>
+<ul class="changelog-list">
                 <li><strong>工作室消息实时显示</strong>：修复成员完成后消息不出现、必须点击“停止”才集中渲染的问题；文字与推理内容现在会在成员独立气泡中逐行流式更新。</li>
                 <li><strong>气泡与执行状态</strong>：修复“继续”等用户消息产生重复气泡；执行中的成员气泡显示三点动态状态，完成、失败和停止状态及时同步。</li>
                 <li><strong>Android 流式链路</strong>：强化 WebView SSE 心跳、缓存与缓冲控制，并增加每秒消息同步兜底，降低长任务和弱网下的事件丢失。</li>
                 <li><strong>多成员协作</strong>：完善成员互相 @、长按头像 @、群聊消息排序、工单看板、工具卡片和返回链路。</li>
                 <li><strong>悬浮聊天与反馈体验</strong>：新增原生悬浮聊天窗口，修复缩放、全屏入口、用量卡片滚动和悬浮球显示；优化反馈流程、文本选中与模型名称显示。</li>
               </ul>
-
-              <details class="changelog-history">
-                <summary>查看全部更新记录</summary>
-                <div class="history-inner">
 <h3 class="history-version">v1.4.6-r1 更新说明【稳定】</h3>
 <p class="changelog-sub">2026-09-07 发布</p>
 <ul class="changelog-list">
