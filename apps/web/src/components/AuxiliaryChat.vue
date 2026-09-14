@@ -119,12 +119,32 @@ async function removeCurrent() {
 </template>
 
 <style scoped>
-.auxiliary-chat { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; color: var(--text); }
+.auxiliary-chat { --aux-density: .82; position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; color: var(--text); }
 header, form { display: flex; gap: 6px; padding: 8px; flex-shrink: 0; }
 select, textarea { min-width: 0; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--fill); color: inherit; padding: 7px; font: inherit; font-size: 12px; }
 button { flex-shrink: 0; border: 0; border-radius: 8px; background: var(--fill); color: var(--blue); padding: 7px 9px; font: inherit; font-size: 12px; }
 button:disabled { opacity: .5; }.model { width: calc(100% - 16px); margin: 0 8px; }
-.transcript { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px 8px; }
+.transcript { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 9px 8px; }
+.transcript :deep(.bubble) { padding: 7px 10px; border-radius: 15px 15px 6px 15px; font-size: 12.5px; line-height: 1.48; }
+.transcript :deep(.user-wrap) { max-width: 88%; }
+.transcript :deep(.md) { font-size: 12.3px; line-height: 1.58; }
+.transcript :deep(.acts) { gap: 1px; margin-top: 4px; }
+.transcript :deep(.act) { height: 23px; padding: 0 6px; gap: 3px; font-size: 10.5px; }
+.transcript :deep(.act svg) { width: 12px; height: 12px; }
+.transcript :deep(.reasoning .toggle) { min-height: 27px; padding: 2px; gap: 5px; font-size: 11px; }
+.transcript :deep(.reasoning .body) { margin-top: 2px; padding: 6px 9px; font-size: 11.2px; line-height: 1.55; }
+.transcript :deep(.tool) { border-radius: 10px; }
+.transcript :deep(.tool .head) { min-height: 36px; padding: 5px 8px; gap: 7px; }
+.transcript :deep(.tool .tile) { width: 24px; height: 24px; border-radius: 7px; }
+.transcript :deep(.tool .verb) { font-size: 11.5px; }
+.transcript :deep(.tool .target), .transcript :deep(.tool .st) { font-size: 9.8px; }
+.transcript :deep(.tool .body) { padding: 3px 8px 8px; }
+.transcript :deep(.group .ghead) { min-height: 36px; padding: 5px 8px; gap: 6px; }
+.transcript :deep(.group .gicon) { width: 24px; height: 24px; border-radius: 7px; }
+.transcript :deep(.group .gtitle) { font-size: 11.5px; }
+.transcript :deep(.group .gsum), .transcript :deep(.group .gms) { font-size: 9.8px; }
+.transcript :deep(.attachment-chip) { height: 31px; }
+.transcript :deep(.attachment-chip img), .transcript :deep(.file-icon) { width: 22px; height: 22px; flex-basis: 22px; }
 .empty { margin: auto; padding: 16px; font-size: 13px; text-align: center; }.hint { color: var(--text-3); font-size: 12px; }.error { color: var(--danger); font-size: 12px; margin: 4px 8px; }
 textarea { resize: none; } :deep(.scrim) { position: absolute; z-index: 10; } :deep(.sheet) { max-height: 100%; overflow: auto; }
 </style>

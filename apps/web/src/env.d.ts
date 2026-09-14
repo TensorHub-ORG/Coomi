@@ -11,6 +11,7 @@ interface Window {
   __coomiFloating?: boolean
   CoomiAndroid?: {
     openDashboard(): void
+    closeHostActivity?(): void
     openFloatingWindow?(): void
     importFiles?(): void
     importFilesForRequest?(requestId: string): void
@@ -31,6 +32,8 @@ interface Window {
     getThemeMode?(): string
     setThemeMode?(mode: string): void
     setDisplayScale?(scale: number): void
+    getQuickCommands?(): string
+    setQuickCommands?(json: string): boolean
     getDigitalLifeEnabled?(): boolean
     setDigitalLifeEnabled?(enabled: boolean): void
     /** 任务完成通知开关（原生侧 SharedPreferences，默认开）。 */

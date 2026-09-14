@@ -8,6 +8,17 @@
     </LinearLayout>
     <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true" android:scrollbars="none">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingStart="@dimen/coomi_gutter" android:paddingEnd="@dimen/coomi_gutter" android:paddingTop="@dimen/coomi_space_s" android:paddingBottom="@dimen/coomi_space_xl">
+            <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="显示比例" />
+            <LinearLayout style="@style/Coomi.Card" android:paddingStart="16dp" android:paddingTop="10dp" android:paddingEnd="16dp" android:paddingBottom="8dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                        <TextView style="@style/Coomi.Text.Body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="软件显示比例" />
+                        <TextView style="@style/Coomi.Text.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:text="缩小后同一屏显示更多内容，状态栏不变" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/txt_display_scale" style="@style/Coomi.Text.Body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="100%" android:textColor="?attr/coomiBlue" />
+                </LinearLayout>
+                <SeekBar android:id="@+id/seek_display_scale" android:layout_width="match_parent" android:layout_height="36dp" android:max="35" android:progress="25" android:progressTint="?attr/coomiBlue" android:thumbTint="?attr/coomiBlue" />
+            </LinearLayout>
             <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="主题风格" />
             <LinearLayout style="@style/Coomi.Card">
                 <LinearLayout android:id="@+id/btn_appearance_system" style="@style/Coomi.Row" android:clickable="true" android:focusable="true"><RadioButton android:id="@+id/radio_appearance_system" android:layout_width="wrap_content" android:layout_height="wrap_content" android:buttonTint="?attr/coomiBlue" android:clickable="false"/><TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="@string/coomi_dash_theme_system"/></LinearLayout>
@@ -20,17 +31,6 @@
                 <View style="@style/Coomi.Divider"/><LinearLayout android:id="@+id/btn_appearance_ember" style="@style/Coomi.Row" android:clickable="true" android:focusable="true"><RadioButton android:id="@+id/radio_appearance_ember" android:layout_width="wrap_content" android:layout_height="wrap_content" android:buttonTint="?attr/coomiBlue" android:clickable="false"/><TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="@string/coomi_dash_theme_ember"/></LinearLayout>
                 <View style="@style/Coomi.Divider"/><LinearLayout android:id="@+id/btn_appearance_celadon" style="@style/Coomi.Row" android:clickable="true" android:focusable="true"><RadioButton android:id="@+id/radio_appearance_celadon" android:layout_width="wrap_content" android:layout_height="wrap_content" android:buttonTint="?attr/coomiBlue" android:clickable="false"/><TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="@string/coomi_dash_theme_celadon"/></LinearLayout>
                 <View style="@style/Coomi.Divider"/><LinearLayout android:id="@+id/btn_appearance_linen" style="@style/Coomi.Row" android:clickable="true" android:focusable="true"><RadioButton android:id="@+id/radio_appearance_linen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:buttonTint="?attr/coomiBlue" android:clickable="false"/><TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="@string/coomi_dash_theme_linen"/></LinearLayout>
-            </LinearLayout>
-            <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/coomi_space_l" android:text="显示比例" />
-            <LinearLayout style="@style/Coomi.Card" android:paddingStart="16dp" android:paddingTop="14dp" android:paddingEnd="16dp" android:paddingBottom="12dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
-                        <TextView style="@style/Coomi.Text.Body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="软件显示比例" />
-                        <TextView style="@style/Coomi.Text.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="缩小后同一屏显示更多内容，状态栏不变" />
-                    </LinearLayout>
-                    <TextView android:id="@+id/txt_display_scale" style="@style/Coomi.Text.Body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="100%" android:textColor="?attr/coomiBlue" />
-                </LinearLayout>
-                <SeekBar android:id="@+id/seek_display_scale" android:layout_width="match_parent" android:layout_height="40dp" android:max="35" android:progress="25" android:progressTint="?attr/coomiBlue" android:thumbTint="?attr/coomiBlue" />
             </LinearLayout>
             <LinearLayout android:id="@+id/section_saved_palettes" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                 <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/coomi_space_l" android:text="已保存配色" />

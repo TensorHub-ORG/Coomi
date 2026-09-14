@@ -4,12 +4,17 @@
  * 三个模式不是装饰，各自映射到真实命令：
  *   快速 → set_permission_mode('auto')；计划 → enter_plan_mode；谨慎 → set_permission_mode('ask')。
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
 import CoomiIcon from './CoomiIcon.vue'
 import CoomiMark from './CoomiMark.vue'
+import {
+  QUICK_COMMAND_CHANGED_EVENT,
+  loadQuickCommandConfig,
+  type QuickCommand,
+} from '@/utils/quickCommands'
 
 const session = useSessionStore()
 const config = useConfigStore()
@@ -21,12 +26,20 @@ const MODES = [
   { key: 'careful', label: '谨慎', icon: 'shield', desc: '每一次写入都等你点头' },
 ] as const
 
-const SUGGESTIONS: { icon: string; text: string; guide?: string }[] = [
-  { icon: 'phone', text: '查看手机系统信息与型号信息' },
-  { icon: 'globe', text: '今日科技圈热点话题' },
-  { icon: 'sparkle', text: 'Coomi 新手使用指南', guide: 'newbie' },
-  { icon: 'cube', text: '自定义拓展进化指南', guide: 'extension' },
-]
+const suggestions = ref<QuickCommand[]>([])
+function refreshSuggestions() {
+  const value = loadQuickCommandConfig()
+  suggestions.value = (value.sets.find(set => set.id === value.activeSetId) ?? value.sets[0]).commands
+}
+function runSuggestion(command: QuickCommand) {
+  if (command.guide) session.sendGuide(command.guide)
+  else session.sendMessage(command.content)
+}
+onMounted(() => {
+  refreshSuggestions()
+  window.addEventListener(QUICK_COMMAND_CHANGED_EVENT, refreshSuggestions)
+})
+onBeforeUnmount(() => window.removeEventListener(QUICK_COMMAND_CHANGED_EVENT, refreshSuggestions))
 
 const active = computed(() => (config.planMode ? 'plan' : config.permissionMode === 'ask' ? 'careful' : 'fast'))
 const hint = computed(() => MODES.find(m => m.key === active.value)?.desc ?? '')
@@ -76,14 +89,14 @@ function pick(key: 'fast' | 'plan' | 'careful') {
 
     <div class="sugs">
       <button
-        v-for="(s, i) in SUGGESTIONS"
-        :key="s.text"
+        v-for="(s, i) in suggestions"
+        :key="s.id"
         class="sug cascade"
         :style="{ animationDelay: 50 * i + 'ms' }"
-        @click="s.guide ? session.sendGuide(s.guide) : session.sendMessage(s.text)"
+        @click="runSuggestion(s)"
       >
         <span class="sicon"><CoomiIcon :name="s.icon" :size="16" /></span>
-        <span class="stext">{{ s.text }}</span>
+        <span class="stext">{{ s.name }}</span>
         <span class="sarrow"><CoomiIcon name="chevronRight" :size="12" /></span>
       </button>
     </div>

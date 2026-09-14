@@ -28,10 +28,12 @@ public class CoomiActivity extends Activity {
     public static final String EXTRA_SESSION_ID = "coomi.session_id";
     public static final String EXTRA_PREFILL_DRAFT = "coomi.prefill_draft";
     public static final String EXTRA_RETURN_TO_SETUP = "coomi.return_to_setup";
+    public static final String EXTRA_RETURN_TO_HOME_SETTINGS = "coomi.return_to_home_settings";
     private static final int REQUEST_OVERLAY = 2105;
     private CoomiChatSession mSession;
     private boolean mWaitingForPermission;
     private boolean mOpeningFloating;
+    private boolean mRestoreHomeSettingsAfterQuickCommands;
     /** 启动失败页「一键反馈」（引擎启动失败场景的显式反馈入口）。 */
     private Button mSplashFeedbackButton;
     private boolean mSplashFeedbackSubmitted;
@@ -42,6 +44,8 @@ public class CoomiActivity extends Activity {
         setContentView(R.layout.activity_coomi);
         CoomiTheme.applySystemBars(this);
         mWaitingForPermission = state != null && state.getBoolean("waitingOverlay");
+        mRestoreHomeSettingsAfterQuickCommands = state != null
+            && state.getBoolean("restoreHomeSettingsAfterQuickCommands");
         findViewById(R.id.btn_coomi_retry).setOnClickListener(v -> mSession.retryStart());
         mSplashFeedbackButton = findViewById(R.id.btn_coomi_feedback);
         mSplashFeedbackButton.setOnClickListener(v -> submitSplashFeedback());
@@ -127,8 +131,26 @@ public class CoomiActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        mRestoreHomeSettingsAfterQuickCommands = intent.getBooleanExtra(
+            EXTRA_RETURN_TO_HOME_SETTINGS, false);
         setIntent(intent);
         attachSession();
+    }
+
+    /** Return from the Web quick-command editor without losing the native settings stack. */
+    public void closeQuickCommandsEditor() {
+        if (mRestoreHomeSettingsAfterQuickCommands) {
+            mRestoreHomeSettingsAfterQuickCommands = false;
+            mSession.navigateToRoot();
+            startActivities(new Intent[] {
+                new Intent(this, app.coomi.CoomiDashboardActivity.class),
+                new Intent(this, app.coomi.CoomiHomeSettingActivity.class),
+            });
+            return;
+        }
+        finish();
+        overridePendingTransition(
+            R.anim.coomi_activity_close_enter, R.anim.coomi_activity_close_exit);
     }
 
     @Override protected void onResume() {
@@ -180,6 +202,7 @@ public class CoomiActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putBoolean("waitingOverlay", mWaitingForPermission);
+        state.putBoolean("restoreHomeSettingsAfterQuickCommands", mRestoreHomeSettingsAfterQuickCommands);
         super.onSaveInstanceState(state);
     }
 

@@ -12,10 +12,11 @@ use uuid::Uuid;
 
 const BASELINE_TOKENS: u64 = 12_000;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: u64 = 20_000;
-// 压缩后保留的"最近用户指令"条数与"最近工具活动"消息数：
-// 摘要之后依次跟随工具活动尾部与最近用户指令，保证模型最后读到的是最新指令与工作现场。
+// 压缩后保留最近三轮的真实用户指令、每轮最终助手回复，以及工作现场尾部。
+// 消息数与正文预算均有上限，避免单次长 Agent 任务压缩后仍塞回完整工具瀑布流。
 const COMPACT_RECENT_USER_MESSAGES: usize = 3;
-const COMPACT_RECENT_TOOL_MESSAGES: usize = 5;
+const COMPACT_RECENT_ACTIVITY_MESSAGES: usize = 12;
+const COMPACT_RECENT_ACTIVITY_MAX_TOKENS: u64 = 20_000;
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT: &str =
     "Output exceeded the available model context and was truncated";
 
@@ -253,23 +254,10 @@ pub fn compacted_history(messages: &[ChatMessage], summary: &str) -> Vec<ChatMes
     }
     retained.reverse();
 
-    // 最近工具活动尾部：保留最近几条 assistant/tool 消息作为工作现场；
-    // 窗口切断造成的悬空 tool 输出由 normalize_history 丢弃/补齐。
-    let tail: Vec<ChatMessage> = messages
-        .iter()
-        .rev()
-        .filter(|message| message.role != Role::User)
-        .take(COMPACT_RECENT_TOOL_MESSAGES)
-        .cloned()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let tail = normalize_history(&tail);
-
-    // 最近用户指令：置于历史最末，保证模型最后读到的是最新指令；
-    // 同样受预算约束（新者优先），单条超预算截断，预算耗尽后更早的最近消息跳过。
-    let mut recent_messages = Vec::new();
+    // 最近三轮必须按原始 user → assistant → tool 顺序整体保留。旧实现把所有
+    // assistant/tool 提到 user 前面，会让下一轮模型看到“先回答、后提问”的伪历史，
+    // 表现为同一会话中忘记上一轮。用户正文仍按新者优先受预算约束。
+    let mut recent_users = Vec::new();
     let mut recent_budget = COMPACT_USER_MESSAGE_MAX_TOKENS;
     for position in recent.iter().rev() {
         if recent_budget == 0 {
@@ -278,23 +266,161 @@ pub fn compacted_history(messages: &[ChatMessage], summary: &str) -> Vec<ChatMes
         let message = &messages[*position];
         let tokens = estimate_text_tokens(&message.content);
         if tokens <= recent_budget {
-            recent_messages.push(message.clone());
+            recent_users.push((*position, message.clone()));
             recent_budget -= tokens;
         } else {
             let mut truncated = message.clone();
             truncated.content = truncate_text_to_tokens(&message.content, recent_budget);
-            recent_messages.push(truncated);
+            recent_users.push((*position, truncated));
             recent_budget = 0;
         }
     }
-    recent_messages.reverse();
+    recent_users.reverse();
 
-    // 结构：早期用户消息 → 摘要 → 最近工具活动 → 最近用户指令
+    let mut recent_messages = Vec::new();
+    for (position, user) in recent_users {
+        recent_messages.push(user);
+        let end = user_positions
+            .iter()
+            .copied()
+            .find(|next| *next > position)
+            .unwrap_or(messages.len());
+        recent_messages.extend(
+            messages[position + 1..end]
+                .iter()
+                .filter(|message| !message.compaction_summary)
+                .cloned(),
+        );
+    }
+    let recent_messages = bounded_recent_history(&recent_messages);
+
+    // 结构：早期目标 → 摘要 → 最近完整会话轮次。
     let mut output = retained;
     output.push(ChatMessage::summary(format!("{SUMMARY_PREFIX}\n{summary}")));
-    output.extend(tail);
     output.extend(recent_messages);
     output
+}
+
+/// Keep the recent transcript chronological while bounding long single-turn tool waterfalls.
+/// The newest activity tail and each retained turn's final assistant reply survive; large content
+/// is truncated from the older side of that retained set.
+fn bounded_recent_history(messages: &[ChatMessage]) -> Vec<ChatMessage> {
+    let real_user_positions = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| {
+            message.role == Role::User && !message.internal && !message.compaction_summary
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let activity_positions = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| {
+            !(message.role == Role::User && !message.internal && !message.compaction_summary)
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let mut kept_activity = activity_positions
+        .iter()
+        .rev()
+        .take(COMPACT_RECENT_ACTIVITY_MESSAGES)
+        .copied()
+        .collect::<HashSet<_>>();
+
+    for (turn, user_position) in real_user_positions.iter().enumerate() {
+        let end = real_user_positions.get(turn + 1).copied().unwrap_or(messages.len());
+        if let Some((assistant_position, _)) = messages[*user_position + 1..end]
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, message)| message.role == Role::Assistant)
+        {
+            kept_activity.insert(*user_position + 1 + assistant_position);
+        }
+    }
+
+    let output = messages
+        .iter()
+        .enumerate()
+        .filter(|(index, message)| {
+            (message.role == Role::User && !message.internal && !message.compaction_summary)
+                || kept_activity.contains(index)
+        })
+        .map(|(_, message)| message.clone())
+        .collect::<Vec<_>>();
+    let mut normalized = normalize_history(&output);
+    // Opaque provider replay items are no longer needed after a fresh compaction summary and
+    // can dwarf the visible transcript. Tool calls remain structured and are budgeted with
+    // their matching outputs as an indivisible activity group.
+    for message in &mut normalized {
+        message.provider_items.clear();
+    }
+
+    let mut groups: Vec<(bool, Vec<ChatMessage>)> = Vec::new();
+    let mut index = 0;
+    while index < normalized.len() {
+        let message = &normalized[index];
+        let real_user = message.role == Role::User && !message.internal && !message.compaction_summary;
+        if message.role == Role::Assistant && !message.tool_calls.is_empty() {
+            let call_ids = message
+                .tool_calls
+                .iter()
+                .map(|call| call.id.as_str())
+                .collect::<HashSet<_>>();
+            let mut group = vec![message.clone()];
+            index += 1;
+            while index < normalized.len()
+                && normalized[index].role == Role::Tool
+                && normalized[index]
+                    .tool_call_id
+                    .as_deref()
+                    .is_some_and(|id| call_ids.contains(id))
+            {
+                group.push(normalized[index].clone());
+                index += 1;
+            }
+            groups.push((false, group));
+        } else {
+            groups.push((real_user, vec![message.clone()]));
+            index += 1;
+        }
+    }
+
+    let mut retained_groups = Vec::new();
+    let mut remaining = COMPACT_RECENT_ACTIVITY_MAX_TOKENS;
+    for (real_user, mut group) in groups.into_iter().rev() {
+        if real_user {
+            retained_groups.push(group);
+            continue;
+        }
+        let tokens = estimate_request_tokens("", &group, &[]);
+        if tokens <= remaining {
+            remaining -= tokens;
+            retained_groups.push(group);
+            continue;
+        }
+        // A plain assistant answer may be longer than the remaining budget. Preserve its newest
+        // text tail. Structured tool-call groups are skipped whole so no malformed arguments or
+        // orphaned results can enter the provider request.
+        if group.len() == 1 && group[0].tool_calls.is_empty() && remaining > 0 {
+            let mut shell = group[0].clone();
+            shell.content.clear();
+            let fixed = estimate_request_tokens("", &[shell], &[]);
+            let content_budget = remaining.saturating_sub(fixed);
+            if content_budget > 0 {
+                group[0].content = truncate_text_to_tokens(&group[0].content, content_budget);
+                remaining = remaining.saturating_sub(estimate_request_tokens("", &group, &[]));
+                retained_groups.push(group);
+            }
+        }
+    }
+    retained_groups.reverse();
+    let retained = retained_groups
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    normalize_history(&retained)
 }
 
 pub fn retained_user_history(messages: &[ChatMessage]) -> Vec<ChatMessage> {
@@ -418,12 +544,78 @@ mod tests {
             ChatMessage::user("second"),
         ];
         let compacted = compacted_history(&messages, "new");
-        // 结构：摘要 → 工具活动尾部 → 最近用户指令
+        // 结构：摘要 → 最近完整会话轮次；助手回复不能跑到提问前面。
         assert_eq!(compacted.len(), 4);
         assert!(compacted[0].compaction_summary);
-        assert_eq!(compacted[1].role, Role::Assistant);
-        assert_eq!(compacted[2].content, "first");
+        assert_eq!(compacted[1].content, "first");
+        assert_eq!(compacted[2].role, Role::Assistant);
         assert_eq!(compacted[3].content, "second");
+    }
+
+    #[test]
+    fn compaction_preserves_recent_user_assistant_turn_order() {
+        let messages = vec![
+            ChatMessage::user("第一问"),
+            ChatMessage::assistant("第一答", Vec::new()),
+            ChatMessage::user("第二问"),
+            ChatMessage::assistant("第二答", Vec::new()),
+            ChatMessage::user("第三问"),
+        ];
+        let compacted = compacted_history(&messages, "此前摘要");
+        let transcript = compacted
+            .iter()
+            .filter(|message| !message.compaction_summary)
+            .map(|message| (message.role, message.content.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(transcript, vec![
+            (Role::User, "第一问"),
+            (Role::Assistant, "第一答"),
+            (Role::User, "第二问"),
+            (Role::Assistant, "第二答"),
+            (Role::User, "第三问"),
+        ]);
+    }
+
+    #[test]
+    fn compaction_bounds_a_tool_heavy_single_turn_without_losing_final_reply() {
+        let mut messages = vec![ChatMessage::user("完成一个很长的任务")];
+        for index in 0..80 {
+            let call = ToolCall {
+                id: format!("call-{index}"),
+                name: "shell".into(),
+                arguments: serde_json::json!({
+                    "command": format!("step-{index}"),
+                    "large_write": "a".repeat(24_000),
+                }),
+            };
+            let mut assistant = ChatMessage::assistant("", vec![call]);
+            assistant.provider_items.push(serde_json::json!({
+                "type": "reasoning",
+                "payload": "p".repeat(24_000),
+            }));
+            messages.push(assistant);
+            messages.push(ChatMessage::tool(
+                format!("call-{index}"),
+                format!("tool output {index}: {}", "x".repeat(8_000)),
+            ));
+        }
+        messages.push(ChatMessage::assistant("最终完成结论", Vec::new()));
+
+        let compacted = compacted_history(&messages, "长任务摘要");
+        assert!(compacted.iter().any(|message| message.content == "最终完成结论"));
+        assert!(compacted.iter().all(|message| message.provider_items.is_empty()));
+        assert!(
+            compacted.len() <= COMPACT_RECENT_ACTIVITY_MESSAGES + 3,
+            "tool waterfall should be a bounded suffix, got {} messages",
+            compacted.len()
+        );
+        assert!(
+            estimate_request_tokens("", &compacted, &[]) < 30_000,
+            "bounded transcript unexpectedly exceeds its text budget"
+        );
+        let user = compacted.iter().position(|message| message.role == Role::User).unwrap();
+        let final_reply = compacted.iter().position(|message| message.content == "最终完成结论").unwrap();
+        assert!(user < final_reply);
     }
 
     #[test]
@@ -469,9 +661,9 @@ mod tests {
         ];
         let compacted = compacted_history(&messages, "summary");
         assert!(compacted[0].compaction_summary);
-        assert_eq!(compacted[1].role, Role::Assistant);
-        assert_eq!(compacted[2].role, Role::Tool);
-        assert_eq!(compacted[3].content, "goal");
+        assert_eq!(compacted[1].content, "goal");
+        assert_eq!(compacted[2].role, Role::Assistant);
+        assert_eq!(compacted[3].role, Role::Tool);
         assert_eq!(compacted[4].content, "latest");
     }
 

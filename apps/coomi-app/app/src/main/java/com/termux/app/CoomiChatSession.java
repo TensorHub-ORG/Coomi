@@ -482,6 +482,12 @@ public final class CoomiChatSession extends ContextWrapper {
         });
     }
 
+    /** Reset a reused singleTask host before rebuilding the native dashboard/settings stack. */
+    void navigateToRoot() {
+        if (mWebView == null || !mPageLoaded) return;
+        runOnUiThread(() -> mWebView.evaluateJavascript("window.location.hash='/'", null));
+    }
+
     private void configureWebView() {
         WebSettings s = mWebView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -615,6 +621,17 @@ public final class CoomiChatSession extends ContextWrapper {
         @JavascriptInterface
         public void openDashboard() { runOnUiThread(CoomiChatSession.this::openDashboard); }
 
+        /** 由原生二级设置页进入 Web 全屏编辑器时，关闭宿主并回到原页面。 */
+        @JavascriptInterface
+        public void closeHostActivity() {
+            runOnUiThread(() -> {
+                flush();
+                CoomiActivity host = activity();
+                if (host == null) return;
+                host.closeQuickCommandsEditor();
+            });
+        }
+
         /** 前端上报任务状态（running/done），更新通知栏「任务执行中/已完成」。 */
         @JavascriptInterface
         public void updateTaskStatus(String status) {
@@ -723,6 +740,23 @@ public final class CoomiChatSession extends ContextWrapper {
                 applyThemeToWebView();
                 sendBroadcast(new Intent(CoomiTheme.ACTION_THEME_CHANGED).setPackage(getPackageName()));
             });
+        }
+
+        /**
+         * 新会话快捷指令必须跨引擎随机端口保存；Web localStorage 只作为当前页面缓存，
+         * Android SharedPreferences 才是原生应用中的持久化权威值。
+         */
+        @JavascriptInterface
+        public String getQuickCommands() {
+            return getSharedPreferences("coomi_settings", android.content.Context.MODE_PRIVATE)
+                .getString("coomi.quick_commands.v1", "");
+        }
+
+        @JavascriptInterface
+        public boolean setQuickCommands(String json) {
+            if (json == null || json.length() > 256_000) return false;
+            return getSharedPreferences("coomi_settings", android.content.Context.MODE_PRIVATE)
+                .edit().putString("coomi.quick_commands.v1", json).commit();
         }
 
         @JavascriptInterface

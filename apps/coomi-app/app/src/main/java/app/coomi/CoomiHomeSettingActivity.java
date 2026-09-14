@@ -1,6 +1,7 @@
 package app.coomi;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.RadioButton;
@@ -37,6 +38,7 @@ public class CoomiHomeSettingActivity extends Activity {
 
         findViewById(R.id.btn_home_console).setOnClickListener(v -> selectRoute("console"));
         findViewById(R.id.btn_home_chat).setOnClickListener(v -> selectRoute("chat"));
+        findViewById(R.id.btn_home_quick_commands).setOnClickListener(v -> openQuickCommands());
     }
 
     private void selectRoute(String route) {
@@ -45,5 +47,12 @@ public class CoomiHomeSettingActivity extends Activity {
         mRadioChat.setChecked(chat);
         CoomiHomePreference.setHomeRoute(this, route);
         mSavedText.setVisibility(View.VISIBLE);
+    }
+
+    private void openQuickCommands() {
+        Intent intent = new Intent(this, com.termux.app.CoomiActivity.class);
+        intent.putExtra(com.termux.app.CoomiActivity.EXTRA_ROUTE, "#/quick-commands?native=1");
+        intent.putExtra(com.termux.app.CoomiActivity.EXTRA_RETURN_TO_HOME_SETTINGS, true);
+        startActivity(intent);
     }
 }

@@ -24,8 +24,15 @@ export function installSystemBackHandler(router: Router): void {
     if (closeTopOverlay()) return true
     const route = router.currentRoute.value.path
     if (route === '/') return false
+    if (route === '/quick-commands'
+      && router.currentRoute.value.query.native === '1'
+      && window.CoomiAndroid?.closeHostActivity) {
+      window.CoomiAndroid.closeHostActivity()
+      return true
+    }
     // 三级页（记忆库/心情日记）先回二级（数字生命体）。
     if (route.startsWith('/life/')) goBack(router, '/life')
+    else if (route === '/quick-commands') goBack(router, '/')
     else if (route === '/appearance' || route === '/persona') goBack(router, '/settings')
     else if (route.startsWith('/studio/')) goBack(router, '/studio')
     else if (

@@ -45,6 +45,13 @@ test('composer keeps imported attachments outside the visible prompt', () => {
   assert.match(bubble, /<AttachmentStrip v-if="userAttachments\.length"/)
 })
 
+test('composer gives text and attachments one shared bounded scroll area', () => {
+  const composer = readFileSync(new URL('../src/components/Composer.vue', import.meta.url), 'utf8')
+  assert.match(composer, /class="composer-content"/)
+  assert.match(composer, /\.composer-content\s*\{[^}]*max-height:[^;}]*132px[^}]*overflow-y:\s*auto/s)
+  assert.doesNotMatch(composer, /textareaScrollable/)
+})
+
 test('display scale is persisted by Android and applied to web app content', () => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8')
   const appearance = readFileSync(new URL('../src/views/AppearanceView.vue', import.meta.url), 'utf8')
@@ -58,6 +65,22 @@ test('display scale is persisted by Android and applied to web app content', () 
   assert.match(theme, /getDisplayScale/)
   assert.match(theme, /root\.put\("displayScale"/)
   assert.match(bridge, /public void setDisplayScale\(double scale\)/)
+})
+
+test('appearance controls fit the app viewport without an inner page scrollbar', () => {
+  const appearance = readFileSync(new URL('../src/views/AppearanceView.vue', import.meta.url), 'utf8')
+  const nativeAppearance = readFileSync(new URL('../../coomi-app/app/src/main/res/layout/activity_coomi_appearance.xml', import.meta.url), 'utf8')
+  assert.match(appearance, /\.body\s*\{[^}]*overflow:\s*hidden/s)
+  assert.match(appearance, /\.theme-options\s*\{[^}]*grid-template-columns/s)
+  assert.ok(nativeAppearance.indexOf('android:text="显示比例"') < nativeAppearance.indexOf('android:text="主题风格"'))
+  assert.equal((nativeAppearance.match(/@\+id\/seek_display_scale/g) ?? []).length, 1)
+})
+
+test('auxiliary transcript applies a scoped compact density', () => {
+  const auxiliary = readFileSync(new URL('../src/components/AuxiliaryChat.vue', import.meta.url), 'utf8')
+  assert.match(auxiliary, /--aux-density:/)
+  assert.match(auxiliary, /\.transcript\s*:deep\(\.bubble\)/)
+  assert.match(auxiliary, /\.transcript\s*:deep\(\.tool\)/)
 })
 
 test('account-backed provider entries disclose account risk and keep Zhipu official key path', () => {

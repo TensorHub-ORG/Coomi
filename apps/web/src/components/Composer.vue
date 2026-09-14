@@ -47,7 +47,6 @@ const quickOpen = ref(false)
 const lifeStatsOpen = ref(false)
 const transferText = ref('')
 const transferProgress = ref(0)
-const textareaScrollable = ref(false)
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
 
 const canSend = computed(() => text.value.trim().length > 0 || attachments.value.length > 0)
@@ -64,10 +63,9 @@ function autoGrow() {
   const el = textarea.value
   if (!el) return
   el.style.height = 'auto'
-  const scrollHeight = el.scrollHeight
-  const maxHeight = Number.parseFloat(getComputedStyle(el).maxHeight) || 132
-  textareaScrollable.value = scrollHeight > maxHeight
-  el.style.height = Math.min(scrollHeight, maxHeight) + 'px'
+  // 文本与附件由外层 composer-content 共用一个滚动区。textarea 展开到
+  // 完整内容高度，避免长文本再产生第二条互相抢触摸事件的内部滚动条。
+  el.style.height = `${el.scrollHeight}px`
 }
 
 async function submit() {
@@ -417,18 +415,19 @@ watch(attachments, () => {
         </div>
         <div class="life-stats-grid"><span>当前模式<strong>数字生命</strong></span><span>推理档位<strong>{{ REASONING_EFFORTS.find(i => i.value === config.reasoningEffort)?.label }}</strong></span><span>会话状态<strong>{{ session.isBusy ? '运行中' : '待命' }}</strong></span><span>动态流<strong>已连接</strong></span></div>
       </div>
-      <AttachmentStrip v-if="attachments.length" class="composer-attachments" :items="attachments" removable @remove="removeAttachment" />
-      <div class="input-clip">
-        <textarea
-          ref="textarea"
-          v-model="text"
-          class="input"
-          :class="{ scrollable: textareaScrollable }"
-          rows="1"
-          :placeholder="session.isBusy ? '插队补充指令…' : '输入问题或任务…'"
-          @input="onInput"
-          @keydown="onKeydown"
-        />
+      <div class="composer-content">
+        <AttachmentStrip v-if="attachments.length" class="composer-attachments" :items="attachments" removable @remove="removeAttachment" />
+        <div class="input-clip">
+          <textarea
+            ref="textarea"
+            v-model="text"
+            class="input"
+            rows="1"
+            :placeholder="session.isBusy ? '插队补充指令…' : '输入问题或任务…'"
+            @input="onInput"
+            @keydown="onKeydown"
+          />
+        </div>
       </div>
 
       <div class="bar">
@@ -528,22 +527,24 @@ watch(attachments, () => {
     0 6px 24px color-mix(in srgb, var(--blue) 9%, transparent);
 }
 .field.busy { border-color: var(--border-strong); }
-.composer-attachments { padding: 5px 5px 2px 3px; }
-
-.input-clip { overflow: hidden; border-radius: 17px 17px 8px 8px; }
-.input {
-  display: block; width: 100%; max-height: 132px; overflow-y: hidden;
-  padding: 9px 10px 5px 6px; border: 0; background: none; outline: none; resize: none;
-  font: inherit; font-size: 16px; line-height: 1.5; color: var(--text);
+.composer-content {
+  max-height: 132px; overflow-y: auto; overscroll-behavior: contain;
+  border-radius: 17px 17px 8px 8px;
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
-.input.scrollable { overflow-y: auto; }
-:global(html[data-coomi-floating='true'] .composer .input) { max-height: min(132px, 20vh); }
+.composer-content::-webkit-scrollbar { width: 3px; }
+.composer-content::-webkit-scrollbar-track { margin-block: 8px 5px; background: transparent; }
+.composer-content::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--border-strong); }
+:global(html[data-coomi-floating='true'] .composer .composer-content) { max-height: min(132px, 20vh); }
+.composer-attachments { padding: 5px 5px 2px 3px; }
+
+.input-clip { overflow: visible; }
+.input {
+  display: block; width: 100%; overflow: hidden;
+  padding: 9px 10px 5px 6px; border: 0; background: none; outline: none; resize: none;
+  font: inherit; font-size: 16px; line-height: 1.5; color: var(--text);
+}
 .input::placeholder { color: var(--text-3); }
-.input:not(.scrollable)::-webkit-scrollbar { display: none; width: 0; }
-.input.scrollable::-webkit-scrollbar { width: 3px; }
-.input.scrollable::-webkit-scrollbar-track { margin-block: 12px 7px; background: transparent; }
-.input.scrollable::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--border-strong); }
 
 /* 按输入框容器宽度统一缩放文字、图标、按钮和间距，小窗也保持完整单行。 */
 .bar { display: flex; flex-wrap: nowrap; align-items: center; gap: .4em; padding: 3px 0 0; font-size: clamp(8px, 3.6cqw, 13px); }

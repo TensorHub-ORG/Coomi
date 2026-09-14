@@ -152,6 +152,8 @@
     <string name="coomi_home_console_desc">先看引擎状态与各功能入口</string>
     <string name="coomi_home_chat">对话</string>
     <string name="coomi_home_chat_desc">直接进入 Coomi 对话界面</string>
+    <string name="coomi_home_quick_commands">新会话快捷指令</string>
+    <string name="coomi_home_quick_commands_desc">管理待机页四条指令与多套方案</string>
     <string name="coomi_home_saved">已保存</string>
     <string name="coomi_dash_backup">备份与导入</string>
     <string name="coomi_dash_backup_desc">完整备份会话、永久统计、MCP 与 Skill</string>
