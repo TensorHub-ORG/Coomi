@@ -197,7 +197,7 @@ onMounted(() => { void ux.refresh() })
           </div>
           <div class="auto-row">
             <span>会话页邀请提示（已加入计划后自动关闭）</span>
-            <button class="switch" :class="{ on: !ux.neverAsk }" @click="ux.setNeverAsk(ux.neverAsk)">
+            <button class="switch" :class="{ on: !ux.neverAsk }" @click="ux.setNeverAsk(!ux.neverAsk)">
               <i />
             </button>
           </div>

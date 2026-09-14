@@ -95,7 +95,7 @@ function goDashboard() {
             <span><b>隔离开发工作区</b><small><code>~/custom_coomi</code> 与构建工具链独立保存，避免影响主应用</small></span>
           </article>
             <article class="feature">
-            <span class="feature-icon"><CoomiIcon name="globe" :size="17" /></span>
+            <span class="feature-icon"><CoomiIcon name="git" :size="17" /></span>
               <span><b>Git开源生态社区</b><small>对于用户的所有迭代和改进，Coomi都会提示你，引导你按规范提交PR和封装自己的APK</small></span>
           </article>
         </div>

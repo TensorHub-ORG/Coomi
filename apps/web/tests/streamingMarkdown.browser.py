@@ -64,6 +64,36 @@ with sync_playwright() as p:
       assert(root.innerHTML === expected.innerHTML, 'completed markdown differs from full parser');
       assert(animations.length === 0, 'entry animations replayed during streaming: ' + JSON.stringify(animations));
       assert(getComputedStyle(root).animationName === 'none', 'markdown still animates on remount');
+
+      // Reasoning activity must come from the explicit stream lifecycle. A late
+      // content mutation after completion must not restart the shimmer, and the
+      // expanded state must survive virtual-list measurement/recycling.
+      session.timeline = [{kind:'reasoning', id:'reasoning-test', content:'先检查状态', expanded:false, streaming:true}];
+      await nextTick(); await sleep(80);
+      assert(document.querySelector('.reasoning .ticker'), 'streaming reasoning has no live ticker');
+      const reasoning = session.timeline[0];
+      reasoning.streaming = false;
+      reasoning.content += '\\n思考已经结束';
+      await nextTick(); await sleep(80);
+      assert(!document.querySelector('.reasoning .ticker'), 'completed reasoning restarted its live ticker');
+      assert(getComputedStyle(document.querySelector('.reasoning .spark')).animationName === 'none',
+        'completed reasoning sparkle is still animated');
+      document.querySelector('.reasoning .toggle').click();
+      await nextTick(); await sleep(80);
+      assert(reasoning.expanded === true, 'reasoning expanded state was not written to timeline');
+      assert(document.querySelector('.reasoning .body'), 'reasoning did not expand after one click');
+
+      const feedback = {kind:'notice', id:'feedback-test', tone:'warn', text:'本轮出现异常，遇到问题了吗？',
+        detail:'诊断详情', expanded:false, analysisStatus:'consent', feedbackEligible:true,
+        feedback:{channel:'runtime_error', summary:'异常', needsAnalysis:false, toolTrace:[], hasConversation:true}};
+      session.timeline = [feedback];
+      await nextTick(); await sleep(80);
+      document.querySelector('.feedback-card .fb-head').click();
+      await nextTick(); await sleep(80);
+      assert(feedback.expanded === true, 'feedback expanded state was not written to timeline');
+      assert(document.querySelector('.feedback-card .fb-body'), 'feedback did not expand after one click');
+
+      animations.length = 0;
       const rows = Array.from({length:100}, (_, i) => ({kind:'assistant', id:'history-'+i,
         mid:'history-'+i, content:'History '+i+'\\n\\nCompleted paragraph.', streaming:false}));
       session.timeline = rows;

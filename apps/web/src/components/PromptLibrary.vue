@@ -4,6 +4,7 @@ import { usePromptsStore } from '@/stores/prompts'
 import type { SavedPrompt } from '@/utils/promptLibrary'
 import CoomiIcon from './CoomiIcon.vue'
 
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 const emit = defineEmits<{ fill: [text: string] }>()
 const prompts = usePromptsStore()
 const query = ref(''), category = ref(''), tags = ref('')
@@ -28,7 +29,7 @@ async function save() {
 async function remove(id: string) { if (await prompts.remove(id)) deleting.value = '' }
 </script>
 <template>
-  <section class="prompt-library" aria-label="常用提示词指令">
+  <section class="prompt-library" :class="{ embedded: props.embedded }" aria-label="常用提示词指令">
     <form v-if="draft" class="editor" @submit.prevent="save">
       <div class="editor-heading"><strong>{{ draft.id.startsWith('builtin:') ? '编辑并另存为自定义' : '编辑提示词' }}</strong><button type="button" aria-label="取消编辑" @click="draft = null"><CoomiIcon name="close" :size="17" /></button></div>
       <label>名称<input v-model="draft.title" :disabled="prompts.busy" required maxlength="80" placeholder="给提示词起个名字" /></label>
@@ -52,14 +53,21 @@ async function remove(id: string) { if (await prompts.remove(id)) deleting.value
   </section>
 </template>
 <style scoped>
-.prompt-library { height: 100%; min-height: 0; overflow: auto; padding: 4px 2px 12px; color: var(--text); font-size: 13px; container-type: inline-size; }
+.prompt-library {
+  height: 100%; min-height: 0; overflow: auto;
+  padding: 4px clamp(14px, calc((100% - 760px) / 2), 64px) 12px;
+  color: var(--text); font-size: 13px; container-type: inline-size;
+  scrollbar-gutter: stable;
+}
+.prompt-library.embedded { padding: 4px 14px 12px; }
 .toolbar,.actions,.editor-heading,.row-bottom,.prompt-heading,.delete-confirm { display:flex; align-items:center; gap:8px; }
 .toolbar input { flex:1; min-width:0; }
 button { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:32px; padding:5px 9px; border-radius:var(--r-sm); background:var(--fill); color:var(--text-2); white-space:nowrap; font:inherit; }
 button:disabled { opacity:.45; }
 input,textarea { width:100%; min-width:0; border:1px solid var(--border); border-radius:var(--r-sm); background:var(--bg-input,var(--fill)); color:var(--text); padding:9px; font:inherit; }
 textarea { resize:vertical; min-height:120px; line-height:1.6; }
-.categories { display:flex; gap:5px; overflow-x:auto; padding:10px 0; flex-shrink:0; }
+.categories { display:flex; flex-wrap:wrap; gap:5px; overflow:visible; padding:10px 0; flex-shrink:0; }
+.embedded .categories { flex-wrap:nowrap; overflow-x:auto; }
 .categories button { border-radius:var(--r-pill); background:transparent; }
 .categories .selected,.fill { background:var(--blue-soft); color:var(--blue); }
 .prompt-row { border-top:1px solid var(--border); padding:12px 0; }
@@ -67,6 +75,8 @@ textarea { resize:vertical; min-height:120px; line-height:1.6; }
 small,.tags { color:var(--text-3); font-size:11px; }
 .preview { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; margin:7px 0; line-height:1.6; color:var(--text-2); overflow-wrap:anywhere; }
 .tags { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row-bottom { flex-wrap:wrap; }
+.row-bottom .tags { flex:1 1 90px; }
 .text-button { background:transparent; padding:4px; font-size:12px; }
 .editor { display:grid; gap:12px; }
 .editor-heading strong { flex:1; font-weight:600; }

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
+import TaskDetailPanel from '@/components/TaskDetailPanel.vue'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore, type TaskDetail, type TaskInfo } from '@/stores/sessions'
 
@@ -43,6 +44,7 @@ function openTask(task: TaskInfo) {
 }
 
 async function inspectTask(task: TaskInfo) {
+  if (detail.value?.task.task_id === task.task_id) { detail.value = null; return }
   detail.value = await sessions.taskDetail(task.task_id)
 }
 
@@ -51,8 +53,7 @@ async function act(task: TaskInfo, action: 'pause' | 'resume' | 'cancel' | 'retr
   detail.value = await sessions.taskDetail(task.task_id)
 }
 
-async function setPriority(task: TaskInfo, event: Event) {
-  const priority = (event.target as HTMLSelectElement).value as TaskInfo['priority']
+async function setPriority(task: TaskInfo, priority: TaskInfo['priority']) {
   await sessions.taskAction(task.task_id, 'priority', priority)
 }
 
@@ -81,7 +82,8 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
 
       <p class="sec-label">当前任务</p>
       <div v-if="active.length" class="task-list">
-        <div v-for="task in active" :key="task.task_id" :class="['task-row', { download: task.task_kind === 'download' }]">
+        <template v-for="task in active" :key="task.task_id">
+        <div :class="['task-row', { download: task.task_kind === 'download', selected: detail?.task.task_id === task.task_id }]">
           <button class="task-main" @click="inspectTask(task)">
             <span class="task-title">{{ task.session_title }}</span>
             <span class="task-meta">
@@ -100,58 +102,26 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
             <CoomiIcon name="stop" :size="17" />
           </button>
         </div>
+        <TaskDetailPanel v-if="detail?.task.task_id === task.task_id" :detail="detail" :status-labels="statusLabels" @close="detail = null" @action="act" @priority="setPriority" @open="openTask" />
+        </template>
       </div>
       <p v-else class="empty">当前没有运行中的任务。</p>
 
       <template v-if="recent.length">
         <p class="sec-label">最近任务</p>
         <div class="task-list">
-          <button v-for="task in recent" :key="task.task_id" class="task-row recent" @click="inspectTask(task)">
+          <template v-for="task in recent" :key="task.task_id">
+          <button class="task-row recent" :class="{ selected: detail?.task.task_id === task.task_id }" @click="inspectTask(task)">
             <span class="task-main">
               <span class="task-title">{{ task.session_title }}</span>
               <span class="task-meta" :class="task.status">{{ statusLabels[task.status] }} · {{ elapsed(task.started_at) }}前开始</span>
             </span>
             <CoomiIcon name="chevronRight" :size="17" class="chevron" />
           </button>
+          <TaskDetailPanel v-if="detail?.task.task_id === task.task_id" :detail="detail" :status-labels="statusLabels" @close="detail = null" @action="act" @priority="setPriority" @open="openTask" />
+          </template>
         </div>
       </template>
-
-      <section v-if="detail" class="detail">
-        <div class="detail-head">
-          <div>
-            <p class="sec-label">任务详情</p>
-            <strong>{{ detail.task.session_title || detail.task.kind }}</strong>
-          </div>
-          <button class="control" aria-label="关闭详情" title="关闭详情" @click="detail = null"><CoomiIcon name="close" :size="17" /></button>
-        </div>
-        <div class="detail-grid">
-          <label>优先级
-            <select :value="detail.task.priority" @change="setPriority(detail.task, $event)">
-              <option value="high">高</option><option value="normal">普通</option><option value="low">低</option>
-            </select>
-          </label>
-          <span>状态<strong>{{ statusLabels[detail.task.status] }}</strong></span>
-          <span>模型<strong>{{ detail.task.model || '未记录' }}</strong></span>
-          <span>重试<strong>{{ detail.task.retries ?? 0 }}</strong></span>
-        </div>
-        <p v-if="detail.task.error" class="error">{{ detail.task.error }}</p>
-        <p class="detail-label">资源</p>
-        <ul class="resource-list">
-          <li v-for="resource in detail.task.resources" :key="resource.key.kind + resource.key.identity">
-            <code>{{ resource.key.kind }} · {{ resource.access }}</code><span>{{ resource.key.identity }}</span>
-          </li>
-        </ul>
-        <p class="detail-label">事件日志</p>
-        <ol class="event-list">
-          <li v-for="event in detail.events.slice().reverse()" :key="event.at_ms + event.event">
-            <time>{{ new Date(event.at_ms).toLocaleTimeString() }}</time><strong>{{ statusLabels[event.status] }}</strong><span>{{ event.summary }}</span>
-          </li>
-        </ol>
-        <div class="detail-actions">
-          <button v-if="['failed', 'cancelled', 'interrupted', 'conflict', 'completed'].includes(detail.task.status)" @click="act(detail.task, 'retry')"><CoomiIcon name="refresh" :size="16" />重试</button>
-          <button @click="openTask(detail.task)"><CoomiIcon name="chat" :size="16" />打开会话</button>
-        </div>
-      </section>
     </main>
   </div>
 </template>
@@ -169,6 +139,7 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
 .task-row { display: flex; align-items: center; width: 100%; min-height: 66px; text-align: left; }
 .task-row + .task-row { border-top: 1px solid var(--border); }
 .task-row.download { background: var(--blue-soft); }
+.task-row.selected { background: color-mix(in srgb, var(--blue-soft) 68%, var(--bg)); }
 .task-row.download .task-title::before { content: '下载 · '; color: var(--blue); font-weight: 650; }
 .task-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; padding: 11px 6px 11px 14px; text-align: left; }
 .task-title { overflow: hidden; color: var(--text); font-size: 14.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -185,23 +156,4 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
 .task-meta.completed { color: var(--ok); }
 .chevron { margin-right: 12px; color: var(--text-3); }
 .empty { padding: 24px 8px; text-align: center; color: var(--text-3); font-size: 13px; }
-.detail { margin-top: 22px; padding: 14px 4px 0; border-top: 1px solid var(--border); }
-.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.detail-head .sec-label { margin: 0 0 4px; }
-.detail-head strong { font-size: 15px; }
-.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin-top: 16px; }
-.detail-grid > span, .detail-grid label { display: flex; min-width: 0; flex-direction: column; gap: 4px; color: var(--text-3); font-size: 11px; }
-.detail-grid strong, .detail-grid select { overflow: hidden; min-height: 30px; color: var(--text); font-size: 13px; text-overflow: ellipsis; }
-.detail-grid select { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
-.detail-label { margin: 16px 0 7px; color: var(--text-3); font-size: 11px; font-weight: 650; }
-.resource-list, .event-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.resource-list li { display: grid; gap: 3px; min-width: 0; }
-.resource-list code { color: var(--blue); font-size: 11px; }
-.resource-list span { overflow-wrap: anywhere; color: var(--text-2); font-size: 12px; }
-.event-list li { display: grid; grid-template-columns: 76px 74px minmax(0, 1fr); gap: 6px; color: var(--text-2); font-size: 11px; }
-.event-list time { color: var(--text-3); }
-.event-list span { overflow-wrap: anywhere; }
-.error { margin-top: 12px; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
-.detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.detail-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 6px; background: var(--fill); color: var(--text-2); font-size: 12px; }
 </style>

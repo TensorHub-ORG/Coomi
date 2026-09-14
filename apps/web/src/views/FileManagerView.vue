@@ -529,9 +529,9 @@ onBeforeUnmount(clearPressTimer)
 .delete-copy { margin: 6px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.65; }
 .danger-fill { background: var(--danger); color: #fff; }
 .hint, .empty { padding: 20px 0; color: var(--text-3); font-size: 13px; text-align: center; }
-.file-list { display: flex; flex-direction: column; gap: 3px; }
+.file-list { display: flex; flex-direction: column; gap: 2px; }
 .file-item { overflow: hidden; border-radius: var(--r-md); background: var(--bg-card); }
-.file-row { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 8px 8px 8px 12px; touch-action: pan-y; }
+.file-row { display: flex; align-items: center; gap: 9px; min-height: 47px; padding: 6px 8px 6px 12px; touch-action: pan-y; }
 .file-row.selected { background: var(--blue-soft); }
 .file-row.expanded { background: var(--fill); }
 .selection-mark { display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; border: 1.5px solid var(--border-strong); border-radius: 50%; color: #fff; }

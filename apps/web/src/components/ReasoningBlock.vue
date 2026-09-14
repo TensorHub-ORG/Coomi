@@ -3,24 +3,17 @@
  * 思考过程。
  * 正在想的时候只占一行：sparkle + 最后一句 + 渐变流光，像跑马灯一样滚过去；
  * 停下来之后折成「思考过程 · N 字」，点开才铺全文。
- * 没有 streaming 标记可用，所以用「最近 900ms 内还在长」判定活跃。
+ * 活跃态由会话 store 的流事件生命周期维护，结束后不再靠定时器猜测。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed } from 'vue'
 import type { ReasoningBlock } from '@/stores/viewModel'
 import CoomiIcon from './CoomiIcon.vue'
 
 const props = defineProps<{ block: ReasoningBlock }>()
 
-const open = ref(false)
-const live = ref(false)
-let timer: ReturnType<typeof setTimeout> | null = null
-
-watch(() => props.block.content, () => {
-  live.value = true
-  if (timer) clearTimeout(timer)
-  timer = setTimeout(() => { live.value = false }, 900)
-})
-onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
+const live = computed(() => props.block.streaming === true)
+function toggle() { props.block.expanded = !props.block.expanded }
+function collapse() { props.block.expanded = false }
 
 const chars = computed(() => props.block.content.replace(/\s+/g, '').length)
 const tick = computed(() => {
@@ -32,17 +25,17 @@ const tick = computed(() => {
 
 <template>
   <div class="reasoning fade-in">
-    <button class="toggle" @click="open = !open">
+    <button type="button" class="toggle" :aria-expanded="block.expanded" @click.stop="toggle">
       <CoomiIcon name="sparkle" :size="14" class="spark" :class="{ live }" />
       <span v-if="live" class="ticker shimmer-text">{{ tick || '正在思考…' }}</span>
       <template v-else>
         <span class="label">思考过程</span>
         <span class="count">{{ chars }} 字</span>
       </template>
-      <CoomiIcon name="chevronRight" :size="13" class="chev" :class="{ open }" />
+      <CoomiIcon name="chevronRight" :size="13" class="chev" :class="{ open: block.expanded }" />
     </button>
     <!-- 批次五 #28：展开态双击内容区即可收起 -->
-    <div v-if="open" class="body" @dblclick="open = false">{{ block.content }}</div>
+    <div v-if="block.expanded" class="body" @dblclick="collapse">{{ block.content }}</div>
   </div>
 </template>
 
@@ -53,6 +46,7 @@ const tick = computed(() => {
   width: 100%; min-height: 32px; padding: 4px 2px;
   border: 0; background: none; text-align: left;
   font-size: 13px; color: var(--text-3);
+  touch-action: manipulation; cursor: pointer;
 }
 .spark { flex-shrink: 0; color: var(--text-3); }
 .spark.live { color: var(--blue); animation: coomi-blink 1.4s ease-in-out infinite; }

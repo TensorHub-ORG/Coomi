@@ -28,8 +28,21 @@ with sync_playwright() as p:
     page.route('**/api/git/contributions*', lambda route: route.fulfill(json={'authors': [], 'total_commits': 0, 'first_commit_at': None, 'last_commit_at': None, 'by_day': []}))
     page.route('**/api/fs/list*', lambda route: route.fulfill(json={'path': '/', 'entries': [{'name': 'notes.md', 'is_dir': False, 'size': 20, 'modified': 0}]}))
     page.route('**/api/fs/raw*', lambda route: route.fulfill(body='File preview fixture'))
-    page.route('**/api/tasks', lambda route: route.fulfill(json={'tasks': [], 'running_count': 0, 'concurrency_limit': 5}))
+    task = {'task_id': 7, 'session_id': '11111111-1111-4111-8111-111111111111', 'session_title': '浏览器回归任务',
+            'task_kind': 'agent', 'status': 'completed', 'priority': 'normal', 'running': False,
+            'started_at': 1, 'resources': [], 'retries': 0, 'model': 'fixture-model'}
+    page.route('**/api/task-details/7', lambda route: route.fulfill(json={'task': task, 'events': []}))
+    page.route('**/api/tasks', lambda route: route.fulfill(json={'tasks': [task], 'running_count': 0, 'concurrency_limit': 5}))
     page.route('**/api/memory', lambda route: route.fulfill(json={'memories': []}))
+    ux_state = {'busy': False, 'consent': 'local_only', 'auto_update': True, 'never_ask': True,
+                'has_profile': True, 'profile': {'period': {}, 'scene_preferences': [], 'task_preferences': [], 'environment_issues': []}}
+    ux_updates = []
+    def ux_api(route):
+        if route.request.method == 'PUT':
+            ux_updates.append(route.request.post_data_json)
+            ux_state.update({'never_ask': route.request.post_data_json.get('never_ask', ux_state['never_ask'])})
+        route.fulfill(json=ux_state)
+    page.route('**/api/ux-program', ux_api)
     page.goto(origin + '/?demo=1&autoplay=0')
     expect(page.get_by_role('button', name='展开快捷工具')).to_be_visible()
     expect(page.locator('.context-tools > .entry')).to_have_count(0)
@@ -85,6 +98,14 @@ with sync_playwright() as p:
       return Math.abs(band.top - anchor.y - anchor.height / 2) < 1;
     }''')
     assert [page.locator(f'.orbit-tool[data-row="{row}"]').count() for row in [2, 1, 0]] == [4, 3, 1]
+    inner_alignment = page.locator('.orbit-tool[data-row="0"]').evaluate('''button => {
+      const anchor = document.querySelector('.orbit-anchor').getBoundingClientRect();
+      const box = button.getBoundingClientRect();
+      const dx = anchor.x + anchor.width / 2 - (box.x + box.width / 2);
+      const dy = box.y + box.height / 2 - (anchor.y + anchor.height / 2);
+      return {angle: Math.atan2(dy, dx) * 180 / Math.PI, distance: Math.hypot(dx, dy)};
+    }''')
+    assert abs(inner_alignment['angle'] - 45) < 1 and abs(inner_alignment['distance'] - 44) < 1, inner_alignment
     def assert_tools_inside_fan():
         outside = page.locator('.orbit-tool').evaluate_all('''buttons => {
           const band = document.querySelector('.orbit-band').getBoundingClientRect();
@@ -114,11 +135,18 @@ with sync_playwright() as p:
     assert_tool_labels_unclipped()
     page.get_by_role('button', name='提示词', exact=True).click()
     assert_tools_inside_fan()
+    expect(page.locator('.selection-sector')).to_be_visible()
+    assert page.locator('.orbit-tool.selected').evaluate("e => getComputedStyle(e).backgroundColor") in ['rgba(0, 0, 0, 0)', 'transparent']
+    assert page.locator('.fan-glow').evaluate("e => getComputedStyle(e).animationName").startswith('orbit-edge-flow')
     expect(page.get_by_role('dialog', name='提示词', exact=True)).to_be_visible()
     expect(page.locator('.orbit-backdrop')).to_be_visible()
     page.wait_for_timeout(300)
     page.screenshot(path=str(artifacts / 'prompts-390.png'))
-    assert page.locator('.prompt-library').evaluate('(e)=>parseFloat(getComputedStyle(e).paddingRight) >= 10')
+    prompt_edges = page.locator('.prompt-library').evaluate('''e => {
+      const prompt = e.getBoundingClientRect(), card = document.querySelector('.orbit-card').getBoundingClientRect();
+      return {promptRight: prompt.right, cardRight: card.right};
+    }''')
+    assert abs(prompt_edges['promptRight'] - prompt_edges['cardRight']) < 2, prompt_edges
     page.mouse.click(384, 700)
     expect(page.locator('.orbit-card')).to_have_count(0)
     expect(page.get_by_role('navigation', name='快捷工具带')).to_be_visible()
@@ -135,6 +163,10 @@ with sync_playwright() as p:
     expect(page.get_by_role('navigation', name='快捷工具带')).to_have_count(0)
     page.goto(origin + '/?demo=1&autoplay=0#/prompts')
     expect(page.get_by_text('浏览器回归提示词', exact=True)).to_be_visible()
+    full_prompt = page.locator('.prompt-library').bounding_box()
+    assert abs(full_prompt['x']) < 1 and abs(full_prompt['x'] + full_prompt['width'] - 390) < 1, full_prompt
+    assert page.locator('.categories').evaluate('(e)=>e.scrollWidth <= e.clientWidth + 1')
+    page.screenshot(path=str(artifacts / 'prompts-page-390.png'))
     page.goto(origin + '/?demo=1&autoplay=0#/data')
     expect(page.get_by_role('heading', name='数据工具', exact=True)).to_be_visible()
     expect(page.get_by_role('button', name='返回', exact=True)).to_be_visible()
@@ -157,6 +189,9 @@ with sync_playwright() as p:
     page.get_by_role('navigation', name='快捷工具带').get_by_role('button', name='任务中心', exact=True).click()
     expect(page.get_by_role('dialog', name='任务中心', exact=True)).to_be_visible()
     expect(page.get_by_text('当前没有运行中的任务。', exact=True)).to_be_visible()
+    page.get_by_text('浏览器回归任务', exact=True).click()
+    expect(page.locator('.task-row.selected + .task-detail')).to_be_visible()
+    page.screenshot(path=str(artifacts / 'tasks-inline-390.png'))
     page.get_by_role('navigation', name='快捷工具带').get_by_role('button', name='持久记忆', exact=True).click()
     expect(page.get_by_role('dialog', name='持久记忆', exact=True)).to_be_visible()
     expect(page.get_by_text('暂无内建持久记忆', exact=True)).to_be_visible()
@@ -190,6 +225,12 @@ with sync_playwright() as p:
     page.get_by_role('button', name='关闭快捷工具带').click()
     expect(page.locator('.orbit-card')).to_have_count(0)
     expect(page.locator('.orbit-backdrop')).to_have_count(0)
+    page.get_by_role('button', name='展开快捷工具').click()
+    expect(page.get_by_role('navigation', name='快捷工具带')).to_be_visible()
+    page.evaluate("location.hash = '#/prompts'")
+    expect(page.get_by_role('navigation', name='快捷工具带')).to_have_count(0)
+    page.evaluate("location.hash = '#/'")
+    expect(page.get_by_role('button', name='展开快捷工具')).to_be_visible()
     page.emulate_media(reduced_motion='reduce')
     for width in [240, 280, 320, 430]:
         page.set_viewport_size({'width': width, 'height': 640})
@@ -213,6 +254,10 @@ with sync_playwright() as p:
     expect(page.get_by_role('navigation', name='快捷工具带')).to_have_count(0)
     expect(page.get_by_role('button', name='展开快捷工具')).to_have_count(0)
     expect(page.locator('.context-tools button')).to_have_count(0)
+    page.goto(origin + '/?demo=1&autoplay=0#/ux-program')
+    page.get_by_text('会话页邀请提示（已加入计划后自动关闭）', exact=True).locator('..').get_by_role('button').click()
+    page.wait_for_timeout(80)
+    assert ux_updates and ux_updates[-1].get('never_ask') is False, ux_updates
     assert not errors, errors
     browser.close()
 print(json.dumps({'passed': True, 'artifacts': str(artifacts)}))

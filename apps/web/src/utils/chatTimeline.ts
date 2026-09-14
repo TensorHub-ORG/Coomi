@@ -90,7 +90,16 @@ export function parseTranscript(raw: string | null): Timelineitem[] {
   if (!raw) return []
   try {
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed as Timelineitem[] : []
+    if (!Array.isArray(parsed)) return []
+    return (parsed as Timelineitem[]).map(item => {
+      if (item.kind === 'reasoning') {
+        return { ...item, expanded: Boolean(item.expanded), streaming: false }
+      }
+      if (item.kind === 'notice' && item.feedback) {
+        return { ...item, expanded: Boolean(item.expanded) }
+      }
+      return item
+    })
   } catch {
     return []
   }

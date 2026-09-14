@@ -10,7 +10,6 @@ import CoomiIcon from './CoomiIcon.vue'
  */
 const props = defineProps<{ notice: NoticeItem }>()
 const session = useSessionStore()
-const open = ref(false)
 const sending = ref(false)
 
 const feedback = computed(() => props.notice.feedback)
@@ -27,6 +26,7 @@ const previewLines = computed(() => {
 
 const canConsent = computed(() => status.value === 'consent' || status.value === 'failed')
 const canRetryUpload = computed(() => status.value === 'ready' && props.notice.feedbackEligible)
+function toggleOpen() { props.notice.expanded = !props.notice.expanded }
 
 /** 一键反馈：先溯源分析（如需要），完成后自动上传；上传结果回写卡片状态。 */
 async function consentAndSend() {
@@ -58,13 +58,13 @@ async function retryUpload() {
 
 <template>
   <div v-if="feedback" class="feedback-card cascade">
-    <div class="fb-head" @click="open = !open">
+    <button type="button" class="fb-head" :aria-expanded="Boolean(notice.expanded)" @click.stop="toggleOpen">
       <CoomiIcon name="alert" :size="14" class="fb-icon" />
       <span class="fb-summary">{{ notice.text }}</span>
-      <CoomiIcon name="chevronRight" :size="13" class="chev" :class="{ open }" />
-    </div>
+      <CoomiIcon name="chevronRight" :size="13" class="chev" :class="{ open: notice.expanded }" />
+    </button>
 
-    <div v-if="open" class="fb-body">
+    <div v-if="notice.expanded" class="fb-body">
       <pre v-if="notice.detail" class="fb-detail">{{ notice.detail }}</pre>
       <div v-if="status === 'consent'" class="fb-preview">
         <span class="fb-preview-title">点击「一键反馈」将自动采集并上传：</span>
@@ -120,7 +120,9 @@ async function retryUpload() {
   display: flex;
   align-items: flex-start;
   gap: 7px;
+  width: 100%; padding: 0; border: 0; background: transparent; text-align: left;
   cursor: pointer;
+  touch-action: manipulation;
 }
 .fb-icon { flex-shrink: 0; margin-top: 2px; color: var(--orange); }
 .fb-summary {

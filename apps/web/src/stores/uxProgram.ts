@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { authedFetch } from '@/bridge/http'
 
 export type UxConsent = 'undecided' | 'joined' | 'local_only'
+const SHOWN_DATE_KEY = 'coomi.uxProgram.lastShownDate'
 
 export interface UxSubcategory { name: string; level: string; count?: number; example?: string }
 export interface UxScene { category: string; weight?: number; subcategories?: UxSubcategory[] }
@@ -93,6 +94,7 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
   }
 
   async function setConsent(value: UxConsent, exitReason?: string) {
+    const previous = consent.value
     const body: Record<string, unknown> = { consent: value }
     if (exitReason) body.exit_reason = exitReason
     const res = await authedFetch('/api/ux-program', {
@@ -100,7 +102,13 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (res.ok) await refresh()
+    if (res.ok) {
+      await refresh()
+      // 退出计划后，下一次回到会话页应能重新看到邀请入口。
+      if (previous === 'joined' && value !== 'joined' && !neverAsk.value) {
+        try { localStorage.removeItem(SHOWN_DATE_KEY) } catch { /* ignore */ }
+      }
+    }
   }
 
   async function setNeverAsk(value: boolean) {
@@ -109,7 +117,13 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ never_ask: value }),
     })
-    if (res.ok) neverAsk.value = value
+    if (res.ok) {
+      neverAsk.value = value
+      // 从“关闭”重新开启时清除当天抑制标记，让开关立即产生可见效果。
+      if (!value) {
+        try { localStorage.removeItem(SHOWN_DATE_KEY) } catch { /* ignore */ }
+      }
+    }
   }
 
   async function setAutoUpdate(value: boolean) {

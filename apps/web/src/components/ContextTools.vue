@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import CoomiIcon from './CoomiIcon.vue'
@@ -8,6 +9,7 @@ import PromptLibrary from './PromptLibrary.vue'
 const props = defineProps<{ floating?: boolean; usagePercent: number }>()
 const emit = defineEmits<{ open: [] }>()
 const session = useSessionStore()
+const route = useRoute()
 const tools = [
   { id: 'version', label: '版本工具', icon: 'git' },
   { id: 'tasks', label: '任务中心', icon: 'todo' },
@@ -72,6 +74,12 @@ function toggle() {
   if (opened.value) { opened.value = false; active.value = null; void nextTick(() => anchor.value?.focus()) }
   else { measure(); opened.value = true; emit('open') }
 }
+function closeOrbit() {
+  auxiliaryRequest++
+  opened.value = false
+  active.value = null
+  initialChild.value = ''
+}
 function choose(id: Tool) {
   active.value = active.value === id ? null : id
   initialChild.value = ''
@@ -101,6 +109,7 @@ async function openAuxiliary(event: Event) {
   measure(); opened.value = true; active.value = 'auxiliary'; initialChild.value = detail.sessionId; emit('open')
 }
 watch(() => props.floating, floating => { if (floating) { auxiliaryRequest++; opened.value = false; active.value = null } })
+watch(() => route.name, name => { if (name !== 'chat') closeOrbit() })
 watch(opened, async value => {
   cancelAnimationFrame(measureFrame)
   if (!value) return
@@ -144,6 +153,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   mounted = false
+  closeOrbit()
   auxiliaryRequest++
   cancelAnimationFrame(measureFrame)
   anchorObserver?.disconnect()
@@ -164,11 +174,31 @@ const shortLabels: Record<Tool, string> = {
 }
 // 圆心位于扇面右上角。每层只定义半径与角度，按钮沿同心弧均匀排布；
 // 最外层预留完整的按钮角点安全区，选中底色不会越过扇面边缘。
-const polarLayout = [
-  { row: 2, distance: 132, angles: [12, 34, 56, 78] },
-  { row: 1, distance: 91, angles: [20, 49, 77] },
-  { row: 0, distance: 50, angles: [34] },
-].flatMap(ring => ring.angles.map(angle => ({ ...ring, angle })))
+interface PolarCell {
+  row: number
+  distance: number
+  angle: number
+  inner: number
+  outer: number
+  start: number
+  end: number
+}
+const polarLayout: PolarCell[] = [
+  ...[12, 34, 56, 78].map((angle, index) => ({ row: 2, distance: 132, angle, inner: 113, outer: 159, start: 1 + index * 22, end: 23 + index * 22 })),
+  ...[16, 45, 74].map((angle, index) => ({ row: 1, distance: 91, angle, inner: 72, outer: 111, start: 2 + index * 29, end: 31 + index * 29 })),
+  { row: 0, distance: 44, angle: 45, inner: 23, outer: 70, start: 3, end: 87 },
+]
+function polarPoint(distance: number, angle: number): [number, number] {
+  const radians = angle * Math.PI / 180
+  return [radius.value - distance * Math.cos(radians), distance * Math.sin(radians)]
+}
+function sectorPath(cell: PolarCell): string {
+  const [outerStartX, outerStartY] = polarPoint(cell.outer, cell.start)
+  const [outerEndX, outerEndY] = polarPoint(cell.outer, cell.end)
+  const [innerEndX, innerEndY] = polarPoint(cell.inner, cell.end)
+  const [innerStartX, innerStartY] = polarPoint(cell.inner, cell.start)
+  return `M ${outerStartX} ${outerStartY} A ${cell.outer} ${cell.outer} 0 0 0 ${outerEndX} ${outerEndY} L ${innerEndX} ${innerEndY} A ${cell.inner} ${cell.inner} 0 0 1 ${innerStartX} ${innerStartY} Z`
+}
 const sectors = computed(() => tools.map((tool, index) => {
   const point = polarLayout[index]!
   const radians = point.angle * Math.PI / 180
@@ -177,6 +207,11 @@ const sectors = computed(() => tools.map((tool, index) => {
     top: `${point.distance * Math.sin(radians)}px`,
   } }
 }))
+const selectedSector = computed(() => {
+  const index = tools.findIndex(tool => tool.id === active.value)
+  return index < 0 ? '' : sectorPath(polarLayout[index]!)
+})
+const fanEdgePath = computed(() => `M 0 0 A ${radius.value} ${radius.value} 0 0 0 ${radius.value} ${radius.value} L ${radius.value} 22 A 22 22 0 0 1 ${radius.value - 22} 0 Z`)
 </script>
 <template>
   <div class="context-tools" data-context-tools>
@@ -200,7 +235,7 @@ const sectors = computed(() => tools.map((tool, index) => {
               <nav class="version-tabs" aria-label="版本管理工具"><button v-for="tab in versionTabs" :key="tab.id" :class="{ selected: version === tab.id }" @click="version = tab.id">{{ tab.label }}</button></nav>
               <div class="version-content"><component :is="versionViews[version]" embedded /></div>
             </template>
-            <PromptLibrary v-else-if="active === 'prompts'" @fill="fill" />
+            <PromptLibrary v-else-if="active === 'prompts'" embedded @fill="fill" />
             <AuxiliaryChat v-else-if="active === 'auxiliary'" :parent-id="session.sessionId" :initial-session-id="initialChild" />
             <TasksView v-else-if="active === 'tasks'" embedded />
             <MemoryView v-else-if="active === 'memory'" embedded />
@@ -210,7 +245,11 @@ const sectors = computed(() => tools.map((tool, index) => {
         </section>
         </Transition>
         <nav class="orbit-band" aria-label="快捷工具带">
-          <svg class="fan-surface" :viewBox="`0 0 ${radius} ${radius}`" aria-hidden="true"><path :d="`M 0 0 A ${radius} ${radius} 0 0 0 ${radius} ${radius} L ${radius} 22 A 22 22 0 0 1 ${radius - 22} 0 Z`" /></svg>
+          <svg class="fan-surface" :viewBox="`0 0 ${radius} ${radius}`" aria-hidden="true">
+            <path v-if="selectedSector" class="selection-sector" :d="selectedSector" />
+            <path class="fan-outline" :d="fanEdgePath" pathLength="100" />
+            <path class="fan-glow" :d="fanEdgePath" pathLength="100" />
+          </svg>
           <button v-for="tool in sectors" :key="tool.id" class="orbit-tool" :class="{ selected: active === tool.id }" :style="tool.style" :data-row="tool.row" :aria-label="tool.label" :title="tool.label" :aria-pressed="active === tool.id" @click="choose(tool.id)"><span class="tool-label"><CoomiIcon :name="tool.icon" :size="16" /><span>{{ shortLabels[tool.id] }}</span></span></button>
         </nav>
       </div>
@@ -244,31 +283,44 @@ const sectors = computed(() => tools.map((tool, index) => {
     color-mix(in srgb,var(--bg) 97%,var(--fill)) 113px 159px);
   filter:drop-shadow(0 7px 12px rgba(23,32,54,.12));
 }
-.fan-surface { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
-.fan-surface path { fill:none; stroke:var(--border-strong); stroke-width:.75; }
+.fan-surface { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.fan-outline { fill:none; stroke:var(--border-strong); stroke-width:.75; }
+.fan-glow {
+  fill:none; stroke:color-mix(in srgb,var(--blue) 68%,transparent); stroke-width:1.35;
+  stroke-linecap:round; stroke-dasharray:10 90; animation:orbit-edge-flow 3.2s linear infinite;
+  filter:drop-shadow(0 0 2px color-mix(in srgb,var(--blue) 48%,transparent));
+}
+.selection-sector {
+  fill:color-mix(in srgb,var(--blue-soft) 84%,var(--bg));
+  stroke:color-mix(in srgb,var(--blue) 22%,transparent); stroke-width:.8;
+  filter:drop-shadow(0 2px 5px color-mix(in srgb,var(--blue) 12%,transparent));
+}
+@keyframes orbit-edge-flow { to { stroke-dashoffset:-100; } }
 .orbit-tool { position:absolute; width:38px; height:40px; overflow:hidden; transform:translate(-50%,-50%); border:0; border-radius:11px; padding:0; color:var(--text-2); background:transparent; pointer-events:auto; display:grid; place-items:center; transition:background 160ms ease,color 160ms ease,box-shadow 160ms ease,transform 160ms ease; }
 .tool-label { display:flex; flex-direction:column; align-items:center; gap:3px; pointer-events:none; }
 .tool-label > span { font-size:11px; line-height:1.15; white-space:nowrap; font-weight:550; }
-.orbit-tool.selected { background:color-mix(in srgb,var(--blue-soft) 82%,var(--bg)); color:var(--blue); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blue) 16%,transparent),0 2px 7px color-mix(in srgb,var(--blue) 10%,transparent); }
+.orbit-tool.selected { background:transparent; color:var(--blue); box-shadow:none; }
 .orbit-tool:active { transform:translate(-50%,-50%) scale(.92); }
 .orbit-tool:focus-visible { background:var(--blue-soft-2); color:var(--blue); }
 @media(hover:hover) { .orbit-tool:hover { background:var(--blue-soft); color:var(--blue); } }
+.orbit-tool.selected:hover,.orbit-tool.selected:focus-visible { background:transparent; }
 .orbit-card { position:absolute; top:var(--anchor-y); left:calc(var(--anchor-x) - var(--card-width)); width:var(--card-width); height:var(--card-height); display:flex; flex-direction:column; border:1px solid var(--border); border-radius:var(--r-card); background:color-mix(in srgb,var(--bg) 96%,transparent); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 12px 34px rgba(23,32,54,.14),0 2px 8px rgba(23,32,54,.06); pointer-events:auto; overflow:hidden; -webkit-mask-image:radial-gradient(circle at top right,transparent var(--notch),black calc(var(--notch) + 1px)); mask-image:radial-gradient(circle at top right,transparent var(--notch),black calc(var(--notch) + 1px)); }
 .card-heading { min-height:var(--notch); flex-shrink:0; width:calc(100% - var(--notch)); min-width:0; padding:14px 0 10px 15px; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
 .eyebrow { font-size:10px; color:var(--text-3); letter-spacing:.08em; }
 h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:nowrap; }
 .usage-link { display:flex; align-items:center; gap:2px; color:var(--blue); font-size:11px; white-space:nowrap; padding:3px 0; background:transparent; }
 .card-close { color:var(--text-3); font-size:11px; background:transparent; padding:4px 0; }
-.card-content { flex:1; min-height:0; padding:0 12px 12px; display:flex; flex-direction:column; overflow:hidden; }
-.card-content :deep(.prompt-library),.card-content :deep(.transcript),.card-content :deep(.usage-details),.card-content :deep(.embedded .body),.floating-content { scrollbar-gutter:stable; padding-right:12px; overscroll-behavior:contain; }
+.card-content { flex:1; min-height:0; padding:0 0 8px; display:flex; flex-direction:column; overflow:hidden; }
+.card-content :deep(.prompt-library),.card-content :deep(.transcript),.card-content :deep(.usage-details),.card-content :deep(.embedded .body),.floating-content { scrollbar-gutter:stable; overscroll-behavior:contain; }
+.card-content :deep(.usage-details) { width:auto; margin-inline:12px; }
 .orbit-card.compact { height:auto; max-height:var(--card-height); }
 .compact .card-content { flex:0 1 auto; max-height:calc(var(--card-height) - var(--notch)); }
 .compact :deep(.usage-title) { display:none; }
-.version-tabs { display:flex; flex-shrink:0; gap:2px; border-bottom:1px solid var(--border); margin-bottom:8px; }
+.version-tabs { display:flex; flex-shrink:0; gap:2px; border-bottom:1px solid var(--border); margin:0 12px 8px; }
 .version-tabs button { flex:1; min-width:0; padding:9px 0; white-space:nowrap; color:var(--text-3); background:transparent; font-size:clamp(10px,2.7vw,12px); border-bottom:2px solid transparent; }
 .version-tabs .selected { color:var(--blue); border-bottom-color:var(--blue); }
 .version-content { flex:1; min-height:0; overflow:hidden; }
-.floating-content { padding:20px 10px; text-align:center; color:var(--text-2); overflow:auto; }
+.floating-content { margin-inline:12px; padding:20px 10px; text-align:center; color:var(--text-2); overflow:auto; }
 .floating-content p { font-size:13px; line-height:1.7; }.floating-content h3 {font-size:15px}
 .floating-action { background:var(--blue); color:white; padding:10px 18px; border-radius:var(--r-pill); font-size:13px; }
 .orbit-reveal-enter-active .orbit-band,.orbit-reveal-leave-active .orbit-band { transition:transform 280ms cubic-bezier(.2,.8,.2,1),opacity 220ms ease; }
@@ -282,5 +334,6 @@ h2 { margin:0; font-size:16px; line-height:1.4; font-weight:650; white-space:now
 @media(prefers-reduced-motion:reduce) {
   .orbit-reveal-enter-active .orbit-band,.orbit-reveal-leave-active .orbit-band,.card-reveal-enter-active,.card-reveal-leave-active,.orbit-reveal-leave-active .orbit-card,.orbit-veil-enter-active,.orbit-veil-leave-active,.orbit-tool { transition:none; }
   .orbit-reveal-enter-from .orbit-band,.orbit-reveal-leave-to .orbit-band,.card-reveal-enter-from,.card-reveal-leave-to,.orbit-reveal-leave-to .orbit-card { transform:none; }
+  .fan-glow { animation:none; stroke-dasharray:none; opacity:.65; }
 }
 </style>

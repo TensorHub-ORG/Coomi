@@ -36,7 +36,14 @@ export interface AssistantMessage {
   lifeTrigger?: string
 }
 export interface UserMessage { kind: 'user'; id: string; mid: string; content: string }
-export interface ReasoningBlock { kind: 'reasoning'; id: string; content: string; expanded: boolean }
+export interface ReasoningBlock {
+  kind: 'reasoning'
+  id: string
+  content: string
+  expanded: boolean
+  /** 由流事件生命周期显式维护。旧缓存没有该字段时按已结束处理。 */
+  streaming?: boolean
+}
 
 export interface QuestionCard {
   kind: 'question'; callId: string; questions: UserQuestion[]
@@ -72,6 +79,8 @@ export interface NoticeItem {
   /** 上传结果独立提示（完成态展示，避免与卡片摘要重复）。 */
   statusNote?: string
   failureCount?: number
+  /** 反馈卡展开状态随时间线持久化，避免虚拟列表回收后被重置。 */
+  expanded?: boolean
 }
 
 export interface ToolDiagnosticTrace {

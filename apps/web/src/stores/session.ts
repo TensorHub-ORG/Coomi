@@ -55,6 +55,7 @@ return defineStore(storeId, () => {
   const undoConfirm = ref<{ mid: string } | null>(null)
 
   let currentAssistant: AssistantMessage | null = null
+  let currentReasoning: ReasoningBlock | null = null
   let connectedSessionId = ''
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let turnToolTrace: ToolDiagnosticTrace[] = []
@@ -226,7 +227,7 @@ return defineStore(storeId, () => {
     lastEventAt = Date.now()
     switch (ev.event_type) {
       // 兜底：turn_end 之后又开始吐字（引擎续了一轮），状态得跟着回到忙。
-      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; appendAssistant(ev.content); break
+      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; endReasoningStream(); appendAssistant(ev.content); break
       case 'reasoning_chunk': if (runState.value === 'idle') runState.value = 'thinking'; appendReasoning(ev.content); break
       case 'tool_start':
         connection.setRetry(null)
@@ -939,21 +940,41 @@ return defineStore(storeId, () => {
     }
     currentAssistant.content += content
   }
-  function endAssistantStream() { if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null } }
+  function endReasoningStream() {
+    // 显式收尾可避免依赖分片间隔猜测状态；只触碰当前块，避免每个文本
+    // 分片都扫描整条历史记录而重新触发大量响应式读取。
+    if (currentReasoning) currentReasoning.streaming = false
+    currentReasoning = null
+  }
+  function endAssistantStream() {
+    if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null }
+    endReasoningStream()
+  }
   function appendReasoning(content: string) {
+    if (currentReasoning) {
+      currentReasoning.content += content
+      return
+    }
     // 就近合并：从末尾向前找最近的思考块；途中允许跳过工具/问题/通知卡和
     // 还没产出文字的助手消息 —— 部分供应商（如 deepseek）的 reasoning 与
     // text 交错发送，否则思考过程会被拆成多条碎片。
     const items = timeline.value
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i]
-      if (item.kind === 'reasoning') { (item as ReasoningBlock).content += content; return }
+      if (item.kind === 'reasoning') {
+        const reasoning = item as ReasoningBlock
+        reasoning.streaming = true
+        currentReasoning = reasoning
+        reasoning.content += content
+        return
+      }
       if (item.kind === 'assistant' && item.content.trim() !== '') break
       if (item.kind === 'user' || item.kind === 'question') break
     }
     // 没有可合并目标时，纯空白的思考分片不值得新建一个「0 字」块。
     if (!content.trim()) return
-    timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false })
+    timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false, streaming: true })
+    currentReasoning = timeline.value[timeline.value.length - 1] as ReasoningBlock
   }
   function patchTool(callId: string, fn: (c: ToolCard) => void): boolean {
     for (let i = timeline.value.length - 1; i >= 0; i--) { const t = timeline.value[i]; if (t.kind === 'tool' && t.callId === callId) { fn(t); return true } }
@@ -982,7 +1003,7 @@ return defineStore(storeId, () => {
         toolTrace: turnToolTrace.map(({ callId: _callId, ...item }) => item),
         hasConversation: timeline.value.some(t => t.kind === 'user' || (t.kind === 'assistant' && t.content)),
       },
-      analysisStatus: 'consent', feedbackEligible: true,
+      analysisStatus: 'consent', feedbackEligible: true, expanded: false,
       failureCount: turnToolTrace.filter(item => item.status === 'error').length,
     })
   }

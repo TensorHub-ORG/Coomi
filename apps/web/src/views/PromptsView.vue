@@ -14,5 +14,5 @@ async function fill(text: string) {
 <template><div class="prompts-page"><PageHead title="常用提示词指令" @back="goBack(router, 'dashboard')" /><main><PromptLibrary @fill="fill" /></main></div></template>
 <style scoped>
 .prompts-page {height:100%; min-height:0; display:flex; flex-direction:column; background:var(--bg)}
-main {flex:1; min-height:0; width:100%; max-width:760px; margin-inline:auto; padding:12px 16px calc(12px + var(--safe-bottom)); overflow:hidden}
+main {flex:1; min-height:0; width:100%; padding:12px 0 calc(12px + var(--safe-bottom)); overflow:hidden}
 </style>

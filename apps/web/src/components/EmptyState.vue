@@ -92,7 +92,7 @@ function pick(key: 'fast' | 'plan' | 'careful') {
 
 <style scoped>
 .empty {
-  margin: 0 auto; padding: 10px 6px 10px;
+  margin: 0 auto; padding: clamp(42px, 8vh, 78px) 6px 10px;
   display: flex; flex-direction: column; align-items: center;
   text-align: center;
   max-width: 460px;

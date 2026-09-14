@@ -265,7 +265,7 @@ function openAuxiliary(parentId: string, sessionId: string) {
 </template>
 
 <style scoped>
-.aux-child { display: block; width: 100%; text-align: left; padding: 7px 4px 4px 12px; border: 0; background: transparent; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.aux-child { display: block; width: 100%; text-align: left; padding: 5px 4px 3px 12px; border: 0; background: transparent; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
 .aux-children { width: 100%; padding-left: 18px; }
 
 .drawer-root { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
@@ -339,7 +339,7 @@ function openAuxiliary(parentId: string, sessionId: string) {
 .row {
   position: relative;
   display: flex; align-items: center; gap: 4px;
-  padding: 9px 6px 9px 10px; border-radius: var(--r-md);
+  padding: 7px 6px 7px 10px; border-radius: var(--r-md);
 }
 .row:active { background: var(--fill); }
 .row.cur { background: var(--blue-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue-border) 45%, transparent); }
@@ -354,7 +354,7 @@ function openAuxiliary(parentId: string, sessionId: string) {
 }
 .row.cur .rtitle { color: var(--blue); font-weight: 600; }
 .rmeta {
-  display: flex; align-items: center; gap: 4px; margin-top: 3px;
+  display: flex; align-items: center; gap: 4px; margin-top: 2px;
   font-size: 11.5px; color: var(--text-3);
 }
 /* 会话在后台执行中的小圈（放在时间/轮数之后，与 meta 文字同高） */
