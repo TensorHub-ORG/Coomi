@@ -28,9 +28,14 @@ with sync_playwright() as p:
       assert(root, 'markdown mounted');
       const paragraph = root.querySelector('p'), bold = root.querySelector('strong');
       const code = root.querySelector('code'), text = code.firstChild;
+      const animationStartedAt = performance.now();
       const animations = [];
       document.querySelector('.virtual-stream').addEventListener('animationstart', event => {
-        if (['rise-in','coomi-cascade'].includes(event.animationName)) animations.push(event.animationName);
+        if (['rise-in','coomi-cascade'].includes(event.animationName)) animations.push({
+          name: event.animationName,
+          elapsed: Math.round(performance.now() - animationStartedAt),
+          target: event.target.className,
+        });
       });
       let renders = 0;
       const observer = new MutationObserver(() => { renders++; });
@@ -57,7 +62,7 @@ with sync_playwright() as p:
       const expected = document.createElement('div');
       expected.innerHTML = renderMarkdown(session.timeline[0].content);
       assert(root.innerHTML === expected.innerHTML, 'completed markdown differs from full parser');
-      assert(animations.length === 0, 'entry animations replayed during streaming');
+      assert(animations.length === 0, 'entry animations replayed during streaming: ' + JSON.stringify(animations));
       assert(getComputedStyle(root).animationName === 'none', 'markdown still animates on remount');
       const rows = Array.from({length:100}, (_, i) => ({kind:'assistant', id:'history-'+i,
         mid:'history-'+i, content:'History '+i+'\\n\\nCompleted paragraph.', streaming:false}));

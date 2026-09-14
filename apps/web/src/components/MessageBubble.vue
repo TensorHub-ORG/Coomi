@@ -328,12 +328,11 @@ async function saveToMemory() {
 
 .user-wrap { display: flex; flex-direction: column; align-items: flex-end; max-width: 84%; }
 .user-acts { justify-content: flex-end; }
-/* 操作按钮组：收进一个浅色胶囊里，不再"裸奔"在消息下方。 */
+/* 操作区跟随消息表面，不叠加主题填充色；只有交互时显示轻反馈。 */
 .acts {
-  display: inline-flex; align-items: center; gap: 1px;
-  margin-top: 9px; padding: 3px 4px;
-  border-radius: var(--r-pill);
-  background: var(--fill);
+  display: inline-flex; align-items: center; gap: 3px;
+  margin-top: 8px; padding: 0;
+  background: transparent;
 }
 .act {
   display: inline-flex; align-items: center; gap: 5px;
@@ -342,7 +341,9 @@ async function saveToMemory() {
   font-size: 12.5px; color: var(--text-3);
   transition: background .15s, color .15s;
 }
-.act:active { background: var(--bg); color: var(--blue); }
+.act:active { background: color-mix(in srgb, var(--blue-soft) 64%, transparent); color: var(--blue); }
+.act:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 42%, transparent); outline-offset: 1px; }
+@media (hover:hover) { .act:hover { color: var(--text-2); background: color-mix(in srgb, var(--fill) 54%, transparent); } }
 
 /* ── 生命体消息头部：tag 居左 + 朗读居右 ── */
 .life-head {

@@ -1,3 +1,11 @@
+<script lang="ts">
+/**
+ * 手动展开状态存放在 card.manualOpen（见 viewModel.ts）。
+ * 注意：必须写进 card 这个响应式代理对象，computed 才会重算——
+ * 任何非响应式容器（普通 Map/WeakMap）都会让点击后界面永远不更新。
+ */
+</script>
+
 <script setup lang="ts">
 /**
  * 工具调用卡片。
@@ -17,7 +25,6 @@ const props = defineProps<{ card: ToolCard }>()
 /** 大字段单独成块，不塞进参数表。 */
 const BIG = new Set(['content', 'old_string', 'new_string', 'prompt'])
 
-const manual = ref<boolean | null>(null)
 const full = ref(false)
 const copied = ref(false)
 
@@ -203,10 +210,16 @@ const diffLines = computed(() => {
 })
 
 const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(liveOutput.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
-const open = computed(() => manual.value ?? props.card.expanded ?? false)
+const open = computed({
+  // 读写 card 对象上的响应式字段 manualOpen（viewModel.ts 定义）。
+  // card 来自 Pinia store，是响应式代理——写字段会触发依赖它的 computed 重算。
+  // （曾把状态存进 WeakMap：非响应式容器，写完界面永远不更新，点不开。）
+  get: () => props.card.manualOpen ?? props.card.expanded ?? false,
+  set: value => { props.card.manualOpen = value },
+})
 const long = computed(() => output.value.length > 700 || output.value.split('\n').length > 14)
 
-function toggle() { if (hasBody.value) manual.value = !open.value }
+function toggle() { if (hasBody.value) open.value = !open.value }
 
 async function copy(text: string) {
   try {

@@ -65,6 +65,50 @@ function syncScrollHost() {
 
 const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline))
 
+// ── 入场动画去重 ──
+// rise-in 绑定在虚拟列表 item 的内层节点上：DynamicScroller 重排/回收时 unmount
+// 再 remount，动画（fill: both）会重新播放 —— 已经静止的内容再次"淡入上浮"，
+// 流式输出时表现为整个界面闪烁。因此只有「首次出现的新块」播动画，
+// 窗口期（0.32s 动画 + 最大 6×40ms 步进）过后标记失效，重建不再重放。
+const freshBlockKeys = ref(new Set<string>())
+const seenBlockKeys = new Set<string>()
+let freshSweeper: ReturnType<typeof setTimeout> | null = null
+
+watch(() => session.sessionId, () => {
+  // 切换会话：现有时间线整体视为「已见」，打开历史会话不播全屏入场动画。
+  seenBlockKeys.clear()
+  for (const b of blocks.value) seenBlockKeys.add(b.key)
+  freshBlockKeys.value = new Set()
+})
+
+watch(blocks, list => {
+  let changed = false
+  const next = new Set(freshBlockKeys.value)
+  const listed = new Set(list.map(b => b.key))
+  for (const b of list) {
+    if (!seenBlockKeys.has(b.key)) {
+      seenBlockKeys.add(b.key)
+      // assistant 行会在首批流式增量到达时被虚拟列表重测并可能重建。
+      // 若仍处于新块动画窗口，重建会再次播放 rise-in，形成可见闪烁。
+      // 回复内容本身已通过增量渲染自然出现，因此只给用户消息和工具卡入场动效。
+      if (b.t !== 'one' || b.item.kind !== 'assistant') {
+        next.add(b.key)
+        changed = true
+      }
+    }
+  }
+  for (const k of next) if (!listed.has(k)) { next.delete(k); changed = true }
+  if (changed) freshBlockKeys.value = next
+  if (next.size && !freshSweeper) {
+    freshSweeper = setTimeout(() => {
+      freshSweeper = null
+      if (freshBlockKeys.value.size) freshBlockKeys.value = new Set()
+    }, 600)
+  }
+}, { flush: 'post' })
+
+onBeforeUnmount(() => { if (freshSweeper) { clearTimeout(freshSweeper); freshSweeper = null } })
+
 // ── 会话内搜索：关键词匹配时间线消息，跳转并高亮 ──
 const searchOpen = ref(false)
 const searchQuery = ref('')
@@ -173,17 +217,15 @@ onMounted(() => {
   void sessions.refreshRunning()
   runningPoll = setInterval(() => { sessions.refreshRunning(); void session.refreshLifeUnread(); session.autoDeliverLifeIfReady() }, 2000)
   void session.refreshLifeUnread()
-  // 高度只要变就重新贴底（内部有 rAF 合并，不怕高频触发）
+  // 高度只要变就重新贴底（内部有 rAF 合并，不怕高频触发）。
+  // 注意：不再观察 .vue-recycle-scroller__item-wrapper —— 流式期间 wrapper
+  // 高度每 60ms 变一次，观察它会让 follow() 与虚拟滚动的位置修正互相拉扯；
+  // item 级高度变化已由 DynamicScrollerItem 的 emit-resize 覆盖。
   if (typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => follow())
     if (content.value) ro.observe(content.value)
     if (scroller.value) ro.observe(scroller.value)
     syncScrollHost()
-    if (scrollHost.value && scrollHost.value !== scroller.value) {
-      ro.observe(scrollHost.value)
-      const wrapper = scrollHost.value.querySelector<HTMLElement>('.vue-recycle-scroller__item-wrapper')
-      if (wrapper) ro.observe(wrapper)
-    }
   }
   nextTick(() => { syncScrollHost(); follow() })
   // 演示模式自动播一轮，省得进来还要先打字才能看见瀑布流。
@@ -232,8 +274,6 @@ watch(() => session.timeline.length, () => nextTick(() => { syncScrollHost(); fo
 watch(scrollHost, host => {
   if (!ro || !host || host === scroller.value) return
   ro.observe(host)
-  const wrapper = host.querySelector<HTMLElement>('.vue-recycle-scroller__item-wrapper')
-  if (wrapper) ro.observe(wrapper)
 }, { flush: 'post' })
 watch([() => config.digitalLifeEnabled, () => config.lifeGlobalMode, () => session.isBusy], ([, , busy]) => {
   if (!busy) session.syncLifeMode()
@@ -300,12 +340,16 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
               :size-dependencies="[item, item.t === 'one' ? item.item : item.cards]"
               :data-index="index"
               class="virtual-item"
-              :class="{ 'search-hit': highlightIndex === index }"
+              :class="{ 'search-hit': highlightIndex === index, 'no-anim': !freshBlockKeys.has(item.key) }"
               emit-resize
               @resize="follow"
             >
-              <!-- Recycled rows stay visible when their message or height changes. -->
-              <TimelineBlock :block="item" />
+              <!-- 入场动画放内层：外层节点由虚拟滚动管理 transform，动画会覆盖定位。
+                   no-anim 加在外层：窗口期过后整个块（含内层 cascade）禁用动画，
+                   虚拟列表回收重建时不再重放（动画重放 = 流式期间整页闪烁）。 -->
+              <div class="rise-in" :style="{ '--i': Math.min(index, 6) }">
+                <TimelineBlock :block="item" />
+              </div>
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
@@ -416,6 +460,10 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
 }
 .virtual-item { width: 100%; min-width: 0; padding-bottom: 12px; }
+/* 虚拟列表回收重建时不重放入场动画（动画重放 = 流式期间整页闪烁）：
+   no-anim 落在 item 外层，同时压掉内层的 rise-in 与各子组件的 cascade。 */
+.virtual-item.no-anim .rise-in { animation: none; }
+.virtual-item.no-anim :deep(.cascade) { animation: none; }
 
 .to-bottom {
   position: absolute; left: 50%; bottom: 116px; z-index: 8;

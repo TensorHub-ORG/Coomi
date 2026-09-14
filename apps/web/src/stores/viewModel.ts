@@ -14,6 +14,9 @@ export interface ToolCard {
   access?: ToolAccess
   riskSummary?: string
   expanded?: boolean
+  /** 用户手动展开/收起（优先于 expanded）。挂在卡片对象上随 store 持久，
+   *  组件被虚拟列表回收重建后状态不丢；必须是响应式字段，禁止存非响应式 Map。 */
+  manualOpen?: boolean
   /** 工具产生的图片（data URL），瀑布流渲染用。 */
   images?: string[]
   /** 执行中的实时输出流（shell/local_shell 增量回传），done 后清空并入 resultPreview。 */

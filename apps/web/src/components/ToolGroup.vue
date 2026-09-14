@@ -1,22 +1,38 @@
+<script lang="ts">
+import { reactive } from 'vue'
+
+/**
+ * 组的手动开合状态存放处（模块级，跨组件实例共享）。
+ * 以组 key（首个工具 callId）为键 —— 不能放 <script setup> 的本地变量
+ * （每个实例各一份）：虚拟列表回收重建组件后状态仍在，
+ * 「用户手动点过之后就听用户的」这条约定才能真正跨回收生效。
+ *
+ * 必须是 reactive Map：普通 Map 不是响应式数据源，computed 不追踪它的
+ * 变化，点击后状态写了、界面永远不更新——这正是「工具调用点不开」的根因。
+ */
+const groupManual = reactive(new Map<string, boolean>())
+</script>
+
 <script setup lang="ts">
 /**
  * 连续工具调用的分组容器。
  * 单个调用不套壳；两个以上折成一组，跑的时候自动展开、全部结束后自动收起，
  * 用户手动点过之后就听用户的。长任务几十次调用不会把时间线冲成卡片墙。
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { ToolCard } from '@/stores/viewModel'
 import CoomiIcon from './CoomiIcon.vue'
 import ToolCardItem from './ToolCardItem.vue'
 
 const props = defineProps<{ cards: ToolCard[] }>()
 
-const manual = ref<boolean | null>(null)
+const groupKey = computed(() => `g:${props.cards[0]?.callId ?? ''}`)
 
 const active = computed(() =>
   props.cards.some(c => c.status === 'running' || c.status === 'starting' || c.status === 'awaiting_approval'),
 )
-const open = computed(() => manual.value ?? active.value)
+const open = computed(() => groupManual.get(groupKey.value) ?? active.value)
+function toggleGroup() { groupManual.set(groupKey.value, !open.value) }
 const finished = computed(() => props.cards.filter(c => c.status !== 'running' && c.status !== 'starting' && c.status !== 'awaiting_approval').length)
 const failed = computed(() => props.cards.filter(c => c.status === 'error').length)
 const elapsed = computed(() => props.cards.reduce((s, c) => s + (c.elapsed ?? 0), 0))
@@ -33,7 +49,7 @@ const cls = computed(() => (active.value ? 'run' : failed.value ? 'err' : 'ok'))
   <ToolCardItem v-if="cards.length === 1" :card="cards[0]" class="cascade" />
 
   <div v-else class="group cascade" :class="cls">
-    <button class="ghead" @click="manual = !open">
+    <button class="ghead" @click="toggleGroup">
       <span class="gicon" :class="cls"><CoomiIcon name="wrench" :size="16" /></span>
       <span class="gtitle">工具调用 · {{ cards.length }}</span>
       <span class="gsum" :class="cls">{{ summary }}</span>
