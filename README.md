@@ -61,7 +61,7 @@ Comax-Android/
 ├─ apps/coomi-app/        # Android 应用壳（Termux 环境、WebView、更新安装器、控制台、悬浮窗/无障碍）
 ├─ apps/coomi-rs/         # Rust 智能体引擎（engine / services / tools / ui）
 │  ├─ engine/             # 会话、上下文、Agent 循环
-│  ├─ services/           # Provider 适配与消息序列化（含 DeepSeek 官方登录）
+│  ├─ services/           # Provider 适配与消息序列化
 │  ├─ tools/              # 内置工具（shell、read_file、view_image、show_image、ui_automation、SKILL/MCP 管理等）
 │  └─ ui/                 # coomi serve：本地 HTTP/WebSocket 服务
 ├─ apps/web/              # Vue 3 + Pinia 对话前端（打包为 web.zip 内嵌）
