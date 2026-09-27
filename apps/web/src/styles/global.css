@@ -1,0 +1,396 @@
+/*
+  Coomi 设计令牌 —— 蓝 (#2d61c6) + 白为主色，橙 (#d47458) 作点缀。
+  排版语言参考 DeepSeek 移动端：大面积白底、浅灰填充块、16px 卡片圆角、
+  全圆药丸、细描线图标、"浅蓝底 + 蓝字"表达选中态。
+  色值与 Android 侧 res/values/colors_coomi.xml 对齐，跨 WebView 边界不跳色。
+*/
+:root {
+  /* ── 品牌 ── */
+  --blue: #2d61c6;
+  --blue-press: #24509f;
+  --blue-soft: #eaf0fc;
+  --blue-soft-2: #dce7f9;
+  --blue-border: #c6d7f4;
+  --orange: #d47458;
+  --orange-soft: #fcf1ec;
+  --orange-border: #f0d5c9;
+
+  /* ── 表面 ── */
+  --bg: #ffffff;
+  --page: #f4f5f7;
+  --fill: #f5f6f8;
+  --fill-strong: #edeff3;
+  --fill-press: #e5e8ee;
+  --border: #e7e9ee;
+  --border-strong: #dadde4;
+
+  /* ── 文字 ── */
+  --text: #1b1e23;
+  --text-2: #5c6270;
+  --text-3: #9096a2;
+
+  /* ── 语义 ── */
+  --ok: #1f9d6b;
+  --ok-soft: #e9f7f1;
+  --warn: #b7791f;
+  --warn-soft: #fbf3e4;
+  --danger: #d9503f;
+  --danger-soft: #fceeec;
+  --danger-border: #f4cfc9;
+
+  /* ── 代码 ── */
+  --code-bg: #f5f6f8;
+  --code-text: #313743;
+  --code-bg-dark: #1e2430;
+
+  /* ── 形状 / 阴影 ── */
+  --r-card: 16px;
+  --r-md: 12px;
+  --r-sm: 9px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(23, 32, 54, 0.05), 0 2px 8px rgba(23, 32, 54, 0.04);
+  --shadow-2: 0 6px 24px rgba(23, 32, 54, 0.1);
+  --shadow-sheet: 0 -10px 44px rgba(23, 32, 54, 0.16);
+  --shadow-drawer: 10px 0 44px rgba(23, 32, 54, 0.18);
+
+  /* ── 排版 ── */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "HarmonyOS Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --chat-background-overlay: var(--bg);
+  --chat-background-image: none;
+
+  /* ── 旧组件仍在用的别名，保留以免一次性大改 ── */
+  --accent: var(--blue);
+  --accent-hover: var(--blue-press);
+  --accent-soft: var(--blue-soft);
+  --accent-border: var(--blue-border);
+  --accent-dim: var(--blue-border);
+  --text-dim: var(--text-2);
+  --text-faint: var(--text-3);
+  --bg-subtle: var(--fill);
+  --bg-soft: var(--fill-strong);
+  --bg-hover: var(--fill-press);
+  --bg-card: #ffffff;
+  --bg-input: var(--fill);
+  --bg-elevated: #ffffff;
+  --user-bubble: var(--blue);
+  --user-text: #ffffff;
+  --radius: var(--r-card);
+  --radius-sm: var(--r-md);
+  --radius-xs: var(--r-sm);
+
+  color-scheme: light;
+}
+
+/* ── 暗色主题：跟随系统深色模式 ──
+   Android 侧（CoomiActivity）把系统深色状态经 JS 桥写入 <html data-theme="dark">；
+   桌面浏览器由前端 matchMedia 监听自动设置，两者等效。 */
+:root[data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #131518;
+    --page: #0e1013;
+    --fill: #1a1d22;
+    --fill-strong: #22262d;
+    --fill-press: #2a2f38;
+    --border: #252a32;
+    --border-strong: #313844;
+    --text: #e7e9ee;
+    --text-2: #9aa2af;
+    --text-3: #68717f;
+    --blue: #5b8bf0;
+    --blue-press: #6f9bf3;
+    --blue-soft: #1c2c50;
+    --blue-soft-2: #23365f;
+    --blue-border: #3b5285;
+    --orange: #e08a6b;
+    --orange-soft: #3a2821;
+    --orange-border: #5e3b2e;
+    --ok: #38b98a;
+    --ok-soft: #1b362c;
+    --warn: #d3a44e;
+    --warn-soft: #3a3120;
+    --danger: #e86a58;
+    --danger-soft: #3d241f;
+    --danger-border: #613630;
+    --code-bg: #1a1d22;
+    --code-text: #cdd3de;
+    --code-bg-dark: #0d0f12;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 6px 24px rgba(0, 0, 0, 0.45);
+    --shadow-sheet: 0 -10px 44px rgba(0, 0, 0, 0.55);
+    --shadow-drawer: 10px 0 44px rgba(0, 0, 0, 0.55);
+    --bg-card: #191c21;
+    --bg-input: #1c1f24;
+    --bg-elevated: #1f232a;
+    --user-bubble: var(--blue);
+    --user-text: #ffffff;
+  }
+:root[data-theme='book'] {
+  color-scheme: light;
+  --bg: #f7f2e7;
+  --page: #eee6d7;
+  --fill: #f1eadc;
+  --fill-strong: #e7decc;
+  --fill-press: #ddd2bd;
+  --border: #d8ccb6;
+  --border-strong: #c7b99f;
+  --text: #2d3028;
+  --text-2: #626457;
+  --text-3: #8a8979;
+  --blue: #496957;
+  --blue-press: #395343;
+  --blue-soft: #dce8dc;
+  --blue-soft-2: #cdddcf;
+  --blue-border: #abc1ae;
+  --orange: #a76642;
+  --orange-soft: #efe0d3;
+  --orange-border: #d9bda8;
+  --bg-card: #fffaf0;
+  --bg-input: #f1eadc;
+  --bg-elevated: #fffaf0;
+  --user-bubble: #496957;
+}
+:root[data-theme='orange'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --page: #fff7f1;
+  --fill: #fff2e8;
+  --fill-strong: #ffe7d5;
+  --fill-press: #ffdbc2;
+  --border: #f3dac8;
+  --border-strong: #eac4a8;
+  --text: #28231f;
+  --text-2: #6e625a;
+  --text-3: #9b8c82;
+  --blue: #a94f12;
+  --blue-press: #873b0b;
+  --blue-soft: #f8e9de;
+  --blue-soft-2: #f1d8c6;
+  --blue-border: #ddb18f;
+  --orange: #a94f12;
+  --orange-soft: #f8e9de;
+  --orange-border: #ddb18f;
+  --bg-card: #ffffff;
+  --bg-input: #fff7f1;
+  --bg-elevated: #ffffff;
+  --user-bubble: #a94f12;
+}
+:root[data-theme='ink'] {
+  color-scheme: dark;
+  --bg: #101714; --page: #0b110f; --fill: #17211d; --fill-strong: #1e2b26; --fill-press: #273630;
+  --border: #26342f; --border-strong: #344840;
+  --text: #e8eee9; --text-2: #a3b1a8; --text-3: #6f8177;
+  --blue: #63b894; --blue-press: #7ac7a7; --blue-soft: #17392d; --blue-soft-2: #1e493a; --blue-border: #366956;
+  --orange: #d49367; --orange-soft: #38291f; --orange-border: #664733;
+  --ok: #63b894; --ok-soft: #17392d; --warn: #d0a451; --warn-soft: #362e1d;
+  --danger: #e07168; --danger-soft: #3b2423; --danger-border: #673b39;
+  --code-bg: #151e1b; --code-text: #d3ddd6; --code-bg-dark: #080d0b;
+  --bg-card: #141d19; --bg-input: #17211d; --bg-elevated: #1b2621; --user-bubble: #397e62;
+  --shadow-1: 0 2px 8px rgba(0,0,0,.32); --shadow-2: 0 7px 26px rgba(0,0,0,.48); --shadow-sheet: 0 -10px 44px rgba(0,0,0,.56); --shadow-drawer: 10px 0 44px rgba(0,0,0,.56);
+}
+:root[data-theme='abyss'] {
+  color-scheme: dark;
+  --bg: #0d1720; --page: #081018; --fill: #14212c; --fill-strong: #1b2b38; --fill-press: #243746;
+  --border: #223442; --border-strong: #30495c;
+  --text: #e5edf2; --text-2: #9db0bc; --text-3: #667d8d;
+  --blue: #55b8cf; --blue-press: #72c7d9; --blue-soft: #123444; --blue-soft-2: #174457; --blue-border: #32677a;
+  --orange: #e08b71; --orange-soft: #3b2925; --orange-border: #65453b;
+  --ok: #4fc49d; --ok-soft: #12362d; --warn: #d4ad56; --warn-soft: #362f1e;
+  --danger: #ed746e; --danger-soft: #3d2425; --danger-border: #693a3b;
+  --code-bg: #101c26; --code-text: #cedae2; --code-bg-dark: #060c11;
+  --bg-card: #111d27; --bg-input: #14212c; --bg-elevated: #172631; --user-bubble: #247b91;
+  --shadow-1: 0 2px 8px rgba(0,0,0,.34); --shadow-2: 0 7px 26px rgba(0,0,0,.5); --shadow-sheet: 0 -10px 44px rgba(0,0,0,.58); --shadow-drawer: 10px 0 44px rgba(0,0,0,.58);
+}
+:root[data-theme='ember'] {
+  color-scheme: dark;
+  --bg: #1a1614; --page: #110f0e; --fill: #241e1b; --fill-strong: #302824; --fill-press: #3b312c;
+  --border: #352c28; --border-strong: #493b34;
+  --text: #eee9e5; --text-2: #b5a8a0; --text-3: #7e6f67;
+  --blue: #d18a62; --blue-press: #dfa17d; --blue-soft: #40291f; --blue-soft-2: #513327; --blue-border: #76503b;
+  --orange: #e1a05f; --orange-soft: #402f20; --orange-border: #6b4c2e;
+  --ok: #70b995; --ok-soft: #20362c; --warn: #d7ad5d; --warn-soft: #3b311f;
+  --danger: #e47569; --danger-soft: #422624; --danger-border: #6d3c37;
+  --code-bg: #211b18; --code-text: #ddd3cc; --code-bg-dark: #0d0b0a;
+  --bg-card: #201a18; --bg-input: #241e1b; --bg-elevated: #29221f; --user-bubble: #98583a;
+  --shadow-1: 0 2px 8px rgba(0,0,0,.34); --shadow-2: 0 7px 26px rgba(0,0,0,.5); --shadow-sheet: 0 -10px 44px rgba(0,0,0,.58); --shadow-drawer: 10px 0 44px rgba(0,0,0,.58);
+}
+:root[data-theme='celadon'] {
+  color-scheme: light;
+  --bg: #f8fbf9; --page: #edf3ef; --fill: #f0f5f2; --fill-strong: #e2ebe5; --fill-press: #d6e2da;
+  --border: #dce6df; --border-strong: #c8d7cd;
+  --text: #202a25; --text-2: #596a60; --text-3: #89988f;
+  --blue: #39745d; --blue-press: #2d5d4a; --blue-soft: #deeee6; --blue-soft-2: #cde3d7; --blue-border: #a9c9b8;
+  --orange: #b66f4f; --orange-soft: #f5e9e2; --orange-border: #dfc1b2;
+  --bg-card: #ffffff; --bg-input: #f0f5f2; --bg-elevated: #ffffff; --user-bubble: #39745d;
+}
+:root[data-theme='linen'] {
+  color-scheme: light;
+  --bg: #fbfaf7; --page: #f1f0ec; --fill: #f4f2ed; --fill-strong: #e9e6df; --fill-press: #dedad1;
+  --border: #e4e1da; --border-strong: #d2cdc3;
+  --text: #262728; --text-2: #626365; --text-3: #91908d;
+  --blue: #4f607f; --blue-press: #3e4c67; --blue-soft: #e6eaf1; --blue-soft-2: #d7dde8; --blue-border: #b9c3d4;
+  --orange: #b66b4e; --orange-soft: #f4e8e2; --orange-border: #ddbeb1;
+  --bg-card: #fffefa; --bg-input: #f4f2ed; --bg-elevated: #fffefa; --user-bubble: #4f607f;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* 点击不出现蓝色高亮方块：WebView 的 tap highlight / focus ring 全部去掉，
+   交互反馈交给各组件自己的 :active 样式。 */
+*:focus { outline: none !important; }
+*:focus-visible { outline: none !important; }
+button, a, [role="button"], input, textarea, select, label {
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-touch-callout: none;
+}
+::selection { background: var(--blue-soft); }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.62;
+  overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+#app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; padding: 0; }
+input, textarea { font-family: inherit; color: inherit; }
+select { color-scheme: inherit; }
+select option, select optgroup { background: var(--bg); color: var(--text); }
+a { color: var(--blue); text-decoration: none; }
+h1, h2, h3 { margin: 0; font-weight: 650; }
+
+/* ── 按钮 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 46px; padding: 0 18px; border-radius: var(--r-md);
+  background: var(--fill-strong); color: var(--text);
+  font-size: 15px; font-weight: 550; letter-spacing: 0.01em;
+  transition: background 0.16s, opacity 0.16s, transform 0.07s;
+}
+.btn:active { transform: scale(0.985); }
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:active { background: var(--blue-press); }
+.btn-soft { background: var(--blue-soft); color: var(--blue); }
+.btn-danger { background: var(--danger-soft); color: var(--danger); }
+.btn-ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); }
+.btn:disabled { opacity: 0.42; pointer-events: none; }
+
+/* ── 药丸 / 图标按钮 / 卡片 ── */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px;
+  border-radius: var(--r-pill); background: var(--fill-strong); color: var(--text-2);
+  font-size: 13px; font-weight: 550; white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.pill.on { background: var(--blue-soft); color: var(--blue); }
+.pill.warn-on { background: var(--orange-soft); color: var(--orange); }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: var(--r-md); color: var(--text-2);
+  flex-shrink: 0; transition: background 0.15s;
+}
+.icon-btn:active { background: var(--fill-strong); }
+.card { background: var(--bg); border-radius: var(--r-card); box-shadow: var(--shadow-1); overflow: hidden; }
+.sec-label { font-size: 12.5px; color: var(--text-3); padding: 0 4px 8px; letter-spacing: 0.02em; }
+
+/* ── 等宽块 ── */
+.code {
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+  background: var(--code-bg); color: var(--code-text); border-radius: var(--r-sm);
+  padding: 11px 13px; overflow-x: auto; white-space: pre; margin: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 动效：瀑布流的基本单元 ── */
+@keyframes coomi-cascade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.cascade { animation: coomi-cascade 0.26s cubic-bezier(0.22, 0.68, 0.19, 1) both; }
+.fade-in { animation: coomi-cascade 0.24s cubic-bezier(0.22, 0.68, 0.19, 1) both; }
+
+@keyframes coomi-spin { to { transform: rotate(360deg); } }
+@keyframes coomi-blink { 50% { opacity: 0; } }
+@keyframes coomi-shimmer { to { background-position: 200% 0; } }
+@keyframes coomi-sweep {
+  0% { transform: translateX(-100%) scaleX(0.35); }
+  55% { transform: translateX(30%) scaleX(0.7); }
+  100% { transform: translateX(100%) scaleX(0.35); }
+}
+@keyframes coomi-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(45, 97, 198, 0.28); }
+  70% { box-shadow: 0 0 0 7px rgba(45, 97, 198, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(45, 97, 198, 0); }
+}
+
+/* 流式文本的"正在写"光标 */
+.stream-caret {
+  display: inline-block; width: 7px; height: 1.02em; margin-left: 3px;
+  background: var(--blue); border-radius: 1.5px; vertical-align: text-bottom;
+  animation: coomi-blink 1.05s step-end infinite;
+}
+
+/* 未定案文字的流光遮罩（推理 ticker / 运行中的工具名） */
+.shimmer-text {
+  background: linear-gradient(90deg, var(--text-3) 20%, var(--blue) 45%, var(--text-3) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: coomi-shimmer 1.6s linear infinite;
+}
+
+/* ── Markdown 正文 ── */
+.md { font-size: 15.5px; line-height: 1.72; word-break: break-word; }
+.md :first-child { margin-top: 0; }
+.md :last-child { margin-bottom: 0; }
+.md p { margin: 0.55em 0; }
+.md pre {
+  margin: 0.7em 0; background: var(--code-bg); border-radius: var(--r-md);
+  overflow: hidden; box-shadow: inset 0 0 0 1px var(--border);
+}
+.md code {
+  font-family: var(--font-mono); font-size: 0.87em;
+  background: var(--fill-strong); color: var(--code-text);
+  padding: 1.5px 6px; border-radius: 6px;
+}
+.md pre code {
+  display: block; padding: 13px 14px; overflow-x: auto; white-space: pre;
+  background: none; font-size: 12.8px; line-height: 1.62;
+  -webkit-overflow-scrolling: touch;
+}
+.md ul, .md ol { margin: 0.55em 0; padding-left: 1.3em; }
+.md li { margin: 0.24em 0; }
+.md li::marker { color: var(--text-3); }
+.md h1, .md h2, .md h3 { font-size: 1.06em; font-weight: 650; margin: 0.85em 0 0.4em; }
+.md a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+.md strong { font-weight: 650; }
+.md blockquote {
+  margin: 0.7em 0; padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--blue-border); color: var(--text-2);
+}
+.md hr { border: none; border-top: 1px solid var(--border); margin: 1.1em 0; }
+.md table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 0.7em 0; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
+.md th { background: var(--fill); font-weight: 600; }
+
+/* ── 极简界面模式（ChatView 根节点挂 .minimal-ui）──
+   工具调用折叠成小块方框，文本与卡片更小更紧凑。 */
+.minimal-ui .md { font-size: 14px; }
+.minimal-ui .blk { margin-bottom: 6px; }
+.minimal-ui .tool .verb { font-size: 12.5px; }
+.minimal-ui .tool .head { min-height: 36px; padding: 5px 9px; }
+.minimal-ui .tool .tile { width: 24px; height: 24px; border-radius: 7px; }
+.minimal-ui .tool .target { font-size: 10.5px; }
+.minimal-ui .tool-body { font-size: 10px; }
+.minimal-ui .card-out { font-size: 12.4px; }

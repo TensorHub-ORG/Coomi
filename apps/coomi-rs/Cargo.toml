@@ -1,0 +1,51 @@
+[workspace]
+members = ["engine", "services", "tools", "security", "ui", "catalogs", "telemetry"]
+resolver = "2"
+
+[workspace.package]
+version = "2.0.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1"
+base64 = "0.22"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+md5 = "0.7"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+dirs = "6"
+fs2 = "0.4"
+flate2 = "1"
+ignore = "0.4"
+ratatui = "0.29"
+pulldown-cmark = "0.13"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "blocking"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+futures-util = "0.3"
+axum = { version = "0.8", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tar = "0.4"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+unicode-width = "0.2"
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

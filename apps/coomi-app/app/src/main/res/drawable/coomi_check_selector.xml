@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 选中的 Provider 卡片右侧显示蓝色对勾，未选中占位透明 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:drawable="@drawable/coomi_ic_check_blue"/>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/coomi_transparent"/>
+            <size android:width="20dp" android:height="20dp"/>
+        </shape>
+    </item>
+</selector>

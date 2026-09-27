@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="?attr/coomiCard"/>
+    <corners android:radius="@dimen/coomi_radius_button"/>
+    <stroke android:width="@dimen/coomi_stroke_thick" android:color="?attr/coomiBlue"/>
+</shape>

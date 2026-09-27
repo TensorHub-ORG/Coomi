@@ -1,0 +1,44 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!--
+        BotDrop notification icon - simplified robot head (monochrome)
+        Based on the BotDrop mascot character
+    -->
+
+    <!-- Robot head (circle) -->
+    <path
+        android:pathData="M12,8a6,6 0,1 1,0 12a6,6 0,1 1,0 -12z"
+        android:fillColor="#ffffff"/>
+
+    <!-- Left eye -->
+    <path
+        android:pathData="M9.5,13a1.5,1.5 0,1 1,0 0.01"
+        android:fillColor="#000000"/>
+
+    <!-- Right eye -->
+    <path
+        android:pathData="M14.5,13a1.5,1.5 0,1 1,0 0.01"
+        android:fillColor="#000000"/>
+
+    <!-- Left antenna -->
+    <path
+        android:pathData="M9,8L8,5"
+        android:strokeWidth="1.2"
+        android:strokeColor="#ffffff"/>
+    <path
+        android:pathData="M8,5a0.8,0.8 0,1 1,0 0.01"
+        android:fillColor="#ffffff"/>
+
+    <!-- Right antenna -->
+    <path
+        android:pathData="M15,8L16,5"
+        android:strokeWidth="1.2"
+        android:strokeColor="#ffffff"/>
+    <path
+        android:pathData="M16,5a0.8,0.8 0,1 1,0 0.01"
+        android:fillColor="#ffffff"/>
+
+</vector>

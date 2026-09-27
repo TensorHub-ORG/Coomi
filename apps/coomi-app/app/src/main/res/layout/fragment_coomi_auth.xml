@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Setup step that opens the shared Web Provider management page. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:scrollbars="none"
+    android:background="?attr/coomiPage">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/coomi_gutter"
+        android:paddingEnd="@dimen/coomi_gutter"
+        android:paddingTop="@dimen/coomi_space_s"
+        android:paddingBottom="@dimen/coomi_space_xl">
+
+        <TextView
+            style="@style/Coomi.Text.Title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_l"
+            android:text="@string/coomi_auth_title"/>
+
+        <TextView
+            style="@style/Coomi.Text.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_s"
+            android:text="@string/coomi_auth_subtitle"/>
+
+        <TextView
+            style="@style/Coomi.Text.SectionLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_xl"
+            android:text="@string/coomi_auth_section_provider"/>
+
+        <TextView
+            style="@style/Coomi.Text.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_s"
+            android:text="@string/coomi_auth_provider_hint"/>
+
+        <Button
+            android:id="@+id/btn_open_providers"
+            style="@style/Coomi.Button"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/coomi_button_height"
+            android:layout_marginTop="@dimen/coomi_space_l"
+            android:text="@string/coomi_auth_open_providers"/>
+
+        <TextView
+            android:id="@+id/auth_status"
+            style="@style/Coomi.Text.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_m"
+            android:gravity="center"
+            android:text=""/>
+
+    </LinearLayout>
+</ScrollView>

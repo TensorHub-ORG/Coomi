@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem",
+      "description": "Read and manage files under one explicitly allowed directory.",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "{{allowed_path}}"],
+      "required_parameters": [
+        {"key": "allowed_path", "label": "Allowed directory", "secret": false}
+      ]
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "description": "Inspect repository status, history, branches, and diffs.",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "{{repository_path}}"],
+      "required_parameters": [
+        {"key": "repository_path", "label": "Repository directory", "secret": false}
+      ]
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "description": "Store durable entities and relations in a local knowledge graph.",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "description": "Inspect and automate browser pages with Playwright.",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "Work with repositories, issues, pull requests, and actions.",
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "{{github_token}}"},
+      "required_parameters": [
+        {"key": "github_token", "label": "GitHub token", "secret": true}
+      ]
+    }
+  ]
+}

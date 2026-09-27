@@ -1,0 +1,30 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+        maven { url 'https://maven.aliyun.com/repository/public' }
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:8.13.2"
+    }
+}
+
+allprojects {
+}
+
+subprojects { project ->
+    project.afterEvaluate {
+        def androidExt = project.extensions.findByName("android")
+        if (androidExt == null) return
+        def compileSdk = rootProject.properties.compileSdkVersion
+        if (compileSdk != null) {
+            try {
+                if (androidExt.hasProperty("compileSdk")) {
+                    androidExt.compileSdk = compileSdk.toInteger()
+                } else if (androidExt.hasProperty("compileSdkVersion")) {
+                    androidExt.compileSdkVersion = compileSdk.toInteger()
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+}

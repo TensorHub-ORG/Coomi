@@ -1,0 +1,124 @@
+<!--
+    Coomi 启动首页设置二级页面：CoomiHomeSettingActivity。
+    选择打开 App 时进入控制台还是对话界面，风格与 Dashboard/Backup 一致。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?attr/coomiPage"
+    android:fitsSystemWindows="true"
+    tools:context="app.coomi.CoomiHomeSettingActivity">
+
+    <!-- ── 顶栏 ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/coomi_gutter"
+        android:paddingEnd="@dimen/coomi_gutter">
+
+        <ImageButton
+            android:id="@+id/btn_home_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/coomi_ic_back"
+            android:tint="?attr/coomiText"
+            android:contentDescription="@string/coomi_home_setting_title"/>
+
+        <TextView
+            style="@style/Coomi.Text.Heading"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/coomi_space_s"
+            android:text="@string/coomi_home_setting_title"/>
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/coomi_gutter"
+            android:paddingEnd="@dimen/coomi_gutter"
+            android:paddingTop="@dimen/coomi_space_xs"
+            android:paddingBottom="@dimen/coomi_space_xl">
+
+            <TextView
+                style="@style/Coomi.Text.Caption"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/coomi_space_m"
+                android:text="@string/coomi_home_setting_hint"/>
+
+            <!-- ── 选择项 ── -->
+            <LinearLayout style="@style/Coomi.Card">
+                <LinearLayout
+                    android:id="@+id/btn_home_console"
+                    style="@style/Coomi.Row"
+                    android:clickable="true"
+                    android:focusable="true">
+                    <RadioButton
+                        android:id="@+id/radio_home_console"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="false"
+                        android:focusable="false"
+                        android:buttonTint="?attr/colorAccent"/>
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="@dimen/coomi_space_m"
+                        android:orientation="vertical">
+                        <TextView style="@style/Coomi.Text.Body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/coomi_home_console"/>
+                        <TextView style="@style/Coomi.Text.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/coomi_home_console_desc"/>
+                    </LinearLayout>
+                </LinearLayout>
+                <View style="@style/Coomi.Divider"/>
+                <LinearLayout
+                    android:id="@+id/btn_home_chat"
+                    style="@style/Coomi.Row"
+                    android:clickable="true"
+                    android:focusable="true">
+                    <RadioButton
+                        android:id="@+id/radio_home_chat"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="false"
+                        android:focusable="false"
+                        android:buttonTint="?attr/colorAccent"/>
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="@dimen/coomi_space_m"
+                        android:orientation="vertical">
+                        <TextView style="@style/Coomi.Text.Body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/coomi_home_chat"/>
+                        <TextView style="@style/Coomi.Text.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/coomi_home_chat_desc"/>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/txt_home_saved"
+                style="@style/Coomi.Text.Caption"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/coomi_space_m"
+                android:text="@string/coomi_home_saved"
+                android:textColor="?attr/colorAccent"
+                android:visibility="gone"/>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

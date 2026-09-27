@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coomi icon: coomi_ic_play -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/coomiText2">
+    <path android:pathData="M8.5,5.6l10,6c0.5,0.3 0.5,0.9 0,1.2l-10,6c-0.5,0.3 -1.1,-0.1 -1.1,-0.6V6.2c0,-0.5 0.6,-0.9 1.1,-0.6z" android:fillColor="#000000"/>
+</vector>

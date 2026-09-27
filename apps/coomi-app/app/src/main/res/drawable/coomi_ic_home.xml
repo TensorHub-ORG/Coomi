@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coomi icon: coomi_ic_home -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/coomiText2">
+    <path android:pathData="M4,10.5 L12,3.5 L20,10.5 M5,10.5 L5,20 L19,20 L19,10.5"
+        android:strokeColor="#000000" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"/>
+    <path android:pathData="M9.5,20 L9.5,14.5 L14.5,14.5 L14.5,20"
+        android:strokeColor="#000000" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"/>
+</vector>

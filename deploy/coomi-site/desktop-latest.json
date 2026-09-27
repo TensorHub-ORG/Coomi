@@ -1,0 +1,10 @@
+﻿{
+    "size":  256050040,
+    "version":  "0.1.0",
+    "arch":  "x64",
+    "file":  "Coomi-Setup-0.1.0.exe",
+    "publishedAt":  "2026-08-16T23:30:00Z",
+    "platform":  "windows",
+    "minWindows":  "10",
+    "sha256":  "3534a8bedfca2930f6ddcb430ce0d68ffbc837392f6bd8efafbc9225adb0cc25"
+}

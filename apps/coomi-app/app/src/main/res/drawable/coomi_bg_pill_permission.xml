@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 权限胶囊按钮：未配置=主题强调色实底白字（可点），已配置=浅绿底深绿字（禁用） -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/coomiOkSoft"/>
+            <corners android:radius="@dimen/coomi_radius_pill"/>
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/coomiBlue"/>
+            <corners android:radius="@dimen/coomi_radius_pill"/>
+        </shape>
+    </item>
+</selector>

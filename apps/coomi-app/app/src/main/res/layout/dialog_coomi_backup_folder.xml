@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/coomi_space_l"
+    android:paddingEnd="@dimen/coomi_space_l"
+    android:paddingBottom="@dimen/coomi_space_s">
+
+    <TextView
+        style="@style/Coomi.Text.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:lineSpacingExtra="2dp"
+        android:text="从 ProotLinux 虚拟环境中选择要导出的文件夹。备份文件会保存到手机存储，导入时可恢复到虚拟环境主目录。" />
+
+    <TextView
+        style="@style/Coomi.Text.Body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/coomi_space_m"
+        android:text="虚拟环境路径" />
+
+    <EditText
+        android:id="@+id/edit_backup_folder_path"
+        style="@style/Coomi.Input"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/coomi_input_height"
+        android:layout_marginTop="@dimen/coomi_space_s"
+        android:singleLine="true"
+        android:inputType="textUri"
+        android:hint="例如 /home/coomi/custom_coomi" />
+
+    <TextView
+        style="@style/Coomi.Text.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/coomi_space_s"
+        android:lineSpacingExtra="2dp"
+        android:text="支持 /home/coomi 及其子目录，也可以输入 ~/custom_coomi。点击“导出”后再选择手机存储位置。" />
+</LinearLayout>

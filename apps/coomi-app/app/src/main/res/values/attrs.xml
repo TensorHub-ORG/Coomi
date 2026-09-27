@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="termuxActivityDrawerBackground" format="reference" />
+    <attr name="termuxActivityDrawerImageTint" format="reference" />
+
+    <!-- Coomi 三档主题用的设计令牌：layout 引用 ?attr/coomiXxx，
+         Theme.Coomi（浅色）与 Theme.Coomi.Night（深色）各给一套值，
+         这样「夜间模式」档位不依赖系统 uiMode 也能切换界面颜色。 -->
+    <attr name="coomiPage" format="color" />
+    <attr name="coomiText" format="color" />
+    <attr name="coomiText2" format="color" />
+    <attr name="coomiText3" format="color" />
+    <attr name="coomiCard" format="color" />
+    <attr name="coomiBorder" format="color" />
+    <attr name="coomiDivider" format="color" />
+    <attr name="coomiFill" format="color" />
+    <attr name="coomiBlue" format="color" />
+    <attr name="coomiBlueSoft" format="color" />
+    <attr name="coomiOk" format="color" />
+    <attr name="coomiOkSoft" format="color" />
+    <attr name="coomiDanger" format="color" />
+    <attr name="coomiDangerSoft" format="color" />
+    <attr name="coomiWarnSoft" format="color" />
+    <attr name="coomiOrange" format="color" />
+    <attr name="coomiOrangeSoft" format="color" />
+    <attr name="coomiOrangeBorder" format="color" />
+</resources>

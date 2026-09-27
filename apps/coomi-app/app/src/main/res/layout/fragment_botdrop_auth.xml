@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="@color/botdrop_background">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/botdrop_choose_your_ai"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="@color/botdrop_on_background"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/botdrop_select_ai_model_desc"
+            android:textSize="14sp"
+            android:textColor="@color/botdrop_secondary_text"
+            android:layout_marginBottom="32dp" />
+
+        <!-- Model Selection -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/botdrop_ai_model"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/botdrop_on_background"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="32dp">
+
+            <EditText
+                android:id="@+id/auth_model_text"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:hint="@string/botdrop_no_model_selected"
+                android:textSize="12sp"
+                android:textColor="@color/botdrop_on_background"
+                android:textColorHint="@color/botdrop_secondary_text"
+                android:background="@drawable/edit_text_background"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:fontFamily="monospace"
+                android:focusable="false"
+                android:clickable="false"
+                android:cursorVisible="false"
+                android:layout_marginEnd="12dp" />
+
+            <Button
+                android:id="@+id/auth_select_button"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="@string/botdrop_select"
+                android:background="@drawable/botdrop_button_bg"
+                android:textColor="@color/botdrop_background"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp" />
+
+        </LinearLayout>
+
+        <!-- Inline API key input shown after model selection -->
+        <LinearLayout
+            android:id="@+id/auth_key_section"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/auth_key_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/botdrop_api_key"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/botdrop_on_background"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/botdrop_input_bg"
+                android:padding="4dp">
+
+                <EditText
+                    android:id="@+id/auth_key_input"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="@string/botdrop_paste_api_key_here"
+                    android:inputType="textPassword"
+                    android:background="@android:color/transparent"
+                    android:textColor="@color/botdrop_on_background"
+                    android:textColorHint="@color/botdrop_secondary_text"
+                    android:padding="12dp" />
+
+                    <ImageButton
+                        android:id="@+id/auth_key_toggle_visibility"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:src="@drawable/ic_visibility"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:tint="@color/botdrop_secondary_text"
+                        android:contentDescription="@string/botdrop_toggle_visibility" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/auth_base_url_section"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/auth_base_url_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/botdrop_custom_base_url"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/botdrop_on_background"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:background="@drawable/botdrop_input_bg"
+                    android:padding="4dp"
+                    android:layout_marginBottom="16dp">
+
+                    <EditText
+                        android:id="@+id/auth_base_url_input"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/botdrop_custom_base_url_example"
+                        android:inputType="textUri"
+                        android:background="@android:color/transparent"
+                        android:padding="12dp"
+                        android:textSize="14sp"
+                        android:textColor="@color/botdrop_on_background"
+                        android:textColorHint="@color/botdrop_secondary_text" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/auth_key_status_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/botdrop_card_bg"
+                android:padding="12dp"
+                android:layout_marginTop="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/auth_key_status_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:textColor="@color/botdrop_on_background" />
+
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/auth_key_verify_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/botdrop_verify_continue"
+                android:layout_marginTop="24dp"
+                android:background="@drawable/botdrop_button_bg"
+                android:textColor="#1A1A1A"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</ScrollView>

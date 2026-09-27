@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coomi 设计令牌 · 尺寸与圆角 -->
+<resources>
+
+    <!-- 圆角 -->
+    <dimen name="coomi_radius_card">16dp</dimen>
+    <dimen name="coomi_radius_input">14dp</dimen>
+    <dimen name="coomi_radius_button">14dp</dimen>
+    <dimen name="coomi_radius_small">10dp</dimen>
+    <dimen name="coomi_radius_pill">999dp</dimen>
+
+    <!-- 间距 -->
+    <dimen name="coomi_gutter">20dp</dimen>
+    <dimen name="coomi_space_xs">4dp</dimen>
+    <dimen name="coomi_space_s">8dp</dimen>
+    <dimen name="coomi_space_m">12dp</dimen>
+    <dimen name="coomi_space_l">16dp</dimen>
+    <dimen name="coomi_space_xl">24dp</dimen>
+    <dimen name="coomi_space_xxl">32dp</dimen>
+
+    <!-- 控件高度 -->
+    <dimen name="coomi_button_height">52dp</dimen>
+    <dimen name="coomi_input_height">50dp</dimen>
+    <dimen name="coomi_row_height">56dp</dimen>
+    <dimen name="coomi_tap_target">44dp</dimen>
+
+    <!-- 描边 -->
+    <dimen name="coomi_stroke">1dp</dimen>
+    <dimen name="coomi_stroke_thick">1.5dp</dimen>
+
+    <!-- 字号 -->
+    <dimen name="coomi_text_display">28sp</dimen>
+    <dimen name="coomi_text_title">20sp</dimen>
+    <dimen name="coomi_text_heading">17sp</dimen>
+    <dimen name="coomi_text_body">15sp</dimen>
+    <dimen name="coomi_text_secondary">13.5sp</dimen>
+    <dimen name="coomi_text_caption">12sp</dimen>
+
+    <!-- 图标 -->
+    <dimen name="coomi_icon_s">18dp</dimen>
+    <dimen name="coomi_icon_m">22dp</dimen>
+    <dimen name="coomi_icon_l">28dp</dimen>
+    <dimen name="coomi_logo_hero">96dp</dimen>
+    <dimen name="coomi_logo_small">40dp</dimen>
+
+</resources>

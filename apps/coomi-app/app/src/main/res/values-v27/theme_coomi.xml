@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 27+ 才有浅色导航栏图标；低版本保持系统默认深色导航栏，避免白底白图标。 -->
+<resources>
+    <style name="Theme.Coomi" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/coomi_blue</item>
+        <item name="colorPrimaryDark">@color/coomi_blue_press</item>
+        <item name="colorAccent">@color/coomi_blue</item>
+        <item name="colorControlNormal">@color/coomi_text_3</item>
+        <item name="colorControlActivated">@color/coomi_blue</item>
+        <item name="colorControlHighlight">@color/coomi_ripple</item>
+
+        <item name="android:windowBackground">@color/coomi_white</item>
+        <item name="android:colorBackground">@color/coomi_white</item>
+        <item name="android:textColorPrimary">@color/coomi_text</item>
+        <item name="android:textColorSecondary">@color/coomi_text_2</item>
+        <item name="android:textColorHint">@color/coomi_text_3</item>
+        <item name="android:textColorLink">@color/coomi_blue</item>
+
+        <item name="android:statusBarColor">@color/coomi_white</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/coomi_white</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+
+        <item name="android:editTextBackground">@drawable/coomi_bg_input</item>
+
+        <!-- 设计令牌：layout 引用 ?attr/coomiXxx（与 values/theme_coomi.xml 保持一致） -->
+        <item name="coomiPage">@color/coomi_page</item>
+        <item name="coomiText">@color/coomi_text</item>
+        <item name="coomiText2">@color/coomi_text_2</item>
+        <item name="coomiText3">@color/coomi_text_3</item>
+        <item name="coomiCard">@color/coomi_white</item>
+        <item name="coomiBorder">@color/coomi_border</item>
+        <item name="coomiDivider">@color/coomi_divider</item>
+        <item name="coomiFill">@color/coomi_fill</item>
+        <item name="coomiBlue">@color/coomi_blue</item>
+        <item name="coomiBlueSoft">@color/coomi_blue_soft</item>
+        <item name="coomiOk">@color/coomi_ok</item>
+        <item name="coomiOkSoft">@color/coomi_ok_soft</item>
+        <item name="coomiDanger">@color/coomi_danger</item>
+        <item name="coomiDangerSoft">@color/coomi_danger_soft</item>
+        <item name="coomiWarnSoft">@color/coomi_warn_soft</item>
+        <item name="coomiOrange">@color/coomi_orange</item>
+        <item name="coomiOrangeSoft">@color/coomi_orange_soft</item>
+        <item name="coomiOrangeBorder">@color/coomi_orange_border</item>
+    </style>
+</resources>

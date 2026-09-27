@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "frontend-design",
+      "name": "Frontend Design",
+      "description": "Build production-quality, accessible frontend interfaces.",
+      "repository": "anthropics/skills",
+      "ref": "main",
+      "subdir": "skills/frontend-design"
+    },
+    {
+      "id": "webapp-testing",
+      "name": "Web App Testing",
+      "description": "Verify local web applications with browser automation.",
+      "repository": "anthropics/skills",
+      "ref": "main",
+      "subdir": "skills/webapp-testing"
+    },
+    {
+      "id": "code-review",
+      "name": "Code Review Excellence",
+      "description": "Review correctness, maintainability, and test coverage.",
+      "repository": "wshobson/agents",
+      "ref": "main",
+      "subdir": "plugins/developer-essentials/skills/code-review-excellence"
+    },
+    {
+      "id": "security-review",
+      "name": "Security Review",
+      "description": "Find security defects and propose verifiable fixes.",
+      "repository": "github/awesome-copilot",
+      "ref": "main",
+      "subdir": "skills/codeql"
+    },
+    {
+      "id": "react-nextjs",
+      "name": "React Best Practices",
+      "description": "Apply current React and Next.js performance practices.",
+      "repository": "vercel-labs/agent-skills",
+      "ref": "main",
+      "subdir": "skills/react-best-practices"
+    },
+    {
+      "id": "api-design",
+      "name": "API Design Principles",
+      "description": "Design consistent and evolvable HTTP APIs.",
+      "repository": "wshobson/agents",
+      "ref": "main",
+      "subdir": "plugins/backend-development/skills/api-design-principles"
+    },
+    {
+      "id": "git-workflow",
+      "name": "Git Advanced Workflows",
+      "description": "Use branches, rebase, worktrees, and recovery safely.",
+      "repository": "wshobson/agents",
+      "ref": "main",
+      "subdir": "plugins/developer-essentials/skills/git-advanced-workflows"
+    },
+    {
+      "id": "technical-writing",
+      "name": "Documentation Writer",
+      "description": "Write accurate and actionable developer documentation.",
+      "repository": "github/awesome-copilot",
+      "ref": "main",
+      "subdir": "skills/documentation-writer"
+    },
+    {
+      "id": "shizuku",
+      "name": "Shizuku",
+      "description": "Check Shizuku authorization before privileged Android operations.",
+      "repository": "github19155/shizuku-skill",
+      "ref": "main",
+      "subdir": "."
+    }
+  ]
+}

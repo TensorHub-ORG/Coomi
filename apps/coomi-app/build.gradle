@@ -1,0 +1,35 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:8.13.2"
+        classpath "com.google.gms:google-services:4.4.2"
+        classpath "com.google.firebase:firebase-crashlytics-gradle:3.0.3"
+    }
+}
+
+allprojects {
+}
+
+subprojects { project ->
+    project.afterEvaluate {
+        def androidExt = project.extensions.findByName("android")
+        if (androidExt == null) {
+            return
+        }
+        def compileSdk = rootProject.properties.compileSdkVersion ?: rootProject.findProperty("compileSdkVersion")
+        if (compileSdk != null) {
+            def compileSdkInt = compileSdk.toInteger()
+            try {
+                if (androidExt.hasProperty("compileSdk")) {
+                    androidExt.compileSdk = compileSdkInt
+                } else if (androidExt.hasProperty("compileSdkVersion")) {
+                    androidExt.compileSdkVersion = compileSdkInt
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+}

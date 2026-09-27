@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coomi UI 文案（新版设计） -->
+<resources>
+
+    <!-- ===== 启动引导 ===== -->
+    <string name="coomi_brand">Comax</string>
+    <string name="coomi_launcher_title">Comax</string>
+    <string name="coomi_launcher_subtitle">手机上的自主编程 Agent</string>
+    <string name="coomi_launcher_section_permission">开始之前</string>
+    <string name="coomi_launcher_privacy">所有命令都在本机 Linux 环境内执行，权限仅用于保持引擎运行。</string>
+    <string name="coomi_launcher_permission_hint">通知和电池权限开启后即可继续，Root 与 Shizuku 均为可选增强权限</string>
+    <string name="coomi_dash_section_settings">设置</string>
+    <string name="coomi_dash_section_permissions">权限管理</string>
+    <string name="coomi_dash_section_experience">会话与体验</string>
+    <string name="coomi_dash_section_extensions">扩展与自动化</string>
+    <string name="coomi_dash_section_service">维护与支持</string>
+    <string name="coomi_dash_permission_settings">运行权限</string>
+    <string name="coomi_dash_permission_settings_desc">通知、电池与增强权限</string>
+    <string name="coomi_dash_autostart">开机自启</string>
+    <string name="coomi_dash_autostart_desc">开启后开机自动拉起引擎与定时任务（需系统白名单与电池无限制）</string>
+    <string name="coomi_dash_provider_settings">提供商配置</string>
+    <string name="coomi_dash_provider_settings_desc">密钥、模型与服务地址</string>
+    <string name="coomi_dash_storage_settings">手机存储权限</string>
+    <string name="coomi_dash_storage_settings_desc">允许 Agent 读取真实手机目录</string>
+    <string name="coomi_dash_section_appearance">外观</string>
+    <string name="coomi_dash_appearance_desc">控制台与对话界面的明暗风格</string>
+    <string name="coomi_dash_theme_system">跟随系统</string>
+    <string name="coomi_dash_theme_light">明亮</string>
+    <string name="coomi_dash_theme_dark">夜间</string>
+    <string name="coomi_dash_theme_book">书卷纸</string>
+    <string name="coomi_dash_theme_orange">橙白</string>
+    <string name="coomi_dash_theme_ink">墨玉</string>
+    <string name="coomi_dash_theme_abyss">深海</string>
+    <string name="coomi_dash_theme_ember">炭褐</string>
+    <string name="coomi_dash_theme_celadon">青瓷</string>
+    <string name="coomi_dash_theme_linen">亚麻</string>
+    <string name="coomi_auth_discover_models">检索可用模型</string>
+    <string name="coomi_auth_discovering">正在检索可用模型…</string>
+    <string name="coomi_auth_discovered">已更新可用模型</string>
+    <string name="coomi_auth_discover_failed">模型检索失败：%1$s</string>
+    <string name="coomi_auth_need_base_url">请先填写 Base URL</string>
+
+    <!-- ===== 安装向导（外壳） ===== -->
+    <string name="coomi_setup_cancel">取消</string>
+    <string name="coomi_setup_back">返回</string>
+    <string name="coomi_setup_next">下一步</string>
+    <string name="coomi_setup_finish">完成</string>
+    <string name="coomi_setup_step_label">第 %1$d / %2$d 步</string>
+
+    <!-- ===== 步骤一：部署运行时 ===== -->
+    <string name="coomi_install_title">部署运行环境</string>
+    <string name="coomi_install_subtitle">部署原生 ARM64 coomi-rs 引擎与前端。</string>
+    <string name="coomi_install_phase_base">基础环境</string>
+    <string name="coomi_install_phase_base_desc">解压 Termux bootstrap</string>
+    <string name="coomi_install_phase_runtime">Rust 运行时</string>
+    <string name="coomi_install_phase_runtime_desc">部署预编译 ARM64 原生二进制</string>
+    <string name="coomi_install_phase_engine">Coomi 引擎</string>
+    <string name="coomi_install_phase_engine_desc">校验 HTTP / WebSocket 引擎</string>
+    <string name="coomi_install_log_label">部署日志</string>
+    <string name="coomi_install_error_title">部署失败</string>
+    <string name="coomi_install_error_hint">多数失败是网络问题，切换网络后重试即可。</string>
+    <string name="coomi_install_retry">重新部署</string>
+    <string name="coomi_install_waiting">准备中…</string>
+    <string name="coomi_install_running">正在处理：%1$s</string>
+    <string name="coomi_install_unknown_error">未知错误</string>
+    <string name="coomi_install_done_title">部署完成</string>
+    <string name="coomi_install_done_desc">运行环境就绪</string>
+
+    <!-- ===== 步骤二：模型配置 ===== -->
+    <string name="coomi_auth_title">连接模型</string>
+    <string name="coomi_auth_subtitle">在统一的提供商配置页面中配置服务商、API Key 和模型。</string>
+    <string name="coomi_auth_section_provider">服务商</string>
+    <string name="coomi_auth_provider_hint">提供商配置页面支持内置服务商、自定义服务商和模型管理。</string>
+    <string name="coomi_auth_open_providers">打开提供商配置</string>
+    <string name="coomi_auth_provider_required">请先打开提供商配置并完成一个服务商配置。</string>
+    <string name="coomi_auth_provider_ready">提供商已配置，可以继续。</string>
+    <string name="coomi_auth_section_key">凭据</string>
+    <string name="coomi_auth_key_label">API Key</string>
+    <string name="coomi_auth_key_hint">粘贴你的 API Key</string>
+    <string name="coomi_auth_model_label">模型</string>
+    <string name="coomi_auth_model_hint">模型名称</string>
+    <string name="coomi_auth_context_window_label">上下文窗口</string>
+    <string-array name="coomi_context_window_options">
+        <item>128k</item>
+        <item>256k（默认）</item>
+        <item>512k</item>
+    </string-array>
+    <string name="coomi_auth_base_url_label">Base URL</string>
+    <string name="coomi_auth_base_url_hint">https://api.example.com/v1</string>
+    <string name="coomi_auth_verify">保存并验证</string>
+    <string name="coomi_auth_toggle_key">显示 / 隐藏 API Key</string>
+    <string name="coomi_auth_need_key">请先填写 API Key</string>
+    <string name="coomi_auth_saving">正在保存…</string>
+    <string name="coomi_auth_saved">已保存，点「完成」继续</string>
+    <string name="coomi_auth_save_failed">保存失败，请重试</string>
+    <string name="coomi_provider_anthropic">Anthropic</string>
+    <string name="coomi_provider_openai">OpenAI</string>
+    <string name="coomi_provider_gemini">Google Gemini</string>
+    <string name="coomi_provider_deepseek">DeepSeek</string>
+    <string name="coomi_provider_zhipu">智谱</string>
+    <string name="coomi_provider_minimax">Minimax</string>
+    <string name="coomi_provider_custom">自定义 / 兼容 OpenAI</string>
+
+    <!-- ===== 仪表盘 ===== -->
+    <string name="coomi_dash_title">Coomi 控制台</string>
+    <string name="coomi_dash_section_engine">引擎</string>
+    <string name="coomi_dash_section_runtime">运行时</string>
+    <string name="coomi_dash_section_tools">工具</string>
+    <string name="coomi_dash_open_chat">进入对话</string>
+    <string name="coomi_dash_ai_studio">AI 工作室</string>
+    <string name="coomi_dash_ai_studio_desc">配置多个智能体，协同讨论、派单和执行任务</string>
+    <string name="coomi_dash_collab">协同工作台</string>
+    <string name="coomi_dash_collab_desc">并行拆解任务，查看成员执行流与交付产物</string>
+    <string name="coomi_dash_open_chat_desc">Coomi 的主界面</string>
+    <string name="coomi_dash_restart">重启引擎</string>
+    <string name="coomi_dash_stop">停止引擎</string>
+    <string name="coomi_dash_runtime">运行时</string>
+    <string name="coomi_dash_terminal">终端</string>
+    <string name="coomi_dash_terminal_desc">打开 Termux shell</string>
+    <string name="coomi_dash_tui">终端版 Comax</string>
+    <string name="coomi_dash_tui_desc">在终端里运行原生 comax</string>
+    <string name="coomi_dash_browser">在浏览器打开</string>
+    <string name="coomi_dash_browser_desc">用系统浏览器访问本机引擎</string>
+    <string name="coomi_dash_catalog">拓展管理</string>
+    <string name="coomi_dash_catalog_desc">安装与管理 Skills 和 MCP Server</string>
+    <string name="coomi_dash_workflows">自动化工作流（实验）</string>
+    <string name="coomi_dash_workflows_desc">多步骤编排、定时任务与管理</string>
+    <string name="coomi_dash_hooks">自定义钩子（实验）</string>
+    <string name="coomi_dash_hooks_desc">在会话和工具调用前后执行自定义命令</string>
+    <string name="coomi_dash_memory">持久记忆</string>
+    <string name="coomi_dash_memory_desc">编辑 Coomi 内建记忆、范围和命中信息</string>
+    <string name="coomi_dash_life">数字生命体（实验）</string>
+    <string name="coomi_dash_life_desc">安装、觉醒并启用 Coomi Life</string>
+    <string name="coomi_dash_files">文件管理</string>
+    <string name="coomi_dash_files_desc">浏览独立环境，管理项目文件</string>
+    <string name="coomi_dash_env_settings">ProotLinux 环境</string>
+    <string name="coomi_dash_env_settings_desc">内置并自动管理隔离 Linux 运行时</string>
+    <string name="coomi_dash_check_update">检查更新</string>
+    <string name="coomi_dash_check_update_desc">当前版本 Coomi-Android %1$s</string>
+    <string name="coomi_dash_custom_iteration">自定义迭代（实验）</string>
+    <string name="coomi_dash_custom_iteration_desc">全面自定义自己的CoomiDev</string>
+    <string name="coomi_dash_home_settings">启动首页</string>
+    <string name="coomi_root_title">Root 权限（可选）</string>
+    <string name="coomi_root_desc">未授权不影响使用</string>
+    <string name="coomi_root_grant">授权 Root</string>
+    <string name="coomi_root_checking">检查中…</string>
+    <string name="coomi_root_retry">重试</string>
+    <string name="coomi_root_unavailable">不可用</string>
+    <string name="coomi_authorized">已授权</string>
+    <string name="coomi_dash_home_settings_desc">设置打开 App 时进入控制台还是对话</string>
+    <string name="coomi_home_setting_title">启动首页设置</string>
+    <string name="coomi_home_setting_hint">选择打开 App 时首先进入的页面</string>
+    <string name="coomi_home_console">控制台</string>
+    <string name="coomi_home_console_desc">先看引擎状态与各功能入口</string>
+    <string name="coomi_home_chat">对话</string>
+    <string name="coomi_home_chat_desc">直接进入 Coomi 对话界面</string>
+    <string name="coomi_home_saved">已保存</string>
+    <string name="coomi_dash_backup">备份与导入</string>
+    <string name="coomi_dash_backup_desc">完整备份会话、永久统计、MCP 与 Skill</string>
+    <string name="coomi_dash_maintenance">清理工具</string>
+    <string name="coomi_dash_maintenance_desc">扫描并清理安全缓存与临时文件</string>
+    <string name="coomi_dash_usage">用量统计（实验）</string>
+    <string name="coomi_dash_usage_desc">按时间范围查看 Token 用量流水</string>
+    <string name="coomi_dash_section_support">支持</string>
+    <string name="coomi_dash_feedback">反馈建议</string>
+    <string name="coomi_dash_feedback_desc">告诉我们你的建议或遇到的问题</string>
+    <string name="coomi_dash_donate">捐赠者计划</string>
+    <string name="coomi_dash_donate_desc">喜欢 Comax 就给晚风买杯咖啡，或加 QQ 群 1108467806 反馈与交流</string>
+    <string name="coomi_dash_donate_title">支持 Comax</string>
+    <string name="coomi_dash_donate_hint">微信扫一扫赞赏随意，你的支持是魔改继续下去的动力。</string>
+    <string name="coomi_dash_donate_qq">加入 QQ 交流群 1108467806</string>
+    <string name="coomi_dash_donate_close">关闭</string>
+    <string name="coomi_feedback_title">反馈建议</string>
+    <string name="coomi_feedback_intro">告诉我们哪里可以做得更好。问题反馈可附截图，便于快速定位。</string>
+    <string name="coomi_feedback_type_label">反馈类型</string>
+    <string name="coomi_feedback_type_suggestion">功能建议</string>
+    <string name="coomi_feedback_type_issue">问题反馈</string>
+    <string name="coomi_feedback_message_hint">请描述你的想法，或说明问题如何发生</string>
+    <string name="coomi_feedback_contact_hint">联系方式（选填）</string>
+    <string name="coomi_feedback_add_images">添加图片</string>
+    <string name="coomi_feedback_no_images">未选择图片（最多 3 张）</string>
+    <string name="coomi_feedback_image_count">已选择 %1$d/3 张</string>
+    <string name="coomi_feedback_images_failed">部分图片无法处理，请重新选择</string>
+    <string name="coomi_feedback_privacy">提交时会附带 App、设备信息和全部推理强度汇总，不会上传对话内容或 API Key。图片最多 3 张。</string>
+    <string name="coomi_feedback_cancel">取消</string>
+    <string name="coomi_feedback_send">提交</string>
+    <string name="coomi_feedback_sending">提交中…</string>
+    <string name="coomi_feedback_message_required">请先填写反馈内容</string>
+    <string name="coomi_feedback_sent">感谢反馈，我们已收到</string>
+    <string name="coomi_feedback_failed">提交失败，请检查网络后重试</string>
+    <string name="coomi_dash_backup_starting">正在备份…</string>
+    <string name="coomi_dash_backup_done">备份完成：%1$s</string>
+    <string name="coomi_dash_backup_failed">备份失败：%1$s</string>
+
+    <string name="coomi_backup_title">备份与导入</string>
+    <string name="coomi_backup_back">返回</string>
+    <string name="coomi_backup_action">备份数据</string>
+    <string name="coomi_backup_action_desc">导出数据文件、Coomi 配置、完整 MCP 与 Skill；不包含运行环境和缓存</string>
+    <string name="coomi_backup_import">导入备份</string>
+    <string name="coomi_backup_import_desc">选择备份压缩包（.zip），恢复完整 Coomi 数据与拓展文件</string>
+    <string name="coomi_backup_hint">提示：备份包含提供商配置和本地拓展实现，可能含敏感数据，请妥善保管备份文件。</string>
+    <string name="coomi_backup_importing">正在导入备份…</string>
+    <string name="coomi_backup_import_done">导入完成</string>
+    <string name="coomi_backup_import_failed">导入失败：%1$s</string>
+    <string name="coomi_backup_import_result">已恢复会话 %1$d 个、MCP %2$d 个、Skill %3$d 个</string>
+    <string name="coomi_backup_restart_hint">部分配置将在应用重启后生效。</string>
+    <string name="coomi_backup_ok">知道了</string>
+    <string name="coomi_dash_checking">正在检查更新…</string>
+    <string name="coomi_dash_engine_running">引擎运行中</string>
+    <string name="coomi_dash_engine_stopped">引擎未启动</string>
+    <string name="coomi_dash_engine_starting">正在启动…</string>
+    <string name="coomi_dash_toast_no_service">服务未连接</string>
+    <string name="coomi_dash_toast_started">引擎已启动</string>
+    <string name="coomi_dash_toast_start_failed">启动失败：%1$s</string>
+    <string name="coomi_dash_toast_stopped">引擎已停止</string>
+    <string name="coomi_dash_toast_tui_hint">在终端里执行：coomi</string>
+    <string name="coomi_dash_toast_no_browser">未找到可用的浏览器</string>
+
+    <!-- ===== WebView 闪屏 ===== -->
+    <string name="coomi_splash_hint">正在连接本机引擎…</string>
+    <string name="coomi_splash_retry">重试</string>
+
+    <!-- ===== 演示包（demo 构建类型专用） ===== -->
+    <string name="coomi_demo_routing">演示模式，跳过环境检查…</string>
+    <string name="coomi_demo_install_title">已跳过</string>
+    <string name="coomi_demo_install_desc">演示包不部署运行环境，直接点「下一步」</string>
+    <string name="coomi_demo_auth_hint">演示包无需 API Key</string>
+    <string name="coomi_demo_auth_button">演示模式</string>
+    <string name="coomi_demo_auth_status">演示包不连模型，直接点「完成」</string>
+    <string name="coomi_demo_dash_status">演示模式 · 引擎未启动</string>
+    <string name="coomi_demo_dash_runtime">演示包不含 Rust 引擎</string>
+    <string name="coomi_demo_dash_unavailable">演示包不含终端环境</string>
+    <string name="coomi_demo_loading">正在加载演示界面…</string>
+    <string name="coomi_demo_failed">演示资源缺失（web.zip）</string>
+
+    <string name="coomi_shizuku_title">Shizuku 权限（可选）</string>
+    <string name="coomi_shizuku_desc">未授权不影响使用</string>
+    <string name="coomi_shizuku_grant">授权 Shizuku</string>
+    <string name="coomi_shizuku_checking">检查中…</string>
+    <string name="coomi_shizuku_retry">重试</string>
+    <string name="coomi_shizuku_not_running">未运行</string>
+    <string name="coomi_shizuku_unavailable">不可用</string>
+    <string name="coomi_appearance_title">外观</string>
+    <string name="coomi_appearance_book_desc">书卷纸底色与墨绿色强调</string>
+    <string name="coomi_appearance_orange_desc">白色底面与橙色强调</string>
+    <string name="coomi_terms_consent">同意《用户协议》和《用户隐私政策》</string>
+    <string name="coomi_user_agreement_title">用户协议</string>
+    <string name="coomi_user_agreement_body">使用 Coomi 即表示您授权其按您的指令在本机执行操作。请审慎确认高风险操作并遵守适用法律。软件按现状提供，重要数据请自行备份。</string>
+    <string name="coomi_privacy_policy_title">用户隐私政策</string>
+    <string name="coomi_privacy_policy_body">对话、文件和密钥默认保存在您的设备。模型请求会发送给您配置的服务商。匿名日活仅按 IP 每日去重，不上传对话或文件；错误反馈仅在您确认后上传脱敏诊断。</string>
+</resources>

@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/botdrop_background">
+
+    <!-- Phase 1: Welcome + Permissions -->
+    <ScrollView
+        android:id="@+id/welcome_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="32dp">
+
+            <ImageView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:src="@drawable/botdrop_logo"
+                android:contentDescription="@string/application_name"
+                android:layout_marginTop="56dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/botdrop_welcome"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:textColor="@color/botdrop_on_background"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/botdrop_permissions_intro"
+                android:textSize="14sp"
+                android:textAlignment="center"
+                android:textColor="@color/botdrop_secondary_text"
+                android:layout_marginBottom="40dp" />
+
+            <!-- Notification Permission -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="16dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/botdrop_notifications"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/botdrop_on_background" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/botdrop_notifications_hint"
+                        android:textSize="13sp"
+                        android:textColor="@color/botdrop_secondary_text" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/notification_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:layout_marginEnd="8dp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btn_notification_permission"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="@string/botdrop_allow"
+                    android:textSize="13sp"
+                    android:minWidth="80dp"
+                    android:background="@drawable/botdrop_button_bg"
+                    android:textColor="#1A1A1A"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Battery Optimization -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="16dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/botdrop_background_running"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/botdrop_on_background" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/botdrop_background_running_hint"
+                        android:textSize="13sp"
+                        android:textColor="@color/botdrop_secondary_text" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/battery_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:layout_marginEnd="8dp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btn_battery_permission"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="@string/botdrop_allow"
+                    android:textSize="13sp"
+                    android:minWidth="80dp"
+                    android:background="@drawable/botdrop_button_bg"
+                    android:textColor="#1A1A1A"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Advanced background settings (OEMs may still throttle) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="36dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/botdrop_advanced_background_settings"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/botdrop_on_background" />
+
+                    <TextView
+                        android:id="@+id/background_hint_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/botdrop_advanced_background_hint"
+                        android:textSize="13sp"
+                        android:textColor="@color/botdrop_secondary_text" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btn_background_settings"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="@string/botdrop_open"
+                    android:textSize="13sp"
+                    android:minWidth="80dp"
+                    android:background="@drawable/botdrop_button_outline_bg"
+                    android:textColor="@color/botdrop_accent"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_continue"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="@string/botdrop_continue"
+                android:textSize="16sp"
+                android:enabled="false"
+                android:background="@drawable/botdrop_button_bg"
+                android:textColor="#1A1A1A"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Phase 2: Loading (original splash) -->
+    <LinearLayout
+        android:id="@+id/loading_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <ImageView
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/botdrop_logo"
+            android:contentDescription="@string/application_name"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/application_name"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="@color/botdrop_on_background"
+            android:layout_marginBottom="8dp" />
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/botdrop_accent" />
+
+        <TextView
+            android:id="@+id/launcher_status_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/botdrop_checking_installation"
+            android:textSize="14sp"
+            android:textColor="@color/botdrop_secondary_text" />
+
+    </LinearLayout>
+
+</FrameLayout>

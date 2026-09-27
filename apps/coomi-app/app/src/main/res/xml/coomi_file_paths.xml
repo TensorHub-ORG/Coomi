@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 路径映射：允许把 Termux 环境（files 目录）里的文件分享给其它 app 打开。 -->
+<paths>
+    <files-path name="home" path="." />
+    <external-path name="external" path="." />
+    <cache-path name="cache" path="." />
+    <external-files-path name="downloads" path="Download/" />
+</paths>

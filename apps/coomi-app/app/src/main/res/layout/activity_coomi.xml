@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Coomi 对话宿主：白色品牌闪屏盖在 WebView 之上，引擎就绪、页面加载完成后整块隐藏。
+    coomi_webview / coomi_splash / coomi_loading_text / coomi_loading_detail /
+    btn_coomi_retry 由 CoomiActivity 引用。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/coomiPage"
+    tools:context="com.termux.app.CoomiActivity">
+
+    <!-- WebView：Vue 前端由 coomi-rs 通过 loopback 提供 -->
+    <WebView
+        android:id="@+id/coomi_webview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?attr/coomiPage"
+        android:visibility="gone"/>
+
+    <!-- 启动闪屏 -->
+    <LinearLayout
+        android:id="@+id/coomi_splash"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="?attr/coomiPage"
+        android:paddingStart="@dimen/coomi_gutter"
+        android:paddingEnd="@dimen/coomi_gutter">
+
+        <FrameLayout
+            android:layout_width="128dp"
+            android:layout_height="128dp">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/coomi_hero_glow"/>
+
+            <ImageView
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_gravity="center"
+                android:src="@drawable/coomi_logo"
+                android:contentDescription="@string/coomi_brand"/>
+        </FrameLayout>
+
+        <ProgressBar
+            android:id="@+id/coomi_splash_spinner"
+            style="@style/Coomi.Spinner"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginTop="@dimen/coomi_space_xl"/>
+
+        <TextView
+            android:id="@+id/coomi_loading_text"
+            style="@style/Coomi.Text.Secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_l"
+            android:gravity="center"
+            android:text="@string/coomi_splash_hint"/>
+
+        <TextView
+            android:id="@+id/coomi_loading_detail"
+            style="@style/Coomi.Text.Mono"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_s"
+            android:gravity="center"
+            android:maxLines="3"
+            android:ellipsize="end"
+            android:visibility="gone"
+            android:text=""/>
+
+        <Button
+            android:id="@+id/btn_coomi_retry"
+            style="@style/Coomi.Button.Outline"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/coomi_button_height"
+            android:layout_marginTop="@dimen/coomi_space_xl"
+            android:visibility="gone"
+            android:text="@string/coomi_splash_retry"/>
+    </LinearLayout>
+
+</FrameLayout>

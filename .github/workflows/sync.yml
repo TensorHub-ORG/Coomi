@@ -1,0 +1,49 @@
+name: Sync GitHub to Gitee
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Gitee SSH
+        shell: bash
+        env:
+          GITEE_SSH_PRIVATE_KEY: ${{ secrets.ID_ED25519_TIANXUAN || secrets.GITEE_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$GITEE_SSH_PRIVATE_KEY" || {
+            echo "Missing repository secret GITEE_SSH_PRIVATE_KEY" >&2
+            exit 1
+          }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$GITEE_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519_gitee"
+          chmod 600 "$HOME/.ssh/id_ed25519_gitee"
+          ssh-keyscan -t ed25519 gitee.com >> "$HOME/.ssh/known_hosts"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add gitee git@gitee.com:tensorhub/coomi.git
+
+      - name: Push branch or tag to Gitee
+        shell: bash
+        env:
+          GIT_SSH_COMMAND: ssh -i "$HOME/.ssh/id_ed25519_gitee" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            git push gitee "refs/tags/$REF_NAME:refs/tags/$REF_NAME"
+          else
+            git push gitee "HEAD:refs/heads/$REF_NAME"
+          fi

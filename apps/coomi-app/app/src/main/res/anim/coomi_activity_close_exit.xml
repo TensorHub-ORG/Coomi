@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 复刻 Android 16 framework activity_close_exit：
+     当前页 450ms 向右滑出 96dp + 快速淡出（83ms，offset 35ms） -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shareInterpolator="false">
+    <alpha
+        android:interpolator="@android:interpolator/linear"
+        android:duration="83"
+        android:startOffset="35"
+        android:fromAlpha="1.0"
+        android:toAlpha="0.0"
+        android:fillBefore="true"
+        android:fillAfter="true"
+        android:fillEnabled="true" />
+    <translate
+        android:interpolator="@interpolator/coomi_fast_out_extra_slow_in"
+        android:duration="450"
+        android:fromXDelta="0"
+        android:toXDelta="96dp"
+        android:fillBefore="true"
+        android:fillAfter="true"
+        android:fillEnabled="true" />
+</set>

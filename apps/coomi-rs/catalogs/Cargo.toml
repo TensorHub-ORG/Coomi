@@ -1,0 +1,19 @@
+[package]
+name = "coomi-catalogs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+coomi-telemetry = { path = "../telemetry" }
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

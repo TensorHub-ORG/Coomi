@@ -1,0 +1,30 @@
+[Unit]
+Description=Coomi website statistics service
+After=network-online.target coomi-db-tunnel.service
+Wants=network-online.target
+Requires=coomi-db-tunnel.service
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/opt/coomi-stats
+EnvironmentFile=/etc/coomi-stats.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/coomi-stats/conda-env/bin/uvicorn stats_server:app --host 127.0.0.1 --port 8062 --workers 1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

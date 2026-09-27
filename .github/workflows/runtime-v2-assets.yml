@@ -1,0 +1,64 @@
+name: Runtime V2 assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_base_url:
+        description: Immutable URL prefix where the three generated assets will be published
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  proot-host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build pinned ARM64 PRoot host
+        run: scripts/runtime-v2/build-proot-host.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: proot-host
+          path: runtime-v2-dist/proot-host-arm64.tar.gz
+          if-no-files-found: error
+  debian-rootfs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned-rootfs tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mmdebstrap qemu-user-static binfmt-support debian-archive-keyring
+          sudo update-binfmts --enable qemu-aarch64
+      - name: Build Debian snapshot rootfs
+        run: sudo --preserve-env=RUNTIME_V2_OUTPUT scripts/runtime-v2/build-rootfs.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: debian-rootfs
+          path: runtime-v2-dist/debian-bookworm-arm64.tar.gz
+          if-no-files-found: error
+
+  manifest:
+    needs: [proot-host, debian-rootfs]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: '*'
+          path: runtime-v2-dist
+          merge-multiple: true
+      - name: Generate checksummed manifest
+        env:
+          RUNTIME_V2_BASE_URL: ${{ inputs.release_base_url }}
+        run: scripts/runtime-v2/create-manifest.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-v2-release-assets
+          path: |
+            runtime-v2-dist/proot-host-arm64.tar.gz
+            runtime-v2-dist/debian-bookworm-arm64.tar.gz
+            runtime-v2-dist/runtime-v2-manifest.json
+          if-no-files-found: error

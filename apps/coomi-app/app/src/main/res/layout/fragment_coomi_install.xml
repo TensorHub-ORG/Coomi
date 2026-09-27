@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    向导第一步：部署原生 Rust 运行时。
+    install_step_status / install_progress_text / install_progress_container /
+    install_retry_container / install_error_detail / btn_install_retry 由 InstallFragment 引用。
+    install_p{1,2,3}_* 是三段式进度清单，由 InstallFragment.setPhase() 切换。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:scrollbars="none"
+    android:background="?attr/coomiPage">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/coomi_gutter"
+        android:paddingEnd="@dimen/coomi_gutter"
+        android:paddingTop="@dimen/coomi_space_s"
+        android:paddingBottom="@dimen/coomi_space_xl">
+
+        <!-- ── 标题区 ── -->
+        <TextView
+            style="@style/Coomi.Text.Title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_l"
+            android:text="@string/coomi_install_title"/>
+
+        <TextView
+            style="@style/Coomi.Text.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_s"
+            android:text="@string/coomi_install_subtitle"/>
+
+        <!-- ── 三段式清单 ── -->
+        <LinearLayout
+            style="@style/Coomi.Card"
+            android:layout_marginTop="@dimen/coomi_space_xl"
+            android:background="@drawable/coomi_bg_card_outlined"
+            android:tag="coomi:card-outlined"
+            android:paddingTop="@dimen/coomi_space_xs"
+            android:paddingBottom="@dimen/coomi_space_xs">
+
+            <!-- 阶段 1 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="@dimen/coomi_space_l"
+                android:paddingEnd="@dimen/coomi_space_l"
+                android:paddingTop="14dp"
+                android:paddingBottom="14dp">
+
+                <FrameLayout
+                    android:layout_width="24dp"
+                    android:layout_height="24dp">
+
+                    <View
+                        android:id="@+id/install_p1_ring"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/coomi_ring_idle"/>
+
+                    <ProgressBar
+                        android:id="@+id/install_p1_spinner"
+                        style="@style/Coomi.Spinner"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:visibility="gone"/>
+
+                    <ImageView
+                        android:id="@+id/install_p1_check"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_check"
+                        android:tint="?attr/coomiOk"
+                        android:visibility="gone"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/install_p1_title"
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/coomi_install_phase_base"/>
+
+                    <TextView
+                        android:id="@+id/install_p1_desc"
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_install_phase_base_desc"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <View style="@style/Coomi.Divider"
+                android:layout_marginStart="52dp"/>
+
+            <!-- 阶段 2 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="@dimen/coomi_space_l"
+                android:paddingEnd="@dimen/coomi_space_l"
+                android:paddingTop="14dp"
+                android:paddingBottom="14dp">
+
+                <FrameLayout
+                    android:layout_width="24dp"
+                    android:layout_height="24dp">
+
+                    <View
+                        android:id="@+id/install_p2_ring"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/coomi_ring_idle"/>
+
+                    <ProgressBar
+                        android:id="@+id/install_p2_spinner"
+                        style="@style/Coomi.Spinner"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:visibility="gone"/>
+
+                    <ImageView
+                        android:id="@+id/install_p2_check"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_check"
+                        android:tint="?attr/coomiOk"
+                        android:visibility="gone"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/install_p2_title"
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/coomi_install_phase_runtime"/>
+
+                    <TextView
+                        android:id="@+id/install_p2_desc"
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_install_phase_runtime_desc"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <View style="@style/Coomi.Divider"
+                android:layout_marginStart="52dp"/>
+
+            <!-- 阶段 3 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="@dimen/coomi_space_l"
+                android:paddingEnd="@dimen/coomi_space_l"
+                android:paddingTop="14dp"
+                android:paddingBottom="14dp">
+
+                <FrameLayout
+                    android:layout_width="24dp"
+                    android:layout_height="24dp">
+
+                    <View
+                        android:id="@+id/install_p3_ring"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/coomi_ring_idle"/>
+
+                    <ProgressBar
+                        android:id="@+id/install_p3_spinner"
+                        style="@style/Coomi.Spinner"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:visibility="gone"/>
+
+                    <ImageView
+                        android:id="@+id/install_p3_check"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_check"
+                        android:tint="?attr/coomiOk"
+                        android:visibility="gone"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/install_p3_title"
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/coomi_install_phase_engine"/>
+
+                    <TextView
+                        android:id="@+id/install_p3_desc"
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_install_phase_engine_desc"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ── 当前状态 ── -->
+        <LinearLayout
+            android:id="@+id/install_progress_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_l"
+            android:orientation="vertical"
+            android:background="@drawable/coomi_bg_blue_soft"
+            android:padding="@dimen/coomi_space_l">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <FrameLayout
+                    android:layout_width="18dp"
+                    android:layout_height="18dp">
+
+                    <ProgressBar
+                        android:id="@+id/install_status_spinner"
+                        style="@style/Coomi.Spinner"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_gravity="center"/>
+
+                    <ImageView
+                        android:id="@+id/install_status_check"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/coomi_ic_check"
+                        android:tint="?attr/coomiOk"
+                        android:visibility="gone"
+                        android:contentDescription="@null"/>
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/install_step_status"
+                    style="@style/Coomi.Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:textColor="?attr/coomiBlue"
+                    android:textStyle="bold"
+                    android:text="@string/coomi_install_waiting"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/install_progress_text"
+                style="@style/Coomi.Text.Mono"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:maxLines="4"
+                android:ellipsize="end"
+                android:text=""/>
+        </LinearLayout>
+
+        <!-- ── 失败态 ── -->
+        <LinearLayout
+            android:id="@+id/install_retry_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/coomi_space_l"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/coomi_bg_banner_error"
+                android:padding="@dimen/coomi_space_l">
+
+                <ImageView
+                    android:layout_width="@dimen/coomi_icon_m"
+                    android:layout_height="@dimen/coomi_icon_m"
+                    android:src="@drawable/coomi_ic_alert"
+                    android:tint="?attr/coomiDanger"
+                    android:contentDescription="@null"/>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/coomi_space_m"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/Coomi.Text.Body"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:textColor="?attr/coomiDanger"
+                        android:text="@string/coomi_install_error_title"/>
+
+                    <TextView
+                        style="@style/Coomi.Text.Caption"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/coomi_install_error_hint"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView
+                style="@style/Coomi.Text.SectionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/coomi_space_l"
+                android:text="@string/coomi_install_log_label"/>
+
+            <TextView
+                android:id="@+id/install_error_detail"
+                style="@style/Coomi.Text.Mono"
+                android:layout_width="match_parent"
+                android:layout_height="180dp"
+                android:background="@drawable/coomi_bg_log"
+                android:padding="@dimen/coomi_space_m"
+                android:scrollbars="vertical"
+                android:textColor="?attr/coomiDanger"
+                android:visibility="gone"
+                android:text=""/>
+
+            <Button
+                android:id="@+id/btn_install_retry"
+                style="@style/Coomi.Button.Outline"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/coomi_button_height"
+                android:layout_marginTop="@dimen/coomi_space_l"
+                android:text="@string/coomi_install_retry"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

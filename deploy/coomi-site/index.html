@@ -1,0 +1,1442 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f8ff">
+  <meta name="description" content="Coomi Agent 魔改版（晚风制作）：把完整的智能体工作环境装进 Android。超载模式 / AI 工作室 / 控制模式 / Operit 工具集成，原生 Rust 引擎本地运行。">
+  <meta property="og:title" content="Coomi Agent 魔改版 · 晚风制作">
+  <meta property="og:description" content="把完整的智能体工作环境装进 Android。原生 Rust 引擎、内嵌 Ubuntu 终端、多智能体协同。">
+  <meta property="og:type" content="website">
+  <title>Coomi Agent 魔改版 · 晚风制作</title>
+
+  <link rel="icon" href="site_assets/icons/favicon-64.png" type="image/png">
+  <link rel="icon" sizes="32x32" href="site_assets/icons/favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="site_assets/icons/apple-touch-icon.png">
+
+  <style>
+    /* ── 设计定调 ──
+       蓝白。深蓝只用于文字与图标，亮蓝用于交互与强调，青蓝只出现在高光与数据上。
+       卡片是半透明白玻璃 + 浅蓝描边，阴影带蓝调（纯黑阴影在白底上会显脏）。
+       第三色只留一点点暖橙，专门用来标「魔改」。 */
+    :root {
+      --paper: #f4f8ff;
+      --surface: #ffffff;
+      --glass: rgba(255, 255, 255, .72);
+      --ink: #101f3a;
+      --ink-2: #4a5a75;
+      --quiet: #8592a8;
+      --line: #dbe5f5;
+      --line-2: #c3d5ef;
+      --blue: #2f6bd8;
+      --blue-deep: #1c4696;
+      --blue-soft: #eaf2ff;
+      --cyan: #2ea8d8;
+      --warm: #e07a3c;
+      --shadow-1: 0 1px 2px rgba(28, 70, 150, .05), 0 6px 18px rgba(28, 70, 150, .06);
+      --shadow-2: 0 2px 6px rgba(28, 70, 150, .07), 0 18px 44px rgba(28, 70, 150, .11);
+      --shadow-3: 0 4px 12px rgba(28, 70, 150, .09), 0 30px 70px rgba(28, 70, 150, .16);
+      --squircle: url(#squircle);
+      --font-display: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", STSong, Georgia, serif;
+      --font-body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+    body {
+      margin: 0;
+      min-height: 100svh;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.85;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    a:focus-visible, button:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    .wrap { width: min(calc(100% - 44px), 1120px); margin: 0 auto; }
+    .narrow { width: min(calc(100% - 44px), 800px); margin: 0 auto; }
+
+    /* ── 背景：淡蓝光晕 + 细网格 + 浮尘，固定层不参与滚动 ── */
+    .backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .glow { position: absolute; border-radius: 50%; filter: blur(60px); will-change: transform; }
+    .glow.g1 { width: 60vw; height: 60vw; left: -16vw; top: -20vw; background: radial-gradient(circle, rgba(47,107,216,.22), transparent 68%); }
+    .glow.g2 { width: 52vw; height: 52vw; right: -14vw; top: 4vh; background: radial-gradient(circle, rgba(46,168,216,.18), transparent 68%); }
+    .glow.g3 { width: 66vw; height: 66vw; left: 18vw; bottom: -32vw; background: radial-gradient(circle, rgba(28,70,150,.13), transparent 70%); }
+    .grid-lines {
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(28,70,150,.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(28,70,150,.05) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, #000 18%, transparent 80%);
+      -webkit-mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, #000 18%, transparent 80%);
+    }
+    .fade-b { position: absolute; inset: auto 0 0 0; height: 40vh; background: linear-gradient(180deg, transparent, var(--paper)); }
+    /* 浮尘：数量少、只动 transform，用来给静止画面一点呼吸感。 */
+    .motes { position: absolute; inset: 0; }
+    .mote {
+      position: absolute; width: 5px; height: 5px; border-radius: 50%;
+      background: rgba(47,107,216,.5);
+      box-shadow: 0 0 10px 3px rgba(47,107,216,.22);
+      will-change: transform, opacity;
+    }
+
+    .progress {
+      position: fixed; inset: 0 auto auto 0; z-index: 70;
+      width: 100%; height: 2.5px;
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+      transform: scaleX(0); transform-origin: 0 50%;
+      pointer-events: none;
+    }
+
+    /* ── 导航 ── */
+    header.top {
+      position: sticky; top: 0; z-index: 60;
+      background: rgba(244, 248, 255, .74);
+      backdrop-filter: blur(16px) saturate(150%);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      border-bottom: 1px solid var(--line);
+    }
+    .top-inner { display: flex; align-items: center; gap: 14px; height: 68px; }
+    .brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 650; }
+    .brand img { width: 34px; height: 34px; display: block; }
+    .brand .name { font-size: 15.5px; }
+    .brand .name small { display: block; color: var(--quiet); font-size: 10.5px; font-weight: 500; letter-spacing: .14em; }
+    nav.links { display: flex; gap: 4px; margin-left: auto; }
+    nav.links a {
+      position: relative; padding: 8px 13px; border-radius: 999px;
+      color: var(--ink-2); font-size: 13.5px;
+      transition: color .2s ease, background-color .2s ease;
+    }
+    nav.links a::after {
+      content: ""; position: absolute; left: 50%; bottom: 3px; height: 2px; width: 0;
+      border-radius: 2px; background: linear-gradient(90deg, var(--blue), var(--cyan));
+      transform: translateX(-50%); transition: width .26s ease;
+    }
+    nav.links a:hover { color: var(--blue); background: var(--blue-soft); }
+    nav.links a:hover::after { width: 46%; }
+    .top-cta {
+      margin-left: 6px; padding: 9px 17px; border-radius: 999px;
+      background: linear-gradient(180deg, var(--blue), var(--blue-deep));
+      color: #fff; font-size: 13.5px; font-weight: 650;
+      box-shadow: 0 6px 16px rgba(47,107,216,.26);
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .top-cta:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(47,107,216,.34); }
+
+    main { position: relative; z-index: 1; }
+
+    /* ══ Hero ══ */
+    .hero { position: relative; padding: 68px 0 80px; }
+    .hero-inner { text-align: center; }
+    /* 指针跟随的柔光：只动 transform，不触发重排/重绘 */
+    .cursor-glow {
+      position: absolute; left: 0; top: 0; z-index: 0;
+      width: 460px; height: 460px; margin: -230px 0 0 -230px;
+      border-radius: 50%; pointer-events: none; opacity: 0;
+      background: radial-gradient(circle, rgba(47,107,216,.16), transparent 66%);
+    }
+
+    .hero-icon {
+      position: relative; display: block;
+      width: 192px; height: 192px; margin: 0 auto 32px;
+    }
+    .hero-icon img { position: relative; z-index: 2; width: 100%; height: 100%; display: block; }
+    /* 两圈轨道 + 光晕，各自以不同速度反向旋转，做出「仪器在运转」的观感 */
+    .ring {
+      position: absolute; inset: -14px; border-radius: 50%;
+      border: 1px dashed rgba(47,107,216,.30);
+      will-change: transform;
+    }
+    .ring.r2 { inset: -30px; border-style: solid; border-color: rgba(47,107,216,.10); }
+    .ring .sat {
+      position: absolute; top: -3.5px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px;
+      border-radius: 50%; background: var(--cyan);
+      box-shadow: 0 0 12px 4px rgba(46,168,216,.55);
+    }
+    .ring.r2 .sat { background: var(--blue); box-shadow: 0 0 12px 4px rgba(47,107,216,.45); top: auto; bottom: -3px; }
+    .halo {
+      position: absolute; inset: -22px; z-index: 1; border-radius: 50%;
+      background: radial-gradient(circle, rgba(47,107,216,.26), transparent 68%);
+      filter: blur(18px);
+    }
+
+    .tagline {
+      position: relative; display: inline-flex; align-items: center; gap: 8px;
+      margin-bottom: 24px; padding: 6px 15px 6px 11px;
+      border: 1px solid var(--line-2); border-radius: 999px;
+      background: var(--glass); color: var(--ink-2); font-size: 12.5px;
+      box-shadow: var(--shadow-1);
+    }
+    .tagline .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #2bb673; box-shadow: 0 0 0 3px rgba(43,182,115,.16);
+    }
+
+    h1 {
+      position: relative; margin: 0 auto; max-width: 16em;
+      font-family: var(--font-display);
+      font-size: clamp(34px, 5vw, 60px);
+      font-weight: 600; line-height: 1.22; letter-spacing: -.005em;
+      /* 逐字升起时带 rotateX，需要透视才有立体感，否则只是纵向压扁 */
+      perspective: 900px;
+    }
+    h1 .line { display: block; }
+    /* 单字包裹后必须 inline-block 才能各自做 transform */
+    h1 .ch { display: inline-block; will-change: transform, opacity; }
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(96deg, var(--blue), var(--cyan));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    /* 掠过标题的高光：一个倾斜的白色渐变块横向扫过 */
+    .shine-sweep {
+      position: absolute; top: -10%; bottom: -10%; width: 26%; z-index: 3;
+      pointer-events: none; opacity: .9;
+      background: linear-gradient(100deg, transparent, rgba(255,255,255,.92), transparent);
+      transform: translateX(-260%) skewX(-16deg);
+      mix-blend-mode: overlay;
+    }
+
+    .lede { position: relative; margin: 24px auto 0; max-width: 40em; color: var(--ink-2); font-size: 16.5px; line-height: 2; }
+    .lede b { color: var(--ink); font-weight: 650; }
+    .cta-row { position: relative; margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+
+    .btn {
+      position: relative; overflow: hidden;
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+      min-height: 50px; padding: 0 24px; border-radius: 14px;
+      border: 1px solid transparent;
+      font-size: 15px; font-weight: 650; white-space: nowrap; cursor: pointer;
+      transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, border-color .22s ease, color .22s ease, background-color .22s ease;
+      will-change: transform;
+    }
+    .btn:active { transform: translateY(1px) scale(.99); }
+    .btn.primary {
+      background: linear-gradient(180deg, var(--blue), var(--blue-deep));
+      color: #fff; box-shadow: 0 12px 28px rgba(47,107,216,.30);
+    }
+    .btn.primary:hover { box-shadow: 0 16px 36px rgba(47,107,216,.42); }
+    .btn.primary::after {
+      content: ""; position: absolute; top: 0; bottom: 0; width: 40%;
+      background: linear-gradient(100deg, transparent, rgba(255,255,255,.55), transparent);
+      transform: translateX(-180%) skewX(-18deg);
+      transition: transform .75s ease;
+    }
+    .btn.primary:hover::after { transform: translateX(280%) skewX(-18deg); }
+    .btn.ghost { border-color: var(--line-2); color: var(--ink); background: var(--glass); }
+    .btn.ghost:hover { border-color: var(--blue); color: var(--blue); }
+    .btn .arrow { font-size: 16px; line-height: 1; transform: translateY(-1px); }
+    /* 点击涟漪 */
+    .ripple {
+      position: absolute; border-radius: 50%; pointer-events: none;
+      background: radial-gradient(circle, rgba(255,255,255,.65), transparent 70%);
+      transform: translate(-50%, -50%) scale(0);
+    }
+    .btn.ghost .ripple { background: radial-gradient(circle, rgba(47,107,216,.28), transparent 70%); }
+
+    /* 滚动提示 */
+    .scroll-cue {
+      margin: 44px auto 0; width: 22px; height: 36px;
+      border: 1.5px solid var(--line-2); border-radius: 12px; position: relative;
+    }
+    .scroll-cue i {
+      position: absolute; left: 50%; top: 7px; width: 3px; height: 7px; margin-left: -1.5px;
+      border-radius: 2px; background: var(--blue);
+    }
+
+    /* ── 规格条 ── */
+    .specs { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--glass); }
+    .specs-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+    .spec { padding: 24px 22px; border-right: 1px solid var(--line); }
+    .spec:last-child { border-right: 0; }
+    .spec dt { margin: 0 0 6px; color: var(--quiet); font-size: 11.5px; letter-spacing: .12em; }
+    .spec dd { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 600; }
+    .spec dd .unit { color: var(--quiet); font-size: 13px; font-family: var(--font-body); }
+
+    section.block { position: relative; padding: 92px 0; }
+    section.block + section.block { border-top: 1px solid var(--line); }
+
+    .sec-head { margin-bottom: 42px; }
+    .sec-head .kicker {
+      display: block; margin-bottom: 12px;
+      color: var(--blue); font-size: 11.5px; letter-spacing: .22em; text-transform: uppercase; font-weight: 650;
+    }
+    h2 {
+      margin: 0; font-family: var(--font-display);
+      font-size: clamp(25px, 3.3vw, 36px); font-weight: 600; line-height: 1.3;
+    }
+    /* 标题按字升起，配合 overflow 裁切做出「从纸面下推上来」的效果 */
+    h2 .word { display: inline-block; overflow: hidden; vertical-align: bottom; }
+    h2 .word > span { display: inline-block; will-change: transform; }
+    .sec-head p { margin: 13px 0 0; max-width: 46em; color: var(--quiet); font-size: 14.5px; }
+
+    /* ══ 对话演示：全页的视觉主角 ══
+       用真机比例的对话流，把「发问 → 思考 → 调工具 → 流式作答」演一遍。
+       所有动画只跑在 opacity / transform / clip-path 上，不碰布局属性。 */
+    /* min-width:0 是必须的：网格项默认 min-width:auto，会被内部最长内容（工具卡里的长文件名、
+       不换行的等宽文本）撑开，导致整列超出容器 —— 表现就是「手机界面右边超出去」。
+       minmax(0,…) 只管轨道，轨道里的元素还得自己允许收缩。 */
+    .demo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px) minmax(0, 1fr); gap: 32px; align-items: center; }
+    .demo > * { min-width: 0; }
+    .demo-side { display: grid; gap: 16px; min-width: 0; }
+    .note {
+      position: relative;
+      padding: 16px 18px;
+      border: 1px solid var(--line); border-radius: 16px;
+      background: var(--glass); box-shadow: var(--shadow-1);
+      transition: border-color .35s ease, box-shadow .35s ease, background-color .35s ease;
+    }
+    /* 与演示时间轴同步点亮：讲到哪一步，哪张卡片亮起来 */
+    .note.lit { border-color: rgba(47,107,216,.45); box-shadow: var(--shadow-2); background: rgba(234,242,255,.86); }
+    .note h4 { margin: 0 0 5px; font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+    .note h4 .idx {
+      display: grid; place-items: center; width: 20px; height: 20px; flex: none;
+      clip-path: var(--squircle);
+      background: var(--blue-soft); color: var(--blue);
+      font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+      transition: background-color .35s ease, color .35s ease;
+    }
+    .note.lit h4 .idx { background: linear-gradient(150deg, var(--blue), var(--cyan)); color: #fff; }
+    .note p { margin: 0; color: var(--quiet); font-size: 12.8px; line-height: 1.8; }
+
+    /* 手机外框：蓝色渐变描边 + 外发光 */
+    .phone {
+      position: relative; width: 100%; max-width: 380px; min-width: 0; margin: 0 auto;
+      padding: 13px; border-radius: 40px;
+      background: linear-gradient(170deg, #ffffff, #eef4ff);
+      border: 1px solid var(--line-2);
+      box-shadow: var(--shadow-3), inset 0 1px 0 #fff;
+      will-change: transform;
+    }
+    /* 边框上流动的高光：一层 conic 渐变沿圆角转一圈 */
+    /* 边框上流转的高光。GSAP 选不中伪元素，所以用真实元素：conic 渐变 + mask
+       只保留 1px 边，旋转它就是一道沿边框跑的光。 */
+    .phone-glow {
+      position: absolute; inset: -1px; border-radius: 41px; padding: 1px;
+      background: conic-gradient(from 0deg, transparent 0deg, rgba(47,107,216,.6) 40deg, rgba(46,168,216,.6) 90deg, transparent 150deg, transparent 360deg);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      pointer-events: none; opacity: 0;
+    }
+    .phone::before {
+      content: ""; position: absolute; inset: -1px; border-radius: 41px;
+      border: 1px solid rgba(47,107,216,.14); pointer-events: none;
+    }
+    .phone-screen {
+      position: relative; overflow: hidden; border-radius: 30px;
+      background: linear-gradient(180deg, #fbfdff, #f3f8ff);
+      border: 1px solid var(--line);
+      height: 488px; display: flex; flex-direction: column;
+    }
+    /* 屏幕顶部的一条细进度：表示「任务正在推进」 */
+    .screen-progress {
+      position: absolute; top: 0; left: 0; height: 2px; width: 100%;
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+      transform: scaleX(0); transform-origin: 0 50%; z-index: 5;
+    }
+    .ph-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 15px 11px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.7);
+      backdrop-filter: blur(8px);
+    }
+    .ph-bar .av {
+      width: 24px; height: 24px; flex: none;
+      clip-path: var(--squircle);
+      background: linear-gradient(150deg, var(--blue), var(--cyan));
+    }
+    .ph-bar .tt { font-size: 12.5px; font-weight: 650; }
+    .ph-bar .tt small { display: block; color: var(--quiet); font-size: 10.5px; font-weight: 500; }
+    .ph-bar .live { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--blue); font-size: 10.5px; font-weight: 650; }
+    .ph-bar .live i { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: live-pulse 1.4s ease-in-out infinite; }
+    @keyframes live-pulse { 0%,100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+
+    .stream { flex: 1; min-height: 0; min-width: 0; padding: 14px 13px; display: flex; flex-direction: column; gap: 11px; overflow: hidden; }
+
+    .bub-user {
+      align-self: flex-end; max-width: 82%; min-width: 0;
+      padding: 9px 14px; border-radius: 17px 17px 5px 17px;
+      background: linear-gradient(180deg, var(--blue), var(--blue-deep));
+      color: #fff; font-size: 13.2px; line-height: 1.6;
+      box-shadow: 0 6px 14px rgba(47,107,216,.22);
+      transform-origin: 100% 100%; will-change: transform, opacity;
+      overflow-wrap: anywhere;
+    }
+    .think {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+      padding: 9px 12px; border-radius: 12px;
+      border: 1px solid var(--line); background: rgba(255,255,255,.82);
+      color: var(--ink-2); font-size: 12px;
+    }
+    .think > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+    .think .bars { display: inline-flex; gap: 3px; flex: none; }
+    .think .bars i { width: 3px; height: 11px; border-radius: 2px; background: var(--blue); opacity: .3; animation: bar 1.1s ease-in-out infinite; }
+    .think .bars i:nth-child(2) { animation-delay: .16s; }
+    .think .bars i:nth-child(3) { animation-delay: .32s; }
+    @keyframes bar { 0%,100% { opacity: .25; transform: scaleY(.6); } 50% { opacity: 1; transform: scaleY(1); } }
+
+    .tool {
+      min-width: 0;
+      border: 1px solid var(--line-2); border-radius: 14px;
+      background: rgba(255,255,255,.88); overflow: hidden;
+      box-shadow: var(--shadow-1);
+      will-change: transform, opacity;
+    }
+    .tool-head { display: flex; align-items: center; gap: 9px; padding: 10px 12px; }
+    .tool-head .ic {
+      display: grid; place-items: center; width: 26px; height: 26px; flex: none;
+      clip-path: var(--squircle);
+      background: var(--blue-soft); color: var(--blue); font-size: 12px;
+      transform: rotate(-12deg);
+    }
+    .tool-head .nm { min-width: 0; font-size: 12.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-head .nm code {
+      font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+      color: var(--ink-2); background: var(--blue-soft);
+      padding: 1px 5px; border-radius: 4px;
+    }
+    .tool-head .st { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; color: #1f9d63; font-size: 11px; font-weight: 650; }
+    /* 工具内部的执行进度条：填充完就代表这次调用结束 */
+    .tool-bar { height: 2px; background: var(--blue-soft); margin: 0 12px; border-radius: 2px; overflow: hidden; }
+    .tool-bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, var(--blue), var(--cyan)); transform: scaleX(0); transform-origin: 0 50%; }
+    /* 文件名很长且没有空格。等宽字体下必须显式允许断行，否则整行会顶出去。 */
+    .tool-body { padding: 9px 12px 11px; min-width: 0; font-family: var(--font-mono); font-size: 10.8px; line-height: 1.75; color: var(--ink-2); }
+    .tool-body .ln { display: block; min-width: 0; overflow-wrap: anywhere; }
+    .tool-body .ln b { color: var(--blue); font-weight: 600; }
+
+    .card-out {
+      min-width: 0;
+      padding: 11px 13px; border-radius: 16px 16px 16px 6px;
+      border: 1px solid var(--line); background: #fff;
+      box-shadow: var(--shadow-1);
+      font-size: 13px; line-height: 1.72; color: var(--ink);
+      will-change: transform, opacity;
+      overflow-wrap: anywhere;
+    }
+    .card-out .typing { display: inline; }
+    .card-out .caret {
+      display: inline-block; width: 2px; height: 14px; margin-left: 1px;
+      background: var(--blue); vertical-align: -2px;
+      animation: caret 1s step-end infinite;
+    }
+    @keyframes caret { 50% { opacity: 0; } }
+    .card-out .chips { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+    .card-out .chips span {
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--blue-soft); color: var(--blue);
+      font-size: 10.5px; font-weight: 650;
+      display: inline-block; will-change: transform, opacity;
+    }
+
+    .ph-input { display: flex; align-items: center; gap: 9px; padding: 11px 13px 14px; border-top: 1px solid var(--line); background: rgba(255,255,255,.72); }
+    .ph-input .field {
+      flex: 1; height: 34px; border-radius: 999px;
+      border: 1px solid var(--line); background: #fff;
+      display: flex; align-items: center; padding: 0 13px;
+      color: var(--quiet); font-size: 12px;
+    }
+    .ph-input .send {
+      width: 34px; height: 34px; flex: none; border-radius: 50%;
+      display: grid; place-items: center;
+      background: linear-gradient(180deg, var(--blue), var(--blue-deep));
+      color: #fff; font-size: 14px;
+      box-shadow: 0 6px 14px rgba(47,107,216,.3);
+    }
+
+    /* ── 特性网格 ── */
+    .feat-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; }
+    .feat {
+      grid-column: span 3;
+      position: relative; overflow: hidden;
+      padding: 25px 24px 27px;
+      border: 1px solid var(--line); border-radius: 22px;
+      background: var(--glass); box-shadow: var(--shadow-1);
+      transition: border-color .28s ease, box-shadow .28s ease;
+      will-change: transform;
+    }
+    .feat.wide { grid-column: span 4; }
+    .feat.narrow { grid-column: span 2; }
+    .feat.hl { border-color: rgba(47,107,216,.34); background: linear-gradient(165deg, rgba(234,242,255,.92), rgba(255,255,255,.7)); }
+    .feat:hover { border-color: rgba(47,107,216,.45); box-shadow: var(--shadow-2); }
+    .feat .spot {
+      position: absolute; width: 220px; height: 220px; border-radius: 50%;
+      left: 0; top: 0; margin: -110px 0 0 -110px;
+      background: radial-gradient(circle, rgba(47,107,216,.18), transparent 62%);
+      opacity: 0; transition: opacity .3s ease; pointer-events: none;
+    }
+    .feat:hover .spot { opacity: 1; }
+    /* 卡片上掠过的高光 */
+    .feat .gloss {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.75) 50%, transparent 65%);
+      transform: translateX(-120%);
+    }
+    .feat h3 { position: relative; margin: 0 0 9px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15.5px; font-weight: 650; }
+    .feat p { position: relative; margin: 0; color: var(--ink-2); font-size: 13.8px; line-height: 1.9; }
+    .feat code {
+      font-family: var(--font-mono); font-size: 12.3px;
+      padding: 1.5px 6px; border-radius: 5px;
+      background: var(--blue-soft); border: 1px solid rgba(47,107,216,.18); color: var(--blue-deep);
+    }
+    .feat .glyph {
+      flex: none; display: grid; place-items: center;
+      width: 30px; height: 30px;
+      clip-path: var(--squircle);
+      background: linear-gradient(150deg, var(--blue), var(--cyan));
+      color: #fff; font-family: var(--font-mono); font-size: 11.5px; font-weight: 700;
+      will-change: transform;
+    }
+    .chip { padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 650; letter-spacing: .06em; }
+    .chip.mod { background: rgba(224,122,60,.13); color: var(--warm); border: 1px solid rgba(224,122,60,.28); }
+    .chip.core { background: var(--blue-soft); color: var(--blue); border: 1px solid rgba(47,107,216,.24); }
+
+    /* ── 跑马灯：全页只此一处 ── */
+    .marquee {
+      position: relative; overflow: hidden; padding: 24px 0;
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      background: var(--glass);
+      mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+    }
+    .marquee-track { display: flex; gap: 38px; width: max-content; will-change: transform; }
+    .marquee-track span {
+      display: inline-flex; align-items: center; gap: 12px;
+      font-family: var(--font-display); font-size: 19px; color: var(--quiet);
+      white-space: nowrap;
+    }
+    .marquee-track span b { color: var(--ink); font-weight: 600; }
+    .marquee-track span::after { content: "◆"; color: rgba(47,107,216,.42); font-size: 9px; }
+
+    /* ── 更新说明 ── */
+    .timeline { position: relative; padding-left: 34px; }
+    .tl-rule {
+      position: absolute; left: 8px; top: 6px; bottom: 6px; width: 1px;
+      background: linear-gradient(180deg, var(--blue), rgba(46,168,216,.5), transparent);
+      transform-origin: 50% 0;
+    }
+    .tl-item { position: relative; padding-bottom: 26px; }
+    .tl-item:last-child { padding-bottom: 0; }
+    .tl-item::before {
+      content: ""; position: absolute; left: -30px; top: 9px;
+      width: 9px; height: 9px; border-radius: 50%;
+      background: #fff; border: 2px solid var(--blue);
+      box-shadow: 0 0 0 4px rgba(47,107,216,.12);
+    }
+    .tl-item h4 { margin: 0 0 6px; font-size: 15.5px; font-weight: 650; }
+    .tl-item p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.9; }
+    .tl-item code { font-family: var(--font-mono); font-size: 12.4px; color: var(--blue); }
+
+    details.history { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line); }
+    details.history summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 8px; color: var(--blue); font-size: 14px; font-weight: 600; }
+    details.history summary::-webkit-details-marker { display: none; }
+    details.history summary::after { content: "↓"; font-size: 12px; transition: transform .25s ease; }
+    details.history[open] summary::after { transform: rotate(180deg); }
+    .ver-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 2px; border-bottom: 1px solid var(--line); font-size: 13.4px; }
+    .ver-row:last-child { border-bottom: 0; }
+    .ver-row .name { font-family: var(--font-mono); color: var(--ink-2); }
+    .ver-row a { color: var(--blue); font-weight: 600; }
+    .ver-row a:hover { text-decoration: underline; }
+
+    /* ── 下载 ── */
+    .download-card {
+      position: relative; overflow: hidden;
+      padding: 50px 40px 44px;
+      border: 1px solid var(--line-2); border-radius: 30px;
+      background:
+        radial-gradient(ellipse 80% 130% at 50% -20%, rgba(47,107,216,.15), transparent 62%),
+        var(--surface);
+      box-shadow: var(--shadow-2);
+      text-align: center;
+    }
+    .download-card .icon { width: 88px; height: 88px; margin: 0 auto 20px; display: block; }
+    .download-card h2 { margin-bottom: 8px; }
+    .download-card .hint { margin: 0 0 30px; color: var(--quiet); font-size: 13.5px; }
+    .download-card .cta-row { justify-content: center; }
+    .meta { margin: 32px auto 0; padding-top: 22px; border-top: 1px solid var(--line); display: grid; gap: 10px; max-width: 640px; color: var(--quiet); font-size: 12.6px; }
+    .meta .row { display: flex; justify-content: space-between; gap: 14px; }
+    .meta .row > span:first-child { flex: none; letter-spacing: .06em; }
+    .meta .val { font-family: var(--font-mono); color: var(--ink-2); word-break: break-all; text-align: right; }
+    .meta .count { color: var(--blue); font-weight: 650; }
+
+    footer.site-foot {
+      position: relative; z-index: 1;
+      padding: 38px 0 34px;
+      border-top: 1px solid var(--line); background: var(--glass);
+      color: var(--quiet); font-size: 12.8px;
+    }
+    .foot-inner { display: flex; align-items: center; justify-content: space-between; gap: 22px; flex-wrap: wrap; }
+    .foot-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; }
+    .foot-brand img { width: 26px; height: 26px; }
+    footer.site-foot a { color: var(--ink-2); border-bottom: 1px solid var(--line-2); }
+    .maker { color: var(--blue); font-weight: 650; }
+
+    @media (max-width: 960px) {
+      .demo { grid-template-columns: 1fr; gap: 30px; }
+      .demo-side { order: 2; grid-template-columns: 1fr 1fr; }
+      .phone { order: 1; max-width: 340px; }
+      .phone-screen { height: 440px; }
+      .cursor-glow { display: none; }
+    }
+    /* 三栏刚好挤得下的区间：把手机压窄一点，避免两侧说明卡与手机互相挤压导致溢出。 */
+    @media (max-width: 1100px) and (min-width: 961px) {
+      .demo { grid-template-columns: minmax(0, 1fr) minmax(0, 336px) minmax(0, 1fr); gap: 22px; }
+    }
+    @media (max-width: 900px) {
+      .hero { padding: 50px 0 60px; }
+      .hero-icon { width: 136px; height: 136px; margin-bottom: 26px; }
+      nav.links { display: none; }
+      .specs-grid { grid-template-columns: repeat(2, 1fr); }
+      .spec { border-right: 0; border-bottom: 1px solid var(--line); }
+      .spec:nth-child(odd) { border-right: 1px solid var(--line); }
+      .spec:nth-last-child(-n+2) { border-bottom: 0; }
+      .feat, .feat.wide, .feat.narrow { grid-column: span 6; }
+      section.block { padding: 62px 0; }
+      .download-card { padding: 36px 22px 32px; }
+      .meta .row { flex-direction: column; gap: 3px; }
+      .meta .val { text-align: left; }
+      .glow { filter: blur(44px); }
+      .scroll-cue { display: none; }
+    }
+    @media (max-width: 560px) { .demo-side { grid-template-columns: 1fr; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+      }
+      .progress { transform: scaleX(1); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 超椭圆（小米式连续曲率圆角）。objectBoundingBox 让同一路径适配任意尺寸元素。 -->
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <defs>
+    <clipPath id="squircle" clipPathUnits="objectBoundingBox">
+      <path d="M1.0 0.5L0.9979 0.6806L0.9914 0.7544L0.9806 0.8093L0.9653 0.8536L0.9454 0.8901L0.9204 0.9204L0.8901 0.9454L0.8536 0.9653L0.8093 0.9806L0.7544 0.9914L0.6806 0.9979L0.5 1.0L0.3194 0.9979L0.2456 0.9914L0.1907 0.9806L0.1464 0.9653L0.1099 0.9454L0.0796 0.9204L0.0546 0.8901L0.0347 0.8536L0.0194 0.8093L0.0086 0.7544L0.0021 0.6806L0.0 0.5L0.0021 0.3194L0.0086 0.2456L0.0194 0.1907L0.0347 0.1464L0.0546 0.1099L0.0796 0.0796L0.1099 0.0546L0.1464 0.0347L0.1907 0.0194L0.2456 0.0086L0.3194 0.0021L0.5 0.0L0.6806 0.0021L0.7544 0.0086L0.8093 0.0194L0.8536 0.0347L0.8901 0.0546L0.9204 0.0796L0.9454 0.1099L0.9653 0.1464L0.9806 0.1907L0.9914 0.2456L0.9979 0.3194Z"/>
+    </clipPath>
+  </defs>
+</svg>
+
+<div class="backdrop" aria-hidden="true">
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+  <div class="glow g3"></div>
+  <div class="grid-lines"></div>
+  <div class="motes" id="motes"></div>
+  <div class="fade-b"></div>
+</div>
+
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <a class="brand" href="/">
+      <img src="site_assets/icons/favicon-64.png" alt="">
+      <span class="name">Coomi 魔改版<small>COMAX · BY 晚风</small></span>
+    </a>
+    <nav class="links" aria-label="页面导航">
+      <a href="#talk">对话</a>
+      <a href="#features">特性</a>
+      <a href="#notes">更新</a>
+      <a href="#download">下载</a>
+    </nav>
+    <a class="top-cta js-download" href="#download">下载 APK</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="cursor-glow" id="cursor-glow" aria-hidden="true"></div>
+    <div class="wrap hero-inner">
+      <span class="hero-icon" id="hero-icon">
+        <span class="halo" aria-hidden="true"></span>
+        <span class="ring r2" aria-hidden="true"><i class="sat"></i></span>
+        <span class="ring" aria-hidden="true"><i class="sat"></i></span>
+        <img src="site_assets/icons/app-icon.png" alt="Coomi 魔改版图标">
+      </span>
+      <span class="tagline" id="tagline"><span class="dot"></span><span id="tagline-text">Android 1.5.0o3 · Comax 魔改版</span></span>
+      <h1 id="hero-title">
+        <span class="line" data-text="把完整的智能体"></span>
+        <span class="line" data-text="工作环境，装进 " data-accent="手机"></span>
+        <span class="shine-sweep" aria-hidden="true"></span>
+      </h1>
+      <p class="lede">
+        在官方 Coomi 之上深度增强：<b>超载模式</b>、<b>AI 工作室</b>、<b>控制模式</b> 与
+        <b>Operit 工具集成</b>。原生 Rust 引擎、内嵌 Ubuntu 终端与对话界面协同运行，离线可用。
+      </p>
+      <div class="cta-row">
+        <a class="btn primary js-download" href="#download">
+          <span class="arrow" aria-hidden="true">↓</span><span>下载 APK</span>
+        </a>
+        <a class="btn ghost" href="#talk">先看看它怎么对话</a>
+      </div>
+      <span class="scroll-cue" aria-hidden="true"><i></i></span>
+    </div>
+  </section>
+
+  <section class="specs" aria-label="版本信息">
+    <div class="wrap specs-grid">
+      <dl class="spec"><dt>架构</dt><dd>ARM64</dd></dl>
+      <dl class="spec"><dt>系统要求</dt><dd>Android <span class="unit">7.0+</span></dd></dl>
+      <dl class="spec"><dt>当前版本</dt><dd id="spec-version">1.5.0o3</dd></dl>
+      <dl class="spec"><dt>安装包</dt><dd id="spec-size">192 <span class="unit">MB</span></dd></dl>
+    </div>
+  </section>
+
+  <!-- ── 对话演示：整页的视觉主角 ── -->
+  <section class="block" id="talk">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Conversation</span>
+        <h2 data-split>它说话的方式，和普通助手不一样</h2>
+        <p>四步循环演示一遍真实流程：发问 → 思考 → 调工具 → 流式作答。工具卡里能看到它真的执行了什么。</p>
+      </div>
+
+      <div class="demo">
+        <div class="demo-side">
+          <div class="note" data-step="1">
+            <h4><span class="idx">1</span>你说一句就好</h4>
+            <p>不用写提示词模板。它会自己把模糊需求拆成可执行步骤。</p>
+          </div>
+          <div class="note" data-step="2">
+            <h4><span class="idx">2</span>思考过程可见</h4>
+            <p>推理不是黑箱。想什么、为什么这么想，都能展开看到。</p>
+          </div>
+        </div>
+
+        <div class="phone" id="demo-phone">
+          <span class="phone-glow" aria-hidden="true"></span>
+          <div class="phone-screen">
+            <span class="screen-progress" id="screen-progress" aria-hidden="true"></span>
+            <div class="ph-bar">
+              <span class="av"></span>
+              <span class="tt">Coomi<small id="demo-status">正在输入</small></span>
+              <span class="live"><i></i>运行中</span>
+            </div>
+
+            <div class="stream">
+              <div class="bub-user" data-anim="user">把下载目录里的截图按日期归一下类</div>
+
+              <div class="think" data-anim="think">
+                <span class="bars"><i></i><i></i><i></i></span>
+                <span>先看清目录里有什么，再决定按什么规则分组</span>
+              </div>
+
+              <div class="tool" data-anim="tool">
+                <div class="tool-head">
+                  <span class="ic">▤</span>
+                  <span class="nm">读取目录 <code>~/Download</code></span>
+                  <span class="st">✓ 0.3s</span>
+                </div>
+                <div class="tool-bar"><i data-anim="toolbar"></i></div>
+                <div class="tool-body" data-anim="toolbody">
+                  <span class="ln"><b>12</b> 个文件 · 共 <b>48.2 MB</b></span>
+                  <span class="ln">Screenshot_2026-08-06-10-40-39.jpg</span>
+                  <span class="ln">Screenshot_2026-09-09-23-03-06.png</span>
+                </div>
+              </div>
+
+              <div class="card-out" data-anim="out">
+                <span class="typing" id="demo-typing">已按年月归档 12 张截图，建好 3 个文件夹：2026-08、2026-09、其他。需要我顺便清掉重复的吗？</span><span class="caret" id="demo-caret"></span>
+                <span class="chips" data-anim="chips"><span>2026-08 · 5 张</span><span>2026-09 · 6 张</span><span>其他 · 1 张</span></span>
+              </div>
+            </div>
+
+            <div class="ph-input">
+              <span class="field">继续输入…</span>
+              <span class="send">↑</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-side">
+          <div class="note" data-step="3">
+            <h4><span class="idx">3</span>工具真的被执行</h4>
+            <p>读文件、跑命令、开网页。卡片上是真实结果与耗时，不是模拟。</p>
+          </div>
+          <div class="note" data-step="4">
+            <h4><span class="idx">4</span>答案逐字出来</h4>
+            <p>流式输出，不用等全部生成完。随时可以打断、追加要求。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track" id="marquee-track">
+      <span><b>原生 Rust 引擎</b></span>
+      <span><b>Ubuntu 24.04</b> 完整环境</span>
+      <span><b>DeepSeek</b> 账号额度</span>
+      <span><b>Skill</b> 与 <b>MCP</b> 扩展</span>
+      <span><b>持久记忆</b></span>
+      <span><b>任务中心</b></span>
+      <span><b>数字生命体</b></span>
+      <span><b>本地终端</b></span>
+    </div>
+  </div>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Features</span>
+        <h2 data-split>官方能力全在，另外还有这些</h2>
+        <p>标着「魔改」的是这一版新增或重做的部分。</p>
+      </div>
+
+      <div class="feat-grid">
+        <article class="feat wide hl">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="chip mod">魔改</span>超载模式（注意力全开）</h3>
+          <p>产能模式升级为「超载」。模型先定义问题、限制条件、成功标准与失败边界，再动手；所有关键事实必须通过工具或原始资料交叉验证；零冗余输出，每一句都承载信息量。</p>
+        </article>
+        <article class="feat narrow">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="chip mod">魔改</span>控制模式</h3>
+          <p>无障碍 + 桌面悬浮球，代替你点击、输入、发送。</p>
+        </article>
+        <article class="feat narrow hl">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="chip mod">魔改</span>AI 工作室</h3>
+          <p>多成员协同、群聊 @ 调度、工单看板与审批流。</p>
+        </article>
+        <article class="feat wide">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="chip mod">魔改</span>Operit 工具集成</h3>
+          <p>内置 <code>local_model</code>、<code>local_ocr</code>、<code>local_tts</code>、<code>ui_automation</code> 四个本地工具。</p>
+        </article>
+        <article class="feat">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="glyph">UB</span><span class="chip core">官方</span>完整 Ubuntu 24.04</h3>
+          <p>内嵌 ProotLinux + Ubuntu 24.04 LTS，C/C++ 构建链、sqlite3、网络工具开箱即用。</p>
+        </article>
+        <article class="feat">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="glyph">DS</span><span class="chip core">官方</span>DeepSeek 账号登录</h3>
+          <p>密码 / 验证码双通道，复用 DeepSeek App 订阅额度，无需单独购买 API 额度。</p>
+        </article>
+        <article class="feat">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="glyph">SK</span><span class="chip core">官方</span>Skill / MCP 扩展</h3>
+          <p>技能市场与 MCP 配置热更新，内置 UI 设计师、环境模板、skill-creator 等技能。</p>
+        </article>
+        <article class="feat">
+          <span class="spot"></span><span class="gloss"></span>
+          <h3><span class="glyph">IO</span><span class="chip core">官方</span>记录导入导出</h3>
+          <p>JSON / JSONL / Markdown / TXT 全格式导入导出，导入前可预览。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="notes">
+    <div class="narrow">
+      <div class="sec-head">
+        <span class="kicker">Changelog</span>
+        <h2 id="notes-title" data-split>1.5.0o3 更新说明</h2>
+        <p id="notes-sub">2026-09-21 发布 · 制作人：晚风</p>
+      </div>
+      <div class="timeline" id="timeline">
+        <span class="tl-rule" aria-hidden="true"></span>
+        <div class="tl-item">
+          <h4>控制模式重做</h4>
+          <p>新增主动申请无障碍权限；桌面悬浮层显示正在调用的工具与思考过程，不用时可拖动缩成小球。</p>
+        </div>
+        <div class="tl-item">
+          <h4>上下文压缩不再重复执行已完成任务</h4>
+          <p>摘要按「已完成 / 进行中 / 待办」分段，已完成项明确标注不得重做，避免压缩后重跑一遍。</p>
+        </div>
+        <div class="tl-item">
+          <h4>修复界面闪烁</h4>
+          <p>调用工具或开始输出文字时不再整屏闪动；工具卡片不再反复重建，动画全部改为只动 <code>transform</code>。</p>
+        </div>
+        <div class="tl-item">
+          <h4>DeepSeek 账号适配与反风控</h4>
+          <p>适配新版会话 ID 与模型类型，修复登录后无法发起会话；账号接口统一节流与串行，持久化设备标识。</p>
+        </div>
+      </div>
+
+      <details class="history">
+        <summary>历史版本安装包</summary>
+        <div id="history-list">
+          <div class="ver-row"><span class="name">1.5.0o3（当前）</span><a href="#download">下载 ↓</a></div>
+          <div class="ver-row"><span class="name">1.5.0o2</span><a href="/coomi/download/Comax-1.5.0o2-complete-signed.apk" download>下载 ↓</a></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="block" id="download">
+    <div class="wrap">
+      <div class="download-card">
+        <img class="icon" src="site_assets/icons/app-icon.png" alt="Coomi 魔改版图标">
+        <h2>下载安装</h2>
+        <p class="hint">签名校验通过（v2 + v3），可直接覆盖安装官方或魔改历史版本。</p>
+        <div class="cta-row">
+          <a class="btn primary js-download" id="apk-link" href="/coomi/download/Comax-1.5.0o3-complete-signed.apk" download>
+            <span class="arrow" aria-hidden="true">↓</span><span id="apk-label">下载 Comax 魔改版 APK</span>
+          </a>
+          <a class="btn ghost" id="src-link" href="/coomi/Comax-1.5.0o3-source.zip" download>
+            <span class="arrow" aria-hidden="true">↓</span><span>下载源码包</span>
+          </a>
+        </div>
+        <div class="meta">
+          <div class="row"><span>版本</span><span class="val" id="meta-version">1.5.0o3</span></div>
+          <div class="row"><span>包大小</span><span class="val" id="meta-size">192 MB</span></div>
+          <div class="row"><span>SHA-256</span><span class="val" id="meta-sha">读取中…</span></div>
+          <div class="row"><span>下载次数</span><span class="val count" id="meta-count" aria-live="polite">读取中…</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap foot-inner">
+    <span class="foot-brand">
+      <img src="site_assets/icons/favicon-64.png" alt="">
+      Coomi Agent 魔改版
+    </span>
+    <span>基于官方 <a href="https://github.com/TensorHub-ORG/Coomi" target="_blank" rel="noreferrer">Coomi</a> 二次开发 · © 2026</span>
+    <span class="maker">制作人：晚风</span>
+  </div>
+</footer>
+
+<script src="site_assets/gsap.min.js"></script>
+<script src="site_assets/ScrollTrigger.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hasGsap = typeof window.gsap !== 'undefined' && typeof window.ScrollTrigger !== 'undefined';
+  if (hasGsap) window.gsap.registerPlugin(window.ScrollTrigger);
+
+  const fmtMb = bytes => (Number(bytes || 0) ? `${Math.round(Number(bytes) / 1048576)} MB` : '');
+  const set = (id, text) => { const n = document.getElementById(id); if (n) n.textContent = text; };
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+  /* ── 标题按字拆开：只有逐字拆开才能做 stagger 升起。
+        顺带保留 data-accent 指定的词（用渐变色）。 ── */
+  function buildTitle() {
+    const title = $('#hero-title');
+    if (!title) return [];
+    const chars = [];
+    title.querySelectorAll('.line').forEach(line => {
+      const text = line.dataset.text || '';
+      const accent = line.dataset.accent || '';
+      const frag = document.createDocumentFragment();
+      let index = 0;
+      while (index < text.length) {
+        // 先看当前位置是不是要着色的词
+        if (accent && text.startsWith(accent, index)) {
+          const em = document.createElement('em');
+          for (const ch of accent) {
+            const span = document.createElement('span');
+            span.className = 'ch';
+            span.textContent = ch;
+            em.appendChild(span);
+            chars.push(span);
+          }
+          frag.appendChild(em);
+          index += accent.length;
+          continue;
+        }
+        const ch = text[index];
+        const span = document.createElement('span');
+        span.className = 'ch';
+        span.textContent = ch === ' ' ? '\u00A0' : ch;
+        frag.appendChild(span);
+        chars.push(span);
+        index += 1;
+      }
+      line.appendChild(frag);
+    });
+    return chars;
+  }
+
+  /* ── 小标题按词拆开，配合 overflow 做「从下推上来」 ── */
+  function splitWords(heading, text) {
+    heading.textContent = '';
+    const words = [];
+    for (const word of text.split(/(\s+)/)) {
+      if (!word) continue;
+      if (/^\s+$/.test(word)) { heading.appendChild(document.createTextNode(' ')); continue; }
+      const wrap = document.createElement('span');
+      wrap.className = 'word';
+      const inner = document.createElement('span');
+      inner.textContent = word;
+      wrap.appendChild(inner);
+      heading.appendChild(wrap);
+      words.push(inner);
+    }
+    return words;
+  }
+
+  function buildSectionTitles() {
+    const groups = [];
+    $$('h2[data-split]').forEach(heading => {
+      // 统一按词重排纯文本（标题里没有需要保留的子元素，id 仍留在 h2 自身）
+      groups.push(splitWords(heading, heading.textContent || ''));
+    });
+    return groups;
+  }
+
+  function buildMotes() {
+    const host = $('#motes');
+    if (!host) return [];
+    const dots = [];
+    for (let i = 0; i < 12; i += 1) {
+      const dot = document.createElement('span');
+      dot.className = 'mote';
+      dot.style.left = `${Math.random() * 100}%`;
+      dot.style.top = `${Math.random() * 100}%`;
+      dot.style.opacity = String(0.25 + Math.random() * 0.5);
+      const size = 3 + Math.random() * 4;
+      dot.style.width = `${size}px`;
+      dot.style.height = `${size}px`;
+      host.appendChild(dot);
+      dots.push(dot);
+    }
+    return dots;
+  }
+
+  const titleChars = buildTitle();
+  const sectionWords = buildSectionTitles();
+  const motes = buildMotes();
+
+  /* ── 版本信息：静态内容是兜底，联网后由 latest.json 覆盖 ── */
+  fetch('latest.json', { cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then(data => {
+      const v = data.version || '';
+      if (v) {
+        set('spec-version', v);
+        set('meta-version', v);
+        set('tagline-text', `Android ${v} · Comax 魔改版`);
+        // 更新说明的标题也带 data-split，改文字后必须重新拆词，
+        // 否则一次 textContent 就会把拆好的结构抹平、动画失效。
+        const notesTitle = $('#notes-title');
+        if (notesTitle && notesTitle.textContent.trim() !== `${v} 更新说明`) {
+          const words = splitWords(notesTitle, `${v} 更新说明`);
+          if (hasGsap && !reduceMotion) {
+            window.gsap.from(words, {
+              yPercent: 115, opacity: 0, duration: .7, stagger: .05, ease: 'power3.out',
+              scrollTrigger: { trigger: notesTitle.closest('.sec-head'), start: 'top 85%', once: true },
+            });
+          }
+        }
+        if (hasGsap && !reduceMotion) {
+          window.gsap.fromTo('#spec-version', { opacity: 0, y: 6, scale: .94 }, { opacity: 1, y: 0, scale: 1, duration: .5, ease: 'back.out(2)' });
+        }
+      }
+      if (data.publishedAt) set('notes-sub', `${String(data.publishedAt).slice(0, 10)} 发布 · 制作人：晚风`);
+      if (data.size) { set('spec-size', fmtMb(data.size)); set('meta-size', fmtMb(data.size)); }
+      if (data.sha256) set('meta-sha', data.sha256);
+      if (data.file) {
+        const apk = $('#apk-link');
+        if (apk) apk.href = `/coomi/download/${data.file}`;
+        set('apk-label', `下载 Comax ${v} APK`.trim());
+        loadCount(data.file);
+      }
+      if (data.sourceFile) { const src = $('#src-link'); if (src) src.href = `/coomi/${data.sourceFile}`; }
+      if (Array.isArray(data.notes) && data.notes.length) {
+        const timeline = $('#timeline');
+        if (timeline) {
+          const rule = timeline.querySelector('.tl-rule');
+          timeline.innerHTML = data.notes.map(note => {
+            const item = document.createElement('div');
+            item.className = 'tl-item';
+            const body = document.createElement('p');
+            body.textContent = note;
+            item.appendChild(body);
+            return item.outerHTML;
+          }).join('');
+          if (rule) timeline.prepend(rule);
+        }
+      }
+    })
+    .catch(() => { /* 保留静态兜底 */ });
+
+  function loadCount(file) {
+    fetch(`/coomi/download-stats?file=${encodeURIComponent(file)}`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(data => set('meta-count', `${Number(data.downloads || 0).toLocaleString('zh-CN')} 次`))
+      .catch(() => set('meta-count', '暂时无法读取'));
+  }
+
+  /* ══ 对话演示时间轴 ══
+     四步：发问 → 思考 → 工具执行 → 流式作答。
+
+     打字效果不用逐字改 DOM（那会触发几百次重排）。给整段文字套一个
+     clip-path: inset(0 100% 0 0)，动画到 inset(0 0 0 0) 并配 steps 缓动，
+     观感就是逐字出现，而实际只动了一个属性。
+
+     每一步还会同步点亮右侧/左侧对应的说明卡，并驱动屏幕顶部的进度条 ——
+     让「演示」和「讲解」是同一件事。 */
+  function buildDemo() {
+    const root = $('#demo-phone');
+    if (!root) return null;
+
+    const gsap = window.gsap;
+    const q = sel => root.querySelector(sel);
+    const user = q('[data-anim="user"]');
+    const think = q('[data-anim="think"]');
+    const tool = q('[data-anim="tool"]');
+    const toolbar = q('[data-anim="toolbar"]');
+    const toolBody = q('[data-anim="toolbody"]');
+    const out = q('[data-anim="out"]');
+    const chips = Array.from(root.querySelectorAll('[data-anim="chips"] > span'));
+    const typing = q('#demo-typing');
+    const caret = q('#demo-caret');
+    const status = q('#demo-status');
+    const screenProgress = q('#screen-progress');
+    if (!user || !think || !tool || !out || !typing) return null;
+
+    const notes = $$('.note[data-step]');
+    const lightStep = step => notes.forEach(note => note.classList.toggle('lit', Number(note.dataset.step) === step));
+
+    const fullText = typing.textContent || '';
+    const chars = Math.max(1, fullText.length);
+
+    const reset = () => {
+      gsap.set([user, think, tool, out], { opacity: 0, y: 12 });
+      gsap.set(user, { scale: .9 });
+      gsap.set([think, tool, out], { scale: 1 });
+      gsap.set(toolBody, { height: 0, opacity: 0 });
+      gsap.set(toolbar, { scaleX: 0 });
+      gsap.set(chips, { opacity: 0, y: 8, scale: .8 });
+      gsap.set(typing, { clipPath: 'inset(0 100% 0 0)', webkitClipPath: 'inset(0 100% 0 0)' });
+      gsap.set(caret, { opacity: 1 });
+      gsap.set(screenProgress, { scaleX: 0 });
+      lightStep(0);
+    };
+
+    reset();
+
+    const tl = gsap.timeline({ repeat: -1, repeatDelay: 1.8, defaults: { ease: 'power2.out' }, onRepeat: reset });
+
+    tl
+      // ① 用户发问：从右下角弹出
+      .add(() => { if (status) status.textContent = '正在输入'; lightStep(1); }, 0)
+      .to(user, { opacity: 1, y: 0, scale: 1, duration: .5, ease: 'back.out(1.7)' })
+      .to(screenProgress, { scaleX: .25, duration: .5 }, '-=.3')
+      .to({}, { duration: .5 })
+
+      // ② 思考
+      .add(() => { if (status) status.textContent = '正在思考'; lightStep(2); }, '+=.1')
+      .to(think, { opacity: 1, y: 0, duration: .4 })
+      .to(screenProgress, { scaleX: .5, duration: .35 }, '-=.3')
+      .to({}, { duration: .85 })
+
+      // ③ 调工具：卡片先出现、进度条跑满、正文再展开
+      .add(() => { if (status) status.textContent = '正在调用工具'; lightStep(3); }, '+=.15')
+      .to(tool, { opacity: 1, y: 0, duration: .42 })
+      .to(toolbar, { scaleX: 1, duration: .55, ease: 'power1.inOut' }, '-=.2')
+      .to(toolBody, { height: 'auto', opacity: 1, duration: .45, ease: 'power2.out' }, '-=.2')
+      .to(screenProgress, { scaleX: .75, duration: .4 }, '-=.5')
+      .to({}, { duration: .5 })
+
+      // ④ 流式作答：clip-path 逐字揭开，标签依次弹入
+      .add(() => { if (status) status.textContent = '正在生成'; lightStep(4); }, '+=.15')
+      .to(out, { opacity: 1, y: 0, duration: .4 })
+      .to(typing, {
+        clipPath: 'inset(0 0% 0 0)',
+        webkitClipPath: 'inset(0 0% 0 0)',
+        duration: 2.3,
+        ease: `steps(${chars})`,
+      }, '-=.1')
+      .to(screenProgress, { scaleX: 1, duration: 2.3, ease: 'none' }, '<')
+      .to(chips, { opacity: 1, y: 0, scale: 1, duration: .38, stagger: .12, ease: 'back.out(2.2)' }, '-=1.6')
+      .add(() => { if (status) status.textContent = '已完成'; }, '-=.3')
+      .to(caret, { opacity: 0, duration: .2 }, '-=.2')
+      .to({}, { duration: 1.3 });
+
+    return tl;
+  }
+
+  /* ══ 全部动效 ══
+     原则：每段动画都要回答「它在传达什么」。
+     hero 交代信息层级、对话演示是内容本身、横向卷轴说明并列关系、
+     金线生长表示更新在累积。没有纯装饰的无限循环（浮尘只动极低透明度的点）。 */
+  if (hasGsap && !reduceMotion) {
+    const { gsap, ScrollTrigger } = window;
+
+    /* 滚动进度 */
+    gsap.to('#progress', { scaleX: 1, ease: 'none', scrollTrigger: { start: 0, end: 'max', scrub: 0.3 } });
+
+    /* 背景光晕漂移 */
+    gsap.to('.glow.g1', { xPercent: 10, yPercent: 7, duration: 20, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.glow.g2', { xPercent: -12, yPercent: 10, duration: 24, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.glow.g3', { xPercent: 8, yPercent: -9, duration: 28, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+
+    /* 浮尘：随机时长飘动，只动 transform 与 opacity */
+    motes.forEach(dot => {
+      gsap.to(dot, {
+        y: -40 - Math.random() * 70,
+        x: (Math.random() - .5) * 60,
+        duration: 7 + Math.random() * 7,
+        repeat: -1, yoyo: true, ease: 'sine.inOut',
+        delay: Math.random() * 4,
+      });
+    });
+
+    /* 导航 */
+    gsap.from('header.top', { y: -28, opacity: 0, duration: .65, ease: 'power3.out' });
+    gsap.from('.brand img', { rotate: -180, scale: .6, opacity: 0, duration: .9, ease: 'back.out(1.6)', delay: .15 });
+
+    /* ── Hero 入场：主角先落位，标题逐字升起，其余跟随 ── */
+    const heroTl = gsap.timeline({ defaults: { ease: 'power3.out' }, delay: .1 });
+    heroTl
+      .from('#hero-icon', { opacity: 0, scale: .7, rotate: -14, duration: 1.05, ease: 'back.out(1.5)' })
+      .from('.ring', { opacity: 0, scale: .8, duration: .8, stagger: .12 }, '-=.7')
+      .from('.tagline', { opacity: 0, y: 12, scale: .94, duration: .5 }, '-=.5')
+      .from(titleChars, {
+        yPercent: 118, opacity: 0, rotateX: -72, duration: .78,
+        stagger: { each: .028, from: 'start' }, ease: 'back.out(1.35)',
+      }, '-=.35')
+      .from('.lede', { opacity: 0, y: 16, duration: .55 }, '-=.5')
+      .from('.cta-row .btn', { opacity: 0, y: 16, scale: .94, duration: .55, stagger: .09, ease: 'back.out(1.6)' }, '-=.4')
+      .from('.scroll-cue', { opacity: 0, y: 10, duration: .5 }, '-=.3');
+
+    /* 标题高光扫过：入场结束后跑一次，之后隔几秒来一遍 */
+    const sweep = () => gsap.fromTo('.shine-sweep',
+      { x: '-260%' },
+      { x: '360%', duration: 1.15, ease: 'power2.inOut' });
+    heroTl.add(sweep, '-=.15');
+    gsap.delayedCall(5.2, function loop() {
+      sweep();
+      gsap.delayedCall(5.2, loop);
+    });
+
+    /* 图标：常驻悬浮 + 两圈轨道反向自转 + 光晕呼吸 */
+    gsap.to('#hero-icon img', { y: -11, duration: 3.6, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.ring', { rotate: 360, duration: 24, repeat: -1, ease: 'none', transformOrigin: '50% 50%' });
+    gsap.to('.ring.r2', { rotate: -360, duration: 38, repeat: -1, ease: 'none', transformOrigin: '50% 50%' });
+    gsap.to('.halo', { opacity: .55, scale: 1.14, duration: 3, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+
+    /* 滚动提示里的小点来回跑 */
+    gsap.to('.scroll-cue i', { y: 14, duration: 1.3, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+
+    /* 指针柔光 */
+    const glow = $('#cursor-glow');
+    if (glow && window.matchMedia('(pointer: fine)').matches) {
+      const heroEl = $('.hero');
+      const moveX = gsap.quickTo(glow, 'x', { duration: .6, ease: 'power3' });
+      const moveY = gsap.quickTo(glow, 'y', { duration: .6, ease: 'power3' });
+      heroEl.addEventListener('pointermove', event => {
+        const rect = heroEl.getBoundingClientRect();
+        gsap.to(glow, { opacity: 1, duration: .4, overwrite: 'auto' });
+        moveX(event.clientX - rect.left);
+        moveY(event.clientY - rect.top);
+      });
+      heroEl.addEventListener('pointerleave', () => gsap.to(glow, { opacity: 0, duration: .45 }));
+    }
+
+    /* Hero 视差：整块图标随滚动轻微下移 */
+    gsap.to('#hero-icon', {
+      yPercent: 26, ease: 'none',
+      scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true },
+    });
+
+    /* 规格数字：进入视口时自下而上抬起 */
+    gsap.from('.spec', {
+      opacity: 0, y: 18, duration: .5, stagger: .07,
+      scrollTrigger: { trigger: '.specs', start: 'top 88%', once: true },
+    });
+
+    /* 区块标题：按词从纸面下推上来 */
+    sectionWords.forEach(words => {
+      if (!words.length) return;
+      gsap.from(words, {
+        yPercent: 115, opacity: 0, duration: .7, stagger: .05, ease: 'power3.out',
+        scrollTrigger: { trigger: words[0].closest('.sec-head'), start: 'top 85%', once: true },
+      });
+    });
+    gsap.utils.toArray('.sec-head .kicker, .sec-head > p').forEach(node => {
+      gsap.from(node, {
+        opacity: 0, y: 14, duration: .5,
+        scrollTrigger: { trigger: node, start: 'top 92%', once: true },
+      });
+    });
+
+    /* 对话演示 */
+    const demoTl = buildDemo();
+    if (demoTl) {
+      demoTl.pause();
+      ScrollTrigger.create({
+        trigger: '#talk',
+        start: 'top 78%',
+        end: 'bottom 12%',
+        onEnter: () => demoTl.play(),
+        onEnterBack: () => demoTl.play(),
+        onLeave: () => demoTl.pause(),
+        onLeaveBack: () => demoTl.pause(),
+      });
+
+      gsap.from('#demo-phone', {
+        opacity: 0, y: 46, scale: .95, rotateY: -12, duration: .95, ease: 'power3.out',
+        scrollTrigger: { trigger: '#talk', start: 'top 80%', once: true },
+      });
+      /* 手机进入视口后，边框高光流转两圈再停 —— 给一个「刚启动」的暗示 */
+      const phoneGlow = $('#demo-phone .phone-glow');
+      if (phoneGlow) {
+        gsap.timeline({ scrollTrigger: { trigger: '#talk', start: 'top 80%', once: true } })
+          .to(phoneGlow, { opacity: 1, duration: .3 })
+          .fromTo(phoneGlow, { rotate: 0 }, { rotate: 720, duration: 2.6, ease: 'none' }, '<')
+          .to(phoneGlow, { opacity: 0, duration: .6 }, '-=.3');
+      }
+      gsap.from('.note', {
+        opacity: 0, x: -18, duration: .55, stagger: .1, ease: 'power2.out',
+        scrollTrigger: { trigger: '.demo', start: 'top 80%', once: true },
+      });
+    }
+
+    /* 特性卡：错落入场 + 指针光斑 + 倾斜 + 高光扫过 */
+    ScrollTrigger.batch('.feat', {
+      start: 'top 88%', once: true,
+      onEnter: batch => gsap.from(batch, {
+        opacity: 0, y: 30, scale: .97, duration: .6, stagger: .07, ease: 'power2.out',
+      }),
+    });
+
+    $$('.feat').forEach(card => {
+      const spot = card.querySelector('.spot');
+      card.addEventListener('pointermove', event => {
+        const rect = card.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        if (spot) gsap.set(spot, { x, y });
+        gsap.to(card, {
+          rotateX: ((y / rect.height) - .5) * -5,
+          rotateY: ((x / rect.width) - .5) * 5,
+          transformPerspective: 900,
+          duration: .4, ease: 'power2.out',
+        });
+      });
+      card.addEventListener('pointerenter', () => {
+        const gloss = card.querySelector('.gloss');
+        if (gloss) gsap.fromTo(gloss, { x: '-120%', opacity: .0 }, { x: '120%', opacity: 1, duration: .8, ease: 'power2.inOut' });
+        const glyph = card.querySelector('.glyph');
+        if (glyph) gsap.fromTo(glyph, { rotate: -22, scale: .86 }, { rotate: 0, scale: 1, duration: .5, ease: 'back.out(2.4)' });
+      });
+      card.addEventListener('pointerleave', () => {
+        gsap.to(card, { rotateX: 0, rotateY: 0, duration: .5, ease: 'power3.out' });
+      });
+    });
+
+    /* 跑马灯：半宽只在布局变化时量一次。
+       放进 modifier 里每帧读 scrollWidth 会强制同步布局，手机上这一条就够把帧率拖垮。 */
+    const marquee = $('#marquee-track');
+    if (marquee) {
+      marquee.innerHTML += marquee.innerHTML;
+      let tween = null;
+      const start = () => {
+        tween?.kill();
+        const half = marquee.scrollWidth / 2;
+        if (half <= 0) return;
+        gsap.set(marquee, { x: 0 });
+        tween = gsap.to(marquee, { x: -half, duration: Math.max(18, half / 42), ease: 'none', repeat: -1 });
+      };
+      start();
+      window.addEventListener('resize', start);
+      /* 滚动速度越快，跑马灯微微倾斜：把「惯性」这个物理直觉交给眼睛 */
+      ScrollTrigger.create({
+        trigger: '.marquee', start: 'top bottom', end: 'bottom top',
+        onUpdate: self => {
+          const skew = gsap.utils.clamp(-6, 6, self.getVelocity() / -420);
+          gsap.to(marquee, { skewX: skew, duration: .4, overwrite: 'auto' });
+        },
+      });
+    }
+
+    /* 时间线：只让那条竖线生长，条目依次点亮 */
+    const timeline = $('#timeline');
+    if (timeline) {
+      const rule = timeline.querySelector('.tl-rule');
+      if (rule) {
+        gsap.from(rule, {
+          scaleY: 0, transformOrigin: '50% 0', duration: 1.1, ease: 'power2.out',
+          scrollTrigger: { trigger: timeline, start: 'top 82%', once: true },
+        });
+      }
+      gsap.from(timeline.querySelectorAll('.tl-item'), {
+        opacity: 0, x: -16, duration: .5, stagger: .1, ease: 'power2.out',
+        scrollTrigger: { trigger: timeline, start: 'top 82%', once: true },
+      });
+    }
+
+    /* 下载卡 */
+    gsap.from('.download-card', {
+      opacity: 0, y: 32, scale: .985, duration: .75, ease: 'power3.out',
+      scrollTrigger: { trigger: '.download-card', start: 'top 86%', once: true },
+    });
+    gsap.to('.download-card .icon', { y: -7, duration: 2.8, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.download-card .icon', {
+      filter: 'drop-shadow(0 10px 22px rgba(47,107,216,.34))',
+      duration: 2.8, repeat: -1, yoyo: true, ease: 'sine.inOut',
+    });
+
+    /* 主按钮：指针吸附 + 点击涟漪 */
+    $$('.btn.primary, .top-cta').forEach(node => {
+      node.addEventListener('pointermove', event => {
+        const rect = node.getBoundingClientRect();
+        gsap.to(node, {
+          x: (event.clientX - (rect.left + rect.width / 2)) * .05,
+          y: (event.clientY - (rect.top + rect.height / 2)) * .12,
+          duration: .35, ease: 'power2.out',
+        });
+      });
+      node.addEventListener('pointerleave', () => gsap.to(node, { x: 0, y: 0, duration: .5, ease: 'power3.out' }));
+    });
+
+    $$('.btn').forEach(node => {
+      node.addEventListener('pointerdown', event => {
+        const rect = node.getBoundingClientRect();
+        const dot = document.createElement('span');
+        dot.className = 'ripple';
+        const size = Math.max(rect.width, rect.height) * 2.2;
+        dot.style.width = `${size}px`;
+        dot.style.height = `${size}px`;
+        dot.style.left = `${event.clientX - rect.left}px`;
+        dot.style.top = `${event.clientY - rect.top}px`;
+        node.appendChild(dot);
+        gsap.to(dot, {
+          scale: 1, opacity: 0, duration: .7, ease: 'power2.out',
+          onComplete: () => dot.remove(),
+        });
+      });
+    });
+
+    window.addEventListener('resize', () => ScrollTrigger.refresh());
+  } else {
+    /* 不做动画也必须让内容完整可见：演示区直接停在最终状态。 */
+    if (window.gsap) {
+      const tl = buildDemo();
+      if (tl) { tl.progress(1).pause(); }
+    }
+    $$('.note[data-step]').forEach(note => note.classList.add('lit'));
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "name": "coomi-web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "type-check": "vue-tsc --noEmit",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "node --experimental-strip-types --test tests/marketSearch.test.ts tests/chatTimeline.test.ts"
+  },
+  "dependencies": {
+    "@rolldown/binding-linux-arm64-gnu": "^1.2.5",
+    "gsap": "^3.13.0",
+    "lucide": "^1.48.0",
+    "marked": "^12.0.2",
+    "morphicons": "^1.7.1",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0",
+    "vue-virtual-scroller": "^2.0.0-beta.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.4.5",
+    "vite": "^8.2.2",
+    "vue-tsc": "^2.0.11"
+  }
+}

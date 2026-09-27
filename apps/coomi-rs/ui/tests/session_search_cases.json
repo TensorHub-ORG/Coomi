@@ -1,0 +1,111 @@
+{
+  "_comment": "会话检索打分对拍语料：Rust session_search_score（ui/src/terminal_ui/mod.rs）与前端 scoreSession（web/src/stores/sessions.ts）共用。两端修改打分逻辑时必须同步更新本文件的 expect 值并各自重跑测试。字段与 SessionSummary / SessionMeta 对应；id 固定为 nil uuid，不含任何查询词。",
+  "cases": [
+    {
+      "query": "多进程",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "Python 的 GIL 是什么？影响什么场景",
+          "summary": "多进程不受影响，多进程方案并行",
+          "preview": "多进程",
+          "model": "deepseek-chat",
+          "expect": 7
+        }
+      ]
+    },
+    {
+      "query": "docker",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "用两句话解释 Docker 容器和虚拟机的区别",
+          "summary": "Docker 容器与虚拟机对比",
+          "preview": "用两句话解释 Docker 容器",
+          "model": "deepseek-chat",
+          "expect": 9
+        }
+      ]
+    },
+    {
+      "query": "B+树",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "76408",
+          "summary": "B+ 树适合范围查询（原文带空格）",
+          "preview": "",
+          "model": "deepseek-chat",
+          "expect": 1
+        }
+      ]
+    },
+    {
+      "query": "量子纠缠",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "随便聊聊",
+          "summary": "今天天气不错",
+          "preview": "随便聊聊",
+          "model": "deepseek-chat",
+          "expect": 0
+        }
+      ]
+    },
+    {
+      "query": "Python GIL",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "Python 的 GIL 是什么？影响什么场景",
+          "summary": "GIL 全称 Global Interpreter Lock，影响多线程",
+          "preview": "Python 的 GIL",
+          "model": "deepseek-chat",
+          "expect": 15
+        }
+      ]
+    },
+    {
+      "query": "deepseek",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "测试",
+          "summary": "",
+          "preview": "",
+          "model": "deepseek-chat",
+          "expect": 1
+        }
+      ]
+    },
+    {
+      "_comment": "2 字符词不得命中 uuid（防误报）",
+      "query": "ab",
+      "sessions": [
+        {
+          "id": "ab000000-0000-0000-0000-000000000000",
+          "title": "测试标题",
+          "summary": "",
+          "preview": "",
+          "model": "deepseek-chat",
+          "expect": 0
+        }
+      ]
+    },
+    {
+      "_comment": "≥6 字符 uuid 片段允许命中（粘 ID 片段可搜）",
+      "query": "00000000",
+      "sessions": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "title": "测试标题",
+          "summary": "",
+          "preview": "",
+          "model": "deepseek-chat",
+          "expect": 1
+        }
+      ]
+    }
+  ]
+}

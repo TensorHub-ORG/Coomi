@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Coomi 安装向导外壳：顶部步骤指示 + ViewPager2 + 底部导航条。
+    setup_viewpager / setup_nav_bar / btn_setup_back / btn_setup_next 由 Java 引用。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?attr/coomiPage"
+    android:fitsSystemWindows="true"
+    tools:context="app.coomi.CoomiSetupActivity">
+
+    <!-- ── 顶栏：品牌 + 步骤药丸 ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/coomi_space_l"
+        android:paddingEnd="@dimen/coomi_space_l">
+
+        <ImageView
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:src="@drawable/coomi_logo"
+            android:contentDescription="@string/coomi_brand"/>
+
+        <TextView
+            android:id="@+id/setup_step_label"
+            style="@style/Coomi.Text.Caption"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/coomi_space_s"
+            android:text="@string/coomi_brand"/>
+
+        <!-- 步骤指示药丸 -->
+        <View
+            android:id="@+id/setup_step_1"
+            android:layout_width="20dp"
+            android:layout_height="4dp"
+            android:background="@drawable/coomi_step_active"/>
+
+        <View
+            android:id="@+id/setup_step_2"
+            android:layout_width="20dp"
+            android:layout_height="4dp"
+            android:layout_marginStart="5dp"
+            android:background="@drawable/coomi_step_idle"/>
+    </LinearLayout>
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/setup_viewpager"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <!-- ── 底部导航条 ── -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/coomiDivider"/>
+
+    <LinearLayout
+        android:id="@+id/setup_nav_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="?attr/coomiPage"
+        android:paddingStart="@dimen/coomi_gutter"
+        android:paddingEnd="@dimen/coomi_gutter"
+        android:paddingTop="@dimen/coomi_space_m"
+        android:paddingBottom="@dimen/coomi_space_l">
+
+        <Button
+            android:id="@+id/btn_setup_back"
+            style="@style/Coomi.Button.Secondary"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/coomi_button_height"
+            android:layout_weight="1"
+            android:text="@string/coomi_setup_cancel"/>
+
+        <Button
+            android:id="@+id/btn_setup_next"
+            style="@style/Coomi.Button"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/coomi_button_height"
+            android:layout_weight="1.6"
+            android:layout_marginStart="@dimen/coomi_space_m"
+            android:text="@string/coomi_setup_next"/>
+    </LinearLayout>
+</LinearLayout>

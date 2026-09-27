@@ -1,0 +1,657 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!DOCTYPE resources [
+    <!ENTITY TERMUX_PACKAGE_NAME "app.botdrop">
+    <!ENTITY TERMUX_APP_NAME "Comax">
+    <!ENTITY TERMUX_API_APP_NAME "BotDrop:API">
+    <!ENTITY TERMUX_BOOT_APP_NAME "BotDrop:Boot">
+    <!ENTITY TERMUX_FLOAT_APP_NAME "BotDrop:Float">
+    <!ENTITY TERMUX_STYLING_APP_NAME "BotDrop:Styling">
+    <!ENTITY TERMUX_TASKER_APP_NAME "BotDrop:Tasker">
+    <!ENTITY TERMUX_WIDGET_APP_NAME "BotDrop:Widget">
+    ]>
+
+<resources>
+
+    <string name="application_name">&TERMUX_APP_NAME;</string>
+    <string name="shared_user_label">&TERMUX_APP_NAME; user</string>
+
+
+
+    <!-- Termux RUN_COMMAND permission -->
+    <string name="permission_run_command_label">Run commands in &TERMUX_APP_NAME; environment</string>
+    <string name="permission_run_command_description">execute arbitrary commands within &TERMUX_APP_NAME;
+        environment and access files</string>
+    <string name="shizuku_manager_permission_description">Allow components in same application to manage Shizuku.</string>
+    <string name="shizuku_api_v23_permission_description">Allow Shizuku API clients to access protected framework APIs.</string>
+
+
+
+    <!-- Termux Bootstrap Packages Installation -->
+    <string name="bootstrap_installer_body">Installing bootstrap packages…</string>
+    <string name="bootstrap_error_title">Unable to install bootstrap</string>
+    <string name="bootstrap_error_body">&TERMUX_APP_NAME; was unable to install the bootstrap packages.</string>
+    <string name="bootstrap_error_abort">Abort</string>
+    <string name="bootstrap_error_try_again">Try again</string>
+    <string name="bootstrap_error_not_primary_user_message">&TERMUX_APP_NAME; can only be run as the primary user.
+        \nBootstrap binaries compiled for &TERMUX_APP_NAME; have hardcoded $PREFIX path and cannot be installed
+        under any path other than:\n%1$s.</string>
+    <string name="bootstrap_error_installed_on_portable_sd">&TERMUX_APP_NAME; cannot be installed on
+        portable/external/removable sd card on your device.
+        \nBootstrap binaries compiled for &TERMUX_APP_NAME; have hardcoded $PREFIX path and cannot be installed
+        under any path other than:\n%1$s.</string>
+
+
+
+    <!-- Terminal Sidebar and Shortcuts -->
+    <string name="action_new_session">New session</string>
+    <string name="action_new_session_failsafe">Failsafe</string>
+    <string name="title_max_terminals_reached">Max terminals reached</string>
+    <string name="msg_max_terminals_reached">Close down existing ones before creating new.</string>
+
+    <string name="title_rename_session">Set session name</string>
+    <string name="action_rename_session_confirm">Set</string>
+    <string name="title_create_named_session">New named session</string>
+    <string name="action_create_named_session_confirm">Create</string>
+
+    <string name="action_toggle_soft_keyboard">Keyboard</string>
+
+    <string name="msg_enabling_terminal_toolbar">Enabling Terminal Toolbar</string>
+    <string name="msg_disabling_terminal_toolbar">Disabling Terminal Toolbar</string>
+
+
+
+    <!-- Terminal Popup -->
+    <string name="action_select_url">Select URL</string>
+    <string name="title_select_url_dialog">Click URL to copy or long press to open</string>
+    <string name="title_select_url_none_found">No URL found in the terminal.</string>
+    <string name="msg_select_url_copied_to_clipboard">URL copied to clipboard</string>
+
+    <string name="action_share_transcript">Share transcript</string>
+    <string name="title_share_transcript">Terminal transcript</string>
+    <string name="title_share_transcript_with">Send transcript to:</string>
+
+    <string name="action_share_selected_text">Share selected text</string>
+    <string name="title_share_selected_text">Terminal Text</string>
+    <string name="title_share_selected_text_with">Send selected text to:</string>
+
+    <string name="action_autofill_username">Autofill username</string>
+    <string name="action_autofill_password">Autofill password</string>
+
+    <string name="action_reset_terminal">Reset</string>
+    <string name="msg_terminal_reset">Terminal reset</string>
+
+    <string name="action_kill_process">Kill process (%d)</string>
+    <string name="title_confirm_kill_process">Really kill this session?</string>
+
+    <string name="action_style_terminal">Style</string>
+    <string name="action_toggle_keep_screen_on">Keep screen on</string>
+    <string name="action_open_help">Help</string>
+    <string name="action_open_settings">Settings</string>
+
+    <string name="action_report_issue">Report Issue</string>
+    <string name="msg_generating_report">Generating Report</string>
+    <string name="msg_add_termux_debug_info">Add termux debug info to report?</string>
+
+    <string name="error_styling_not_installed">The &TERMUX_STYLING_APP_NAME; Plugin App is not installed.</string>
+    <string name="action_styling_install">Install</string>
+
+
+
+    <!-- Termux Notifications -->
+    <string name="notification_action_exit">Exit</string>
+    <string name="notification_action_wake_lock">Acquire wakelock</string>
+    <string name="notification_action_wake_unlock">Release wakelock</string>
+
+
+
+    <!-- TermuxService -->
+    <string name="error_display_over_other_apps_permission_not_granted_to_start_terminal">&TERMUX_APP_NAME; requires
+        \"Display over other apps\" permission to start terminal sessions from background on Android >= 10.
+        Grants it from Settings -> Apps -> &TERMUX_APP_NAME; -> Advanced</string>
+    <string name="error_termux_service_invalid_execution_command_runner">Invalid execution command runner to TermuxService: `%1$s`</string>
+    <string name="error_termux_service_unsupported_execution_command_runner">Unsupported execution command runner to TermuxService: `%1$s`</string>
+    <string name="error_termux_service_unsupported_execution_command_shell_create_mode">Unsupported execution command shell create mode to TermuxService: `%1$s`</string>
+    <string name="error_termux_service_execution_command_shell_name_unset">Shell name not set but `%1$s` shell create mode passed</string>
+
+
+
+    <!-- Termux RunCommandService -->
+    <string name="error_run_command_service_invalid_intent_action">Invalid intent action to RunCommandService: `%1$s`</string>
+    <string name="error_run_command_service_invalid_execution_command_runner">Invalid execution command runner to RunCommandService: `%1$s`</string>
+    <string name="error_run_command_service_mandatory_extra_missing">Mandatory extra missing to RunCommandService: \"%1$s\"</string>
+    <string name="error_run_command_service_api_help">Visit %1$s for more info on RUN_COMMAND Intent usage.</string>
+
+
+
+    <!-- Termux File Receiver -->
+    <string name="title_file_received">Save file in ~/downloads/</string>
+    <string name="action_file_received_edit">Edit</string>
+    <string name="action_file_received_open_directory">Open directory</string>
+
+
+
+    <!-- Miscellaneous -->
+    <string name="error_termux_service_start_failed_general">Failed to start TermuxService. Check logcat for exception message.</string>
+    <string name="error_termux_service_start_failed_bg">Failed to start TermuxService while app is in background due to android bg restrictions.</string>
+
+
+
+    <!-- Termux Settings -->
+    <string name="title_activity_termux_settings">&TERMUX_APP_NAME; Settings</string>
+
+    <!-- Termux App Preferences -->
+    <string name="termux_preferences_title">&TERMUX_APP_NAME;</string>
+    <string name="termux_preferences_summary">Preferences for &TERMUX_APP_NAME; app</string>
+
+        <!-- Debugging Preferences -->
+        <string name="termux_debugging_preferences_title">Debugging</string>
+        <string name="termux_debugging_preferences_summary">Preferences for debugging</string>
+
+            <!-- Logging Category -->
+            <string name="termux_logging_header">Logging</string>
+
+                <!-- Log Level -->
+                <string name="termux_log_level_title">Log Level</string>
+
+                <!-- Terminal View Key Logging -->
+                <string name="termux_terminal_view_key_logging_enabled_title">Terminal View Key Logging</string>
+                <string name="termux_terminal_view_key_logging_enabled_off">Logs will not have entries for terminal view keys. (Default)</string>
+                <string name="termux_terminal_view_key_logging_enabled_on">Logcat logs will have entries for terminal view keys.
+                    These are very verbose and should be disabled under normal circumstances or will cause performance issues.</string>
+
+                <!-- Plugin Error Notifications -->
+                <string name="termux_plugin_error_notifications_enabled_title">Plugin Error Notifications</string>
+                <string name="termux_plugin_error_notifications_enabled_off">Disable flashes and notifications for plugin errors.</string>
+                <string name="termux_plugin_error_notifications_enabled_on">Show flashes and notifications for plugin errors. (Default)</string>
+
+                <!-- Crash Report Notifications -->
+                <string name="termux_crash_report_notifications_enabled_title">Crash Report Notifications</string>
+                <string name="termux_crash_report_notifications_enabled_off">Disable notifications for crash reports.</string>
+                <string name="termux_crash_report_notifications_enabled_on">Show notifications for crash reports. (Default)</string>
+
+                <!-- Firebase Crashlytics -->
+                <string name="termux_crashlytics_collection_enabled_title">Firebase Crashlytics</string>
+                <string name="termux_crashlytics_collection_enabled_off">Disable automatic crash collection to Firebase.</string>
+                <string name="termux_crashlytics_collection_enabled_on">Enable automatic crash collection to Firebase.</string>
+
+                <!-- Firebase Analytics -->
+                <string name="termux_analytics_collection_enabled_title">Firebase Analytics</string>
+                <string name="termux_analytics_collection_enabled_off">Disable automatic analytics collection to Firebase.</string>
+                <string name="termux_analytics_collection_enabled_on">Enable automatic analytics collection to Firebase.</string>
+
+
+        <!-- Terminal IO Preferences -->
+        <string name="termux_terminal_io_preferences_title">Terminal I/O</string>
+        <string name="termux_terminal_io_preferences_summary">Preferences for terminal I/O</string>
+
+            <!-- Keyboard Category -->
+            <string name="termux_keyboard_header">Keyboard</string>
+
+                <!-- Soft Keyboard -->
+                <string name="termux_soft_keyboard_enabled_title">Soft Keyboard Enabled</string>
+                <string name="termux_soft_keyboard_enabled_off">Soft keyboard will be disabled.</string>
+                <string name="termux_soft_keyboard_enabled_on">Soft keyboard will be enabled. (Default)</string>
+
+                <!-- Soft Keyboard Only If No Hardware-->
+                <string name="termux_soft_keyboard_enabled_only_if_no_hardware_title">Soft Keyboard Only If No Hardware</string>
+                <string name="termux_soft_keyboard_enabled_only_if_no_hardware_off">Soft keyboard will be enabled even if
+                    hardware keyboard is connected. (Default)</string>
+                <string name="termux_soft_keyboard_enabled_only_if_no_hardware_on">Soft keyboard will be enabled only if
+                    no hardware keyboard is connected.</string>
+
+
+        <!-- Terminal View Preferences -->
+        <string name="termux_terminal_view_preferences_title">Terminal View</string>
+        <string name="termux_terminal_view_preferences_summary">Preferences for terminal view</string>
+
+            <!-- View Category -->
+            <string name="termux_terminal_view_view_header">View</string>
+
+                <!-- Terminal View Margin Adjustment -->
+                <string name="termux_terminal_view_terminal_margin_adjustment_title">Terminal Margin Adjustment</string>
+                <string name="termux_terminal_view_terminal_margin_adjustment_off">Terminal margin adjustment will be disabled.</string>
+                <string name="termux_terminal_view_terminal_margin_adjustment_on">Terminal margin adjustment will be enabled.
+                    It should be enabled to try to fix the issue where soft keyboard covers part of extra keys/terminal view.
+                    If it causes screen flickering on your devices, then disable it. (Default)</string>
+
+
+
+    <!-- Termux:API App Preferences -->
+    <string name="termux_api_preferences_title">&TERMUX_API_APP_NAME;</string>
+    <string name="termux_api_preferences_summary">Preferences for &TERMUX_API_APP_NAME; app</string>
+
+
+
+    <!-- Termux:Float App Preferences -->
+    <string name="termux_float_preferences_title">&TERMUX_FLOAT_APP_NAME;</string>
+    <string name="termux_float_preferences_summary">Preferences for &TERMUX_FLOAT_APP_NAME; app</string>
+
+
+
+    <!-- Termux:Tasker App Preferences -->
+    <string name="termux_tasker_preferences_title">&TERMUX_TASKER_APP_NAME;</string>
+    <string name="termux_tasker_preferences_summary">Preferences for &TERMUX_TASKER_APP_NAME; app</string>
+
+
+
+    <!-- Termux:Widget App Preferences -->
+    <string name="termux_widget_preferences_title">&TERMUX_WIDGET_APP_NAME;</string>
+    <string name="termux_widget_preferences_summary">Preferences for &TERMUX_WIDGET_APP_NAME; app</string>
+
+
+
+    <!-- About Preference -->
+    <string name="about_preference_title">About</string>
+
+    <!-- Donate Preference -->
+    <string name="donate_preference_title">Donate</string>
+
+    <string name="shizuku_single_app_preferences_title">Shizuku (Single App)</string>
+    <string name="shizuku_single_app_preferences_summary">Open Shizuku status and manual start controls</string>
+    <string name="action_open_shizuku_status">Open Shizuku Home</string>
+    <string name="action_request_shizuku_permission">Check Shizuku Permission</string>
+    <string name="botdrop_shizuku_panel_title">Shizuku</string>
+    <string name="botdrop_shizuku_status_checking">Checking Shizuku status...</string>
+    <string name="botdrop_shizuku_permission_granted">Shizuku permission granted</string>
+    <string name="botdrop_shizuku_permission_denied">Shizuku permission denied</string>
+    <string name="botdrop_shizuku_permission_not_granted">Shizuku permission not granted</string>
+    <string name="botdrop_shizuku_permission_already_granted">Shizuku permission already granted</string>
+    <string name="botdrop_shizuku_binder_not_ready">Shizuku binder not ready</string>
+    <string name="botdrop_shizuku_requesting_permission">Requesting Shizuku permission...</string>
+    <string name="botdrop_waiting">Waiting...</string>
+    <string name="botdrop_checking">Checking...</string>
+    <string name="botdrop_shizuku_precheck_service_not_connected">Service not connected, cannot run Shizuku precheck</string>
+    <string name="botdrop_shizuku_precheck_running">Running Shizuku precheck...</string>
+    <string name="botdrop_shizuku_precheck_no_result">Shizuku precheck: no result</string>
+    <string name="botdrop_shizuku_precheck_passed">Shizuku precheck passed</string>
+    <string name="botdrop_shizuku_precheck_failed">Shizuku precheck failed: %1$s</string>
+    <string name="botdrop_shizuku_bridge_status_checking">Checking Shizuku bridge status...</string>
+    <string name="botdrop_shizuku_bridge_status_not_configured">Shizuku bridge token not configured</string>
+    <string name="botdrop_shizuku_bridge_status_running">Shizuku bridge running</string>
+    <string name="botdrop_shizuku_bridge_status_stopped">Shizuku bridge stopped</string>
+    <string name="botdrop_shizuku_bridge_status_stopped_with_reason">Shizuku bridge stopped: %1$s</string>
+    <string name="botdrop_u2_service_panel_title">u2 Service</string>
+    <string name="botdrop_u2_service_status_checking">Checking u2 status...</string>
+    <string name="botdrop_u2_service_status_running">u2 service running</string>
+    <string name="botdrop_u2_service_status_stopped">u2 service stopped</string>
+    <string name="botdrop_u2_service_status_stopped_with_reason">u2 service stopped: %1$s</string>
+    <string name="botdrop_u2_service_prepare_step_clean_sources">[1/5] Trimming apt sources…</string>
+    <string name="botdrop_u2_service_prepare_step_prepare_env">[2/5] Reinstalling dependencies (may take 1–2 min)…</string>
+    <string name="botdrop_u2_service_prepare_step_verify">[3/5] Installing u2automator (may take 2–5 min)…</string>
+    <string name="botdrop_u2_service_prepare_step_install_ime">[4/5] Installing AdbKeyboard IME…</string>
+    <string name="botdrop_u2_service_prepare_step_start_u2">[5/5] Starting u2.jar…</string>
+    <string name="botdrop_u2_service_starting">Starting u2 service...</string>
+    <string name="botdrop_u2_service_start_failed">Failed to start u2 service</string>
+    <string name="botdrop_u2_service_start_command_sent">u2 service start command sent</string>
+    <string name="botdrop_u2_service_stopping">Stopping u2 service...</string>
+    <string name="botdrop_u2_service_stop_failed">Failed to stop u2 service</string>
+    <string name="botdrop_u2_service_stop_command_sent">u2 service stop command sent</string>
+    <string name="botdrop_start_u2_service">Start u2 Service</string>
+    <string name="botdrop_stop_u2_service">Stop u2 Service</string>
+    <string name="botdrop_shizuku_status_unavailable">Shizuku status unavailable</string>
+
+    <!-- BotDrop UI -->
+    <string name="botdrop_update_available">Update available</string>
+    <string name="botdrop_download">Download</string>
+    <string name="botdrop_dismiss">Dismiss</string>
+    <string name="botdrop_back">Back</string>
+    <string name="botdrop_gateway_stopped">Gateway Stopped</string>
+    <string name="botdrop_gateway_started">Gateway started</string>
+    <string name="botdrop_gateway_start_failed">Failed to start gateway</string>
+    <string name="botdrop_gateway_stopped_toast">Gateway stopped</string>
+    <string name="botdrop_gateway_stop_failed">Failed to stop gateway</string>
+    <string name="botdrop_gateway_restarting">Restarting gateway</string>
+    <string name="botdrop_gateway_restarted">Gateway restarted</string>
+    <string name="botdrop_gateway_restart_failed">Failed to restart gateway</string>
+    <string name="botdrop_gateway_restarting_with_new_model">Restarting gateway for model change</string>
+    <string name="botdrop_gateway_restarted_successfully">Gateway restarted successfully</string>
+    <string name="botdrop_check_openclaw_updates">Check OpenClaw updates</string>
+    <string name="botdrop_check_updates">Check updates</string>
+    <string name="botdrop_automation_panel_title">Automation Panel</string>
+    <string name="botdrop_automation_panel_desc">Manage automations and triggers.</string>
+    <string name="botdrop_loading_versions">Loading versions…</string>
+    <string name="botdrop_view_log">View log</string>
+    <string name="botdrop_view_log_title">View Log</string>
+    <string name="botdrop_view_log_desc">Inspect gateway output and errors.</string>
+    <string name="botdrop_open_web_ui">Open Web UI</string>
+    <string name="botdrop_open_web_ui_title">Open Web UI</string>
+    <string name="botdrop_open_web_ui_desc">Open the local OpenClaw web interface.</string>
+    <string name="botdrop_opening_web_ui">Opening Web UI</string>
+    <string name="botdrop_opening_web_ui_attempt">Opening Web UI (%1$d/%2$d)</string>
+    <string name="botdrop_uptime">Uptime: %1$s</string>
+    <string name="botdrop_loaded_models_from_openclaw">Loaded %1$d models from OpenClaw</string>
+    <string name="botdrop_first_interaction_tip">First reply may take 2-3 minutes while the agent warms up.</string>
+    <string name="botdrop_gateway_issue_detected">Gateway issue detected</string>
+    <string name="botdrop_channels">Channels</string>
+    <string name="botdrop_channel_telegram">Telegram</string>
+    <string name="botdrop_platform_telegram">Telegram</string>
+    <string name="botdrop_connected">● Connected</string>
+    <string name="botdrop_disconnected">○ —</string>
+    <string name="botdrop_channel_discord">Discord</string>
+    <string name="botdrop_platform_discord">Discord</string>
+    <string name="botdrop_channel_feishu">Feishu</string>
+    <string name="botdrop_platform_feishu">Feishu</string>
+    <string name="botdrop_channel_qqbot">QQ Bot</string>
+    <string name="botdrop_platform_qqbot">QQ Bot</string>
+    <string name="botdrop_current_model">Current Model</string>
+    <string name="botdrop_change_model">Change Model</string>
+    <string name="botdrop_change_version">Change Version</string>
+    <string name="botdrop_check_botdrop_update">Check Update</string>
+    <string name="botdrop_start">Start</string>
+    <string name="botdrop_stop">Stop</string>
+    <string name="botdrop_restart">Restart</string>
+    <string name="botdrop_backup">Backup</string>
+    <string name="botdrop_restore">Restore</string>
+    <string name="botdrop_tools">Tools</string>
+    <string name="botdrop_data_recovery">Data &amp; Recovery</string>
+    <string name="botdrop_data_recovery_desc">Back up settings or restore a saved file.</string>
+    <string name="botdrop_tip">💡 Tip</string>
+    <string name="botdrop_chat_tip">Chat with BotDrop in a connected channel to adjust settings, add channels, or change models.</string>
+    <string name="botdrop_ssh_access">SSH Access</string>
+    <string name="botdrop_ssh_password_label">ssh -p 8022 %1$s\nPassword: %2$s</string>
+    <string name="botdrop_welcome">Welcome to BotDrop</string>
+    <string name="botdrop_permissions_intro">BotDrop needs two permissions to keep your AI gateway running in the background.</string>
+    <string name="botdrop_notifications">Notifications</string>
+    <string name="botdrop_notifications_hint">Show gateway alerts and status</string>
+    <string name="botdrop_enabled">Enabled</string>
+    <string name="botdrop_allow">Allow</string>
+    <string name="botdrop_granted">Granted</string>
+    <string name="botdrop_background_running">Background Running</string>
+    <string name="botdrop_background_running_hint">Keep the gateway running in the background</string>
+    <string name="botdrop_advanced_background_settings">Background Settings</string>
+    <string name="botdrop_advanced_background_hint">Recommended: set Battery to Unrestricted and allow Background data.</string>
+    <string name="botdrop_background_data_restricted">Background data is restricted. Enable Unrestricted data usage for BotDrop.</string>
+    <string name="botdrop_background_data_allowed">Background data is allowed. If it still pauses, set Battery to Unrestricted.</string>
+    <string name="botdrop_background_data_hint">If the bot pauses in background, set Battery to Unrestricted and allow Background data.</string>
+    <string name="botdrop_open">Open</string>
+    <string name="botdrop_set">Set</string>
+    <string name="botdrop_starting_status">Starting...</string>
+    <string name="botdrop_continue">Continue</string>
+    <string name="botdrop_check_update">Check Update</string>
+    <string name="botdrop_checking_installation">Checking installation...</string>
+    <string name="botdrop_terminal">🖥 Terminal</string>
+    <string name="botdrop_terminal_title">Terminal</string>
+    <string name="botdrop_terminal_desc">Run commands and debug.</string>
+    <string name="botdrop_next">Next</string>
+    <string name="botdrop_set_provider_credentials">Set provider credentials</string>
+    <string name="botdrop_close">Close</string>
+    <string name="botdrop_provider_id">Provider ID</string>
+    <string name="botdrop_provider_id_hint">e.g., moonshot</string>
+    <string name="botdrop_custom_base_url">Custom Base URL</string>
+    <string name="botdrop_custom_base_url_hint">https://api.example.com/v1</string>
+    <string name="botdrop_enter_api_key">Enter API key</string>
+    <string name="botdrop_saved_keys">Saved keys</string>
+    <string name="botdrop_cancel">Cancel</string>
+    <string name="botdrop_select_model">Select Model</string>
+    <string name="botdrop_search">Search</string>
+    <string name="botdrop_search_models">Search models...</string>
+    <string name="botdrop_loading_models">Loading models...</string>
+    <string name="botdrop_retry">Retry</string>
+    <string name="botdrop_openclaw_gateway_log">OpenClaw Gateway Log</string>
+    <string name="botdrop_copy">Copy</string>
+    <string name="botdrop_stopping_gateway">Stopping gateway</string>
+    <string name="botdrop_installing_update">Installing update</string>
+    <string name="botdrop_finalizing">Finalizing</string>
+    <string name="botdrop_starting_gateway">Starting gateway</string>
+    <string name="botdrop_refreshing_model_list">Refreshing model list</string>
+    <string name="botdrop_may_take_a_few_minutes">This may take a few minutes</string>
+    <string name="botdrop_choose_agent">Choose Your Agent</string>
+    <string name="botdrop_openclaw">OpenClaw</string>
+    <string name="botdrop_openclaw_desc">The AI that actually does things.</string>
+    <string name="botdrop_openclaw_site">openclaw.ai</string>
+    <string name="botdrop_install">Install</string>
+    <string name="botdrop_settings">Settings</string>
+    <string name="botdrop_settings_community">Community</string>
+    <string name="botdrop_settings_website_title">Official Website</string>
+    <string name="botdrop_settings_website_desc">botdrop.app</string>
+    <string name="botdrop_settings_x_title">X (Twitter)</string>
+    <string name="botdrop_settings_x_desc">Follow product updates</string>
+    <string name="botdrop_settings_discord_title">Discord Community</string>
+    <string name="botdrop_settings_discord_desc">Join the community chat</string>
+    <string name="botdrop_settings_docs_title">Docs</string>
+    <string name="botdrop_settings_docs_desc">Read setup and usage guides</string>
+    <string name="botdrop_app_version_label">BotDrop</string>
+    <string name="botdrop_openclaw_version_label">OpenClaw Version</string>
+    <string name="botdrop_openclaw_version_manager">OpenClaw version manager</string>
+    <string name="botdrop_owliabot">OwliaBot</string>
+    <string name="botdrop_owliabot_desc">A leaner, safer crypto-native OpenClaw.</string>
+    <string name="botdrop_owliabot_site">owlia.bot</string>
+    <string name="botdrop_soon">Soon</string>
+    <string name="botdrop_choose_your_ai">Choose your AI</string>
+    <string name="botdrop_select_ai_model_desc">Select an AI model to power your bot</string>
+    <string name="botdrop_ai_model">AI Model</string>
+    <string name="botdrop_no_model_selected">No model selected</string>
+    <string name="botdrop_select">Select</string>
+    <string name="botdrop_api_key">API Key</string>
+    <string name="botdrop_paste_api_key_here">Paste your API key here</string>
+    <string name="botdrop_toggle_visibility">Toggle visibility</string>
+    <string name="botdrop_custom_base_url_example">e.g. https://api.example.com/v1</string>
+    <string name="botdrop_verify_continue">Verify &amp; Continue</string>
+    <string name="botdrop_back_arrow">← Back</string>
+    <string name="botdrop_provider_auth">Provider Auth</string>
+    <string name="botdrop_paste_key_here">Paste your key here</string>
+    <string name="botdrop_open_browser_signin">Open Browser to Sign In</string>
+    <string name="botdrop_connect_im_channels">Connect IM Channels</string>
+    <string name="botdrop_discord_intro">Create a bot on Discord Developer Portal and paste the bot token below.</string>
+    <string name="botdrop_discord_steps">Required steps: 1) Create bot and copy token; 2) Add bot to your server(guild).</string>
+    <string name="botdrop_bot_token">Bot Token</string>
+    <string name="botdrop_bot_token_hint">Bot token</string>
+    <string name="botdrop_guild_id">Guild ID</string>
+    <string name="botdrop_owner_id">Owner ID</string>
+    <string name="botdrop_open_discord_developers">Open Discord Developers</string>
+    <string name="botdrop_connect_start">Connect &amp; Start</string>
+    <string name="botdrop_progress_connecting_channel">Preparing channel setup…</string>
+    <string name="botdrop_progress_checking_qqbot_plugin">Checking QQ Bot plugin…</string>
+    <string name="botdrop_progress_installing_qqbot_plugin">Installing QQ Bot plugin (about 1-2 minutes)…</string>
+    <string name="botdrop_progress_writing_channel_config">Saving channel configuration…</string>
+    <string name="botdrop_progress_deleting_channel_config">Deleting channel configuration…</string>
+    <string name="botdrop_skip_for_now">Skip for now</string>
+    <string name="botdrop_delete_channel_config">Delete configuration</string>
+    <string name="botdrop_delete_channel_title">Delete %1$s configuration?</string>
+    <string name="botdrop_delete_channel_message">This will remove saved %1$s settings from local configuration.</string>
+    <string name="botdrop_delete_channel_failed">Failed to remove configuration</string>
+    <string name="botdrop_feishu_intro">Create a Feishu app and bot, then fill in App ID and App Secret below. See setup guide for details.</string>
+    <string name="botdrop_qqbot_intro">Create a bot on the QQ Open Platform, then fill in AppID and AppSecret below.</string>
+    <string name="botdrop_app_id">App ID</string>
+    <string name="botdrop_app_secret">App Secret</string>
+    <string name="botdrop_feishu_user_id_next_step">Feishu User ID (for the next step)</string>
+    <string name="botdrop_feishu_user_id_hint">ou_xxx...</string>
+    <string name="botdrop_feishu_steps">Step 1: Save with only App ID + App Secret.\nStep 2: Message the bot to get your user id (ou_...).\nStep 3: Paste user id here, save, and restart gateway.</string>
+    <string name="botdrop_qqbot_steps">Steps: 1) Create a bot at q.qq.com; 2) Copy AppID and AppSecret; 3) Fill in below and connect.</string>
+    <string name="botdrop_open_feishu_console">Open Feishu Console</string>
+    <string name="botdrop_open_qqbot_console">Open QQ Open Platform</string>
+    <string name="botdrop_open_setup_bot">Open @BotDropSetupBot</string>
+    <string name="botdrop_ai_assistant_on_phone">Your AI assistant,\nrunning on your phone.</string>
+    <string name="botdrop_environment_ready">Environment ready</string>
+    <string name="botdrop_verifying_nodejs">Verifying Node.js</string>
+    <string name="botdrop_setting_up_environment">Setting up environment...</string>
+    <string name="botdrop_installing_openclaw">Installing OpenClaw</string>
+    <string name="botdrop_takes_about_a_minute">This takes about a minute</string>
+    <string name="botdrop_continue_arrow">Continue →</string>
+    <string name="botdrop_model_badge">Model badge</string>
+    <string name="botdrop_provider_name">Provider Name</string>
+    <string name="botdrop_auth_method_hint">Auth method hint</string>
+    <string name="botdrop_select_provider_choose_model">Select provider and choose model</string>
+    <string name="botdrop_update_title">BotDrop Update</string>
+    <string name="botdrop_new_version_detected">New version detected: v%1$s</string>
+    <string name="botdrop_new_version_detected_detail">New version detected: v%1$s\n\nTap for details</string>
+    <string name="botdrop_update_channel_name">BotDrop Updates</string>
+    <string name="botdrop_update_channel_description">Notifies when a new BotDrop version is available.</string>
+    <string name="botdrop_gateway_running">Gateway Running</string>
+    <string name="botdrop_openclaw_version">OpenClaw v%1$s</string>
+    <string name="botdrop_update_available_version">Update available: v%1$s</string>
+    <string name="botdrop_openclaw_update_available">OpenClaw update available: v%1$s → v%2$s\n\nA newer OpenClaw version is available.\nWould you like to update now?</string>
+    <string name="botdrop_checking_openclaw">Checking OpenClaw...</string>
+    <string name="botdrop_setup_required">Setup required...</string>
+    <string name="botdrop_channel_setup_required">Channel setup required...</string>
+    <string name="botdrop_check_button_unavailable">Check button unavailable</string>
+    <string name="botdrop_already_up_to_date">Already up to date</string>
+    <string name="botdrop_no_app_available_to_open_web_links">No app available to open web links</string>
+    <string name="botdrop_no_browser_available">No browser available</string>
+    <string name="botdrop_service_not_connected">Service not connected</string>
+    <string name="botdrop_failed_openclaw_backup_restore">Failed to restore OpenClaw data</string>
+    <string name="botdrop_no_openclaw_data_folder">No OpenClaw data folder available to backup</string>
+    <string name="botdrop_openclaw_backup_created">OpenClaw backup created:\n%1$s\nIncludes full .openclaw and botdrop folders.</string>
+    <string name="botdrop_openclaw_not_running">OpenClaw gateway is not running</string>
+    <string name="botdrop_web_ui_still_starting">Web UI is still starting. Opened directly; please refresh in browser if needed.</string>
+    <string name="botdrop_openclaw_web_ui_already_opening">Web UI is already opening</string>
+    <string name="botdrop_connected_gateway_starting">Connected! Gateway is starting…</string>
+    <string name="botdrop_service_not_ready">Service not ready, please try again</string>
+    <string name="botdrop_error_start_gateway">Failed to start gateway: %1$s</string>
+    <string name="botdrop_unknown_error_exit_code">Unknown error (exit code: %1$d)</string>
+    <string name="botdrop_skip_channel_setup_title">Skip %1$s setup?</string>
+    <string name="botdrop_skip_channel_setup_message">If you skip now, %1$s will remain unconfigured.\nYou can configure channels later from the OpenClaw Web UI.</string>
+    <string name="botdrop_skip">Skip</string>
+    <string name="botdrop_this_channel">This channel</string>
+    <string name="botdrop_connecting">Connecting…</string>
+    <string name="botdrop_error_enter_valid_bot_token">Please enter a valid bot token</string>
+    <string name="botdrop_error_enter_app_id">Please enter your App ID</string>
+    <string name="botdrop_error_enter_qqbot_app_id">Please enter your QQ Bot AppID</string>
+    <string name="botdrop_error_enter_token">Please enter your token</string>
+    <string name="botdrop_error_enter_owner_id">Please enter a valid owner ID</string>
+    <string name="botdrop_error_enter_app_secret">Please enter your App Secret</string>
+    <string name="botdrop_error_enter_qqbot_app_secret">Please enter your QQ Bot AppSecret</string>
+    <string name="botdrop_error_enter_guild_id">Please enter a valid guild ID</string>
+    <string name="botdrop_error_write_config">Failed to write configuration</string>
+    <string name="botdrop_openclaw_versions">OpenClaw Versions</string>
+    <string name="botdrop_service_not_connected_try_later">Service not connected. Please try again later.</string>
+    <string name="botdrop_no_versions_available">No versions available</string>
+    <string name="botdrop_no_valid_versions_found">No valid versions found</string>
+    <string name="botdrop_invalid_version_format">Invalid version format</string>
+    <string name="botdrop_invalid_install_version">Invalid install version</string>
+    <string name="botdrop_install_openclaw_confirm">Install %1$s?</string>
+    <string name="botdrop_install_openclaw_installed_title">Installed: %1$s\n\nInstall %2$s?</string>
+    <string name="botdrop_install_openclaw_not_installed_title">OpenClaw is not installed. Install %1$s?</string>
+    <string name="botdrop_failed_to_load_version_list">Failed to load version list</string>
+    <string name="botdrop_no_versions_found">No versions found</string>
+    <string name="botdrop_failed_to_fetch_versions">Failed to fetch versions</string>
+    <string name="botdrop_failed_to_fetch_versions_exit">Failed to fetch versions (exit %1$s)</string>
+    <string name="botdrop_openclaw_version_manager_title">OpenClaw Version</string>
+    <string name="botdrop_openclaw_current_version">OpenClaw v%1$s (Current)</string>
+    <string name="botdrop_reset_to_latest">Reset to latest</string>
+    <string name="botdrop_current_install_version">Current install version: %1$s</string>
+    <string name="botdrop_set_to_latest">Set to %1$s</string>
+    <string name="botdrop_pin">Pin</string>
+    <string name="botdrop_pin_install_version">Pin install version to %1$s?</string>
+    <string name="botdrop_update_failed">Update Failed</string>
+    <string name="botdrop_no_update_target_version">No update target version</string>
+    <string name="botdrop_dismissed_update">Dismissed update: v%1$s</string>
+    <string name="botdrop_updating_model">Updating…</string>
+    <string name="botdrop_install_failed">Install failed: %1$s</string>
+    <string name="botdrop_updated_to_version_refreshing">Updated to v%1$s and refreshing model list...</string>
+    <string name="botdrop_updated_to_version">Updated to v%1$s</string>
+    <string name="botdrop_updated_to_version_cache_failed">Updated to v%1$s (model cache refresh failed)</string>
+    <string name="botdrop_no_custom_model_list">No custom model list found</string>
+    <string name="botdrop_invalid_model_format">Invalid model format</string>
+    <string name="botdrop_failed_update_model_settings">Failed to update model settings</string>
+    <string name="botdrop_clipboard_unavailable">Clipboard unavailable</string>
+    <string name="botdrop_log_copied">Log copied</string>
+    <string name="botdrop_no_backup_found">No backup file found in: %1$s</string>
+    <string name="botdrop_backup_permission_denied">Cannot check for OpenClaw backup because storage permission is not granted.</string>
+    <string name="botdrop_no_openclaw_backup_found">No OpenClaw backup found in: %1$s. Continue with a fresh setup.</string>
+    <string name="botdrop_restore_openclaw_setup_title">Restore OpenClaw data before setup?</string>
+    <string name="botdrop_restore_openclaw_setup_message">A saved OpenClaw backup was found. Restore will replace current .openclaw folder, then jump to Dashboard. Choose Start from scratch to continue normal setup.</string>
+    <string name="botdrop_restore_data_button">Restore data</string>
+    <string name="botdrop_start_from_scratch">Start from scratch</string>
+    <string name="botdrop_openclaw_data_restored">OpenClaw data restored</string>
+    <string name="botdrop_no_update_available">No update available</string>
+    <string name="botdrop_service_unavailable_try_again">Service not available. Please try again.</string>
+    <string name="botdrop_open_browser">Open</string>
+    <string name="botdrop_update_update_available">Update available</string>
+    <string name="botdrop_update_update_message">A new version is available: v%1$s\n\nGo to update page?</string>
+    <string name="botdrop_telegram_token_hint">123456789:ABCdefGHI...</string>
+    <string name="botdrop_telegram_owner_hint">123456789</string>
+    <string name="botdrop_discord_token_hint">bot-token</string>
+    <string name="botdrop_discord_owner_id_hint">optional</string>
+    <string name="botdrop_feishu_app_id_hint">app-id</string>
+    <string name="botdrop_feishu_app_secret_hint">app-secret</string>
+    <string name="botdrop_qqbot_app_id_hint">AppID</string>
+    <string name="botdrop_qqbot_app_secret_hint">AppSecret</string>
+    <string name="botdrop_telegram_setup_help">Open the setup bot to create your Telegram bot and get your User ID.</string>
+    <string name="botdrop_feishu_setup_steps">Step 1: Tap Connect &amp; Start with only App ID + App Secret.\nStep 2: Message the setup bot after connect to get your User ID.\nStep 3: Paste the user id here, then tap Connect &amp; Start again.</string>
+    <string name="botdrop_add_custom_provider">Add custom provider</string>
+    <string name="botdrop_api_key_required_for_provider">API key is required for this provider</string>
+    <string name="botdrop_backup_permission_denied_with_manual_restore">Cannot restore OpenClaw backup automatically because storage permission is not granted. You can restore manually later.</string>
+    <string name="botdrop_base_url_changed_reselect_provider_model">Base URL changed, please reselect provider and model</string>
+    <string name="botdrop_base_url_required_for_provider">Provider base URL is required</string>
+    <string name="botdrop_cached_keys">Cached keys</string>
+    <string name="botdrop_confirm">Confirm</string>
+    <string name="botdrop_connected_with_model">Connected: %1$s</string>
+    <string name="botdrop_custom_provider">Custom provider</string>
+    <string name="botdrop_custom_provider_base_url_and_api_key_required">Custom provider base URL and API key are both required</string>
+    <string name="botdrop_delete_cached_key">Delete cached key</string>
+    <string name="botdrop_enter_api_key_for_provider">Enter API key for this provider</string>
+    <string name="botdrop_enter_custom_base_url">Enter custom base URL</string>
+    <string name="botdrop_enter_provider_credentials_custom">Enter credentials for custom provider</string>
+    <string name="botdrop_failed_to_load_from_openclaw_using_bundled_catalog">Failed to load models from OpenClaw, using bundled catalog</string>
+    <string name="botdrop_failed_to_load_model_catalog">Failed to load model catalog</string>
+    <string name="botdrop_failed_to_parse_openclaw_output_using_bundled_catalog">Failed to parse OpenClaw model output, using bundled catalog</string>
+    <string name="botdrop_failed_to_read_openclaw_logs">Failed to read OpenClaw logs</string>
+    <string name="botdrop_failed_to_read_openclaw_logs_exit_code">Failed to read OpenClaw logs (exit code: %1$d)</string>
+    <string name="botdrop_fallback_to_bundled_catalog">Using bundled model catalog</string>
+    <string name="botdrop_fetch_models">Fetch models</string>
+    <string name="botdrop_installation_complete">Installation complete</string>
+    <string name="botdrop_installation_complete_with_version">Installation complete: v%1$s</string>
+    <string name="botdrop_installation_failed">Installation failed</string>
+    <string name="botdrop_invalid_api_key_format">Invalid API key format</string>
+    <string name="botdrop_later">Later</string>
+    <string name="botdrop_leave_empty_to_keep_current_key">Leave empty to keep current key</string>
+    <string name="botdrop_loading_models_from_custom_url">Loading models from custom URL...</string>
+    <string name="botdrop_no_custom_model_list_reselect">No custom model list found. Please reselect provider and try again.</string>
+    <string name="botdrop_no_log_output_available">No log output available</string>
+    <string name="botdrop_no_model_list_available">No model list available</string>
+    <string name="botdrop_no_models_available_for_provider">No models available for this provider</string>
+    <string name="botdrop_no_models_returned_by_custom_provider">No models returned by custom provider</string>
+    <string name="botdrop_no_provider_available">No providers available</string>
+    <string name="botdrop_open_browser_error">Failed to open browser</string>
+    <string name="botdrop_owner_id_hint">Owner ID</string>
+    <string name="botdrop_preparing_next_step">Preparing next step</string>
+    <string name="botdrop_provider_id_required">Provider ID is required</string>
+    <string name="botdrop_provider_models">Models for %1$s</string>
+    <string name="botdrop_provider_name_exists">Provider ID already exists</string>
+    <string name="botdrop_provider_section_configured">Configured</string>
+    <string name="botdrop_provider_section_unconfigured">Not configured</string>
+    <string name="botdrop_provider_status_configured">Configured</string>
+    <string name="botdrop_provider_status_unconfigured">Not configured</string>
+    <string name="botdrop_restore_openclaw_data">Restore OpenClaw data?</string>
+    <string name="botdrop_restore_openclaw_data_message">A saved OpenClaw backup was found. Restore now?</string>
+    <string name="botdrop_search_model">Search models...</string>
+    <string name="botdrop_search_provider">Search providers...</string>
+    <string name="botdrop_select_model_first">Please select a model first</string>
+    <string name="botdrop_select_provider">Select provider</string>
+    <string name="botdrop_unknown">Unknown</string>
+    <string name="botdrop_failed_to_open_link">Failed to open link</string>
+    <string name="botdrop_update">Update</string>
+    <string name="botdrop_updating_openclaw">Updating OpenClaw</string>
+    <string name="botdrop_use">Use</string>
+    <string name="botdrop_verifying">Verifying...</string>
+    <string name="botdrop_verifying_credentials">Verifying credentials...</string>
+
+    <!-- Coomi launcher / onboarding -->
+    <string name="coomi_launcher_welcome">你的 AI 助手，运行在手机上。\n基于 Termux 的自主 Agent 系统。</string>
+    <string name="coomi_launcher_notification_title">通知权限</string>
+    <string name="coomi_launcher_notification_desc">用于引擎后台保活通知</string>
+    <string name="coomi_launcher_battery_title">电池优化</string>
+    <string name="coomi_launcher_autostart_title">自启动管理</string>
+    <string name="coomi_launcher_autostart_desc">开机自动拉起引擎与定时任务</string>
+    <string name="coomi_launcher_battery_desc">允许后台运行以防引擎被杀</string>
+    <string name="coomi_allow">允许</string>
+    <string name="coomi_go_grant">去授权</string>
+    <string name="coomi_enabled">已开启</string>
+    <string name="coomi_granted">已授予</string>
+    <string name="coomi_continue">开始使用</string>
+    <string name="coomi_setting_up_environment">准备基础环境…</string>
+    <string name="coomi_setup_required">需要完成设置</string>
+    <string name="coomi_starting">准备启动…</string>
+    <string name="coomi_engine_starting">正在启动引擎…</string>
+    <string name="coomi_engine_failed">引擎启动失败</string>
+    <string name="coomi_engine_exited">引擎已退出</string>
+    <string name="coomi_engine_timeout">引擎启动超时</string>
+
+    <!-- 控制模式：无障碍服务说明（会显示在系统无障碍设置里） -->
+    <string name="coomi_accessibility_summary">控制模式：让 Coomi 替你操作屏幕</string>
+    <string name="coomi_accessibility_description">开启后，控制模式可以读取当前界面的控件，并代你填写和发送聊天消息、点击与滑动页面。用于「自动回复 / 自动操作 App」这类需要动手的任务，不会在后台自行操作。</string>
+    <string name="coomi_float_channel_name">控制模式悬浮层</string>
+
+</resources>

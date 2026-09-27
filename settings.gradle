@@ -1,0 +1,38 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+    }
+    plugins {
+        id("com.android.application") version "8.13.2"
+        id("com.android.library") version "8.13.2"
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+    }
+}
+
+rootProject.name = "coomi"
+
+include ':app'
+project(':app').projectDir = file('apps/coomi-app/app')
+
+include ':termux-shared'
+project(':termux-shared').projectDir = file('apps/coomi-app/termux-shared')
+
+include ':terminal-emulator'
+project(':terminal-emulator').projectDir = file('apps/coomi-app/terminal-emulator')
+
+include ':terminal-view'
+project(':terminal-view').projectDir = file('apps/coomi-app/terminal-view')

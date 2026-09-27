@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Disabled state: dim border -->
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <stroke android:width="2dp" android:color="#444444"/>
+            <corners android:radius="8dp"/>
+            <solid android:color="@android:color/transparent"/>
+        </shape>
+    </item>
+    <!-- Enabled state: gold border -->
+    <item>
+        <ripple android:color="@color/botdrop_accent_dark">
+            <item>
+                <shape android:shape="rectangle">
+                    <stroke android:width="2dp" android:color="@color/botdrop_accent"/>
+                    <corners android:radius="8dp"/>
+                    <solid android:color="@android:color/transparent"/>
+                </shape>
+            </item>
+        </ripple>
+    </item>
+</selector>

@@ -1,0 +1,12 @@
+Coomi Life optional extension
+
+This extension was informed by selected community concepts in LAAP AGI:
+https://github.com/ywbing-xrang/laap-AGI
+Pinned upstream commit: fe98e1e61adefe5899a01db561143ee8f8c45086
+Copyright 2025-2026 Lorry Jovens and LAAP contributors.
+Licensed under the Apache License, Version 2.0.
+
+Upstream did not contain a NOTICE file at the pinned commit. Coomi does not use
+LAAP, Aris, or contributor names as a product brand. The implementation in this
+directory is substantially modified for local JSON-RPC stdio operation, profile
+isolation, bounded context, Coomi Provider reuse, and Android lifecycle control.

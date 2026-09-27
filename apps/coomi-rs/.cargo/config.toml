@@ -1,0 +1,8 @@
+[target.aarch64-linux-android]
+linker = "/workspace/coomi/toolchain/android-linker-wrapper"
+rustflags = ["-C", "lto=off", "-C", "codegen-units=16", "-C", "link-arg=-L/workspace/coomi/toolchain/ndk/sysroot/usr/lib/aarch64-linux-android/24", "-C", "link-arg=-L/workspace/coomi/toolchain/ndk/sysroot/usr/lib/aarch64-linux-android"]
+
+[env]
+CC_aarch64_linux_android = "/workspace/coomi/toolchain/aarch64-clang-wrapper"
+AR_aarch64_linux_android = "/workspace/coomi/toolchain/ar-wrapper"
+RANLIB_aarch64_linux_android = "/workspace/coomi/toolchain/ranlib-wrapper"

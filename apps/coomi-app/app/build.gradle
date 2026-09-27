@@ -1,0 +1,454 @@
+plugins {
+    id "com.android.application"
+}
+
+def coomiDevBuild = System.getenv("COOMI_DEV_BUILD") == "1"
+def coomiPackageName = coomiDevBuild ? "com.coomidev.android" : "com.cubee.newapp4"
+def coomiAppName = coomiDevBuild ? "CoomiDev" : "Comax"
+def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
+def coomiPrebuiltNative = System.getenv("COOMI_PREBUILT_NATIVE") == "1"
+
+configurations.configureEach {
+    resolutionStrategy.force "com.google.guava:guava:24.1-jre"
+}
+
+ext {
+    // The packageVariant defines the bootstrap variant that will be included in the app APK.
+    // This must be supported by com.termux.shared.termux.TermuxBootstrap.PackageVariant or app will
+    // crash at startup.
+    // Currently supported values are: [ "apt-android-7" "apt-android-5" ]
+    packageVariant = System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7" // Default: "apt-android-7"
+}
+
+android {
+    namespace "com.termux"
+
+    compileSdkVersion project.properties.compileSdkVersion.toInteger()
+    if (coomiNdkHomeOverride) {
+        ndkPath = coomiNdkHomeOverride
+    } else {
+        ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: project.properties.ndkVersion
+    }
+    def coomiTargetSdk = project.properties.targetSdkVersion.toInteger()
+    if (coomiTargetSdk > 28) {
+        throw new GradleException(
+            "Coomi's Termux bootstrap executes from app-private storage and requires targetSdkVersion <= 28. " +
+            "Target API 29+ blocks usr/bin/bash with EACCES (Permission denied)."
+        )
+    }
+    def appVersionName = System.getenv("TERMUX_APP_VERSION_NAME") ?: ""
+    def apkVersionTag = System.getenv("TERMUX_APK_VERSION_TAG") ?: ""
+
+    dependencies {
+        implementation "androidx.annotation:annotation:1.9.0"
+        implementation "androidx.core:core:1.13.1"
+        implementation "androidx.appcompat:appcompat:1.6.1"
+        implementation "androidx.drawerlayout:drawerlayout:1.2.0"
+        implementation "androidx.fragment:fragment:1.6.2"
+        implementation "androidx.preference:preference:1.2.1"
+        implementation "androidx.work:work-runtime:2.9.1"
+        implementation "androidx.documentfile:documentfile:1.0.1"
+        implementation "androidx.viewpager:viewpager:1.0.0"
+        implementation "androidx.viewpager2:viewpager2:1.0.0"
+        implementation "com.google.android.material:material:1.12.0"
+        implementation "dev.rikka.shizuku:api:12.2.0"
+        implementation "dev.rikka.shizuku:provider:12.2.0"
+        implementation "com.google.guava:guava:24.1-jre"
+        implementation "io.noties.markwon:core:$markwonVersion"
+        implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
+        implementation "io.noties.markwon:linkify:$markwonVersion"
+        implementation "io.noties.markwon:recycler:$markwonVersion"
+        implementation 'com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava'
+
+        implementation project(":terminal-view")
+        implementation project(":termux-shared")
+    }
+
+    defaultConfig {
+        // NOTE: applicationId is "com.coomi.android" (Coomi's own package name).
+        // The official Termux bootstrap has /data/data/com.termux baked into apt/dpkg/bash
+        // at compile time, so package installation (pkg/apt) may fail until a bootstrap
+        // rebuilt for com.coomi.android is supplied; bash and most core tools work via $PREFIX.
+        applicationId coomiPackageName
+        minSdkVersion project.properties.minSdkVersion.toInteger()
+        targetSdkVersion coomiTargetSdk
+        // Keep the executable Termux bootstrap security domain for v1.4.0.
+        versionCode 73
+        versionName "1.5.0o6"
+
+        if (appVersionName) versionName = appVersionName
+        validateVersionName(versionName)
+
+        buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"" + project.ext.packageVariant + "\"" // Used by TermuxApplication class
+        buildConfigField "boolean", "COOMI_DEV_BUILD", coomiDevBuild.toString()
+        buildConfigField "int", "COOMI_DEFAULT_ENGINE_PORT", coomiDevBuild ? "18765" : "8765"
+
+        // 演示包开关：只有 demo 构建类型会打成 true，见 buildTypes.demo。
+        buildConfigField "boolean", "COOMI_DEMO", "false"
+
+        manifestPlaceholders.TERMUX_PACKAGE_NAME = coomiPackageName
+        manifestPlaceholders.TERMUX_APP_NAME = coomiAppName
+        manifestPlaceholders.COOMI_APP_LABEL = coomiAppName
+        manifestPlaceholders.COOMI_APP_ICON = coomiDevBuild ? "@drawable/coomi_agent_dev" : "@mipmap/ic_launcher"
+        manifestPlaceholders.COOMI_APP_ROUND_ICON = coomiDevBuild ? "@drawable/coomi_agent_dev" : "@mipmap/ic_launcher_round"
+        manifestPlaceholders.TERMUX_API_APP_NAME = "Coomi:API"
+        manifestPlaceholders.TERMUX_BOOT_APP_NAME = "Coomi:Boot"
+        manifestPlaceholders.TERMUX_FLOAT_APP_NAME = "Coomi:Float"
+        manifestPlaceholders.TERMUX_STYLING_APP_NAME = "Coomi:Styling"
+        manifestPlaceholders.TERMUX_TASKER_APP_NAME = "Coomi:Tasker"
+        manifestPlaceholders.TERMUX_WIDGET_APP_NAME = "Coomi:Widget"
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            ndkBuild {
+                cFlags "-std=c11", "-Wall", "-Wextra", "-Werror", "-Os", "-fno-stack-protector", "-Wl,--gc-sections"
+            }
+        }
+    }
+
+    signingConfigs {
+        debug {
+            // 签名口令从 local.properties 读取（不入库）；缺失时明确报错，禁止明文回退。
+            def signingProps = new Properties()
+            def signingPropsFile = rootProject.file('local.properties')
+            if (signingPropsFile.exists()) {
+                signingPropsFile.withInputStream { signingProps.load(it) }
+            }
+            storePassword signingProps.getProperty('coomi.signing.storePassword')
+            keyPassword signingProps.getProperty('coomi.signing.keyPassword')
+            storeFile file(signingProps.getProperty('coomi.signing.storeFile', 'testkey_untrusted.jks'))
+            keyAlias signingProps.getProperty('coomi.signing.keyAlias', 'alias')
+            if (!storePassword || !keyPassword) {
+                throw new GradleException(
+                    '签名口令缺失：请在 local.properties 配置 coomi.signing.storePassword 与 coomi.signing.keyPassword')
+            }
+            // 双保险：同时启用 v1/v2 签名。
+            // v1 让 UpdateChecker 的 GET_SIGNATURES 回退路径在低版本 Android 上可用；
+            // v2/v3 是 AGP 8 默认，UpdateChecker 在 API 28+ 用 getSigningInfo 读取。
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            // Remove resources that are not reachable from the release graph. Runtime archives
+            // are copied explicitly and are not affected by this pass.
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+        }
+
+        debug {
+            signingConfig signingConfigs.debug
+        }
+
+        /**
+         * 纯界面演示包：不起引擎、不要 API Key。
+         *
+         * 引导页每一步都能直接「下一步」跳过，仪表盘里点「启动 Coomi」直接把
+         * assets/web.zip 解出来的前端喂进 WebView（?demo=1，走 DemoTransport 的假事件），
+         * 全程不碰网络、不碰 bootstrap —— 就是拿来看界面的。
+         */
+        demo {
+            initWith debug
+            signingConfig signingConfigs.debug
+            // 库模块只有 debug / release，没有 demo，构建时回落到 debug。
+            matchingFallbacks = ['debug']
+            versionNameSuffix "-demo"
+            buildConfigField "boolean", "COOMI_DEMO", "true"
+        }
+    }
+
+    compileOptions {
+        // Flag to enable support for the new language APIs
+        coreLibraryDesugaringEnabled true
+
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    if (!coomiPrebuiltNative) {
+        externalNativeBuild {
+            ndkBuild {
+                path "src/main/cpp/Android.mk"
+            }
+        }
+    }
+
+    lint {
+        disable 'ProtectedPermissions'
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+    androidResources {
+        // RuntimeManager verifies and opens the original gzip archives by name.
+        // aapt otherwise expands .gz assets and silently strips the extension.
+        noCompress += ["tgz"]
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def tag = apkVersionTag ? apkVersionTag : project.ext.packageVariant + "-" + variant.buildType.name
+            outputFileName = new File(coomiDevBuild
+                ? "CoomiDev-${variant.versionName}-${variant.buildType.name}-arm64-v8a.apk"
+                : "coomi-app_" + tag + "_arm64-v8a.apk")
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    packagingOptions {
+        jniLibs {
+            // ARM64 本机构建复用已发布的 Termux 壳库，并打入已剥离的 Rust 引擎。
+            // 不再调用官方 x86_64 NDK 的 llvm-strip。
+            keepDebugSymbols += ['**/*.so']
+        }
+    }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.robolectric:robolectric:4.10"
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:1.1.5"
+}
+
+def coomiRustTarget = "aarch64-linux-android"
+def coomiRustRoot = rootProject.file("apps/coomi-rs")
+def coomiWebRoot = rootProject.file("apps/web")
+def coomiWebArchive = file("src/main/assets/web.zip")
+def coomiNativeDir = file("src/main/jniLibs/arm64-v8a")
+def coomiRuntimeDist = rootProject.file("runtime-v2-dist")
+def coomiRuntimeAssetsDir = layout.buildDirectory.dir("generated/coomiRuntimeAssets")
+def coomiDevResourcesDir = layout.buildDirectory.dir("generated/coomiDevResources")
+def coomiNativeBinary = new File(coomiRustRoot,
+    "target/${coomiRustTarget}/release/coomi")
+def coomiOsName = System.getProperty("os.name").toLowerCase(Locale.ROOT)
+def coomiOsArch = System.getProperty("os.arch").toLowerCase(Locale.ROOT)
+def coomiWindowsHost = coomiOsName.contains("windows")
+def coomiArm64LinuxHost = coomiOsName.contains("linux") && (coomiOsArch == "aarch64" || coomiOsArch == "arm64")
+def coomiNdkRoot = coomiNdkHomeOverride
+    ? file(coomiNdkHomeOverride)
+    : new File(android.sdkDirectory, "ndk/${android.ndkVersion}")
+def coomiNdkHostTag = coomiWindowsHost ? "windows-x86_64" : "linux-x86_64"
+def coomiNdkToolchainOverride = System.getenv("COOMI_NDK_TOOLCHAIN_DIR")
+def coomiNdkToolchain = coomiNdkToolchainOverride
+    ? file(coomiNdkToolchainOverride)
+    : new File(coomiNdkRoot, "toolchains/llvm/prebuilt/${coomiNdkHostTag}/bin")
+def coomiClangSuffix = coomiWindowsHost ? ".cmd" : ""
+def coomiToolSuffix = coomiWindowsHost ? ".exe" : ""
+def coomiAndroidLinker = file(System.getenv("COOMI_ANDROID_CLANG")
+    ?: new File(coomiNdkToolchain,
+        "aarch64-linux-android${android.defaultConfig.minSdkVersion.apiLevel}-clang${coomiClangSuffix}"))
+def coomiAndroidAr = file(System.getenv("COOMI_ANDROID_AR")
+    ?: new File(coomiNdkToolchain, "llvm-ar${coomiToolSuffix}"))
+def coomiAndroidRanlib = file(System.getenv("COOMI_ANDROID_RANLIB")
+    ?: new File(coomiNdkToolchain, "llvm-ranlib${coomiToolSuffix}"))
+def coomiNpm = System.getenv("COOMI_NPM") ?: (coomiWindowsHost ? "npm.cmd" : "npm")
+def coomiCargo = System.getenv("COOMI_CARGO") ?: "cargo"
+def coomiRustup = System.getenv("COOMI_RUSTUP") ?: "rustup"
+
+tasks.register("installCoomiRustAndroidTarget", Exec) {
+    group = "coomi build"
+    description = "Install the Rust ARM64 Android standard library."
+    commandLine coomiRustup, "target", "add", coomiRustTarget
+}
+
+tasks.register("buildCoomiWeb", Exec) {
+    group = "coomi build"
+    description = "Build the Vue frontend served by coomi-rs."
+    workingDir coomiWebRoot
+    commandLine coomiNpm, "run", "build"
+    inputs.files(fileTree(coomiWebRoot) {
+        include "src/**", "public/**", "*.json", "*.ts", "*.js", "*.html"
+        exclude "node_modules/**", "dist/**"
+    })
+    outputs.dir new File(coomiWebRoot, "dist")
+}
+
+tasks.register("stageCoomiWeb", Zip) {
+    group = "coomi build"
+    description = "Package the current Vue build into the APK assets."
+    dependsOn "buildCoomiWeb"
+    from new File(coomiWebRoot, "dist")
+    destinationDirectory = coomiWebArchive.parentFile
+    archiveFileName = coomiWebArchive.name
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.register("buildCoomiRustAndroid", Exec) {
+    group = "coomi build"
+    description = "Cross-compile the complete coomi-rs CLI and Web bridge for Android ARM64."
+    dependsOn "installCoomiRustAndroidTarget"
+    doFirst {
+        if (coomiArm64LinuxHost && !coomiNdkToolchainOverride) {
+            throw new GradleException(
+                "Linux ARM64 builds require COOMI_NDK_TOOLCHAIN_DIR from the verified CoomiDev Build Kit; " +
+                "the official Android NDK does not provide a linux-aarch64 host toolchain.")
+        }
+        if (!coomiAndroidLinker.isFile()) {
+            throw new GradleException("Android NDK linker not found: ${coomiAndroidLinker}")
+        }
+        if (!coomiAndroidAr.isFile() || !coomiAndroidRanlib.isFile()) {
+            throw new GradleException("Android NDK archiver tools are incomplete in ${coomiNdkToolchain}")
+        }
+    }
+    workingDir coomiRustRoot
+    commandLine coomiCargo, "build", "--release", "--locked",
+        "--target", coomiRustTarget, "-p", "coomi-ui", "--bin", "coomi"
+    environment "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", coomiAndroidLinker.absolutePath
+    environment "CC_aarch64_linux_android", coomiAndroidLinker.absolutePath
+    environment "AR_aarch64_linux_android", coomiAndroidAr.absolutePath
+    environment "RANLIB_aarch64_linux_android", coomiAndroidRanlib.absolutePath
+    inputs.files(fileTree(coomiRustRoot) {
+        include "**/src/**", "**/Cargo.toml", "Cargo.lock"
+        exclude "target/**"
+    })
+    // These files are embedded with include_str! and must invalidate the Rust
+    // binary when the installed Coomi Life implementation or its manifest changes.
+    inputs.files(
+        rootProject.file("extensions/coomi-life/sidecar.py"),
+        rootProject.file("extensions/coomi-life/extension.json"),
+        rootProject.file("extensions/coomi-life/LICENSE.upstream"),
+        rootProject.file("extensions/coomi-life/NOTICE"),
+    )
+    outputs.file coomiNativeBinary
+}
+
+tasks.register("stageCoomiRustAndroid", Copy) {
+    group = "coomi build"
+    description = "Stage the ARM64 PIE executable as an extractable APK native payload."
+    dependsOn "buildCoomiRustAndroid"
+    from coomiNativeBinary
+    into coomiNativeDir
+    rename { "libcoomi.so" }
+}
+
+tasks.register("stageCoomiRuntimeV2", Copy) {
+    group = "coomi build"
+    description = "Bundle the verified ARM64 PRoot host and Debian rootfs for offline installation."
+    from(coomiRuntimeDist) {
+        include "proot-host-arm64.tar.gz", "debian-bookworm-arm64.tar.gz"
+        into "runtime-v2"
+        rename { name -> name.replace(".tar.gz", ".tgz") }
+    }
+    into coomiRuntimeAssetsDir
+    doFirst {
+        delete coomiRuntimeAssetsDir
+        ["proot-host-arm64.tar.gz", "debian-bookworm-arm64.tar.gz"].each { name ->
+            def artifact = new File(coomiRuntimeDist, name)
+            if (!artifact.isFile() || artifact.length() == 0) {
+                throw new GradleException("Runtime V2 artifact is missing: ${artifact}")
+            }
+        }
+    }
+}
+
+android.sourceSets.main.assets.srcDir(coomiRuntimeAssetsDir)
+
+tasks.register("stageCoomiDevIcon", Copy) {
+    onlyIf { coomiDevBuild }
+    from rootProject.file("assets/coomi-agent-dev.png")
+    into coomiDevResourcesDir.map { it.dir("drawable-nodpi") }
+    rename { "coomi_agent_dev.png" }
+    doFirst {
+        if (!rootProject.file("assets/coomi-agent-dev.png").isFile()) {
+            throw new GradleException("CoomiDev icon is missing: assets/coomi-agent-dev.png")
+        }
+    }
+}
+
+if (coomiDevBuild) {
+    android.sourceSets.main.res.srcDir(coomiDevResourcesDir)
+}
+
+tasks.named("preBuild").configure {
+    dependsOn "stageCoomiWeb", "stageCoomiRustAndroid", "stageCoomiRuntimeV2", "stageCoomiDevIcon"
+}
+
+task versionName {
+    doLast {
+        print android.defaultConfig.versionName
+    }
+}
+
+def validateVersionName(String versionName) {
+    // Custom Android builds use the established 1.4.6o5-style release suffix.
+    if (java.util.regex.Pattern.matches("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)o[1-9]\\d*\$", versionName)) return
+    // https://semver.org/spec/v2.0.0.html#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+    if (!java.util.regex.Pattern.matches("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?\$", versionName))
+        throw new GradleException("The versionName '"  + versionName + "' is not a valid version as per semantic version '2.0.0' spec in the format 'major.minor.patch(-prerelease)(+buildmetadata)'. https://semver.org/spec/v2.0.0.html.")
+}
+
+/**
+ * Stage the bootstrap zip that gets embedded into the APK via the libtermux-bootstrap NDK module.
+ *
+ * We use the official Termux bootstrap from references/termux-bootstrap/ rather than downloading
+ * a custom one (see defaultConfig above for the package-name caveat).
+ */
+def stageBootstrap(String arch) {
+    def target = new File(projectDir, "src/main/cpp/bootstrap-" + arch + ".zip")
+    if (target.exists() && target.length() > 0) {
+        logger.quiet("bootstrap-" + arch + ".zip already staged, skipping")
+        return
+    }
+
+    def referenceDir = new File(rootProject.projectDir, "references/termux-bootstrap")
+    def candidates = referenceDir.exists() ?
+        referenceDir.listFiles({ f -> f.name.startsWith("bootstrap-" + arch) && f.name.endsWith(".zip") } as FileFilter) : null
+
+    if (candidates == null || candidates.length == 0) {
+        throw new GradleException("No local bootstrap found for " + arch + " in " + referenceDir +
+            "\nExpected a file named bootstrap-" + arch + "*.zip")
+    }
+
+    // Prefer the newest by filename (they are date-stamped).
+    candidates.sort { a, b -> b.name <=> a.name }
+    def source = candidates[0]
+
+    target.parentFile.mkdirs()
+    copy {
+        from source
+        into target.parentFile
+        rename { target.name }
+    }
+    logger.quiet("Staged bootstrap from " + source.name + " (" + target.length() + " bytes)")
+}
+
+clean {
+    doLast {
+        def tree = fileTree(new File(projectDir, 'src/main/cpp'))
+        tree.include 'bootstrap-*.zip'
+        tree.each { it.delete() }
+    }
+}
+
+task stageBootstraps() {
+    doLast {
+        stageBootstrap("aarch64")
+    }
+}
+
+afterEvaluate {
+    android.applicationVariants.all { variant ->
+        variant.javaCompileProvider.get().dependsOn(stageBootstraps)
+    }
+}
