@@ -45,6 +45,7 @@ export const useSessionStore = defineStore('session', () => {
   const lifeUnread = ref<LifeUnreadItem[]>([])
   const lifeUnreadName = ref('')
   const lifeDelivering = ref(false)
+  const lifeStatsOpen = ref(false)
   /** 本次打开会话是否已做过开场问候（避免轮询重复触发投递）。 */
   let lifeAutoSent = false
   /** 编辑覆盖状态：非空表示输入框正处于「编辑上一条消息」模式。 */
@@ -97,6 +98,8 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   let connectedSessionId = ''
+  /** 并行会话：每个已打开的会话各持一条 WS（后台任务不断连，切回即可看到结果）。 */
+  const transportPool = new Map<string, Transport>()
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let turnToolTrace: ToolDiagnosticTrace[] = []
   let consecutiveToolFailures = 0
@@ -215,14 +218,21 @@ export const useSessionStore = defineStore('session', () => {
     t.connect()
   }
 
-  function disconnect() { transport.value?.close(); transport.value = null; connectedSessionId = '' }
+  function disconnect() {
+    for (const t of transportPool.values()) t?.close?.()
+    transportPool.clear()
+    transport.value = null
+    connectedSessionId = ''
+  }
 
   /** Recreate the active socket so newly saved retry settings take effect immediately. */
   function reconnect() {
-    const previous = transport.value
+    const current = sessionId.value
+    const previous = transportPool.get(current)
+    transportPool.delete(current)
+    previous?.close()
     transport.value = null
     connectedSessionId = ''
-    previous?.close()
     connect(connection.wsUrl || undefined)
   }
 
@@ -294,10 +304,8 @@ export const useSessionStore = defineStore('session', () => {
                 failureNoticeCreated = true
                 const noticeId = nextId()
                 timeline.value.push({
-                  kind: 'notice', id: noticeId, tone: 'warn', analysisStatus: 'consent', feedbackEligible: true,
-                  text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，建议反馈脱敏错误记录。`,
-                  analysisTrace: turnToolTrace.map(item => ({ ...item, callId: undefined })),
-                  failureCount: turnToolTrace.filter(item => item.status === 'error').length,
+                    kind: 'notice', id: noticeId, tone: 'warn',
+                    text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，请检查工具参数或环境。`,
                 })
               }
             } else consecutiveToolFailures = 0
@@ -406,10 +414,8 @@ export const useSessionStore = defineStore('session', () => {
             const trace = turnToolTrace.map(item => ({ ...item, callId: undefined }))
             const noticeId = nextId()
             timeline.value.push({
-              kind: 'notice', id: noticeId, tone: 'warn', analysisStatus: 'consent', feedbackEligible: true,
-              text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，建议反馈脱敏错误记录。`,
-              analysisTrace: trace,
-              failureCount: failures,
+              kind: 'notice', id: noticeId, tone: 'warn',
+              text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，请检查工具参数或环境。`,
             })
           }
         }
@@ -759,7 +765,8 @@ export const useSessionStore = defineStore('session', () => {
     loop.value = { active: false, currentStep: 0, totalSteps: 0, status: '' }
     pendingEdit.value = null
     undoConfirm.value = null
-    runState.value = 'syncing'
+      // 切换会话立即回到空闲态，避免把旧会话的「正在对话」带到新会话顶部显示。
+      runState.value = 'idle'
     const targetId = isUuid(id) ? id : sessions.migrateId(id, createSessionId())
     activateSession(targetId)
     const restoredFromEngine = await restoreFromEngine(targetId)
@@ -889,65 +896,9 @@ export const useSessionStore = defineStore('session', () => {
   }
   function pushNotice(tone: 'info' | 'warn' | 'error' | 'success', text: string) { timeline.value.push({ kind: 'notice', id: nextId(), tone, text }) }
 
-  async function consentToolFailureFeedback(noticeId: string): Promise<boolean> {
-    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === noticeId)
-    if (notice?.kind !== 'notice' || !notice.analysisTrace?.length) return false
-    if (!['consent', 'failed'].includes(notice.analysisStatus ?? '')) return false
-    const trace = notice.analysisTrace
-    const failureCount = notice.failureCount ?? trace.filter(item => item.status === 'error').length
-    updateAnalysisNotice(noticeId, {
-      analysisStatus: 'analyzing', feedbackEligible: false, detail: undefined,
-      text: '正在后台轻量整理工具调用错误，完成后将自动上传。您可以继续对话。',
-    })
-    persistSoon()
-    try {
-      const response = await authedFetch('/api/tool-failure-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider_id: config.currentProviderId,
-          trace: trace.map(({ callId: _callId, ...item }) => item),
-        }),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = await response.json()
-      const analysis = typeof data.analysis === 'string' ? data.analysis.trim() : ''
-      if (!analysis) throw new Error('empty analysis')
-      updateAnalysisNotice(noticeId, {
-        analysisStatus: 'ready', feedbackEligible: false,
-        text: `已完成 ${failureCount} 次工具失败的脱敏整理，正在自动上传。`,
-        detail: `${analysis}\n\n${buildLocalEvidence(trace)}`,
-      })
-      persistSoon()
-      return true
-    } catch (error) {
-      updateAnalysisNotice(noticeId, {
-        analysisStatus: 'failed', feedbackEligible: true, detail: undefined,
-        text: `反馈整理失败，未上传任何内容：${error instanceof Error ? error.message : String(error)}。可点击重试。`,
-      })
-      persistSoon()
-      return false
-    }
-  }
+  function toggleLifeStats() { lifeStatsOpen.value = !lifeStatsOpen.value }
 
-  function finishToolFailureFeedback(noticeId: string, ok: boolean, reason = '') {
-    updateAnalysisNotice(noticeId, ok ? {
-      analysisStatus: 'complete', feedbackEligible: false,
-      text: '工具调用错误记录已完成脱敏整理并自动上传，感谢您的反馈。',
-      analysisTrace: undefined,
-    } : {
-      analysisStatus: 'ready', feedbackEligible: true,
-      text: `整理已完成，但自动上传失败${reason ? `：${reason}` : ''}。可直接重试上传，无需再次调用模型。`,
-    })
-    persistSoon()
-  }
-
-  function updateAnalysisNotice(id: string, patch: Partial<Extract<Timelineitem, { kind: 'notice' }>>) {
-    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === id)
-    if (notice?.kind === 'notice') Object.assign(notice, patch)
-  }
-
-  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, completeSendMorph, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setProductionMode, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, consentToolFailureFeedback, finishToolFailureFeedback }
+  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeStatsOpen, toggleLifeStats, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, completeSendMorph, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setProductionMode, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide }
 })
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }

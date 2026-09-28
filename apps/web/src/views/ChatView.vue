@@ -181,8 +181,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   <div class="chat" :class="{ 'minimal-ui': config.minimalUi }">
     <div class="shell" :class="{ pushed: drawerOpen }">
       <TopBar :menu-open="drawerOpen" @menu="openDrawer" />
-      <button class="browser-fab" aria-label="内置浏览器" @click="router.push('/browser')"><CoomiIcon name="globe" :size="18" /></button>
-        <button class="mindmap-fab" aria-label="产物思维导图" @click="openMindMap"><CoomiIcon name="branch" :size="18" /></button>
 
       <main ref="scroller" class="stream">
         <div v-if="session.timeline.length === 0" ref="content" class="inner empty-inner">
@@ -278,13 +276,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   background-size: cover;
 }
 
-.browser-fab {
-  position: fixed; right: 14px; top: 62px; z-index: 40;
-  display: grid; place-items: center; width: 42px; height: 42px;
-  border: 0; border-radius: 14px; background: var(--bg);
-  color: var(--blue); box-shadow: var(--shadow-2);
-}
-.browser-fab:active { background: var(--fill); }
 
 .shell {
   position: relative;
@@ -350,6 +341,4 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 .retry-actions button { min-height: 34px; padding: 0 13px; border-radius: 6px; font-size: 13px; font-weight: 600; }
 .retry-secondary { background: var(--fill); color: var(--text-2); }
 .retry-primary { background: var(--blue); color: #fff; }
-.mindmap-fab { position: fixed; right: 14px; bottom: 116px; z-index: 40; display: grid; place-items: center; width: 42px; height: 42px; border: 0; border-radius: 14px; background: var(--bg); color: var(--blue); box-shadow: var(--shadow-2); }
-.mindmap-fab:active { background: var(--fill); }
 </style>

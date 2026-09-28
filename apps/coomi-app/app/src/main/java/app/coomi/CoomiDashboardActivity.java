@@ -59,7 +59,6 @@ public class CoomiDashboardActivity extends Activity {
 
     private static final String LOG_TAG = "CoomiDashboardActivity";
     private static final int STATUS_REFRESH_MS = 5000;
-    private static final int REQUEST_FEEDBACK_IMAGES = 8204;
 
     private View mStatusIndicator;
     private TextView mStatusText;
@@ -92,12 +91,9 @@ public class CoomiDashboardActivity extends Activity {
     private View mBackupButton;
     private View mMaintenanceButton;
     private View mUsageButton;
-    private View mFeedbackButton;
     private View mDonateButton;
     private boolean mUpdateCheckStarted;
     private AlertDialog mUpdateDialog;
-    private final ArrayList<Uri> mFeedbackImageUris = new ArrayList<>();
-    private TextView mFeedbackImageCount;
     private String mAppliedThemeMode;
     private String mAppliedAppearanceSignature;
 
@@ -162,7 +158,6 @@ public class CoomiDashboardActivity extends Activity {
         mBackupButton = findViewById(R.id.btn_backup_data);
         mMaintenanceButton = findViewById(R.id.btn_maintenance);
         mUsageButton = findViewById(R.id.btn_usage);
-        mFeedbackButton = findViewById(R.id.btn_feedback);
         mDonateButton = findViewById(R.id.btn_donate);
         mPermissionSettingsButton = findViewById(R.id.btn_permission_settings);
         mStorageSettingsButton = findViewById(R.id.btn_storage_settings);
@@ -196,7 +191,6 @@ public class CoomiDashboardActivity extends Activity {
             startActivity(new Intent(this, CoomiBackupActivity.class)));
         mMaintenanceButton.setOnClickListener(v -> openCoomiRoute("#/maintenance"));
         mUsageButton.setOnClickListener(v -> openCoomiRoute("#/usage"));
-        mFeedbackButton.setOnClickListener(v -> showFeedbackDialog());
         mDonateButton.setOnClickListener(v -> showDonateDialog());
         mPermissionSettingsButton.setOnClickListener(v -> openPermissionSettings());
         mStorageSettingsButton.setOnClickListener(v -> openStorageSettings());
@@ -538,6 +532,12 @@ public class CoomiDashboardActivity extends Activity {
     }
 
     /** 跳转 QQ 加群链接（群里反馈 / 捐赠交流）。 */
+    private int resolveThemeColor(int attribute) {
+        android.util.TypedValue value = new android.util.TypedValue();
+        if (!getTheme().resolveAttribute(attribute, value, true)) return 0;
+        return value.resourceId != 0 ? getColor(value.resourceId) : value.data;
+    }
+
     private void openQQGroup() {
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW,
@@ -548,133 +548,6 @@ public class CoomiDashboardActivity extends Activity {
             Toast.makeText(this, "无法打开 QQ，请手动搜索群号 1108467806",
                 Toast.LENGTH_LONG).show();
         }
-    }
-
-    private void showFeedbackDialog() {
-        mFeedbackImageUris.clear();
-        View form = getLayoutInflater().inflate(R.layout.dialog_coomi_feedback, null);
-        CoomiTheme.applyCustomColors(this, form);
-        EditText messageInput = form.findViewById(R.id.feedback_message);
-        EditText contactInput = form.findViewById(R.id.feedback_contact);
-        RadioGroup typeInput = form.findViewById(R.id.feedback_type);
-        Button addImages = form.findViewById(R.id.feedback_add_images);
-        mFeedbackImageCount = form.findViewById(R.id.feedback_image_count);
-        addImages.setOnClickListener(v -> openFeedbackImagePicker());
-        AlertDialog dialog = new AlertDialog.Builder(this)
-            .setView(form)
-            .setNegativeButton(R.string.coomi_feedback_cancel, null)
-            .setPositiveButton(R.string.coomi_feedback_send, null)
-            .create();
-        dialog.setOnShowListener(ignored -> {
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setBackgroundDrawableResource(R.drawable.coomi_bg_dialog);
-            }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(resolveThemeColor(R.attr.coomiBlue));
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(resolveThemeColor(R.attr.coomiText2));
-            if (dialog.getWindow() != null) {
-                CoomiTheme.applyCustomColors(this, dialog.getWindow().getDecorView());
-            }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String message = messageInput.getText().toString().trim();
-            if (message.isEmpty()) {
-                messageInput.setError(getString(R.string.coomi_feedback_message_required));
-                messageInput.requestFocus();
-                return;
-            }
-            String kind = typeInput.getCheckedRadioButtonId() == R.id.feedback_type_issue
-                ? "issue" : "suggestion";
-            sendFeedback(dialog, kind, message, contactInput.getText().toString().trim());
-            });
-        });
-        dialog.show();
-    }
-
-    private int resolveThemeColor(int attribute) {
-        android.util.TypedValue value = new android.util.TypedValue();
-        if (!getTheme().resolveAttribute(attribute, value, true)) return 0;
-        return value.resourceId != 0 ? getColor(value.resourceId) : value.data;
-    }
-
-    private void openFeedbackImagePicker() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("image/*");
-        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-        startActivityForResult(intent, REQUEST_FEEDBACK_IMAGES);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_FEEDBACK_IMAGES || resultCode != RESULT_OK || data == null) return;
-        mFeedbackImageUris.clear();
-        if (data.getClipData() != null) {
-            int count = Math.min(3, data.getClipData().getItemCount());
-            for (int index = 0; index < count; index++) {
-                mFeedbackImageUris.add(data.getClipData().getItemAt(index).getUri());
-            }
-        } else if (data.getData() != null) {
-            mFeedbackImageUris.add(data.getData());
-        }
-        if (mFeedbackImageCount != null) {
-            mFeedbackImageCount.setText(getString(R.string.coomi_feedback_image_count, mFeedbackImageUris.size()));
-        }
-    }
-
-    private void sendFeedback(AlertDialog dialog, String kind, String message, String contact) {
-        Button sendButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        sendButton.setEnabled(false);
-        sendButton.setText(R.string.coomi_feedback_sending);
-        JSONObject payload = new JSONObject();
-        try {
-            payload.put("type", kind);
-            payload.put("message", message);
-            payload.put("contact", contact);
-            payload.put("diagnostics", CoomiFeedbackClient.diagnostics(this));
-            payload.put("reasoning_statistics", readReasoningStatistics());
-            payload.put("source", "android_dashboard");
-            payload.put("time", isoUtcNow());
-        } catch (Exception error) {
-            Toast.makeText(this, R.string.coomi_feedback_failed, Toast.LENGTH_LONG).show();
-            sendButton.setEnabled(true);
-            sendButton.setText(R.string.coomi_feedback_send);
-            return;
-        }
-        new Thread(() -> {
-            List<CoomiFeedbackClient.Attachment> attachments = new ArrayList<>();
-            try {
-                for (int index = 0; index < mFeedbackImageUris.size(); index++) {
-                    attachments.add(new CoomiFeedbackClient.Attachment(
-                        "feedback-" + (index + 1) + ".jpg",
-                        "image/jpeg",
-                        compressFeedbackImage(mFeedbackImageUris.get(index))
-                    ));
-                }
-            } catch (Exception error) {
-                runOnUiThread(() -> {
-                    sendButton.setEnabled(true);
-                    sendButton.setText(R.string.coomi_feedback_send);
-                    Toast.makeText(this, R.string.coomi_feedback_images_failed, Toast.LENGTH_LONG).show();
-                });
-                return;
-            }
-            String rawResult = CoomiFeedbackClient.post(payload.toString(), attachments);
-            boolean ok = false;
-            try { ok = new JSONObject(rawResult).optBoolean("ok", false); }
-            catch (Exception ignored) {}
-            final boolean submitted = ok;
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                if (submitted) {
-                    dialog.dismiss();
-                    Toast.makeText(this, R.string.coomi_feedback_sent, Toast.LENGTH_LONG).show();
-                } else {
-                    sendButton.setEnabled(true);
-                    sendButton.setText(R.string.coomi_feedback_send);
-                    Toast.makeText(this, R.string.coomi_feedback_failed, Toast.LENGTH_LONG).show();
-                }
-            });
-        }, "coomi-feedback-submit").start();
     }
 
     private JSONObject readReasoningStatistics() {
@@ -721,40 +594,6 @@ public class CoomiDashboardActivity extends Activity {
         } catch (Exception ignored) {
             return new JSONObject();
         }
-    }
-
-    private byte[] compressFeedbackImage(Uri uri) throws Exception {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
-            BitmapFactory.decodeStream(input, null, bounds);
-        }
-        int sample = 1;
-        while (Math.max(bounds.outWidth / sample, bounds.outHeight / sample) > 2400) sample *= 2;
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inSampleSize = sample;
-        Bitmap bitmap;
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
-            bitmap = BitmapFactory.decodeStream(input, null, options);
-        }
-        if (bitmap == null) throw new IllegalArgumentException("unsupported image");
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        float scale = Math.min(1f, 1600f / Math.max(width, height));
-        Bitmap resized = scale < 1f
-            ? Bitmap.createScaledBitmap(bitmap, Math.round(width * scale), Math.round(height * scale), true)
-            : bitmap;
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        int quality = 80;
-        do {
-            output.reset();
-            resized.compress(Bitmap.CompressFormat.JPEG, quality, output);
-            quality -= 10;
-        } while (output.size() > 2 * 1024 * 1024 && quality >= 40);
-        if (resized != bitmap) resized.recycle();
-        bitmap.recycle();
-        if (output.size() > 2 * 1024 * 1024) throw new IllegalArgumentException("image exceeds 2 MB");
-        return output.toByteArray();
     }
 
     private static String isoUtcNow() {

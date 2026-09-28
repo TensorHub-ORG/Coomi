@@ -10,6 +10,7 @@ import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
 import { apiGet } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
+import { costCny, fmtMoney, priceFor } from '@/utils/modelPrices'
 import CoomiMark from './CoomiMark.vue'
 import MorphBurger from './MorphBurger.vue'
 
@@ -171,6 +172,55 @@ function browseInFileManager() {
   pathPickerOpen.value = false
   router.push('/files')
 }
+
+  // ── 余额与消耗（右上角）──
+  const balanceOpen = ref(false)
+  const balanceData = ref<{
+    available_yuan: number
+    lamp_remaining: number
+    expires_at: number
+    provider: string
+  } | null>(null)
+  const balanceLoading = ref(false)
+  const balanceError = ref('')
+
+  async function fetchBalance() {
+    if (balanceLoading.value) return
+    balanceLoading.value = true
+    balanceError.value = ''
+    try {
+      const data = await apiGet<{ ok: boolean; provider: string; balance: { available_yuan: number; lamp_remaining: number; expires_at: number } }>('/api/balance')
+      balanceData.value = data.balance ? {
+        available_yuan: Number(data.balance.available_yuan) || 0,
+        lamp_remaining: Number(data.balance.lamp_remaining) || 0,
+        expires_at: Number(data.balance.expires_at) || 0,
+        provider: data.provider,
+      } : null
+    } catch (e) {
+      balanceError.value = e instanceof Error ? e.message : String(e)
+      balanceData.value = null
+    } finally {
+      balanceLoading.value = false
+    }
+  }
+
+  function toggleBalance() {
+    balanceOpen.value = !balanceOpen.value
+    if (balanceOpen.value) fetchBalance()
+  }
+
+  // 消耗估算：会话累计 = input+output（缓存按 20% 计入价格表）；本轮 = 本轮输出增量。
+  const sessionCost = computed(() => {
+    const u = session.usage
+    if (!u) return 0
+    return costCny(config.currentModel, u.input ?? 0, u.output ?? 0, u.cachedInput ?? 0)
+  })
+  const turnCost = computed(() => {
+    const u = session.usage
+    if (!u) return 0
+    return costCny(config.currentModel, 0, u.turnOutputTokens ?? 0, 0)
+  })
+  const modelUnit = computed(() => priceFor(config.currentModel))
 </script>
 
 <template>
@@ -179,6 +229,9 @@ function browseInFileManager() {
 
     <button class="center" :aria-expanded="modelOpen" @click="toggleModel">
       <span class="model">{{ config.currentModel }}</span>
+        <button v-if="session.mode === 'life'" class="life-orbit" aria-label="查看数字生命统计" title="查看生命统计" @click.stop="session.toggleLifeStats()">
+          <i class="orbit outer" /><i class="orbit inner" />
+        </button>
       <CoomiMark v-if="showSessionBrand" :size="22" class="session-brand" :class="{ spinning: session.isBusy, settling: settlingBrand, enter: enteringBrand }" />
       <span v-if="connection.demo" class="demo">演示</span>
       <span v-if="config.planMode" class="plan">计划</span>
@@ -217,6 +270,10 @@ function browseInFileManager() {
         <circle class="usage-value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="usageStroke" />
       </svg>
     </button>
+      <button class="balance-button" :aria-expanded="balanceOpen" aria-label="余额与消耗" @click="toggleBalance">
+        <CoomiIcon name="bolt" :size="16" />
+        <span v-if="balanceData" class="balance-num">{{ fmtMoney(balanceData.available_yuan) }}</span>
+      </button>
 
     <Teleport to="body">
     <button v-if="usageOpen" class="usage-scrim" aria-label="关闭上下文数据" @click="usageOpen = false" />
@@ -248,6 +305,23 @@ function browseInFileManager() {
       <div class="usage-path">
         <span>会话标记路径</span>
         <button class="path-btn" @click="openPathPicker">{{ session.cwd || '点击选择' }}</button>
+      </div>
+      <div class="usage-balance">
+        <p class="usage-subtitle">余额与消耗（估算）</p>
+        <template v-if="balanceData">
+          <div class="balance-row">
+            <span>账户余额</span><strong>¥ {{ fmtMoney(balanceData.available_yuan) }}</strong>
+          </div>
+          <div class="balance-row"><span>LAMP</span><strong>{{ balanceData.lamp_remaining }}</strong></div>
+          <div v-if="balanceData.expires_at > 0" class="balance-row">
+            <span>订阅到期</span><strong>{{ new Date(balanceData.expires_at).toLocaleDateString() }}</strong>
+          </div>
+        </template>
+        <p v-else-if="balanceLoading" class="usage-empty">查询中…</p>
+        <p v-else class="usage-empty">{{ balanceError || '无余额数据（非中转站 Key 可能不支持）' }}</p>
+        <div class="balance-row"><span>当前模型单价</span><strong>入 ¥{{ fmtMoney(modelUnit.in * 7.2) }}/M · 出 ¥{{ fmtMoney(modelUnit.out * 7.2) }}/M</strong></div>
+        <div class="balance-row"><span>本轮消耗</span><strong class="cost">≈ ¥{{ fmtMoney(turnCost) }}</strong></div>
+        <div class="balance-row"><span>会话累计消耗</span><strong class="cost">≈ ¥{{ fmtMoney(sessionCost) }}</strong></div>
       </div>
       <div v-if="runtimeInfo" class="usage-env">
         <span>运行环境</span>
@@ -406,6 +480,21 @@ function browseInFileManager() {
   border: 0; border-radius: 50%; background: none; color: var(--text-2);
 }
 .icon-btn:active { background: var(--fill); }
+.balance-button {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-width: 34px; height: 34px; padding: 6px 8px;
+  border: 0; border-radius: 50%; background: none; color: var(--text-2);
+  font-size: 12.5px; font-weight: 650;
+}
+.balance-button:active { background: var(--fill); }
+.balance-num { color: var(--ok); }
+.usage-balance {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+.balance-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--text-2); }
+.balance-row strong { font-weight: 700; color: var(--text); }
+.balance-row .cost { color: var(--orange); }
 .usage-button {
   position: relative; display: grid; place-items: center; flex-shrink: 0;
   width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--text-2);
@@ -427,6 +516,13 @@ function browseInFileManager() {
 .session-brand.enter { animation: session-brand-enter 1.1s cubic-bezier(.12,.8,.22,1) both; }
 .session-brand.spinning { animation:session-brand-spin 1s cubic-bezier(.62,.02,.2,.92) infinite; }
 .session-brand.settling { animation:session-brand-settle 1s cubic-bezier(.2,.8,.2,1) both; }
+.life-orbit { position: relative; display: inline-grid; place-items: center; width: 20px; height: 20px; margin: 0 3px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; flex-shrink: 0; }
+.orbit { position: absolute; inset: 2px; border-radius: 50%; }
+.orbit.outer { border: 1.6px solid transparent; border-top-color: var(--blue); border-right-color: var(--blue); animation: topbar-life-spin 1.8s linear infinite; }
+.orbit.inner { inset: 5px; border: 1.6px solid transparent; border-bottom-color: var(--orange); border-left-color: var(--orange); animation: topbar-life-spin-reverse 1.15s linear infinite; }
+@keyframes topbar-life-spin { to { transform: rotate(360deg); } }
+@keyframes topbar-life-spin-reverse { to { transform: rotate(-360deg); } }
+@media (prefers-reduced-motion: reduce) { .orbit.outer, .orbit.inner { animation-duration: 6s; } }
 @keyframes session-brand-enter {
   0% { transform:translateX(-46vw) scale(3.2) rotate(0deg); opacity:0; }
   18% { opacity:1; }

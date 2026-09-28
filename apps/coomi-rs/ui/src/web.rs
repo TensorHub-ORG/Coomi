@@ -865,6 +865,7 @@ pub async fn serve(
             get(get_maintenance_prompts).put(set_maintenance_prompts),
         )
         .route("/api/usage", get(usage_ledger))
+        .route("/api/balance", get(balance_status))
         .route("/api/catalog", get(catalog_index))
         .route("/api/workflows", get(list_workflows).post(create_workflow))
         .route("/api/workflows/templates", get(list_workflow_templates))
@@ -4953,7 +4954,7 @@ async fn select_provider_model(
 }
 
 async fn verify_provider_credentials(provider: &ProviderSettings) -> Result<(), ApiError> {
-    let models = fetch_provider_models(provider).await.map_err(|error| {
+    let (models, _windows) = fetch_provider_models(provider).await.map_err(|error| {
         ApiError::bad_gateway(format!(
             "provider credential verification failed: {}",
             error.message
@@ -5020,7 +5021,7 @@ async fn discover_provider_models(
         .get(&id)
         .cloned()
         .ok_or_else(|| ApiError::not_found("provider not found"))?;
-    let models = fetch_provider_models(&provider).await?;
+    let (models, context_windows) = fetch_provider_models(&provider).await?;
     if models.is_empty() {
         return Err(ApiError::bad_request(
             "provider returned no available models",
@@ -5029,10 +5030,33 @@ async fn discover_provider_models(
     if persist {
         if let Some(settings) = document.providers.get_mut(&id) {
             apply_provider_models(settings, &models, document.active == id)?;
+            // 在线发现的上下文窗口一并落盘（无值的不覆盖用户已有配置）。
+            if !context_windows.is_empty() {
+                let existing = settings
+                    .extra
+                    .get("modelContextWindows")
+                    .and_then(Value::as_object)
+                    .map(|object| {
+                        object
+                            .iter()
+                            .filter_map(|(model, value)| {
+                                value.as_u64().map(|window| (model.clone(), window))
+                            })
+                            .collect::<BTreeMap<_, _>>()
+                    })
+                    .unwrap_or_default();
+                let mut merged = existing;
+                for (model, window) in &context_windows {
+                    merged.insert(model.clone(), *window);
+                }
+                settings
+                    .extra
+                    .insert("modelContextWindows".into(), serde_json::to_value(&merged).unwrap_or(Value::Null));
+            }
         }
         document.save(&path).map_err(ApiError::from)?;
     }
-    Ok(Json(json!({"models": models})))
+    Ok(Json(json!({"models": models, "contextWindows": context_windows})))
 }
 
 async fn runtime_v2_state(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -5903,7 +5927,9 @@ async fn life_memory_get(
     }))
 }
 
-async fn fetch_provider_models(provider: &ProviderSettings) -> Result<Vec<String>, ApiError> {
+async fn fetch_provider_models(
+    provider: &ProviderSettings,
+) -> Result<(Vec<String>, BTreeMap<String, u64>), ApiError> {
     let base = provider.base_url.trim_end_matches('/');
     if base.is_empty() {
         return Err(ApiError::bad_request("base URL is required"));
@@ -5915,7 +5941,7 @@ async fn fetch_provider_models(provider: &ProviderSettings) -> Result<Vec<String
     {
         let declared = provider_models(provider);
         if !declared.is_empty() {
-            return Ok(declared);
+            return Ok((declared, BTreeMap::new()));
         }
     }
     let endpoint = EndpointResolver::new(base, provider_protocol_settings(provider)).models();
@@ -5986,7 +6012,30 @@ async fn fetch_provider_models(provider: &ProviderSettings) -> Result<Vec<String
         .collect::<Vec<_>>();
     models.sort();
     models.dedup();
-    Ok(models)
+    // 同时收集各模型的上下文窗口（OpenAI /models 返回 context_window 或 max_tokens 字段）。
+    let mut windows = BTreeMap::new();
+    for entry in entries {
+        if let Some(name) = entry
+            .get("id")
+            .or_else(|| entry.get("name"))
+            .and_then(Value::as_str)
+        {
+            let model = name.strip_prefix("models/").unwrap_or(name).to_owned();
+            if model.is_empty() || !models.contains(&model) {
+                continue;
+            }
+            let window = entry
+                .get("context_window")
+                .or_else(|| entry.get("max_context"))
+                .or_else(|| entry.get("max_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if window > 0 {
+                windows.insert(model, window);
+            }
+        }
+    }
+    Ok((models, windows))
 }
 
 fn provider_protocol_settings(provider: &ProviderSettings) -> ProviderProtocol {
@@ -7845,6 +7894,81 @@ async fn usage_ledger(
     }
     records.reverse();
     Ok(Json(json!({ "from": from, "to": to, "input_tokens": input, "cached_input_tokens": cached, "output_tokens": output, "total_tokens": total, "requests": records.len(), "records": records })))
+}
+
+async fn balance_status(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let document = read_provider_document(&state.home).map_err(ApiError::from)?;
+    let provider = document
+        .providers
+        .get(&document.active)
+        .cloned()
+        .ok_or_else(|| ApiError::not_found("no active provider"))?;
+    if provider.api_key.trim().is_empty() && provider.api_keys.is_empty() {
+        return Err(ApiError::bad_request("active provider has no API key"));
+    }
+    let key = provider
+        .api_keys
+        .first()
+        .map(|s| s.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(&provider.api_key)
+        .trim();
+    let base = provider.base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err(ApiError::bad_request("active provider has no base URL"));
+    }
+    // 优先 DeepSeek 风格 /v1/user/balance（中转站 / 官方 DeepSeek 均兼容），
+    // 其次 /user/balance，最后 /v1/dashboard/billing/subscription（OpenAI 兼容）。
+    let candidates = [
+        format!("{base}/v1/user/balance"),
+        format!("{base}/user/balance"),
+        format!("{base}/v1/dashboard/billing/subscription"),
+    ];
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| ApiError::internal(format!("http client: {e}")))?;
+    let mut last_error = String::new();
+    for url in candidates {
+        let mut request = client.get(&url).bearer_auth(key);
+        if provider.provider_type.contains("anthropic") {
+            request = request
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01");
+        }
+        let response = match request.send().await {
+            Ok(r) => r,
+            Err(e) => { last_error = e.to_string(); continue }
+        };
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if status.is_success() {
+            if let Ok(value) = serde_json::from_str::<Value>(&body) {
+                let lamp = value.get("lamp_remaining").and_then(Value::as_u64).unwrap_or(0);
+                let available_yuan = value
+                    .get("available_yuan")
+                    .and_then(Value::as_f64)
+                    .or_else(|| value.get("balance").and_then(Value::as_f64))
+                    .unwrap_or(0.0);
+                let expires_at = value.get("expires_at").and_then(Value::as_i64).unwrap_or(0);
+                return Ok(Json(json!({
+                    "ok": true,
+                    "provider": document.active,
+                    "balance": {
+                        "currency": "CNY",
+                        "available_yuan": available_yuan,
+                        "lamp_remaining": lamp,
+                        "expires_at": expires_at,
+                    },
+                    "raw": value,
+                })));
+            }
+        }
+        last_error = format!("HTTP {status}: {}", preview(&body));
+    }
+    Err(ApiError::bad_gateway(format!("balance query failed: {last_error}")))
 }
 
 fn add_reasoning_sample(

@@ -623,16 +623,19 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  async function discoverModels(id: string, persist = false): Promise<string[] | null> {
-    if (usingMock.value) return providers.value.find(provider => provider.id === id)?.models ?? []
+  async function discoverModels(id: string, persist = false): Promise<{ models: string[]; contextWindows: Record<string, number> } | null> {
+    if (usingMock.value) {
+      const provider = providers.value.find(provider => provider.id === id)
+      return { models: provider?.models ?? [], contextWindows: provider?.modelContextWindows ?? {} }
+    }
     try {
-      const result = await apiSend<{ models: string[] }>(
+      const result = await apiSend<{ models: string[]; contextWindows?: Record<string, number> }>(
         `/api/providers/${encodeURIComponent(id)}/discover-models`,
         'POST',
         { persist },
       )
       if (persist) await fetchProviders()
-      return result.models
+      return { models: result.models ?? [], contextWindows: result.contextWindows ?? {} }
     } catch (e) {
       lastError.value = String(e)
       return null

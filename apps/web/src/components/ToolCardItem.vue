@@ -6,7 +6,7 @@
  * 状态是有语义色的：运行中蓝 + 左侧流光，成功绿勾，失败红叉且输出染红，
  * 待授权橙（真正的确认交给底部 ApprovalSheet，卡片只说明原因），缓存命中灰闪电。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ToolCard } from '@/stores/viewModel'
 import { useConfigStore } from '@/stores/config'
 import { asText, toolMeta, toolTarget } from '@/utils/toolMeta'
@@ -237,23 +237,31 @@ watch(open, (value, previous) => {
   if (prefersReducedMotion() || !config.sendMorphAnimation) return
   gsap.killTweensOf(element)
   if (value) {
-    const target = element.scrollHeight
-    gsap.fromTo(element, { height: 0, opacity: 0 }, {
-      height: target,
-      opacity: 1,
-      duration: 0.24,
-      ease: 'power2.out',
-      onComplete: () => { gsap.set(element, { clearProps: 'height' }) },
-    })
+    // v-show 刚把元素切到可见，此时布局未完成、scrollHeight 可能为 0。
+    // 先等一帧拿到真实内容高度，再从 0 展开 —— 否则会「卡一下直接展开」。
+    nextTick(() => requestAnimationFrame(() => {
+      const target = element.scrollHeight
+      gsap.fromTo(element, { height: 0, opacity: 0 }, {
+        height: target,
+        opacity: 1,
+        duration: 0.26,
+        ease: 'power2.out',
+        onComplete: () => { gsap.set(element, { clearProps: 'height' }) },
+      })
+    }))
   } else {
     gsap.to(element, {
       height: 0,
       opacity: 0,
-      duration: 0.18,
+      duration: 0.16,
       ease: 'power2.in',
       onComplete: () => { gsap.set(element, { clearProps: 'height,opacity' }) },
     })
   }
+})
+
+onBeforeUnmount(() => {
+  if (bodyRef.value) gsap.killTweensOf(bodyRef.value)
 })
 </script>
 

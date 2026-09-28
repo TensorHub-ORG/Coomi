@@ -11,7 +11,7 @@ import { useSessionStore } from '@/stores/session'
 import { useRouter } from 'vue-router'
 import { pushTrace, setControlModeActive } from '@/bridge/controlFloat'
 import { MorphIcon } from 'morphicons/vue'
-import { Menu, ChevronUp } from 'lucide'
+import { Menu, ChevronUp, Plus, X } from 'lucide'
 import CoomiIcon from './CoomiIcon.vue'
 
 const session = useSessionStore()
@@ -50,7 +50,6 @@ function sendControl() {
 }
 const sendButton = ref<HTMLButtonElement | null>(null)
 const quickOpen = ref(false)
-const lifeStatsOpen = ref(false)
 const transferText = ref('')
 const transferProgress = ref(0)
 const textareaScrollable = ref(false)
@@ -69,6 +68,7 @@ const showStop = computed(() => session.isBusy && !canSend.value)
  */
 const barOpen = ref(false)
 const barIcon = ref(Menu)
+const quickIcon = computed(() => quickOpen.value ? X : Plus)
 function toggleBar() {
   barOpen.value = !barOpen.value
   barIcon.value = barOpen.value ? ChevronUp : Menu
@@ -293,7 +293,6 @@ watch(controlThinking, value => {
 })
 
 
-function toggleLifeStats() { lifeStatsOpen.value = !lifeStatsOpen.value }
 
 function importFiles() { quickOpen.value = false; window.CoomiAndroid?.importFiles?.() }
 function authorizeFolder() { quickOpen.value = false; window.CoomiAndroid?.authorizeFolder?.() }
@@ -381,7 +380,7 @@ watch(text, () => {
     <div v-if="transferText" class="transfer">
       <span>{{ transferText }}</span><progress :value="transferProgress" max="100" />
     </div>
-    <div v-if="quickOpen || lifeStatsOpen" class="quick-scrim" @click="quickOpen = false; lifeStatsOpen = false" />
+    <div v-if="quickOpen || session.lifeStatsOpen" class="quick-scrim" @click="quickOpen = false; session.lifeStatsOpen = false" />
     <div v-if="quickOpen" class="quick">
       <p class="qhead reasoning-head">推理强度</p>
       <div class="reasoning-options"><button v-for="item in REASONING_EFFORTS" :key="item.value" :class="{ selected: config.reasoningEffort === item.value }" @click="session.setReasoningEffort(item.value)">{{ item.label }}</button></div>
@@ -405,11 +404,8 @@ watch(text, () => {
     </div>
 
     <div class="field" :class="{ busy: session.isBusy }">
-      <button v-if="session.mode === 'life'" class="life-orbit" aria-label="查看数字生命统计" title="查看生命统计" @click="toggleLifeStats">
-        <i class="orbit outer" /><i class="orbit inner" />
-      </button>
-      <div v-if="lifeStatsOpen" class="life-stats-card">
-        <header><span>生命状态</span><button aria-label="关闭" @click="lifeStatsOpen = false"><CoomiIcon name="close" :size="14" /></button></header>
+      <div v-if="session.lifeStatsOpen" class="life-stats-card">
+        <header><span>生命状态</span><button aria-label="关闭" @click="session.lifeStatsOpen = false"><CoomiIcon name="close" :size="14" /></button></header>
         <div class="life-waveform" aria-label="数字生命动态状态波形">
           <svg viewBox="0 0 320 100" preserveAspectRatio="none" aria-hidden="true">
             <path class="wave wave-upper upper-back" d="M0 50C20 47 26 28 46 29C65 30 66 45 84 39C102 33 101 15 117 12C133 9 136 38 153 39C169 40 177 29 191 34C207 40 210 48 225 48C243 48 247 30 264 32C282 34 285 45 301 43C310 42 316 48 320 50V50H0Z" />
@@ -443,58 +439,65 @@ watch(text, () => {
         />
       </div>
 
-      <div class="bar">
-        <!-- 三横杠：把一排模式按钮收进来，点击向上展开（内联在 bar 里，不会溢出）。 -->
-        <button class="pill bar-toggle" :class="{ on: barOpen }" @click="toggleBar" aria-label="更多模式" :aria-expanded="barOpen">
-          <MorphIcon
-            :icon="barIcon"
-            :size="15"
-            stroke-width="2"
-            :spring="{ stiffness: 300, damping: 22 }"
-            :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
-          />
-          <span>模式</span>
-        </button>
-
-        <template v-if="barOpen">
-          <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode()">
-            <CoomiIcon name="target" :size="14" />
-            <span>计划</span>
-          </button>
-          <button class="pill" :class="{ on: config.permissionMode === 'auto' || config.permissionMode === 'minimal', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode">
-            <CoomiIcon name="shield" :size="14" />
-            <span>{{ modeLabel }}</span>
+        <div class="bar">
+          <!-- 三横杠：模式按钮竖向折叠，点击向上展开面板 -->
+          <button class="pill bar-toggle" :class="{ on: barOpen }" @click="toggleBar" aria-label="更多模式" :aria-expanded="barOpen">
+            <MorphIcon
+              :icon="barIcon"
+              :size="15"
+              stroke-width="2"
+              :spring="{ stiffness: 300, damping: 22 }"
+              :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+            />
+            <span>模式</span>
           </button>
 
-          <button class="pill production-pill" :class="{ on: config.productionMode !== 'normal', 'warn-on': config.productionMode === 'berserk' }" @click="toggleProductionMode">
-            <CoomiIcon name="target" :size="14" />
-            <span>{{ config.productionMode === 'berserk' ? '狂暴' : config.productionMode === 'overload' ? '超载' : '普通' }}</span>
+          <span class="spacer" />
+
+          <button class="act" aria-label="快捷指令" @click="toggleQuick">
+            <MorphIcon
+              :icon="quickIcon"
+              :size="21"
+              stroke-width="2"
+              :spring="{ stiffness: 320, damping: 24 }"
+              :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+            />
           </button>
-          <button class="pill control-pill" :class="{ on: controlMode }" @click="toggleControlMode">
-            <CoomiIcon name="cursor" :size="14" />
-            <span>控制</span>
+
+          <button
+            ref="sendButton"
+            class="send"
+            :class="{ jump: isJumpIn, stop: showStop }"
+            :disabled="!canSend && !session.isBusy"
+            :aria-label="showStop ? '停止' : isJumpIn ? '插队' : '发送'"
+            @click="tapPrimary"
+          >
+            <CoomiIcon v-if="showStop" name="stop" :size="17" />
+            <CoomiIcon v-else-if="isJumpIn" name="subtask" :size="18" />
+            <CoomiIcon v-else name="arrowUp" :size="18" />
           </button>
-        </template>
+        </div>
+                <Transition name="mode-pop">
+          <div v-if="barOpen" class="mode-pop" role="group" aria-label="模式选项">
+            <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode(); barOpen = false">
+              <CoomiIcon name="target" :size="14" />
+              <span>计划</span>
+            </button>
+            <button class="pill" :class="{ on: config.permissionMode === 'auto' || config.permissionMode === 'minimal', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode(); barOpen = false">
+              <CoomiIcon name="shield" :size="14" />
+              <span>{{ modeLabel }}</span>
+            </button>
+            <button class="pill production-pill" :class="{ on: config.productionMode !== 'normal', 'warn-on': config.productionMode === 'berserk' }" @click="toggleProductionMode(); barOpen = false">
+              <CoomiIcon name="target" :size="14" />
+              <span>{{ config.productionMode === 'berserk' ? '狂暴' : config.productionMode === 'overload' ? '超载' : '普通' }}</span>
+            </button>
+            <button class="pill control-pill" :class="{ on: controlMode }" @click="toggleControlMode(); barOpen = false">
+              <CoomiIcon name="cursor" :size="14" />
+              <span>控制</span>
+            </button>
+          </div>
+        </Transition>
 
-        <span class="spacer" />
-
-        <button class="act" aria-label="快捷指令" @click="toggleQuick">
-          <CoomiIcon name="plusCircle" :size="21" />
-        </button>
-
-        <button
-          ref="sendButton"
-          class="send"
-          :class="{ jump: isJumpIn, stop: showStop }"
-          :disabled="!canSend && !session.isBusy"
-          :aria-label="showStop ? '停止' : isJumpIn ? '插队' : '发送'"
-          @click="tapPrimary"
-        >
-          <CoomiIcon v-if="showStop" name="stop" :size="17" />
-          <CoomiIcon v-else-if="isJumpIn" name="subtask" :size="18" />
-          <CoomiIcon v-else name="arrowUp" :size="18" />
-        </button>
-      </div>
     </div>
 
     <!-- 控制模式风险确认浮层 -->
@@ -658,6 +661,20 @@ watch(text, () => {
   /* 小屏/大字体机型：一行放不下就换行，而不是横向溢出屏幕。 */
   flex-wrap: wrap; min-width: 0;
 }
+.spacer { flex: 1 1 auto; min-width: 4px; }
+/* 模式竖向弹出面板：在输入框上方竖排，带展开动画（由快到慢）。 */
+.mode-pop {
+  position: absolute; z-index: 5; left: 10px; right: 10px; bottom: calc(100% + 8px);
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border); border-radius: var(--r-card);
+  background: var(--bg); box-shadow: var(--shadow-2);
+}
+.mode-pop .pill {
+  justify-content: flex-start; width: 100%; min-height: 38px;
+}
+.mode-pop-enter-active, .mode-pop-leave-active { transition: opacity .18s ease, transform .22s cubic-bezier(.22,.9,.28,1.1); }
+.mode-pop-enter-from, .mode-pop-leave-to { opacity: 0; transform: translateY(12px) scale(.97); }
 .bar-toggle { flex-shrink: 0; }
 .bar-toggle.on { color: var(--blue); background: var(--blue-soft); }
 .production-pill.on { color: #ff3b30; background: rgba(255, 59, 48, 0.12); }

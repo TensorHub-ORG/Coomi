@@ -474,13 +474,21 @@ async function discover(skipSave = false) {
   if (!skipSave && !(await saveProvider('配置已保存'))) return
   discovering.value = true
   error.value = ''
-  const models = await config.discoverModels(draft.value.id)
+  const discovered = await config.discoverModels(draft.value.id)
   discovering.value = false
-  if (models === null) {
+  if (discovered === null) {
     error.value = config.lastError || '模型获取失败'
     return
   }
-  candidates.value = Array.from(new Set(models.map(model => model.trim()).filter(Boolean)))
+  candidates.value = Array.from(new Set(discovered.models.map(model => model.trim()).filter(Boolean)))
+  // 在线获取到的上下文窗口直接带进草稿，选中的模型后续会用它做默认窗口。
+  if (discovered.contextWindows && Object.keys(discovered.contextWindows).length) {
+    const windows = { ...draft.value.modelContextWindows }
+    for (const [model, window] of Object.entries(discovered.contextWindows)) {
+      windows[model] = window
+    }
+    draft.value.modelContextWindows = windows
+  }
   showPicker.value = true
 }
 
