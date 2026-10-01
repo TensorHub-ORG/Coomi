@@ -1,0 +1,680 @@
+/* Coomi Desktop 设计系统 —— 对标小米 MiMo Desktop（Electron + Tailwind v4）的令牌体系：
+   暖中性灰、墨色文字 alpha 阶梯、发丝描边、克制的强调色、固定 px 字号 × 全局缩放。 */
+@import 'tailwindcss';
+
+/* 暗色以 [data-theme=dark] 驱动，避免 prefers-color-scheme 与手动切换打架。 */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* ── 语义令牌：同一套名字，明暗两套值 ── */
+:root {
+  /* 版面底色：canvas 最底、surface 面、card 卡片 */
+  --canvas: #f6f7fa;
+  --canvas-side: #ffffff;
+  --surface: #ffffff;
+  --surface-muted: #f1f3f7;
+  --surface-sunken: #e9ecf2;
+  /* 表面层级 v2：canvas → surface → surface-raised → surface-overlay（自下而上四档）。
+     浅色下四档都是白/近白，层级靠描边 + 高程区分；暗色下靠明度递增区分。 */
+  --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
+  --hover: #eef1f6;
+  --active: #e6eaf2;
+  --selected: #eeedec;
+
+  /* 边框 v2 三档：soft（发丝 / 行分隔）→ line（默认描边：卡片、浮层）→ strong（控件描边）。
+     三档都在这里定死，组件里别再写 rgba() 当边框色。 */
+  --line: #dfe3ea;
+  --line-soft: rgba(16, 24, 40, 0.08);
+  /* 控件边框：设置项里的输入框/分段控件都靠它「有框」，太浅会显得一片模糊。 */
+  --line-strong: #cdc9c0;
+  --control-bg: #ffffff;
+  --control-bg-2: #f2f0eb;
+
+  /* 文字：墨色 + alpha 阶梯 */
+  --ink: #14161a;
+  --ink-2: rgba(20, 22, 26, 0.82);
+  --ink-3: rgba(20, 22, 26, 0.58);
+  --ink-4: rgba(20, 22, 26, 0.38);
+  --ink-inverse: #ffffff;
+
+  /* 强调：蓝用于链接/选中/可编辑；橙只用于提醒；主按钮用墨色（大厂克制做法） */
+  --primary: #2f6fed;
+  --primary-hover: #2a63d4;
+  --primary-active: #2453b4;
+  --primary-soft: rgba(47, 111, 237, 0.1);
+  --accent: #ff6a2b;
+  --accent-hover: #ef5a17;
+  --accent-active: #d24c0e;
+  --ok: #12a150;
+  --ok-hover: #0e8743;
+  --ok-active: #0b6d36;
+  --ok-soft: rgba(18, 161, 80, 0.1);
+  --warn: #d97706;
+  --warn-hover: #b86105;
+  --warn-active: #964e04;
+  --warn-soft: rgba(217, 119, 6, 0.12);
+  --danger: #e5484d;
+  --danger-hover: #cf3a3f;
+  --danger-active: #b32f34;
+  --danger-soft: rgba(229, 72, 77, 0.1);
+
+  /* ── 写入类工具的语义色 v1 ──
+     工具条（读取 / 写入 / 修改 / 搜索 / 查找 / 抓取）与工具卡片按「干了什么」上色，
+     不再一律用灰。从「只是读」到「改动了东西」，颜色必须一眼分得开：
+       --tool-read    读取、查看、列目录   → 中性（墨色阶梯，跟正文一个世界）
+       --tool-write   写入、新建、保存     → 加深强调色（蓝紫偏靛），最显眼的一档
+       --tool-edit    修改、替换、打补丁   → 同族的第二个色阶，与 write 区分但不跑远
+       --tool-search  搜索、查找、grep     → 中性偏蓝（冷、克制，不抢写操作）
+       --tool-fetch   抓取、下载、HTTP     → 紫（外网来的东西，与本地操作分开）
+       --tool-error   失败、被拒           → 红（与 --danger 同源，错误只有一种红）
+     对比度：暗色下 write / edit 与 --surface / --msg-card 的对比度 ≥ 4.5:1（AA 正文），
+     这几个值改之前先按这两个底色算一遍。 */
+  --tool-read: var(--ink-2);
+  --tool-read-soft: rgba(16, 24, 40, 0.06);
+  --tool-write: #4338ca;
+  --tool-write-soft: rgba(67, 56, 202, 0.12);
+  --tool-edit: #6d28d9;
+  --tool-edit-soft: rgba(109, 40, 217, 0.12);
+  --tool-search: #2563a8;
+  --tool-search-soft: rgba(37, 99, 168, 0.12);
+  --tool-fetch: #7e22ce;
+  --tool-fetch-soft: rgba(126, 34, 206, 0.12);
+  --tool-error: var(--danger);
+  --tool-error-soft: var(--danger-soft);
+
+  /* ── 文件类型语义色 v1 ──
+     12 类文件各一支色：表格 / 文档 / 演示 / PDF / 图片 / 音频 / 视频 / 压缩包 /
+     代码 / 数据 / 文本 / 其它。附件芯片、附件卡片、文件列表共用这一套
+     （消费入口：components/ui/FileBadge.tsx，它只引类名、不写色值）。
+     明暗两套值都按 WCAG 正文口径算过（相对各自最不利的底色，全部 ≥4.5:1）：
+       浅色：#ffffff / --surface-muted / --surface-sunken / --bubble-user → 最差 5.20:1；
+       暗色：--surface / --surface-sunken / --surface-overlay / --bubble-user → 最差 5.41:1；
+       徽标底色（--file-*-soft，主色 14% 混底）上再算一次 → 最差 4.61:1。
+     改色值前先按这几个底色重算一遍。 */
+  --file-sheet: #166534;
+  --file-doc: #1d4ed8;
+  --file-slides: #9a3412;
+  --file-pdf: #b91c1c;
+  --file-image: #7e22ce;
+  --file-audio: #115e59;
+  --file-video: #4338ca;
+  --file-archive: #854d0e;
+  --file-code: #155e75;
+  --file-data: #6d28d9;
+  --file-text: #475569;
+  --file-other: #4b5563;
+  /* 徽标浅底：由各自的主色派 14%，明暗自动跟随，不必再各写一份 */
+  --file-sheet-soft: color-mix(in srgb, var(--file-sheet) 14%, transparent);
+  --file-doc-soft: color-mix(in srgb, var(--file-doc) 14%, transparent);
+  --file-slides-soft: color-mix(in srgb, var(--file-slides) 14%, transparent);
+  --file-pdf-soft: color-mix(in srgb, var(--file-pdf) 14%, transparent);
+  --file-image-soft: color-mix(in srgb, var(--file-image) 14%, transparent);
+  --file-audio-soft: color-mix(in srgb, var(--file-audio) 14%, transparent);
+  --file-video-soft: color-mix(in srgb, var(--file-video) 14%, transparent);
+  --file-archive-soft: color-mix(in srgb, var(--file-archive) 14%, transparent);
+  --file-code-soft: color-mix(in srgb, var(--file-code) 14%, transparent);
+  --file-data-soft: color-mix(in srgb, var(--file-data) 14%, transparent);
+  --file-text-soft: color-mix(in srgb, var(--file-text) 14%, transparent);
+  --file-other-soft: color-mix(in srgb, var(--file-other) 14%, transparent);
+
+  /* 焦点环：全站只有 base.css 那一处用，组件里不要再自己写 outline */
+  --focus-ring-w: 2px;
+  --focus-ring-offset: 1px;
+  --focus-ring: color-mix(in srgb, var(--primary) 70%, transparent);
+
+  /* 滚动条：轨道宽度固定，滑块靠「边框宽度」做细→粗，hover 时内容不会横跳 */
+  --sb-size: 10px;
+  --sb-thumb-w: 4px;
+  --sb-thumb-w-hover: 7px;
+  --sb-thumb: color-mix(in srgb, var(--ink) 14%, transparent);
+  --sb-thumb-hover: color-mix(in srgb, var(--ink) 26%, transparent);
+  --sb-thumb-active: color-mix(in srgb, var(--ink) 34%, transparent);
+
+  /* 选中文字：只给底色，不动前景色（气泡 / 代码块里的字色不能被框选改掉） */
+  --sel-bg: color-mix(in srgb, var(--primary) 26%, transparent);
+
+  /* 代码块 */
+  --code-bg: #f1f3f7;
+  --code-fg: #3a3a38;
+
+  /* 消息：用户实心气泡（方案 A），助手浅底卡片 */
+  --bubble-user: #dbe7ff;
+  --bubble-user-line: #bfd3fb;
+  --bubble-user-ink: #101a2e;
+  --msg-card: #ffffff;
+  --msg-card-line: #e3e7ee;
+  /* 列表选中：整行框 + 通高强调条 */
+  --row-active: #eef0f6;
+  --row-active-line: #d7dbe6;
+  /* 中性主按钮：浅色=深墨底白字，深色=浅于卡片的面板色深字 */
+  --neutral-btn: #22262e;
+  --neutral-btn-hover: #2f3540;
+  --neutral-btn-ink: #ffffff;
+
+  /* 圆角 v2：6 / 10 / 14 / 18 / 22 五档（xs / md / lg / xl / 2xl）。
+     --r-sm(8px) 是早期控件圆角，既有组件还在引用，保留不删。 */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-2xl: 22px;
+
+  /* ── 高程系统 v2：卡片(1) → 悬浮(2) → 浮层(3) → 模态/顶层(4)，外加按下态内阴影。
+     1~3 的值与 v1 一字不差（既有组件的观感零变化），--elev-4 只给「盖在所有东西上面」那一层。 ── */
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 1px rgba(16, 24, 40, 0.03);
+  --elev-2: 0 2px 8px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --elev-3: 0 12px 32px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --elev-4: 0 24px 64px rgba(16, 24, 40, 0.22), 0 6px 16px rgba(16, 24, 40, 0.08);
+  /* 按下态：用内阴影表示「按进去了」，比让按钮整体位移 1px 稳（不会带着周围文字一起抖） */
+  --elev-press: inset 0 1px 3px rgba(16, 24, 40, 0.16), inset 0 1px 1px rgba(16, 24, 40, 0.08);
+  /* 滚动阴影：内容从下面穿过时的层次感 */
+  --scroll-shadow: 0 6px 12px -8px rgba(16, 24, 40, 0.28);
+  /* 兼容旧名 */
+  --shadow-composer: 0 2px 8px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-menu: 0 12px 32px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.16);
+  --shadow-tip: 0 1px 2px rgba(16, 24, 40, 0.06);
+
+  /* 间距阶梯 v2：严格 4 的倍数。Tailwind 的数值间距类锁在同一网格上
+     （@theme 里 --spacing: 4px），所以 p-3 = 12px、gap-6 = 24px，两边不会各走各的。 */
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── 动效 v2：五档时长 × 非线性缓动 ──
+     时长只有这五档，谁都别再写死毫秒数（包括 JS 里的 setTimeout，见 ContextMenuHost 的退场窗口）：
+       instant 按下 / 图标形变   fast hover / 状态色 / 退场   base 浮层入场 / 折叠 / 数值跳动
+       page 整块出现：对话框 / 页面 / 大面板    slow 大面板位移：位移越大越要慢
+     缓动**按语义取**，不按手感随手写：
+       --ease-out-quint 进入：起步快、收尾长（quint 的尾巴最长，停下时不「磕」一下）
+       --ease-in-quad   退出：起步慢、越走越快（读作「被收走」，不是「被拽走」）
+       --ease-spring    可交互：过冲一点点（按钮 / 开关 / 芯片 / 勾，Z 轴手感就来自这点过冲）
+       --ease-soft      大面板：一点不过冲（对话框 / 抽屉 / 内容列：位移越大，过冲越晃眼）
+       --ease-loop      环境循环：匀速（一直在转 / 在扫的装饰动效，非线性会一顿一顿）
+     旧的 --ease-enter / --ease-exit / --ease-emph 一律**保留为别名**（别人的文件还在引用它们），
+     改值不改名，避免大面积改错。 */
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-quad: cubic-bezier(0.55, 0.085, 0.68, 0.53);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-soft: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-loop: linear;
+  --ease-enter: var(--ease-out-quint);
+  --ease-exit: var(--ease-in-quad);
+  --ease-emph: var(--ease-spring);
+
+  --motion-instant: 90ms;  /* 按下、图标形变：只在指尖上，再长就「糊」 */
+  --motion-fast: 140ms;    /* hover、状态色变化、退场 */
+  /* hover / 按压这两个**指针反馈**专用档：都落在 120~160ms 这一段。
+     比 instant(90) 稍长一点 —— 位移只有 2~3px，太快读不出「被按到了」，只看见闪一下；
+     比 base(200) 短 —— 反馈不该让人等。两者都是别名/窄档，不新增第五条时间轴。 */
+  --motion-hover: 140ms;   /* 悬停：位移 / 底色 / 描边 */
+  --motion-press: 120ms;   /* 按下：2~3px 的下沉 */
+  --motion-base: 200ms;    /* 浮层入场、折叠、数值跳动 */
+  --motion-page: 240ms;    /* 整块出现：对话框、页面、大面板 */
+  --motion-slow: 320ms;    /* 大面板位移：位移越大越要慢 */
+  --motion-collapse: var(--motion-base);  /* 旧名（= base）：展开 / 折叠 */
+  /* 错峰步长：新消息 / 芯片 / 列表项按序号乘它。20~30ms 是人眼刚好能读出「依次」的量 */
+  --motion-stagger: 24ms;
+  /* 环境动效节奏：AI 状态指示器这类「一直在转」的循环。比交互时长慢一个量级，
+     点阵的周期、相位、错峰全部从这三个值推出来，不再各写各的秒数。 */
+  --motion-loop-fast: 0.9s;
+  --motion-loop: 1.6s;
+  --motion-loop-slow: 2.6s;
+
+  /* ── Tailwind 过渡工具类的兜底节奏 ──
+     transition-* 工具类在**运行时**读这两个变量（组件没写 --tw-duration / --tw-ease 时用它俩），
+     Tailwind 自带默认是 150ms + ease-in-out，跟本套体系对不上。这里改成「快档 + 进入曲线」，
+     于是「只写了 transition-colors、没写 duration/ease」的地方自动落进体系内；
+     退出语义（in-quad）与弹性语义（spring）在组件里显式写 ease-[var(--ease-in-quad)] 这类。
+     必须写在未分层的 :root：Tailwind 把默认值放在 @layer theme 里，未分层才压得住。 */
+  --default-transition-duration: var(--motion-fast);
+  --default-transition-timing-function: var(--ease-out-quint);
+
+  /* 指针反馈的位移：一律 2~3px —— 再大就不是「被按到」而是「整块在晃」。
+     hover 抬起 2px、按下沉 2px；卡片 / 按钮 / 芯片都取这两个值，不再各写各的 px。 */
+  --shift-hover: 2px;
+  --shift-press: 2px;
+
+  /* 页面级过渡的基准位移：内容区按导航方向滑动用它（View Transitions 与降级分支共用）。
+     v3 从 28px 收到 **4px**：整页级的位移越大，越像「换了个屏幕」而不是「同一块内容换了一页」，
+     而且位移越大越要重新合成 —— 4px 在 240ms（--motion-page）里是「轻轻让开一格」的手感。 */
+  --nav-slide: 4px;
+
+  /* ── 毛玻璃与半透明表面（性能档位切换的唯一入口）──
+     全站只保留**标题栏一层毛玻璃**：那里几乎没有内容从背后穿过，一次采样就够；
+     其余「工具栏 / 页头」一律用半透明纯色（--glass-* 系列），合成器直接能画，
+     滚动时不用重新采样背景 —— 这是长会话滚动卡顿里最贵的一项。
+     性能模式（html[data-perf=low]）把这三档全部退成不透明纯色，见文件末尾。 */
+  --glass-topbar-bg: color-mix(in srgb, var(--canvas-side) 78%, transparent);
+  /* 滚动中的标题栏：**同一个色相、更高的不透明度**，但一个像素的 blur 都不做。
+     滚动时 backdrop-filter 每一帧都要重新采样它背后那一整条内容，标题栏又是全站唯一的
+     blur 层，于是「滚动发涩」的头号开销就压在它身上。切到半透明纯色后合成器直接画，
+     颜色只是从 78% 提到 92%（同一底色），肉眼几乎看不出这一下切换。 */
+  --glass-topbar-scroll-bg: color-mix(in srgb, var(--canvas-side) 92%, transparent);
+  --glass-bg: color-mix(in srgb, var(--canvas) 92%, transparent);
+  --glass-surface-bg: color-mix(in srgb, var(--surface) 94%, transparent);
+  --glass-blur: 12px;
+
+  /* 布局度量 */
+  --rail-w: 60px;
+  --list-w: 264px;
+  --panel-w: 340px;
+  --topbar-h: 44px;
+  --content-w: 900px;
+  --page-pad-x: 32px;
+  --page-pad-y: 24px;
+  /* 界面字号基线：1 = 100%。默认 1.08 —— 正文 12px→约 13px、13px→约 14px。
+     运行时的真实值由 stores/ui.ts 的 setFontScale/applyStoredAppearance 写进 <html> 的内联样式，
+     这里只是 CSS 兜底：还没被外观设置写过时的第一帧，以及给 --ui-font-scale 一个可读的默认语义。 */
+  --ui-font-scale: 1.08;
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --canvas: #131315;
+  --canvas-side: #0e0e10;
+  --surface: #1d1d21;
+  --surface-muted: #17171a;
+  --surface-sunken: #26262b;
+  --surface-raised: #26262b;
+  --surface-overlay: #2c2c33;
+  --hover: rgba(255, 255, 255, 0.07);
+  --active: rgba(255, 255, 255, 0.12);
+  --selected: rgba(255, 255, 255, 0.1);
+  --line: #303038;
+  --line-soft: rgba(255, 255, 255, 0.08);
+  --line-strong: #4a4a4a;
+  --control-bg: #262626;
+  --control-bg-2: #1a1a1a;
+  --ink: #f4f4f5;
+  --ink-2: #b8b8b8;
+  --ink-3: #8b8b8b;
+  --ink-4: #6a6a6a;
+  --ink-inverse: #151c13;
+  --primary: #5a9cff;
+  --primary-hover: #7bb0ff;
+  --primary-active: #9dc4ff;
+  --primary-soft: rgba(90, 156, 255, 0.16);
+  --accent: #ff7d45;
+  --accent-hover: #ff9463;
+  --accent-active: #ffab82;
+  --ok: #3fb950;
+  --ok-hover: #56c96a;
+  --ok-active: #74d886;
+  --ok-soft: rgba(63, 185, 80, 0.16);
+  --warn: #d29922;
+  --warn-hover: #e0aa33;
+  --warn-active: #eebc52;
+  --warn-soft: rgba(210, 153, 34, 0.18);
+  --danger: #ff6b6f;
+  --danger-hover: #ff8a8d;
+  --danger-active: #ffa3a6;
+  --danger-soft: rgba(255, 107, 111, 0.16);
+  /* 写入类工具语义色（暗色）：写 / 改用「提亮后的同族色」而不是把浅色档原样搬下来，
+     实测对比度（相对 --surface #1d1d21 / --msg-card #1a1a1e）：
+       --tool-write #a5b4fc ≈ 8.9:1、--tool-edit #c4b5fd ≈ 9.7:1、--tool-fetch #d8b4fe ≈ 9.5:1、
+       --tool-search #7dd3fc ≈ 9.4:1、--tool-read(ink-2 #b8b8b8) ≈ 7.7:1 —— 全部 ≥ 4.5:1（AA 正文）。 */
+  --tool-read: var(--ink-2);
+  --tool-read-soft: rgba(255, 255, 255, 0.08);
+  --tool-write: #a5b4fc;
+  --tool-write-soft: rgba(165, 180, 252, 0.18);
+  --tool-edit: #c4b5fd;
+  --tool-edit-soft: rgba(196, 181, 253, 0.18);
+  --tool-search: #7dd3fc;
+  --tool-search-soft: rgba(125, 211, 252, 0.16);
+  --tool-fetch: #d8b4fe;
+  --tool-fetch-soft: rgba(216, 180, 254, 0.18);
+  --tool-error: var(--danger);
+  --tool-error-soft: var(--danger-soft);
+  /* 文件类型语义色（暗色）：浅色档原样搬下来会发闷，这里统一提到 300~400 阶。
+     实测相对 --surface #1d1d21 / --surface-sunken #26262b 的最差对比度 5.41:1（≥4.5:1）。 */
+  --file-sheet: #4ade80;
+  --file-doc: #60a5fa;
+  --file-slides: #fdba74;
+  --file-pdf: #ff8a8d;
+  --file-image: #d8b4fe;
+  --file-audio: #5eead4;
+  --file-video: #a5b4fc;
+  --file-archive: #fde047;
+  --file-code: #7dd3fc;
+  --file-data: #c4b5fd;
+  --file-text: #a8b3c4;
+  --file-other: #a1a1aa;
+  /* 暗色下焦点环要更亮一点，否则压在深面板上几乎看不见 */
+  --focus-ring: color-mix(in srgb, var(--primary) 82%, transparent);
+  --sb-thumb: rgba(255, 255, 255, 0.16);
+  --sb-thumb-hover: rgba(255, 255, 255, 0.3);
+  --sb-thumb-active: rgba(255, 255, 255, 0.42);
+  --sel-bg: color-mix(in srgb, var(--primary) 38%, transparent);
+  --code-bg: #2e2e2e;
+  --code-fg: #e6e6e6;
+  --bubble-user: #1f2b45;
+  --bubble-user-line: #33456a;
+  --bubble-user-ink: #e8eefb;
+  --msg-card: #1a1a1e;
+  --msg-card-line: #2b2b31;
+  --row-active: #242424;
+  --row-active-line: #333333;
+  --neutral-btn: #34343a;
+  --neutral-btn-hover: #3f3f47;
+  --neutral-btn-ink: #f2f3f5;
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 2px 10px rgba(0, 0, 0, 0.45);
+  --elev-3: 0 14px 36px rgba(0, 0, 0, 0.55);
+  --elev-4: 0 28px 72px rgba(0, 0, 0, 0.7), 0 8px 20px rgba(0, 0, 0, 0.45);
+  --elev-press: inset 0 1px 3px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(0, 0, 0, 0.4);
+  --scroll-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.6);
+  --shadow-composer: 0 2px 10px rgba(0, 0, 0, 0.45);
+  --shadow-menu: 0 14px 36px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 14px 36px rgba(0, 0, 0, 0.55);
+  --shadow-tip: 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+/* ── 把语义令牌接进 Tailwind：bg-surface / text-ink-2 / border-line … ── */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-side: var(--canvas-side);
+  --color-surface: var(--surface);
+  --color-muted: var(--surface-muted);
+  --color-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-overlay: var(--surface-overlay);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-selected: var(--selected);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-control: var(--control-bg);
+  --color-control-2: var(--control-bg-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-ink-inverse: var(--ink-inverse);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-ok: var(--ok);
+  --color-ok-hover: var(--ok-hover);
+  --color-ok-active: var(--ok-active);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-hover: var(--warn-hover);
+  --color-warn-active: var(--warn-active);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-active: var(--danger-active);
+  --color-danger-soft: var(--danger-soft);
+  /* 写入类工具语义色：接进 Tailwind，chat 侧直接用 text-tool-write / bg-tool-read-soft 这类类名 */
+  --color-tool-read: var(--tool-read);
+  --color-tool-read-soft: var(--tool-read-soft);
+  --color-tool-write: var(--tool-write);
+  --color-tool-write-soft: var(--tool-write-soft);
+  --color-tool-edit: var(--tool-edit);
+  --color-tool-edit-soft: var(--tool-edit-soft);
+  --color-tool-search: var(--tool-search);
+  --color-tool-search-soft: var(--tool-search-soft);
+  --color-tool-fetch: var(--tool-fetch);
+  --color-tool-fetch-soft: var(--tool-fetch-soft);
+  --color-tool-error: var(--tool-error);
+  --color-tool-error-soft: var(--tool-error-soft);
+  /* 文件类型语义色：chat / 文件列表侧直接用 text-file-doc / bg-file-doc-soft 这类类名 */
+  --color-file-sheet: var(--file-sheet);
+  --color-file-sheet-soft: var(--file-sheet-soft);
+  --color-file-doc: var(--file-doc);
+  --color-file-doc-soft: var(--file-doc-soft);
+  --color-file-slides: var(--file-slides);
+  --color-file-slides-soft: var(--file-slides-soft);
+  --color-file-pdf: var(--file-pdf);
+  --color-file-pdf-soft: var(--file-pdf-soft);
+  --color-file-image: var(--file-image);
+  --color-file-image-soft: var(--file-image-soft);
+  --color-file-audio: var(--file-audio);
+  --color-file-audio-soft: var(--file-audio-soft);
+  --color-file-video: var(--file-video);
+  --color-file-video-soft: var(--file-video-soft);
+  --color-file-archive: var(--file-archive);
+  --color-file-archive-soft: var(--file-archive-soft);
+  --color-file-code: var(--file-code);
+  --color-file-code-soft: var(--file-code-soft);
+  --color-file-data: var(--file-data);
+  --color-file-data-soft: var(--file-data-soft);
+  --color-file-text: var(--file-text);
+  --color-file-text-soft: var(--file-text-soft);
+  --color-file-other: var(--file-other);
+  --color-file-other-soft: var(--file-other-soft);
+  --color-code: var(--code-bg);
+  --color-code-fg: var(--code-fg);
+  --color-bubble-user: var(--bubble-user);
+  --color-bubble-user-line: var(--bubble-user-line);
+  --color-bubble-user-ink: var(--bubble-user-ink);
+  --color-msg-card: var(--msg-card);
+  --color-msg-card-line: var(--msg-card-line);
+  --color-row-active: var(--row-active);
+  --color-row-active-line: var(--row-active-line);
+  --color-neutral-btn: var(--neutral-btn);
+  --color-neutral-btn-hover: var(--neutral-btn-hover);
+  --color-neutral-btn-ink: var(--neutral-btn-ink);
+  /* 间距基准：4px 网格。数值类间距工具（p-3 / gap-6 / mt-8）全部按它算，
+     不再走 rem，免得根字号一变整站间距就跟着漂。 */
+  --spacing: 4px;
+
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+  --shadow-elev-4: var(--elev-4);
+  --shadow-press: var(--elev-press);
+
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-2xl: var(--r-2xl);
+
+  --shadow-composer: var(--shadow-composer);
+  --shadow-menu: var(--shadow-menu);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-tip: var(--shadow-tip);
+
+  --font-sans: 'HarmonyOS Sans SC', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', Inter, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', 'Noto Sans Mono', monospace;
+
+  /* 固定 px 字号阶梯 × 全局缩放：中英文都能落到整数像素，比 rem 更好控 */
+  --text-10: calc(10px * var(--ui-font-scale));
+  --text-11: calc(11px * var(--ui-font-scale));
+  --text-12: calc(12px * var(--ui-font-scale));
+  --text-13: calc(13px * var(--ui-font-scale));
+  --text-14: calc(14px * var(--ui-font-scale));
+  --text-15: calc(15px * var(--ui-font-scale));
+  --text-16: calc(16px * var(--ui-font-scale));
+  --text-17: calc(17px * var(--ui-font-scale));
+  --text-18: calc(18px * var(--ui-font-scale));
+  --text-20: calc(20px * var(--ui-font-scale));
+  --text-22: calc(22px * var(--ui-font-scale));
+  --text-24: calc(24px * var(--ui-font-scale));
+  --text-28: calc(28px * var(--ui-font-scale));
+
+  /* v2 字号阶梯只认这七档：11 / 12 / 13 / 14 / 16 / 20 / 24，各配一条行高。
+     行高写成**无单位倍数**：字号被 --ui-font-scale 缩放时行高一起缩，
+     否则 1.25 倍字号配死 px 行高会挤成一条。
+     100% 缩放下的实际值：11/16 · 12/18 · 13/20 · 14/22 · 16/24 · 20/28 · 24/32。 */
+  --text-11--line-height: 1.45;
+  --text-12--line-height: 1.5;
+  --text-13--line-height: 1.54;
+  --text-14--line-height: 1.57;
+  --text-16--line-height: 1.5;
+  --text-20--line-height: 1.4;
+  --text-24--line-height: 1.33;
+
+  /* 缓动接进 Tailwind：ease-out-quint / ease-in-quad / ease-spring / ease-soft 四个工具类。
+     @theme inline **只把值内联进工具类**、不往 :root 落地声明（上面 :root 那一份才是唯一来源），
+     所以这里的「同名引用」不成环：生成的是 .ease-spring { transition-timing-function: var(--ease-spring) }。 */
+  --ease-out-quint: var(--ease-out-quint);
+  --ease-in-quad: var(--ease-in-quad);
+  --ease-spring: var(--ease-spring);
+  --ease-soft: var(--ease-soft);
+
+  /* 动画工具类：每条都把「时长 + 缓动」写全（进 out-quint / 退 in-quad / 大面板 soft / 勾与开关 spring），
+     组件只管挂类名。 */
+  --animate-enter: enter var(--motion-base) var(--ease-out-quint);
+  --animate-view: view-in var(--motion-fast) var(--ease-out-quint);
+  --animate-rise: rise var(--motion-fast) var(--ease-out-quint);
+  --animate-pop: pop var(--motion-fast) var(--ease-spring);
+  /* --animate-shimmer 已删：全站没有任何调用点（grep 过 animate-shimmer），属纯装饰性循环。
+     「有内容在加载」的语义由下面的 --animate-skeleton（呼吸）承担。 */
+  /* 统一动效体系：页面 / 新段落 / 提示条 / 浮层进出场 */
+  --animate-page: rise-soft var(--motion-page) var(--ease-soft);
+  --animate-seg: rise-soft var(--motion-fast) var(--ease-out-quint);
+  --animate-bar: rise-soft var(--motion-base) var(--ease-out-quint);
+  --animate-pop-in: pop-in var(--motion-base) var(--ease-out-quint);
+  --animate-pop-out: pop-out var(--motion-fast) var(--ease-in-quad) both;
+  --animate-fade: fade-in var(--motion-base) var(--ease-out-quint);
+  --animate-fade-out: fade-exit var(--motion-fast) var(--ease-in-quad) both;
+  /* 组件级：分段控件滑块 / 网格错峰入场 / 骨架呼吸。
+     滑块与骨架只动 transform / opacity，时长全部取自上面的 --motion-*。
+     注意：--animate-card-in 刻意只动 opacity——卡片身上还挂着 .card-lift:hover 的上移。 */
+  --animate-seg-indicator: seg-indicator var(--motion-base) var(--ease-spring) both;
+  --animate-card-in: card-in var(--motion-base) var(--ease-out-quint) both;
+  --animate-skeleton: skeleton-pulse var(--motion-loop) var(--ease-soft) infinite;
+  /* AI 状态语言与全站铺开：完成勾、数字 pop。关键帧都在本文件末尾。
+     芯片（引用 / 附件 / 技能）的进出场自 v2 起改走 motion 的 m.span + AnimatePresence
+     （见 components/chat/Composer.tsx），这里不再保留 CSS 版本，避免两套并存。
+     新消息入场的错峰要按 --msg-i 算延迟，所以它是 base.css 里的 .msg-enter；
+     骨架屏只保留 --animate-skeleton（skeleton-pulse）这一层呼吸，扫光（skeleton-sweep）已删
+     —— 高光长度不随加载进度变化的循环只是「在动」，不承载信息。 */
+  --animate-check-in: check-in var(--motion-base) var(--ease-spring) both;
+  --animate-num-pop: num-pop var(--motion-fast) var(--ease-spring);
+}
+
+/* ── 毛玻璃只此一层 ──
+   标题栏是全站唯一允许 backdrop-filter 的地方（App 的 TitleBar 挂 .glass-topbar）。
+   写成类而不是给 [data-tauri-drag-region] 上样式：那个属性是「能不能拖窗口」的语义，
+   跟观感不该绑在一起（将来把拖拽区挪到别处，毛玻璃不该跟着跑）。 */
+.glass-topbar {
+  background: var(--glass-topbar-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+}
+
+/* 滚动中（html[data-scrolling='1']，由 TitleBar 在滚动开始那一帧挂上、200ms 无滚动摘掉）：
+   毛玻璃就地切成**半透明纯色**。
+   为什么是滚动这一件事触发：blur 的代价不在「有没有动画」，而在**背景每变一次就要重采样一次**。
+   静止时背后那一条是死的，采样一次能缓存住；一开始滚，每一帧背后都在动，于是每一帧都要
+   重新采样 + 重新合成，标题栏这一层就成了滚动发涩的头号开销。
+   切纯色是零成本的（合成器直接画），而且**没有任何过渡**：过渡本身在滚动期间也是一帧重绘。
+   与省电档（html[data-perf='low']，直接把 blur 整层删掉）的区别：这里只在滚动时切，
+   手指一停、200ms 后毛玻璃原样回来。 */
+html[data-scrolling='1'] .glass-topbar {
+  background: var(--glass-topbar-scroll-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 其余表面：半透明纯色，**没有 blur**。工具行 / 页头要的是「内容从底下穿过时
+   还能看出层次」，纯色 + 一点透明度就够了，代价接近零。 */
+.glass-bar { background: var(--glass-bg); }
+.glass-surface { background: var(--glass-surface-bg); }
+
+/* ── 性能模式：html[data-perf='low']（设置页的开关，字段 coomi.prefs.v2.perf）──
+   这里管「观感退档」这两件（毛玻璃、半透明），点阵循环与虚拟化阈值分别在
+   base.css 与 stores/ui.ts。默认档 high 下这一段一条都不生效。 */
+[data-perf='low'] {
+  --glass-topbar-bg: var(--canvas-side);
+  /* 滚动态在省电档里也是纯色（不透明），与上一行同一档底色 */
+  --glass-topbar-scroll-bg: var(--canvas-side);
+  --glass-bg: var(--canvas);
+  --glass-surface-bg: var(--surface);
+}
+[data-perf='low'] .glass-topbar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* 半透明表面退成纯色：背景不再随滚动透出底下内容，重绘面积直接减半 */
+[data-perf='low'] .glass-bar { background: var(--canvas); }
+[data-perf='low'] .glass-surface { background: var(--surface); }
+
+@keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
+/* @keyframes shimmer 已删：无调用点的装饰性扫光（见上面 --animate-shimmer 的说明）。 */
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+/* ── 统一动效体系的骨架帧 ──
+   统一只用 transform/opacity：Tailwind v4 的 translate-* / scale-* 走的是同名独立属性，
+   这里只碰 transform，所以浮层自带的 translate 定位不会被动画顶掉。 */
+/* 极轻的上升：新段落、提示条。8px 起步，再多就「跳」了 */
+@keyframes rise-soft { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* **消息内容专用**的入场：只有位移、没有淡入。消息整行的入场绝不能动 opacity ——
+   动画被打断/暂停时停在半路，用户看到的就是「回复颜色很淡」甚至「消息不见了」。 */
+@keyframes rise-y { from { transform: translateY(8px); } to { transform: none; } }
+/* 浮层方向语义：上弹的从下方 4px 起，下弹的从上方 4px 起（--pop-x/--pop-y 由 .pop-surface 按 data-side 给） */
+@keyframes pop-in {
+  from { opacity: 0; transform: translate3d(var(--pop-x, 0px), var(--pop-y, -4px), 0) scale(0.98); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.985); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-exit { from { opacity: 1; } to { opacity: 0; } }
+/* 分段控件滑块：新指示层从上一格的方向滑进来（--seg-step = 一格宽 + 间隙）。 */
+@keyframes seg-indicator { from { opacity: 0; transform: translateX(calc(-1 * var(--seg-step, 0px))); } to { opacity: 1; transform: none; } }
+/* 骨架呼吸：只动 opacity。 */
+@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* 卡片错峰入场：**只动 opacity**，不碰 transform。
+   卡片身上还挂着 .card-lift:hover 的上移，animation 的 both 填充会锁住 transform，
+   两边同时写 transform 就会「悬停不再抬起」。 */
+@keyframes card-in { from { opacity: 0; } to { opacity: 1; } }
+/* 工具完成 / 复制成功：把勾从 0.6 弹到 1（--motion-base + 弹性曲线；真弹性在 JS 侧由
+   components/chat/MessageList.tsx 的 Pop 走 motion spring）。只碰 transform/opacity，
+   颜色过渡交给调用方的语义色，所以行高与布局一动不动。 */
+@keyframes check-in { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+/* 数字变化：轻微上浮 + 放大。配 tabular-nums 等宽数字，宽度不跳。 */
+@keyframes num-pop { from { opacity: 0.55; transform: translateY(-1px) scale(1.06); } to { opacity: 1; transform: none; } }
+/* 骨架扫光（skeleton-sweep）已删：与加载进度无关的循环高光，纯装饰。
+   骨架屏留一圈静态灰底（base.css 的 .skeleton），加载呼吸交给 skeleton-pulse。 */
+/* 流式光标：停笔时 120ms 收束淡出，不是「啪」地消失 */
+@keyframes caret-pulse { 0%, 55% { opacity: 0.9; } 70%, 100% { opacity: 0.28; } }
+@keyframes caret-out { from { opacity: 0.9; transform: scaleY(1); } to { opacity: 0; transform: scaleY(0.32); } }
+
+/* ══ 动效审计（本轮「删多余、留有信息量」的结论） ══
+   判定标准只有一条：这段动画是否在表达「状态」或「关系」。是 → 留；只是「在动」 → 删。
+   降级：留下的每一项都必须在 [data-motion='off'] 与
+   @media (prefers-reduced-motion: reduce) 下收住（见 base.css 的两段：动画令牌归零 +
+   状态点阵/骨架/光标/导航指示条各自 animation: none）。
+
+   留下（承载信息）：
+     · AgentState 的 11 个语义态（.ai-state 与 ai-* 关键帧）：思考 / 推理 / 检索 / 读取 /
+       写入 / 执行 / 等待 / 压缩 / 子代理 / 重连，点阵与轨道直接编码「AI 在干什么」；
+     · 按压与悬停反馈（--motion-press / --motion-hover、.card-lift）与分段滑块
+       （seg-indicator）：指尖落下的确认 +「选中项在哪」；
+     · 折叠展开（.collapse）、浮层进出场（.pop-surface / .dialog-*）、页面过渡（vt-* / pane-*）：
+       表达「从哪来、到哪去」的空间关系；
+     · 流式光标（caret-pulse）与消息入场（rise-y）：正在生成 / 新内容刚出现；
+     · 运行中指示的呼吸（Tailwind 的 animate-pulse 用在运行小圆点上）与骨架呼吸
+       （--animate-skeleton / skeleton-pulse）：还在跑 / 还在等；
+     · 完成勾（check-in）、数字变化（num-pop）、搜索命中（search-hit）：一次性反馈，
+       不是循环，也不长期占用合成器。
+
+   删掉（纯装饰性循环）：
+     · shimmer / --animate-shimmer：全站零调用点；
+     · skeleton-sweep / .skeleton::after 扫光：高光长度与位置不随加载进度变化；
+     · float 漂浮 / glow 呼吸光晕 / dot-travel 跑点：本仓库不存在这类关键帧
+       （--animate-* 与两处 @keyframes 已逐条核对），无需处理。 */

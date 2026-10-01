@@ -1,0 +1,4 @@
+# Linker and NDK sysroot are injected by the Android Gradle build via
+# CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER / CC / AR / RANLIB environment
+# variables (see apps/coomi-app/app/build.gradle -> buildCoomiRustAndroid).
+# Keep this file free of machine-specific absolute paths.

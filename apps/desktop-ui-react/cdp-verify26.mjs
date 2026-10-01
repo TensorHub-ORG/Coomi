@@ -1,0 +1,15 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { try { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) return 'EXC'; return r.result.result.value; } catch { return null; } };
+const d = JSON.parse(await ev('JSON.stringify(window.__sessionDebug.read())') || '{}');
+console.log('会话=' + JSON.stringify({ sid: String(d.sessionId || '').slice(0, 8), len: d.messagesLen, streaming: d.streaming }));
+console.log('传输=' + await ev("JSON.stringify(window.__transportDebug ? window.__transportDebug() : null)"));
+console.log('注入=' + await ev("JSON.stringify(window.__COOMI_BOOT__ ? {port: window.__COOMI_BOOT__.port, v: window.__COOMI_BOOT__.version} : null)"));
+console.log('前端状态（含新增字段）=' + String(await ev("(async function(){ try { return await window.__TAURI__.core.invoke('collect_diagnostics'); } catch(e) { return 'ERR'; } })()")).split('\n').filter(l=>/前端自报/.test(l)).join(''));
+ws.close();

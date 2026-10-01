@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "entries": {
+    "amap": {
+      "name": "高德地图",
+      "description": "地理编码、路径规划。"
+    },
+    "api-design": {
+      "name": "API 设计",
+      "description": "设计一致且可演进的 HTTP API。"
+    },
+    "atlassian": {
+      "name": "Jira / Confluence",
+      "description": "Atlassian 云端 Jira 与 Confluence。"
+    },
+    "aws": {
+      "name": "AWS",
+      "description": "查询 AWS 资源与成本。"
+    },
+    "brave-search": {
+      "name": "Brave 搜索",
+      "description": "Brave 网页与本地搜索。"
+    },
+    "browsermcp": {
+      "name": "Browser MCP",
+      "description": "连接你正在用的浏览器（需装扩展）。"
+    },
+    "chroma": {
+      "name": "Chroma",
+      "description": "本地向量库检索。"
+    },
+    "clickhouse": {
+      "name": "ClickHouse",
+      "description": "ClickHouse 只读查询。"
+    },
+    "cloudflare": {
+      "name": "Cloudflare 观测",
+      "description": "Workers/日志观测。"
+    },
+    "code-review": {
+      "name": "代码审查",
+      "description": "审查正确性、可维护性与测试覆盖，并给出可执行的改进。"
+    },
+    "context7": {
+      "name": "Context7 文档",
+      "description": "拉取库的最新文档，减少 API 幻觉。"
+    },
+    "deepwiki": {
+      "name": "DeepWiki 项目维基",
+      "description": "按仓库生成/查询项目维基。"
+    },
+    "desktop-commander": {
+      "name": "桌面指挥官",
+      "description": "文件管理 + 终端执行的一体化服务器。"
+    },
+    "docker": {
+      "name": "Docker",
+      "description": "容器与镜像管理。"
+    },
+    "duckdb": {
+      "name": "DuckDB",
+      "description": "本地分析型数据库查询。"
+    },
+    "duckduckgo": {
+      "name": "DuckDuckGo 搜索",
+      "description": "免密钥的网页搜索。"
+    },
+    "elasticsearch": {
+      "name": "Elasticsearch",
+      "description": "索引与查询 ES 集群。"
+    },
+    "everything": {
+      "name": "Everything 演示",
+      "description": "官方演示服务器：用来验证 MCP 通道是否正常。"
+    },
+    "exa": {
+      "name": "Exa 语义搜索",
+      "description": "语义搜索（按意思找资料）。"
+    },
+    "excel": {
+      "name": "Excel",
+      "description": "读写 Excel 工作簿。"
+    },
+    "feishu": {
+      "name": "飞书",
+      "description": "飞书文档与消息（社区实现）。"
+    },
+    "ffmpeg": {
+      "name": "FFmpeg",
+      "description": "音视频转码与抽帧。"
+    },
+    "figma": {
+      "name": "Figma 设计",
+      "description": "读取 Figma 设计文件与组件信息。"
+    },
+    "filesystem": {
+      "name": "文件系统",
+      "description": "在一个明确允许的目录下读写文件。"
+    },
+    "firecrawl": {
+      "name": "Firecrawl 抓取",
+      "description": "整站抓取与结构化抽取。"
+    },
+    "frontend-design": {
+      "name": "前端设计",
+      "description": "构建高质量、可访问的前端界面。"
+    },
+    "git": {
+      "name": "Git",
+      "description": "读取仓库状态、历史、分支与 diff。"
+    },
+    "git-workflow": {
+      "name": "Git 高级工作流",
+      "description": "安全使用分支、rebase、worktree 与恢复操作。"
+    },
+    "gitee": {
+      "name": "Gitee 码云",
+      "description": "码云仓库与 Issue 操作。"
+    },
+    "github": {
+      "name": "GitHub",
+      "description": "仓库、Issue、PR、Actions 操作。"
+    },
+    "gitlab": {
+      "name": "GitLab",
+      "description": "GitLab 项目、Issue、MR 管理。"
+    },
+    "grafana": {
+      "name": "Grafana",
+      "description": "面板与告警查询。"
+    },
+    "kubernetes": {
+      "name": "Kubernetes",
+      "description": "集群资源查看与操作。"
+    },
+    "linear": {
+      "name": "Linear",
+      "description": "Issue 与项目进度管理。"
+    },
+    "markitdown": {
+      "name": "MarkItDown 转换",
+      "description": "把 PDF/Office/图片转成 Markdown。"
+    },
+    "memory": {
+      "name": "记忆",
+      "description": "本地知识图谱：存实体与关系，跨会话记忆。"
+    },
+    "mongodb": {
+      "name": "MongoDB",
+      "description": "集合查询与聚合。"
+    },
+    "mysql": {
+      "name": "MySQL",
+      "description": "MySQL 查询与表结构浏览。"
+    },
+    "notion": {
+      "name": "Notion",
+      "description": "读写 Notion 页面与数据库。"
+    },
+    "office-word": {
+      "name": "Word 文档",
+      "description": "读写 Word 文档。"
+    },
+    "openmemory": {
+      "name": "OpenMemory",
+      "description": "本地长期记忆层（社区实现）。"
+    },
+    "pandas-mcp": {
+      "name": "Pandas",
+      "description": "对 CSV/表格做统计分析。"
+    },
+    "playwright": {
+      "name": "Playwright 浏览器",
+      "description": "浏览器自动化：打开页面、点击、截图。"
+    },
+    "postgres": {
+      "name": "PostgreSQL",
+      "description": "只读查询 Postgres（连接串里带只读账号）。"
+    },
+    "puppeteer": {
+      "name": "Puppeteer 无头浏览器",
+      "description": "无头浏览器抓取与操作。"
+    },
+    "qdrant": {
+      "name": "Qdrant",
+      "description": "向量检索服务。"
+    },
+    "react-nextjs": {
+      "name": "React 最佳实践",
+      "description": "应用当前 React 与 Next.js 的性能与工程实践。"
+    },
+    "redis": {
+      "name": "Redis",
+      "description": "Redis 键值浏览与命令执行。"
+    },
+    "security-review": {
+      "name": "安全审查",
+      "description": "发现安全缺陷并提出可验证的修复方案。"
+    },
+    "sentry": {
+      "name": "Sentry 监控",
+      "description": "查询错误与性能问题。"
+    },
+    "sequential-thinking": {
+      "name": "顺序思考",
+      "description": "把复杂问题拆成可回溯的思考步骤。"
+    },
+    "serena": {
+      "name": "Serena 语义助手",
+      "description": "基于 LSP 的语义代码检索与重构助手。"
+    },
+    "shell": {
+      "name": "Shell 命令",
+      "description": "在受控目录内执行 shell 命令（危险，默认关闭）。"
+    },
+    "skill-creator": {
+      "name": "技能创建器",
+      "description": "创建和更新可复用的 Coomi 技能。"
+    },
+    "slack": {
+      "name": "Slack",
+      "description": "频道消息读取与发送。"
+    },
+    "sqlite": {
+      "name": "SQLite",
+      "description": "查询本地 SQLite 数据库文件。"
+    },
+    "tavily": {
+      "name": "Tavily 搜索",
+      "description": "面向 AI 的搜索与内容抽取。"
+    },
+    "technical-writing": {
+      "name": "文档撰写",
+      "description": "撰写准确、可执行的开发者文档。"
+    },
+    "time": {
+      "name": "时间",
+      "description": "时区换算与当前时间（官方 Python 参考实现）。"
+    },
+    "webapp-testing": {
+      "name": "Web 应用测试",
+      "description": "用浏览器自动化验证本地 Web 应用。"
+    },
+    "youtube": {
+      "name": "YouTube 字幕",
+      "description": "视频字幕与信息抓取。"
+    }
+  }
+}

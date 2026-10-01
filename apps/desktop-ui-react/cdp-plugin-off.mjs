@@ -1,0 +1,12 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); return r.result.exceptionDetails ? 'EXC ' + r.result.exceptionDetails.text : r.result.result.value; };
+console.log('停用演示插件=' + await ev("(async () => { try { return await window.__TAURI__.core.invoke('plugin_set_enabled', { id: 'demo-page', on: false }); } catch (e) { return 'ERR ' + String(e); } })()"));
+console.log('plugin-views=' + await ev("(async () => { const b = window.__COOMI_BOOT__; const r = await fetch('http://127.0.0.1:' + b.port + '/api/plugins/views', { headers: { Authorization: 'Bearer ' + b.token } }); return await r.text(); })()"));
+ws.close();

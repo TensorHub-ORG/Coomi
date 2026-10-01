@@ -1,0 +1,953 @@
+/* 说明：自定义基础样式必须放进 @layer base。
+   未分层的 CSS 在层叠里**永远胜过** Tailwind 的 utilities（哪怕后者选择器更具体），
+   之前 button{background:none} 把 bg-primary / bg-bubble-user 这类工具类全压掉了，
+   表现就是「发送键不高亮、气泡和边框看不见」。 */
+@import './theme.css';
+@import './fonts.css';
+
+@layer base {
+
+  * { border-color: var(--line); }
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-13);
+    /* HarmonyOS Sans 字面略大，行高相应收紧 */
+    line-height: 1.58;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+    /* 桌面端：整体不可选择，只有正文/输入区放开，避免框选出一片蓝 */
+    user-select: none;
+  }
+  input, textarea, [contenteditable], .selectable, .md-body { user-select: text; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  input, textarea { font: inherit; color: inherit; background: none; border: 0; outline: none; }
+  /* 选中文字底色：只给底色，不动前景色——气泡 / 代码块里的字色不能被框选改掉。
+     暗色下换成更高的不透明度（--sel-bg 在 theme.css 里分主题给）。 */
+  ::selection { background: var(--sel-bg); }
+  ::-moz-selection { background: var(--sel-bg); }
+  .md-body, .md-body *, .sel-text, .sel-text *, pre, code, input, textarea { user-select: text; }
+
+  /* 焦点环 v2：全站只有这一处定义。宽度/偏移/颜色全取 --focus-ring*，
+     组件里不要再自己写 outline，否则暗色下会出现「一半亮一半看不见」的环。
+     鼠标点出来的焦点不画环（只有键盘 Tab 走 :focus-visible），点一下按钮不留蓝圈。 */
+  :where(a, button, input, textarea, select, summary, [tabindex], [role='button'], [role='tab'], [role='switch'], [contenteditable='true']):focus-visible {
+    outline: var(--focus-ring-w) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--r-sm);
+  }
+
+  /* 细滚动条 v2：静止时是一条 4px 细线，悬停时**在原轨道内变粗**（只收透明边框，
+     轨道宽度不变），所以鼠标扫过时内容不会左右抖一下。颜色走 --sb-* 令牌，暗色自动换成浅色 alpha。 */
+  ::-webkit-scrollbar { width: var(--sb-size); height: var(--sb-size); }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--sb-thumb);
+    border: calc((var(--sb-size) - var(--sb-thumb-w)) / 2) solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--sb-thumb-hover);
+    border-width: calc((var(--sb-size) - var(--sb-thumb-w-hover)) / 2);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:active { background: var(--sb-thumb-active); background-clip: content-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
+  /* 窗口拖拽区（自绘标题栏用） */
+  .drag { -webkit-app-region: drag; }
+  .no-drag { -webkit-app-region: no-drag; }
+
+  /* ── 插件主题背景层（theme.json 的 background 字段，v1.5）──
+     fixed inset-0 + z-0：垫在画布之上、应用内容之下；pointer-events-none 不挡任何
+     点击 / 选择 / 输入；fixed 相对视口，不随任何容器滚动。
+     内部 .theme-bg-layer 是铺满的成像层：图片走 img + object-fit（cover/contain），
+     渐变走 div + background-image（background-size 同语义）；
+     透明度与模糊由引擎按插件的 opacity / blur 以内联样式给出。 */
+  .theme-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .theme-bg-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  /* ── 插件主题 mascot 挂点（theme.json 的 mascot 字段，v1.6）──
+     Composer 输入框右侧的 flex 空隙：空挂点零尺寸、不占位（:empty 直接无宽高），
+     引擎注入 <img> 后才出现；尺寸封顶、不遮输入、点击穿透（样式只约束挂点本身，
+     logo / avatar 的替换走引擎换 src，复用挂点元素既有 class 的尺寸）。 */
+  [data-theme-composer-mascot] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    pointer-events: none;
+    user-select: none;
+  }
+  [data-theme-composer-mascot]:empty {
+    display: none;
+  }
+  [data-theme-composer-mascot] img {
+    display: block;
+    max-width: 64px;
+    max-height: 64px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    opacity: 0.92;
+  }
+
+  /* 内容栅格：对话、设置、技能中心共用同一列宽，保证纵向对齐 */
+  .content-col { width: 100%; max-width: var(--content-w); margin-inline: auto; }
+
+  /* 中性按钮文字色走自定义类：tailwind-merge 会把 text-[color:var(--x)] 当字号类合并掉 */
+  .btn-neutral-ink { color: var(--neutral-btn-ink); }
+
+  /* 悬浮层与卡片：统一用高程变量，别再各写各的阴影 */
+  .elev-1 { box-shadow: var(--elev-1); }
+  .elev-2 { box-shadow: var(--elev-2); }
+  .elev-3 { box-shadow: var(--elev-3); }
+  /* 卡片：圆角统一 14、静止 elev-1、hover 抬到 elev-2 并上移 1px。
+     时长/缓动只取令牌，位移只动 transform。 */
+  /* 卡片是**可交互元素**：三样都取弹性曲线（抬起那一下带一点过冲，读起来才「活」），
+     时长走 --motion-hover（140ms，落在指针反馈那一段），位移走 --shift-hover（2px，见 theme.css）。
+     位移和时长都从令牌取：全站的 hover / 按压只有 2~3px 这一个量级，谁都不许再写 4px、8px。 */
+  .card-lift {
+    transition:
+      box-shadow var(--motion-hover) var(--ease-spring),
+      border-color var(--motion-hover) var(--ease-spring),
+      transform var(--motion-hover) var(--ease-spring);
+  }
+  .card-lift:hover { box-shadow: var(--elev-2); border-color: var(--line-strong); transform: translateY(calc(-1 * var(--shift-hover))); }
+  /* 按下：反方向沉 2px，时长再压短一档（--motion-press 120ms）。
+     按压是「指尖已经落下了」的确认，必须比 hover 更快、更小 —— 凸出来的那块按下去，
+     手感才对得上。位移只动 transform，不参与布局。 */
+  .card-lift:active {
+    transform: translateY(var(--shift-press));
+    transition-duration: var(--motion-press);
+  }
+  /* 大块容器（设置分组卡片）不做整块抬起——那一块太大会晃眼：
+     只改描边，行的 hover 反馈交给内部控件。 */
+  .card-lift[data-card='static']:hover { box-shadow: var(--elev-1); transform: none; }
+  /* 字体偏好：默认内置 HarmonyOS Sans SC，可切回系统字体 */
+  [data-font='system'] {
+    --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', Inter, sans-serif;
+  }
+
+  /* 密度与动效偏好：全局开关，避免每个组件各写一套判断 */
+  [data-density='cozy'] { --page-pad-y: 32px; }
+  [data-density='cozy'] .content-col { padding-block: 4px; }
+  /* 「动效令牌本身归零」那段在文件末尾的**未分层**区：写在 @layer base 里会被
+     theme.css 里未分层的 :root 令牌压掉（层叠里未分层永远胜过 @layer），等于没写。 */
+  [data-motion='off'] *, [data-motion='off'] *::before, [data-motion='off'] *::after {
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.001ms !important;
+  }
+  /* 页面过渡同样整个关掉：View Transitions 的伪元素树挂在根元素上，
+     所以只能写成 html[data-motion=off]::view-transition-*，不能从内容元素往下选。 */
+  html[data-motion='off']::view-transition-group(*),
+  html[data-motion='off']::view-transition-old(*),
+  html[data-motion='off']::view-transition-new(*) { animation: none !important; }
+  /* 关闭动效时，脉冲/闪烁类装饰动画直接停住：0.001ms 的无限循环只会变成闪烁。
+     只影响观感，折叠、浮层、按钮的功能照旧。 */
+  [data-motion='off'] .stream-caret,
+  [data-motion='off'] .md-body[data-caret] > :last-child::after { animation: none !important; }
+  /* 骨架呼吸、脉冲提示、转圈：这三类是「装饰性无限动画」，关掉动效时直接停住，
+     而不是被压成 0.001ms 的闪烁；按钮的载入转圈属于功能反馈，仍然保留。 */
+  [data-motion='off'] .animate-skeleton,
+  [data-motion='off'] .animate-pulse,
+  [data-motion='off'] [data-skeleton] { animation: none !important; opacity: 1 !important; }
+
+  /* 系统级「减少动态效果」：和设置里的开关同等待遇，过渡全部归零但不改功能 */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.001ms !important;
+      transition-delay: 0s !important;
+      animation-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) { animation: none !important; }
+    .stream-caret,
+    .md-body[data-caret] > :last-child::after { animation: none !important; }
+    .animate-skeleton,
+    .animate-pulse,
+    [data-skeleton] { animation: none !important; opacity: 1 !important; }
+  }
+
+  /* 会话内搜索的临时高亮：不写进 Markdown 结构，只闪一下（动画优先级高于普通声明，
+     所以不会跟 .md-body 里的背景色打架）。 */
+  @keyframes search-hit {
+    0%, 55% { background-color: color-mix(in srgb, var(--primary) 32%, transparent); }
+    100% { background-color: transparent; }
+  }
+  .search-hit {
+    /* 1.5s 是「高亮停留 + 收掉」的装饰时长，不是交互时长——交互时长一律取 --motion-* 那五档；
+       缓动按退出语义取 in-quad（停在原处，再被清掉，不是「被拽走」）。 */
+    animation: search-hit 1.5s var(--ease-in-quad);
+    border-radius: var(--r-xs);
+  }
+
+  /* shiki 双主题：跟随 data-theme 切换，避免重新高亮 */
+  [data-theme='dark'] .shiki, [data-theme='dark'] .shiki span { color: var(--shiki-dark) !important; }
+  [data-theme='light'] .shiki, [data-theme='light'] .shiki span { color: var(--shiki-light) !important; }
+
+}
+/* ── 统一过渡/动画体系 ──
+   三条规矩，别再各写各的：
+   1) 时长只取 theme.css 的 --motion-*（五档），缓动只取 --ease-*——且**按语义取**：
+      进入 --ease-out-quint、退出 --ease-in-quad、可交互 --ease-spring、大面板 --ease-soft、
+      一直在转的循环 --ease-loop（匀速）；随手写 ease / linear 一律视为漏改；
+   2) 只动 transform / opacity（Tailwind v4 的 translate-* / scale-* 是独立属性，不会互相顶掉），
+      避免动画期间把浮层自带的定位 translate 冲掉；
+   3) 进用 --ease-out-quint，退用 --ease-in-quad，且必须有退场。
+
+   这一块**故意不放进 @layer**：Tailwind 自带一个同名的 .collapse 工具类（visibility:collapse），
+   放在 components 层里会被 utilities 层压掉，展开态直接变「不可见」。
+   不分层（层叠里胜过所有 @layer）就只压得住它自己，不用跟 !important 打交道。 */
+
+/* 折叠：grid-template-rows 0fr↔1fr + opacity，高度和透明度一起收放。
+   折叠态彻底退出可见性与命中（visibility + pointer-events），展开时立即恢复。 */
+.collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  /* 必须显式声明：Tailwind 自带的 .collapse 工具类会把 visibility 设成 collapse */
+  visibility: visible;
+  transition:
+    grid-template-rows var(--motion-base) var(--ease-out-quint),
+    opacity var(--motion-base) var(--ease-out-quint),
+    /* visibility 是离散属性，0s 时长下「到点才切」——用 step-end 写明白，别用 linear 那种糊过去的写法 */
+    visibility 0s step-end 0s;
+}
+/* 直接子元素必须是「干净」的一层：grid 的 auto 最小值会算上它的内外边距，
+   带着 margin/padding 的直接子元素会让折叠态收不到 0，留下一条缝。
+   间距放在再下一层，写法就是 <div class="collapse"><div><div class="mt-2">…</div></div></div>。 */
+.collapse > * { min-height: 0; min-width: 0; overflow: hidden; }
+.collapse[data-open='false'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* visibility 延到收完再切，否则内容会在动画中途「消失」而不是「收拢」 */
+  transition:
+    grid-template-rows var(--motion-base) var(--ease-in-quad),
+    opacity var(--motion-base) var(--ease-in-quad),
+    visibility 0s step-end var(--motion-base);
+}
+
+/* 浮层：菜单/气泡/右键菜单。进 --motion-base + --ease-out-quint，退 --motion-fast + --ease-in-quad。
+   方向语义统一：向上弹出的从下方 4px 起，向下弹出的从上方 4px 起。 */
+.pop-surface { --pop-x: 0px; --pop-y: -4px; animation: pop-in var(--motion-base) var(--ease-out-quint); }
+.pop-surface[data-side='top'] { --pop-y: 4px; }
+.pop-surface[data-side='left'] { --pop-x: 4px; --pop-y: 0px; }
+.pop-surface[data-side='right'] { --pop-x: -4px; --pop-y: 0px; }
+/* Radix 的 data-state=closed 就是退场钩子：容器会等动画播完再卸载 */
+.pop-surface[data-state='closed'] { animation: pop-out var(--motion-fast) var(--ease-in-quad) both; }
+
+/* 对话框：整块出现用 --motion-page，退场用 --motion-base；遮罩纯淡入淡出。
+   不给位移，免得跟居中用的 translate 打架。 */
+.dialog-surface { --pop-y: 0px; animation: pop-in var(--motion-page) var(--ease-soft); }
+.dialog-surface[data-state='closed'] { animation: pop-out var(--motion-base) var(--ease-in-quad) both; }
+.dialog-scrim { animation: fade-in var(--motion-page) var(--ease-soft); }
+.dialog-scrim[data-state='closed'] { animation: fade-exit var(--motion-base) var(--ease-in-quad) both; }
+
+/* 自绘浮层关闭后的一小段渲染窗口：纯淡出，比缩放收敛更安静 */
+.fade-exit { animation: fade-exit var(--motion-fast) var(--ease-in-quad) both; }
+
+/* 流式光标：默认贴在 .md-body 最后一段的行尾（伪元素，不干扰 Markdown 结构）；
+   停笔时挂 data-caret='out'，120ms 收束淡出，不是「啪」地消失。 */
+.stream-caret,
+.md-body[data-caret] > :last-child::after {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  border-radius: 1px;
+  vertical-align: -0.16em;
+  background: currentColor;
+  animation: caret-pulse calc(var(--motion-loop) * 0.7) var(--ease-soft) infinite;
+}
+.md-body[data-caret] > :last-child::after { content: ''; }
+.stream-caret[data-state='out'],
+.md-body[data-caret='out'] > :last-child::after {
+  animation: caret-out var(--motion-fast) var(--ease-in-quad) both;
+}
+
+/* 流式文本：只对**新段落**播一次极轻的 rise（8px/120ms）。
+   用 @starting-style + transition 而不是 animation，有两个原因：
+   1) 已有段落是 React 复用节点（key = 标签名+序号），追加文字不会重挂元素，
+      所以每个 text_chunk 都不会再抖一下；
+   2) 不占 animation 属性，会话内搜索的 .search-hit 高亮才不会被这条规则压掉。
+   老内核（Chromium < 117）不认识 @starting-style，只是少了这点微动效，不影响功能。 */
+.md-body > :where(p, ul, ol, h1, h2, h3, h4, blockquote, pre, table) {
+  /* **只过渡位移，绝不碰 opacity**：轮结束那一刻正文从纯文本整段换成解析后的 Markdown，
+     所有段落都是新插入元素，会各自从 @starting-style 起播一次；只要其中一次过渡被打断/暂停，
+     那一段就永久停在半透明上 —— 用户看到的就是「这条回答颜色很淡」（严重时整段看不见）。
+     位移被打断最多差几个像素，正文永远清晰可读。 */
+  transition: transform var(--motion-fast) var(--ease-out-quint);
+}
+@starting-style {
+  .md-body > :where(p, ul, ol, h1, h2, h3, h4, blockquote, pre, table) {
+    transform: translateY(8px);
+  }
+}
+
+/* ── AI 原生状态语言：点阵状态指示器（components/ai/AgentState.tsx）──
+   DOM 固定为「1 个容器 + 1 个环 + 6 个点」：--i 决定点在环上的角度与相位（--a），
+   每个状态只做两件事——给 .ai-ring 一个自转，给 .ai-dot 一套关键帧。
+   全程只动 transform / opacity，没有一个布局属性参与动画，所以周围的行不会跳。
+   周期 / 相位 / 错峰全部从 theme.css 的 --motion-loop* 推出来；加状态＝加一条
+   [data-state='x'] 规则 + 一段关键帧，不用碰 JSX。 */
+.ai-state {
+  --ai-size: 20px;
+  --ai-r: calc(var(--ai-size) * 0.33);          /* 点阵半径 */
+  --ai-dot: calc(var(--ai-size) * 0.17);        /* 点直径 */
+  --ai-speed: var(--motion-loop);               /* 单点动画周期 */
+  --ai-stagger: calc(var(--motion-loop) / 12);  /* 点与点的相位差 */
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--ai-size);
+  height: var(--ai-size);
+  vertical-align: -0.16em;
+}
+.ai-state[data-size='xs'] { --ai-size: 14px; }
+.ai-state[data-size='sm'] { --ai-size: 20px; }
+.ai-state[data-size='md'] { --ai-size: 28px; }
+.ai-state[data-size='lg'] { --ai-size: 48px; }
+
+.ai-ring { position: absolute; inset: 0; transform-origin: 50% 50%; }
+
+.ai-dot {
+  /* 环上的角度：6 个点均分一圈（30° 起步，避免整圈看起来像齿轮缺口在正上方） */
+  --a: calc(var(--i, 0) * 60deg + 30deg);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--ai-dot);
+  height: var(--ai-dot);
+  margin-left: calc(var(--ai-dot) / -2);
+  margin-top: calc(var(--ai-dot) / -2);
+  border-radius: 50%;
+  background: currentColor;
+  /* 先转到自己的角度，再沿 Y 轴外推半径：都是 transform，不产生任何布局 */
+  transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1));
+  animation-duration: var(--ai-speed);
+  animation-timing-function: var(--ease-soft);
+  animation-iteration-count: infinite;
+  /* 负延迟：错峰从第一帧就成立，不会先僵住半秒再开始动 */
+  animation-delay: calc(var(--i, 0) * var(--ai-stagger) * -1);
+}
+
+/* idle：静置的暗点阵。不转、不闪，只是「在那儿」——空闲态不该抢注意力 */
+.ai-state[data-state='idle'] { --ai-r: calc(var(--ai-size) * 0.24); }
+.ai-state[data-state='idle'] .ai-dot { opacity: 0.35; }
+
+/* thinking：整团向心呼吸（不转，半径与明暗一起收放） */
+.ai-state[data-state='thinking'] { --ai-stagger: 0ms; --ai-speed: var(--motion-loop); }
+.ai-state[data-state='thinking'] .ai-dot { animation-name: ai-breathe; }
+
+/* reasoning：环缓慢自转 + 点错相亮起，形成一条推理尾迹 */
+.ai-state[data-state='reasoning'] {
+  --ai-stagger: calc(var(--motion-loop) / 13);
+  --ai-speed: var(--motion-loop);
+}
+.ai-state[data-state='reasoning'] .ai-ring { animation: ai-spin calc(var(--motion-loop) * 2) var(--ease-loop) infinite; }
+.ai-state[data-state='reasoning'] .ai-dot { animation-name: ai-trail; }
+
+/* searching：环快速自转，点同时从中心向外荡开（声呐一圈圈推出去） */
+.ai-state[data-state='searching'] { --ai-stagger: 0ms; --ai-speed: var(--motion-loop-fast); }
+.ai-state[data-state='searching'] .ai-ring { animation: ai-spin var(--motion-loop-fast) var(--ease-loop) infinite; }
+.ai-state[data-state='searching'] .ai-dot { animation-name: ai-ping; }
+
+/* reading：环静置，亮点顺着点阵一个挨一个扫过去（逐条读下去） */
+.ai-state[data-state='reading'] {
+  --ai-stagger: calc(var(--motion-loop) / 6);
+  --ai-speed: var(--motion-loop);
+}
+.ai-state[data-state='reading'] .ai-dot { animation-name: ai-scan; }
+
+/* writing：点被一个个「写」出来并留在环上，一圈写完再整体重置 */
+.ai-state[data-state='writing'] {
+  --ai-stagger: calc(var(--motion-loop) / 9);
+  --ai-speed: calc(var(--motion-loop) * 1.1);
+}
+.ai-state[data-state='writing'] .ai-dot { animation-name: ai-write; }
+
+/* running：环高速自转 + 点阵收紧再放开（快节奏、实心的「在跑」） */
+.ai-state[data-state='running'] { --ai-stagger: 0ms; --ai-speed: calc(var(--motion-loop-fast) * 0.6); }
+.ai-state[data-state='running'] .ai-ring { animation: ai-spin calc(var(--motion-loop-fast) * 1.2) var(--ease-loop) infinite; }
+.ai-state[data-state='running'] .ai-dot { animation-name: ai-run; }
+
+/* awaiting：完全静止 + 慢心跳（两下轻、随后长停顿），读作「在等你」 */
+.ai-state[data-state='awaiting'] { --ai-stagger: 0ms; --ai-speed: var(--motion-loop-slow); }
+.ai-state[data-state='awaiting'] .ai-dot { animation-name: ai-heartbeat; }
+
+/* compacting：点阵向心收拢、触底再弹回（上下文被压进去又展开） */
+.ai-state[data-state='compacting'] { --ai-stagger: 0ms; --ai-speed: calc(var(--motion-loop-fast) * 1.4); }
+.ai-state[data-state='compacting'] .ai-dot { animation-name: ai-converge; }
+
+/* subagents：内外两层反向绕行——外圈顺时针慢、内圈逆时针快，像被派生出去的分支 */
+.ai-state[data-state='subagents'] { --ai-stagger: 0ms; --ai-speed: calc(var(--motion-loop) * 1.6); }
+.ai-state[data-state='subagents'] .ai-dot:nth-child(even) { animation-name: ai-orbit-out; }
+.ai-state[data-state='subagents'] .ai-dot:nth-child(odd) {
+  --ai-r: calc(var(--ai-size) * 0.16);
+  --ai-speed: calc(var(--motion-loop-fast) * 1.4);
+  animation-name: ai-orbit-in;
+}
+
+/* reconnecting：断续闪烁（亮一下、停一拍），与 reading 的连续扫读明显不同 */
+.ai-state[data-state='reconnecting'] {
+  --ai-stagger: calc(var(--motion-loop) / 10);
+  --ai-speed: calc(var(--motion-loop) * 1.1);
+}
+.ai-state[data-state='reconnecting'] .ai-dot { animation-name: ai-beacon; }
+
+@keyframes ai-breathe {
+  0%, 100% { opacity: 0.3; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.68)) scale(0.7); }
+  50% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1.1)) scale(1); }
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+@keyframes ai-trail {
+  0%, 100% { opacity: 0.22; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.9)) scale(0.72); }
+  40% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(1); }
+}
+@keyframes ai-ping {
+  0%, 100% { opacity: 0.95; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.3)) scale(0.45); }
+  70% { opacity: 0.3; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1.3)) scale(1); }
+}
+@keyframes ai-scan {
+  0%, 28%, 100% { opacity: 0.18; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.92)) scale(0.7); }
+  8% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(1.1); }
+}
+@keyframes ai-write {
+  0% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.7)) scale(0.2); }
+  12%, 76% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(1); }
+  88%, 100% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.7)) scale(0.2); }
+}
+@keyframes ai-run {
+  0%, 100% { opacity: 0.6; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.84)) scale(0.86); }
+  50% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1.04)) scale(1); }
+}
+@keyframes ai-heartbeat {
+  0%, 46%, 100% { opacity: 0.28; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(0.86); }
+  8% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1.1)) scale(1.06); }
+  18% { opacity: 0.34; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(0.9); }
+  28% { opacity: 0.95; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1.06)) scale(1); }
+}
+@keyframes ai-converge {
+  0%, 100% { opacity: 0.9; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(1); }
+  45% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.12)) scale(0.5); }
+}
+@keyframes ai-orbit-out {
+  from { opacity: 0.95; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)); }
+  to { opacity: 0.95; transform: rotate(calc(var(--a) + 360deg)) translateY(calc(var(--ai-r) * -1)); }
+}
+@keyframes ai-orbit-in {
+  from { opacity: 0.8; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(0.8); }
+  to { opacity: 0.8; transform: rotate(calc(var(--a) - 360deg)) translateY(calc(var(--ai-r) * -1)) scale(0.8); }
+}
+/* 断续：先亮起、停一拍、再整段暗下去（长停顿是「重连中」的语感） */
+@keyframes ai-beacon {
+  0% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.6)) scale(0.4); }
+  6%, 14% { opacity: 1; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -1)) scale(1); }
+  22%, 100% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--ai-r) * -0.6)) scale(0.4); }
+}
+
+/* 新消息入场：轻 rise + 序号错峰。--msg-i 由 React 按「距列表末尾第几条」给，
+   所以历史回读整屏挂载时也只有末尾几条会播，不会一屏消息依次冒出来。 */
+.msg-enter {
+  /* 用纯位移的 rise-y（不是含淡入的 rise-soft）：消息整行的入场动画一样不许动 opacity，
+     理由同上（打断后停在半路 = 整条消息发淡 / 看不见）。 */
+  animation: rise-y var(--motion-base) var(--ease-out-quint) both;
+  animation-delay: calc(var(--msg-i, 0) * var(--motion-stagger));
+}
+
+/* 骨架屏：只留一块静态灰底。
+   原来的高光扫光（.skeleton::after + skeleton-sweep）已删 —— 高光的长度与位置都不随
+   加载进度变化，是一段没有信息量的循环装饰。「还在加载」这件事由 Skeleton 组件的呼吸
+   （.animate-skeleton / skeleton-pulse）表达，本类只负责占位形状。 */
+.skeleton {
+  background: var(--surface-muted);
+}
+
+/* 命令面板的层级推进：两级并排放在一条 200% 宽的轨道上，整体位移一层宽（只动 transform），
+   上一层留在原地并把透明度压下去，退场反向。宽高一律不参与动画，面板尺寸不会跳。 */
+.cmd-track {
+  display: flex;
+  width: 200%;
+  transition: transform var(--motion-page) var(--ease-soft);
+}
+.cmd-track[data-depth='1'] { transform: translate3d(-50%, 0, 0); }
+.cmd-pane {
+  width: 50%;
+  flex: none;
+  transition: opacity var(--motion-base) var(--ease-out-quint);
+}
+.cmd-pane[data-active='false'] { opacity: 0.35; }
+
+/* ── 减动效降级：设置里的 [data-motion=off] 与系统 prefers-reduced-motion 同一套待遇 ──
+   状态指示器收成一个静态点（aria-label 保留，功能不变）；
+   装饰性循环直接 animation: none —— 0.001ms 的无限循环只会变成闪烁，比不动更糟。
+   这一段必须留在无分层区：.ai-state 也是无分层的，只有这里压得住它的 transform。 */
+[data-motion='off'] .ai-state .ai-ring,
+[data-motion='off'] .ai-state .ai-dot { animation: none !important; }
+[data-motion='off'] .ai-state .ai-ring .ai-dot { transform: none; opacity: 0.55; }
+[data-motion='off'] .ai-state .ai-dot ~ .ai-dot { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-state .ai-ring,
+  .ai-state .ai-dot { animation: none !important; }
+  .ai-state .ai-ring .ai-dot { transform: none; opacity: 0.55; }
+  .ai-state .ai-dot ~ .ai-dot { display: none; }
+}
+
+/* ── 动效降级：把动效令牌本身归零 ──
+   必须放在这里（未分层）：令牌定义在 theme.css 的未分层 :root 上，而层叠里
+   **未分层永远胜过 @layer**，写进 @layer base 的话这两块会被原值压掉、等于没写。
+   --motion-loop* 刻意不动：那是装饰性循环，由上面的 animation: none 直接停掉，
+   压成 0.001s 只会变成闪烁，比不动更糟。
+   五档时长全部列出来（instant / fast / base / slow / page）：CSS 动画、Tailwind 工具类
+   （--tw-duration 缺省时读 --default-transition-duration = --motion-fast）与 var() 间接引用
+   三条路径因此一起归零。旧名 --motion-collapse 是指向 --motion-base 的别名，不必再单独写。 */
+[data-motion='off'] {
+  --motion-instant: 0.001s;
+  --motion-fast: 0.001s;
+  --motion-base: 0.001s;
+  --motion-slow: 0.001s;
+  --motion-page: 0.001s;
+  /* 指针反馈那两档（--motion-hover / --motion-press）与位移（--shift-hover / --shift-press）
+     一起归零：关掉动效时 hover / 按压只剩颜色变化，不再有那 2px 的抬落。 */
+  --motion-hover: 0.001s;
+  --motion-press: 0.001s;
+  --shift-hover: 0px;
+  --shift-press: 0px;
+  --motion-stagger: 0s;
+  --nav-slide: 0px;
+  /* 换页动画那几档一并归零：JS 侧 motionAllowed() 已经走瞬时换页，
+     这里兜住「属性是在动画进行中被切掉」的那一下。 */
+  --pane-in: 0.001s;
+  --pane-out: 0.001s;
+  --pane-shift: 0px;
+  --pane-item-shift: 0px;
+  --pane-stagger: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 0.001s;
+    --motion-fast: 0.001s;
+    --motion-base: 0.001s;
+    --motion-slow: 0.001s;
+    --motion-page: 0.001s;
+    --motion-hover: 0.001s;
+    --motion-press: 0.001s;
+    --shift-hover: 0px;
+    --shift-press: 0px;
+    --motion-stagger: 0s;
+    --nav-slide: 0px;
+    --pane-in: 0.001s;
+    --pane-out: 0.001s;
+    --pane-shift: 0px;
+    --pane-item-shift: 0px;
+    --pane-stagger: 0s;
+  }
+}
+
+/* ── 页面级过渡：View Transitions API（外层不套 @layer，理由同上：要压得住 utilities）──
+   模型只有一句话：**整个外壳是定住的，只有内容列在动**。
+   带 view-transition-name 的元素在过渡期间是一张独立快照，名字相同的新旧两张会原地
+   交叉淡入 —— 所以只要「组 + 新旧快照」都 animation:none、再把外壳元素本身 contain 住，
+   外壳就一帧都不位移；剩下的根快照（＝内容列那一片）按方向滑入淡出。
+   方向由 App.tsx 写在 html[data-nav-dir] 上（不写属性即 forward）。
+
+   登记的命名元素（每一个都必须同时在下面「冻结」那段里列出来，两边一一对应）：
+     app-topbar  标题栏            [data-tauri-drag-region]
+     app-rail    一级导航          [data-app-shell] > nav（Rail 自己的 <nav>）
+     app-list    会话列表（内嵌）  [data-list-pane][data-list-variant='inline']
+     app-drawer  会话列表（抽屉）  [data-list-pane][data-list-variant='drawer']
+     app-main    主内容列（面板）  #coomi-main
+     app-dock    右侧栏（面板）    #coomi-dock-panel
+     app-dockbar 右侧图标条        [data-dock-bar]
+     app-dockpane 侧栏面板体       [data-dock-panel]
+   内嵌列表与抽屉列表**互斥**（同一时刻只有一个在 DOM 里），所以两个名字不会撞车。
+
+   三个坑，改之前先读：
+   1) ::view-transition-* 是**根元素**的伪元素，选择器必须从 html 出发；
+      写成 [data-main-col] ::view-transition-old(...) 永远不命中。
+   2) 不要给内容列/页面加 view-transition-name：命名元素会被强制变成
+      「绝对/固定定位后代的包含块 + 层叠上下文」，消息里那条 fixed 的划选工具条
+      （MessageList 里按 getBoundingClientRect 定位）会整体偏掉。
+      这条同时意味着：外壳元素上也不能挂 fixed 浮层（抽屉/侧栏里目前都没有）。
+   3) contain 只加在外壳上。主内容列永远不 contain —— 同上，划选工具条与
+      「吸在滚动容器顶部」的页头都依赖它自己的包含块与滚动几何。 */
+/* ⚠ 登记的写法是**显式属性** data-shell-part，不是结构选择器。
+   原来 app-rail 写的是 [data-app-shell] > nav：Rail 外面还套着面板组 + Panel 两层 div，
+   `>` 永远命中不了 → 这条规则从来没生效过，导航栏没拿到名字、被算进根快照，
+   切页时跟着整张快照一起横移。这就是「最左侧栏还在动」的根因。
+   列表/侧栏那几条同理：以后外壳里多包一层 div，属性在就不受影响。 */
+[data-tauri-drag-region],
+[data-shell-part='topbar'] { view-transition-name: app-topbar; }
+[data-shell-part='rail'] { view-transition-name: app-rail; }
+[data-shell-part='list'],
+[data-list-pane][data-list-variant='inline'] { view-transition-name: app-list; }
+[data-shell-part='drawer'],
+[data-list-pane][data-list-variant='drawer'] { view-transition-name: app-drawer; }
+[data-shell-part='dock'],
+#coomi-dock-panel { view-transition-name: app-dock; }
+[data-shell-part='dockbar'],
+[data-dock-bar] { view-transition-name: app-dockbar; }
+[data-shell-part='dockpane'],
+[data-dock-panel] { view-transition-name: app-dockpane; }
+/* 内容列**故意不登记**（原来那句 #coomi-main { view-transition-name: app-main } 已删）：
+   带名字的元素会被排除出根快照、冻结成静止图层，把内容列一起冻住就只剩「啪」地换内容。
+   它必须留在根快照里——根快照就是「内容列那一片」，按方向滑入/淡出。 */
+
+/* 外壳定住（两条一起看）：
+   ① 组与两张快照全部 animation:none —— 连一帧交叉淡入都不留，外壳是静态图层；
+      用 animation:none 而不是 animation-duration:0s：后者在部分内核里被当成无效声明。
+   ② contain: layout paint 让外壳与内容列**互不重排**：内容列的滑动不再触发外壳的
+      布局与重绘，也顺手把外壳的自绘范围裁在自身盒里（外壳本来就贴着窗口边，视觉无变化，
+      但省掉大量「整屏重绘」——这正是卡顿那一档的元凶之一）。 */
+html::view-transition-group(app-topbar),
+html::view-transition-group(app-rail),
+html::view-transition-group(app-list),
+html::view-transition-group(app-drawer),
+html::view-transition-group(app-dock),
+html::view-transition-group(app-dockbar),
+html::view-transition-group(app-dockpane),
+html::view-transition-old(app-topbar),
+html::view-transition-new(app-topbar),
+html::view-transition-old(app-rail),
+html::view-transition-new(app-rail),
+html::view-transition-old(app-list),
+html::view-transition-new(app-list),
+html::view-transition-old(app-drawer),
+html::view-transition-new(app-drawer),
+html::view-transition-old(app-dock),
+html::view-transition-new(app-dock),
+html::view-transition-old(app-dockbar),
+html::view-transition-new(app-dockbar),
+html::view-transition-old(app-dockpane),
+html::view-transition-new(app-dockpane) { animation: none; }
+html::view-transition-group(app-topbar),
+html::view-transition-group(app-rail),
+html::view-transition-group(app-list),
+html::view-transition-group(app-drawer),
+html::view-transition-group(app-dock),
+html::view-transition-group(app-dockbar),
+html::view-transition-group(app-dockpane) { contain: layout paint; }
+/* 外壳元素本体也 contain：快照之外（过渡结束后）的稳态同样享受这份隔离。
+   App / RightDock / ListPane 上的 data-shell-frozen 是同一个语义的标记。 */
+[data-app-shell],
+[data-tauri-drag-region],
+[data-shell-frozen] { contain: layout paint; }
+
+/* 根快照（内容区）：旧页**原地**淡出、新页按方向滑进来 —— 位移只给新的那一张。
+   为什么不给旧的也加位移（「两半对开」）：根快照把导航栏/标题栏的位置挖成了两个洞，
+   整张一平移，洞就会从冻结的外壳边上露出来（浅色下是 #f6f7fa 与 #fff 的色差）。
+   新的那张在上面、从屏外滑到屏内，全程盖满视口，任何一帧都不会露出底色。
+   时长：退场 --motion-base（略短，压住重影），进场 --motion-page。 */
+html::view-transition-group(root) { animation-duration: var(--motion-page); }
+html::view-transition-old(root) { animation: vt-fade-out var(--motion-base) var(--ease-in-quad) both; }
+html::view-transition-new(root) { animation: vt-in-right var(--motion-page) var(--ease-soft) both; }
+html[data-nav-dir='back']::view-transition-new(root) { animation: vt-in-left var(--motion-page) var(--ease-soft) both; }
+
+@keyframes vt-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes vt-in-right { from { opacity: 0; transform: translate3d(var(--nav-slide), 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes vt-in-left { from { opacity: 0; transform: translate3d(calc(var(--nav-slide) * -1), 0, 0); } to { opacity: 1; transform: none; } }
+
+/* ── 页面切换：一条确定的路（pane 自己的 CSS 动画）──
+   App 换页时给两个 pane 各挂一个方向 class（class 名＝这一页往哪个方向动）：
+     forward（沿导航顺序往后走）：新页 pane-enter-right，旧页 pane-exit-left
+     back   （往回走）          ：新页 pane-enter-left， 旧页 pane-exit-right
+   为什么是**动画**不是过渡：过渡要有「起点已经被画过一帧」才播得出来，而换页那一拍
+   内容列正是空帧/骨架 —— 上一版就是在这里抓到空帧，用户看到的就是「切页没动画」。
+   @keyframes 不读前一帧的值，class 挂上就播，所以这条路是确定的、不看运气。
+   分工：**只有内容列在动**，外壳（标题栏 / 导航 / 列表 / 右栏）一帧都不位移。
+   时长与位移：进 --pane-in（240ms）/ ±--pane-shift（12px）/ --ease-soft，
+   退 --pane-out（140ms）：退比进短，新旧两页叠在一起的那几帧才不糊。 */
+:root {
+  --pane-in: 240ms;    /* 新页滑入 + 淡入（App 的 PANE_ENTER_MS 与它同值） */
+  --pane-out: 140ms;   /* 旧页淡出（App 的 PANE_EXIT_MS 与它同值） */
+  --pane-shift: 12px;  /* 新页入场位移；旧页退场取它的一半 */
+  --pane-item-shift: 6px;  /* 内容错峰时每一项自己的抬升 */
+  --pane-stagger: 20ms;    /* 内容错峰步长（与 ui/Card 的 STAGGER_STEP_MS 同值） */
+}
+
+/* pane 的角色：只有层叠与可点性 + 「谁还看得见」。
+   透明度不在这里管：进/退那两页的可见度由下面的动画负责，不然退出中的旧页会被
+   这里的 opacity:0 立刻抹掉，退场动画等于没播。 */
+[data-pane-role] { opacity: 0; z-index: 0; pointer-events: none; }
+[data-pane-role='active'],
+[data-pane-role='exit'],
+[data-pane-role='enter'] { opacity: 1; }
+[data-pane-role='active'] { z-index: 1; pointer-events: auto; }
+/* 进的那一页压在最上面：两页同时可见的那 140ms 里，落点只能是新页 */
+[data-pane-role='enter'] { z-index: 2; pointer-events: auto; }
+
+.pane-enter-right { animation: pane-in-right var(--pane-in) var(--ease-soft) backwards; }
+.pane-enter-left { animation: pane-in-left var(--pane-in) var(--ease-soft) backwards; }
+.pane-exit-left { animation: pane-out-left var(--pane-out) var(--ease-in-quad) forwards; }
+.pane-exit-right { animation: pane-out-right var(--pane-out) var(--ease-in-quad) forwards; }
+
+/* backwards / forwards 是刻意的：
+   enter 用 backwards —— 延迟期（还没轮到它）先按起点显示，播完回到自身样式（＝稳态），
+   不会留下一个永远挂着的动画；exit 用 forwards —— 播完停在结束时那一帧（全透明），
+   旧页在卸载前保持退场后的样子，不会「淡出到一半又弹回来」。 */
+@keyframes pane-in-right { from { opacity: 0; transform: translate3d(var(--pane-shift), 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes pane-in-left { from { opacity: 0; transform: translate3d(calc(var(--pane-shift) * -1), 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes pane-out-left { from { opacity: 1; transform: none; } to { opacity: 0; transform: translate3d(calc(var(--pane-shift) * -0.5), 0, 0); } }
+@keyframes pane-out-right { from { opacity: 1; transform: none; } to { opacity: 0; transform: translate3d(calc(var(--pane-shift) * 0.5), 0, 0); } }
+
+/* ── 新页内容的错峰入场：标题 → 工具条 → 列表/卡片，每层 20ms ──
+   四个页面都是「一个 <main> 根」，所以错峰落在根的**直接子元素**上；
+   根只有一个子元素时用 :only-child 下沉一层，两种页面结构都盖得住。
+   封顶 4 步（80ms）：越靠下的东西等得越久，是「越往下出现越慢」的老毛病。
+   卡片/列表项自己那套错峰（.animate-card-in + --motion-stagger）不动：它在正文挂载
+   时才播，正好接在这一层之后（动画那 240ms 里屏幕上是骨架，本来也没有卡片）。 */
+/* ⚠ 这里必须写成**两条选择器**，不能合成 :is(复杂选择器)：实测 Chrome 下
+   [x] > :is(*:only-child > *, *:not(:only-child)) 只命中 1 个元素（内层那对后代不匹配），
+   拆成两条后与 [x] > :only-child > * 的命中数一致。 */
+[data-pane-anim='enter'] > *:only-child > *,
+[data-pane-anim='enter'] > *:not(:only-child) {
+  animation: pane-item-in var(--motion-base) var(--ease-soft) backwards;
+}
+[data-pane-anim='enter'] > *:only-child > *:nth-child(2),
+[data-pane-anim='enter'] > *:not(:only-child):nth-child(2) { animation-delay: var(--pane-stagger); }
+[data-pane-anim='enter'] > *:only-child > *:nth-child(3),
+[data-pane-anim='enter'] > *:not(:only-child):nth-child(3) { animation-delay: calc(var(--pane-stagger) * 2); }
+[data-pane-anim='enter'] > *:only-child > *:nth-child(4),
+[data-pane-anim='enter'] > *:not(:only-child):nth-child(4) { animation-delay: calc(var(--pane-stagger) * 3); }
+[data-pane-anim='enter'] > *:only-child > *:nth-child(n + 5),
+[data-pane-anim='enter'] > *:not(:only-child):nth-child(n + 5) { animation-delay: calc(var(--pane-stagger) * 4); }
+@keyframes pane-item-in { from { opacity: 0; transform: translate3d(0, var(--pane-item-shift), 0); } to { opacity: 1; transform: none; } }
+
+/* 外壳严格零位移：内容列播动画的这 240ms 里，外壳这些块不参与任何过渡/动画。
+   和上面 VT 那一段（把外壳冻成静态图层）是同一个语义，只是不再依赖 VT 是否可用。 */
+[data-tauri-drag-region],
+[data-shell-part],
+[data-shell-frozen] { transition: none !important; animation: none !important; }
+
+/* View Transitions **实验开关**（默认关）：html[data-vt-exp] 由 App 按 localStorage 写，
+   只有显式打开时才走快照那条路；那一路上 pane 自己的动画必须让位，
+   否则新快照抓到的是「刚开始淡入」的半透明画面，整块内容看起来是空的。
+   能力位 html[data-vt]（main.tsx 探测 WebView2 是否支持）保留不动。 */
+html[data-vt-exp='on'] [data-pane-anim] { animation: none !important; }
+html[data-vt-exp='on'] [data-pane-role] { animation: none !important; }
+
+/* ── 面板宽度过渡（会话列表展开/收起、右侧栏展开/收起）──
+   react-resizable-panels 把尺寸写成面板**外层 div** 的 flex-grow（flex-basis 恒为 0，
+   见 Panel 的 style），所以过渡属性是 flex-grow；flex-basis 一起写上，换实现不用回来改。
+   data-pane-anim='on' 只在「展开/收起那一小段时间」挂着：拖拽期间必须没有它
+   （App 的 beginResize 会立刻清掉），否则拖起来跟手会发飘。 */
+[data-panel][data-pane-anim='on'] {
+  transition:
+    flex-grow var(--motion-page) var(--ease-soft),
+    flex-basis var(--motion-page) var(--ease-soft);
+}
+
+/* 会话列表内容与宽度同步收放：收起时整块向左淡出，展开时回位。
+   只动 opacity / translate，不参与布局——宽度那一段归面板自己的过渡。 */
+[data-list-body] {
+  transition: opacity var(--motion-page) var(--ease-soft), translate var(--motion-page) var(--ease-soft);
+}
+[data-list-body][data-open='false'] {
+  opacity: 0;
+  translate: -8px 0;
+  /* 收起＝退出：同一段过渡换 in-quad，收回来的那一下才「被收走」而不是「被拽走」 */
+  transition-timing-function: var(--ease-in-quad);
+  transition-duration: var(--motion-fast);
+}
+
+/* 窄窗口抽屉：面板 translateX 进出场 + 遮罩淡入淡出（进 --motion-base、退 --motion-fast）。
+   位移只给 16px 而不是 -100%：抽屉层压在导航栏之上，整条甩出去的那几帧会盖住导航栏。
+   收起后由 App 等退场播完再卸载（卸载太早等于没有退场）。 */
+[data-list-drawer] > [data-drawer-scrim] { opacity: 1; transition: opacity var(--motion-page) var(--ease-soft); }
+[data-list-drawer] > [data-drawer-panel] {
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--motion-page) var(--ease-soft), transform var(--motion-page) var(--ease-soft);
+}
+[data-list-drawer][data-state='closed'] > [data-drawer-scrim] {
+  opacity: 0;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-in-quad);
+}
+[data-list-drawer][data-state='closed'] > [data-drawer-panel] {
+  opacity: 0;
+  transform: translateX(-16px);
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-in-quad);
+}
+
+/* ── 性能：内容复用与渲染隔离（长会话、长列表的卡顿主要来自这两处）──
+   ① 一条消息 / 一张卡片 = 一个独立渲染单元。content-visibility:auto 让「离屏的那些」
+      在布局里占位但不做布局与绘制（浏览器按需唤醒），首次进入长会话、以及滚动时的
+      主线程开销因此从「整屏 × 每条都要算」降到「视口里那几条」。
+      contain-intrinsic-size 给的是**冷启动占位高度**（还没算过的条目按它估高）：
+      估得偏小只会让滚动条在滚动过程中慢慢变准，不会丢内容、也不会跳位。
+      ⚠ 只挂在消息行 / 卡片这些「别人不会去量它」的块上；滚动容器与虚拟列表的
+      测量节点（Virtuoso 的 item wrapper）绝对不能 contain: layout，否则量出来是 0。
+   ② 数据属性选择器（不是 class）：这些元素由别人负责，壳这边不能改它们的类名，
+      只加零侵入的渲染隔离；chat 侧把类名换掉也不会让这段规则失效。 */
+/* ⚠ 这里原本还有 [data-msg-index] / .card-lift / [data-card] 的 content-visibility:auto
+   （「离屏的行不布局不绘制」省主线程开销）。**2026-09-27 实测撤掉**：
+   消息行会被浏览器判成「与用户无关」而**永久跳过绘制**，而这些行明明就在视口里 ——
+   真机取证：一条用户消息整行落在可视区、可见重叠 96px（高度也是真实值 96，不是占位），
+   checkVisibility({contentVisibilityAuto:true}) 依然回 false（＝没画）。
+   用户看到的就是「我发的消息消失了」，切一下视图/滚动一下才又出现（重挂才恢复）。
+   窗口化已经把 DOM 限制在最后 60 条（多出来的走「加载更早」），这点渲染开销不值得拿
+   「消息可能不显示」去换。**不要再把 content-visibility 加回消息行。**
+   回归断言见 tests/check-msg-visibility.mjs。 */
+[data-msg-index],
+.card-lift,
+[data-card] {
+  /* 占位高度留给将来万一要恢复的策略用；真正的渲染隔离已按上面的结论撤掉。 */
+  contain-intrinsic-size: auto 160px;
+}
+/* 卡片比消息行矮一些，估高分开给，滚动条更准 */
+.card-lift,
+[data-card] { contain-intrinsic-size: auto 120px; }
+
+/* ── 滚动流畅度：滚动锚定 + 冻结测量窗口 ──
+   ① 消息列表容器**开滚动锚定**（overflow-anchor: auto，[data-msg-scroller] 由 MessageList 挂）：
+      正文在视口**上方**长高时（思考链展开、工具行多出一行、Markdown 补渲染），
+      浏览器自己把当前滚动位置顶住，不必等我们量完再回补 —— 那次回补就是
+      「我明明没滚，视口自己往上飘了一格」。虚拟列表的测量节点绝不能改这条（见上面那段注释）。 */
+[data-msg-scroller] { overflow-anchor: auto; }
+
+/* ② 冻结测量窗口：行高在「流式输出」与「折叠动画」期间是**逐帧**变的，虚拟列表每一帧都要
+      照着新高度重量一次（长会话里就是「一边流式一边滚，整屏在抖」）。窗口里只做两件事：
+        · JS 侧一次都不量：MessageList 的 measurementFrozen() 读的就是下面这两个属性
+          （与 CSS 同一判据，不各判一套）；
+        · 折叠块换成**固定高度占位**：高度一次落定、动画只走 opacity ——
+          折叠项不再逐帧改高度，虚拟列表最多只量到一次变化。
+      html[data-msg-collapse='1']  折叠动画窗口：任一折叠块被点开/收起后的 220ms（MessageList 写）
+      [data-msg-freeze='1']        流式 / 切页过渡期间（挂在消息列表容器上）
+      两者都是窗口一关就摘，静止状态下这一段一条都不生效。 */
+html[data-msg-collapse='1'] .collapse,
+[data-msg-freeze='1'] .collapse {
+  /* grid-template-rows 不插值 = 关闭态就是 0 高度的固定占位、展开态一步到位；
+     只剩透明度在走，折叠的「开」仍然是一次淡入，不是硬切。 */
+  transition:
+    opacity var(--motion-hover) var(--ease-out-quint),
+    visibility 0s step-end 0s;
+}
+html[data-msg-collapse='1'] .collapse[data-open='false'],
+[data-msg-freeze='1'] .collapse[data-open='false'] {
+  /* 关闭方向按退出语义取 in-quad；visibility 等透明度播完再切，内容不会中途消失。
+     时长比展开再短一档（--motion-press 120ms）：收起来总是比展开快半拍。 */
+  transition:
+    opacity var(--motion-press) var(--ease-in-quad),
+    visibility 0s step-end var(--motion-press);
+}
+
+/* ── 工具栏 / 页头：半透明纯色，不套毛玻璃 ──
+   三层表面按层级各取一档底色（见 theme.css 的 --glass-*）：
+     --glass-topbar-bg 标题栏（唯一一层真毛玻璃，类 .glass-topbar）
+     --glass-bg        页面工具行（对话页工具栏、吸顶页头）
+     --glass-surface-bg 卡片内表面（吸顶表头）
+   这里再把「吸顶页头」里可能残留的 backdrop blur 一次性清掉 —— 那些页头由各页面自己写，
+   壳这边只保证：全站除标题栏外不再有任何 blur。清掉后仍是半透明，层次感照旧。 */
+[class*='backdrop-blur']:not(.glass-topbar) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ── 性能模式（html[data-perf='low']）──
+   设置页里那一个开关带三件事，规则全在这里与 theme.css 的 [data-perf='low'] 段，
+   组件不各自判断、也不各自存一份。默认档（high）下这一段一条都不生效。 */
+/* ① 毛玻璃只留标题栏一层：其余表面退成「半透明纯色」。
+      纯色 + 透明度是合成器直接能画的，blur 每次滚动都要重新采样背景，是最贵的一种效果。
+      连遮罩那点 blur 也去掉——遮罩本来就只需要一层压暗。 */
+[data-perf='low'] *:not(.glass-topbar),
+[data-perf='low'] *:not(.glass-topbar)::before,
+[data-perf='low'] *:not(.glass-topbar)::after { backdrop-filter: none !important; }
+/* ② 点阵状态指示器是「一直在转」的循环动画：省电档收成一个静态点（aria-label 保留，功能不变） */
+[data-perf='low'] .ai-state .ai-ring,
+[data-perf='low'] .ai-state .ai-dot { animation: none !important; }
+[data-perf='low'] .ai-state .ai-ring .ai-dot { transform: none; opacity: 0.55; }
+[data-perf='low'] .ai-state .ai-dot ~ .ai-dot { display: none; }
+/* ③ 长列表更早交给虚拟化：阈值本身在 stores/ui.ts（virtualizeThreshold()），
+      这里只把「离屏条目不许算」的门槛再压低一格，两条路径一起省。 */
+[data-perf='low'] [data-msg-index] { contain-intrinsic-size: auto 96px; }
+
+/* ── 消息导航条（components/chat/MessageNav.tsx）──
+   位置、高度、行距、点子尺寸都在组件里算（贴内容列左缘外侧 + 垂直居中；
+   高度 = 点数 × 行距，夹在 48px 与 min(70vh,520px) 之间，超限时先压行距、
+   再降聚合预算、最后才让轨道自己滚）。这里只补样式管不到的三件事。 */
+/* ① 轨道自己滚的时候不要滚动条：那 6px 会顶掉刻度的对齐，滚轮的让渡由 onWheel 负责。 */
+[data-msg-nav-track] { scrollbar-width: none; }
+[data-msg-nav-track]::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* ② 高亮的位置指示条只动 transform / opacity：合成器直接搬图层，不参与布局，
+      也不会有「每次高亮都去读 rect」那种强制同步布局。 */
+[data-nav-marker] {
+  transition: transform var(--motion-fast) var(--ease-spring), opacity var(--motion-fast) var(--ease-spring);
+  will-change: transform;
+}
+[data-motion='off'] [data-nav-marker] { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  [data-nav-marker] { transition: none; }
+}
+
+/* ── 只挂「当前 + 上一次」：隐藏的那一页就地停动效 ──
+   上一次那一页还在 DOM 里（保留滚动位置与已渲染内容），它是 inert 且透明的，但里面的
+   循环动效（状态点阵、骨架呼吸）照旧会在合成器上一直跑。用 paused 而不是 none：
+   切回来时从暂停的那一帧接着走，不会「重新开始」。卸载掉的那些页面不用管 —— 它们已经没了。
+   ⚠ [data-pane-anim] 那一层要排除掉：它是「旧页正在淡出」的动画本体，暂停它＝退场不动。 */
+[data-view-pane][data-view-state='inactive'],
+[data-view-pane][data-view-state='inactive'] *:not([data-pane-anim]),
+[data-view-pane][data-view-state='inactive'] *::before,
+[data-view-pane][data-view-state='inactive'] *::after { animation-play-state: paused !important; }
+
+/* ── 切页那一拍（html[data-nav-busy]，由 App.tsx 的 markNavPause 写，320ms）──
+   换页后的这几帧是主线程最忙的一拍：播新旧两页的动画、卸载旧页、挂载目标页正文。
+   内容列里的 CSS 循环动效就地停住，别再来抢这一拍；JS 侧的统计轮询与列表测量读同一个
+   属性跳过（App 的探活看门狗、MessageNav 的 recompute 都读 html[data-nav-busy]）。
+   ⚠ 同样要放过 [data-pane-anim]：换页动画就跑在闸门窗口里，一起暂停就等于「切页没动画」。 */
+html[data-nav-busy] [data-view-pane] *:not([data-pane-anim]),
+html[data-nav-busy] [data-view-pane] *::before,
+html[data-nav-busy] [data-view-pane] *::after { animation-play-state: paused !important; }
+
+/* ── 省电档（html[data-perf='low']）：同一条换页路径，只把位移与错峰归零 ──
+   这一档里位移要重新合成、错峰会让「挂载那一拍」摊得更散，都不划算；
+   留纯淡入淡出就够读出「换了一页」。路径不变（还是 pane-enter-xxx / pane-exit-xxx），
+   只是不再滑动、不再错峰 —— 一条路两种力度，好过两条路各修一遍。
+   View Transitions 实验开关在这一档一律不启用（见 App 的 vtExperimentOn：
+   拍整页快照再逐帧合成是这一档里最贵的一件事）。 */
+html[data-perf='low'] {
+  --pane-shift: 0px;
+  --pane-item-shift: 0px;
+  --pane-stagger: 0s;
+}
+
+/* ── 空态大标题（新对话首屏那句）──
+   为什么不用 text-24：cn() 里的 tailwind-merge 不认识项目自定义的 text-24/text-18 这一档，
+   会把它当成**颜色**类，被同一串里的 text-ink 覆盖掉 —— 结果标题一直按继承来的 13px 渲染
+   （用户看到的就是「首屏那句话怎么变小了」）。尺寸这类自定义档位一律写成独立类，
+   绕开合并器，既稳定又能跟着 --ui-font-scale 一起缩放。 */
+.empty-tagline {
+  font-size: calc(24px * var(--ui-font-scale));
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}

@@ -1,0 +1,1061 @@
+{
+  "version": 2,
+  "entries": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem",
+      "description": "在一个明确允许的目录下读写文件。",
+      "category": "文件与系统",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "{{allowed_path}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "allowed_path",
+          "label": "允许访问的目录",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "description": "本地知识图谱：存实体与关系，跨会话记忆。",
+      "category": "文件与系统",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking",
+      "description": "把复杂问题拆成可回溯的思考步骤。",
+      "category": "文件与系统",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "everything",
+      "name": "Everything",
+      "description": "官方演示服务器：用来验证 MCP 通道是否正常。",
+      "category": "文件与系统",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "time",
+      "name": "Time",
+      "description": "时区换算与当前时间（官方 Python 参考实现）。",
+      "category": "文件与系统",
+      "source": "official",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-time"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "description": "读取仓库状态、历史、分支与 diff。",
+      "requires": ["git"],
+      "category": "开发工具",
+      "source": "official",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "{{repository}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "repository",
+          "label": "仓库路径",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "shell",
+      "name": "Shell",
+      "description": "在受控目录内执行 shell 命令（危险，默认关闭）。",
+      "category": "文件与系统",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-shell-server"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "desktop-commander",
+      "name": "Desktop Commander",
+      "description": "文件管理 + 终端执行的一体化服务器。",
+      "platforms": ["windows", "macos", "linux"],
+      "category": "文件与系统",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@wonderwhy-er/desktop-commander"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "仓库、Issue、PR、Actions 操作。",
+      "category": "Git 与代码托管",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "GitHub Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "description": "GitLab 项目、Issue、MR 管理。",
+      "category": "Git 与代码托管",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-gitlab"
+      ],
+      "env": {
+        "GITLAB_PERSONAL_ACCESS_TOKEN": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "GitLab Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "gitee",
+      "name": "Gitee",
+      "description": "码云仓库与 Issue 操作。",
+      "category": "Git 与代码托管",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-server-gitee"
+      ],
+      "env": {
+        "GITEE_ACCESS_TOKEN": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "Gitee Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "serena",
+      "name": "Serena",
+      "description": "基于 LSP 的语义代码检索与重构助手。",
+      "category": "开发工具",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "context7",
+      "name": "Context7",
+      "description": "拉取库的最新文档，减少 API 幻觉。",
+      "category": "开发工具",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "deepwiki",
+      "name": "DeepWiki",
+      "description": "按仓库生成/查询项目维基。",
+      "category": "开发工具",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.deepwiki.com/sse"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "description": "浏览器自动化：打开页面、点击、截图。",
+      "platforms": ["windows", "macos", "linux"],
+      "category": "浏览器自动化",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "puppeteer",
+      "name": "Puppeteer",
+      "description": "无头浏览器抓取与操作。",
+      "platforms": ["windows", "macos", "linux"],
+      "category": "浏览器自动化",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "browsermcp",
+      "name": "Browser MCP",
+      "description": "连接你正在用的浏览器（需装扩展）。",
+      "platforms": ["windows", "macos", "linux"],
+      "category": "浏览器自动化",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@browsermcp/mcp@latest"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "figma",
+      "name": "Figma",
+      "description": "读取 Figma 设计文件与组件信息。",
+      "category": "开发工具",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "figma-developer-mcp",
+        "--stdio"
+      ],
+      "env": {
+        "FIGMA_API_KEY": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "Figma Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "description": "查询错误与性能问题。",
+      "category": "运维监控",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@sentry/mcp-server"
+      ],
+      "env": {
+        "SENTRY_ACCESS_TOKEN": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "Sentry Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "description": "只读查询 Postgres（连接串里带只读账号）。",
+      "category": "数据库",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "{{connection_string}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "connection_string",
+          "label": "连接串",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite",
+      "description": "查询本地 SQLite 数据库文件。",
+      "category": "数据库",
+      "source": "official",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "{{db_path}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "db_path",
+          "label": "数据库文件路径",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "mysql",
+      "name": "MySQL",
+      "description": "MySQL 查询与表结构浏览。",
+      "category": "数据库",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@benborla29/mcp-server-mysql"
+      ],
+      "env": {
+        "MYSQL_HOST": "{{host}}",
+        "MYSQL_PORT": "{{port}}",
+        "MYSQL_USER": "{{user}}",
+        "MYSQL_PASS": "{{password}}",
+        "MYSQL_DB": "{{database}}"
+      },
+      "required_parameters": [
+        {
+          "key": "host",
+          "label": "主机地址",
+          "secret": false
+        },
+        {
+          "key": "port",
+          "label": "端口",
+          "secret": false
+        },
+        {
+          "key": "user",
+          "label": "用户名",
+          "secret": false
+        },
+        {
+          "key": "password",
+          "label": "密码",
+          "secret": true
+        },
+        {
+          "key": "database",
+          "label": "数据库名",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "mongodb",
+      "name": "MongoDB",
+      "description": "集合查询与聚合。",
+      "category": "数据库",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mongodb-mcp-server",
+        "--connectionString",
+        "{{uri}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "uri",
+          "label": "MongoDB URI",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "name": "Redis",
+      "description": "Redis 键值浏览与命令执行。",
+      "category": "数据库",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-redis",
+        "--url",
+        "{{url}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "url",
+          "label": "Redis URL",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "clickhouse",
+      "name": "ClickHouse",
+      "description": "ClickHouse 只读查询。",
+      "category": "数据库",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-clickhouse"
+      ],
+      "env": {
+        "CLICKHOUSE_HOST": "{{host}}",
+        "CLICKHOUSE_USER": "{{user}}",
+        "CLICKHOUSE_PASSWORD": "{{password}}"
+      },
+      "required_parameters": [
+        {
+          "key": "host",
+          "label": "Host",
+          "secret": false
+        },
+        {
+          "key": "user",
+          "label": "User",
+          "secret": false
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "elasticsearch",
+      "name": "Elasticsearch",
+      "description": "索引与查询 ES 集群。",
+      "category": "数据与分析",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@elastic/mcp-server-elasticsearch"
+      ],
+      "env": {
+        "ES_URL": "{{url}}",
+        "ES_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "url",
+          "label": "ES URL",
+          "secret": false
+        },
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "brave-search",
+      "name": "Brave Search",
+      "description": "Brave 网页与本地搜索。",
+      "category": "搜索与抓取",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "api_key",
+          "label": "Brave API Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily",
+      "description": "面向 AI 的搜索与内容抽取。",
+      "category": "搜索与抓取",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "tavily-mcp"
+      ],
+      "env": {
+        "TAVILY_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "api_key",
+          "label": "Tavily API Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "exa",
+      "name": "Exa",
+      "description": "语义搜索（按意思找资料）。",
+      "category": "搜索与抓取",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "exa-mcp-server"
+      ],
+      "env": {
+        "EXA_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "api_key",
+          "label": "Exa API Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "firecrawl",
+      "name": "Firecrawl",
+      "description": "整站抓取与结构化抽取。",
+      "category": "搜索与抓取",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "firecrawl-mcp"
+      ],
+      "env": {
+        "FIRECRAWL_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "api_key",
+          "label": "Firecrawl API Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "duckduckgo",
+      "name": "DuckDuckGo",
+      "description": "免密钥的网页搜索。",
+      "category": "搜索与抓取",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "duckduckgo-mcp-server"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "markitdown",
+      "name": "MarkItDown",
+      "description": "把 PDF/Office/图片转成 Markdown。",
+      "category": "办公文档",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "markitdown-mcp"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "description": "读写 Notion 页面与数据库。",
+      "category": "办公文档",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@notionhq/notion-mcp-server"
+      ],
+      "env": {
+        "NOTION_TOKEN": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "Notion Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "description": "频道消息读取与发送。",
+      "category": "通讯协作",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-slack"
+      ],
+      "env": {
+        "SLACK_BOT_TOKEN": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "token",
+          "label": "Slack Bot Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "description": "Issue 与项目进度管理。",
+      "category": "通讯协作",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.linear.app/sse"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "atlassian",
+      "name": "Jira / Confluence",
+      "description": "Atlassian 云端 Jira 与 Confluence。",
+      "category": "通讯协作",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.atlassian.com/v1/sse"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "excel",
+      "name": "Excel",
+      "description": "读写 Excel 工作簿。",
+      "category": "办公文档",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "excel-mcp-server",
+        "stdio"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "office-word",
+      "name": "Word",
+      "description": "读写 Word 文档。",
+      "category": "办公文档",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "office-word-mcp-server"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "feishu",
+      "name": "飞书",
+      "description": "飞书文档与消息（社区实现）。",
+      "category": "通讯协作",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@larksuiteoapi/lark-mcp",
+        "mcp",
+        "-a",
+        "{{app_id}}",
+        "-s",
+        "{{app_secret}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "app_id",
+          "label": "App ID",
+          "secret": false
+        },
+        {
+          "key": "app_secret",
+          "label": "App Secret",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "aws",
+      "name": "AWS",
+      "description": "查询 AWS 资源与成本。",
+      "category": "云服务",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-aws"
+      ],
+      "env": {
+        "AWS_ACCESS_KEY_ID": "{{access_key}}",
+        "AWS_SECRET_ACCESS_KEY": "{{secret_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "access_key",
+          "label": "Access Key",
+          "secret": false
+        },
+        {
+          "key": "secret_key",
+          "label": "Secret Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "description": "Workers/日志观测。",
+      "category": "云服务",
+      "source": "official",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://observability.mcp.cloudflare.com/sse"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "docker",
+      "name": "Docker",
+      "description": "容器与镜像管理。",
+      "requires": ["docker"],
+      "category": "云服务",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "docker-mcp"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "kubernetes",
+      "name": "Kubernetes",
+      "description": "集群资源查看与操作。",
+      "requires": ["kubectl"],
+      "category": "云服务",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-server-kubernetes"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana",
+      "description": "面板与告警查询。",
+      "category": "运维监控",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-grafana"
+      ],
+      "env": {
+        "GRAFANA_URL": "{{url}}",
+        "GRAFANA_API_KEY": "{{token}}"
+      },
+      "required_parameters": [
+        {
+          "key": "url",
+          "label": "Grafana URL",
+          "secret": false
+        },
+        {
+          "key": "token",
+          "label": "API Token",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "chroma",
+      "name": "Chroma",
+      "description": "本地向量库检索。",
+      "category": "AI 与向量",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "chroma-mcp",
+        "--client-type",
+        "persistent"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "qdrant",
+      "name": "Qdrant",
+      "description": "向量检索服务。",
+      "category": "AI 与向量",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@qdrant/mcp-server-qdrant"
+      ],
+      "env": {
+        "QDRANT_URL": "{{url}}",
+        "QDRANT_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "url",
+          "label": "Qdrant URL",
+          "secret": false
+        },
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "openmemory",
+      "name": "OpenMemory",
+      "description": "本地长期记忆层（社区实现）。",
+      "category": "AI 与向量",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "openmemory-js"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "duckdb",
+      "name": "DuckDB",
+      "description": "本地分析型数据库查询。",
+      "category": "数据与分析",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-duckdb",
+        "--db-path",
+        "{{db_path}}"
+      ],
+      "env": {},
+      "required_parameters": [
+        {
+          "key": "db_path",
+          "label": "DuckDB 文件",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "pandas-mcp",
+      "name": "Pandas",
+      "description": "对 CSV/表格做统计分析。",
+      "category": "数据与分析",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-pandas"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "amap",
+      "name": "高德地图",
+      "description": "地理编码、路径规划。",
+      "category": "数据与分析",
+      "source": "community",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@amap/amap-maps-mcp-server"
+      ],
+      "env": {
+        "AMAP_MAPS_API_KEY": "{{api_key}}"
+      },
+      "required_parameters": [
+        {
+          "key": "api_key",
+          "label": "高德 Key",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "description": "视频字幕与信息抓取。",
+      "category": "数据与分析",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "youtube-transcript-mcp"
+      ],
+      "env": {},
+      "required_parameters": []
+    },
+    {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "description": "音视频转码与抽帧。",
+      "requires": ["ffmpeg"],
+      "category": "数据与分析",
+      "source": "community",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "ffmpeg-mcp"
+      ],
+      "env": {},
+      "required_parameters": []
+    }
+  ]
+}

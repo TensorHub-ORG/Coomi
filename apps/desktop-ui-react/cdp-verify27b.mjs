@@ -1,0 +1,13 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) return 'EXC'; return r.result.result.value; };
+console.log('引擎连通=' + await ev(`(async () => { const b = window.__COOMI_BOOT__; try { const r = await fetch('http://127.0.0.1:' + b.port + '/api/runtime/installed', { headers: { 'x-coomi-token': b.token } }); return 'HTTP ' + r.status; } catch (e) { return 'ERR ' + e.message; } })()`));
+console.log('会话数=' + await ev(`(async () => { const b = window.__COOMI_BOOT__; try { const r = await fetch('http://127.0.0.1:' + b.port + '/api/sessions', { headers: { 'x-coomi-token': b.token } }); const j = await r.json(); return (j.sessions || j || []).length; } catch (e) { return 'ERR ' + e.message; } })()`));
+console.log('页面里的报错条=' + await ev("(function(){ var t = document.body.innerText || ''; var m = t.match(/加载失败[^\\n]*|连接已断开[^\\n]*|与引擎的连接已断开[^\\n]*/g); return JSON.stringify(m ? m.slice(0,3) : []); })()"));
+ws.close();

@@ -1,0 +1,12 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { try { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) return 'EXC:' + String(r.result.exceptionDetails.exception?.description||'').slice(0,200); return r.result.result.value; } catch (e) { return 'ERR:' + e.message; } };
+console.log('直连 fetch=' + await ev("(async function(){ try { var i = await window.__TAURI__.core.invoke('engine_info'); var r = await fetch('http://127.0.0.1:'+i.port+'/api/runtime/health', {headers:{Authorization:'Bearer '+i.token}}); return 'ok ' + r.status; } catch(e) { return '失败: ' + String(e && (e.name+': '+e.message) || e).slice(0,160); } })()"));
+console.log('直连 WS=' + await ev("(async function(){ try { var i = await window.__TAURI__.core.invoke('engine_info'); var d = window.__sessionDebug.read(); return await new Promise(function(res){ var w = new WebSocket('ws://127.0.0.1:'+i.port+'/ws/session/'+d.sessionId+'?token='+i.token); var t = setTimeout(function(){ try{w.close()}catch(e){}; res('超时 5s 未 open'); }, 5000); w.onopen=function(){ clearTimeout(t); res('open 成功'); w.close(); }; w.onerror=function(){ clearTimeout(t); res('onerror（握手/连接被拒）'); }; w.onclose=function(ev){ clearTimeout(t); res('onclose code=' + ev.code); }; }); } catch(e) { return '失败: ' + String(e && e.message || e).slice(0,160); } })()"));
+ws.close();

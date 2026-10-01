@@ -1,0 +1,16 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { try { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) return 'EXC ' + (r.result.exceptionDetails.text || ''); return r.result.result.value; } catch (e) { return 'ERR ' + e.message; } };
+console.log('版本=' + await ev("(function(){ try { return window.__TAURI__.app.getVersion(); } catch(e) { return 'ERR'; } })()"));
+console.log('注入=' + await ev("JSON.stringify(window.__COOMI_BOOT__ ? { port: window.__COOMI_BOOT__.port, v: window.__COOMI_BOOT__.version } : null)"));
+console.log('引擎连通=' + await ev("(async () => { const b = window.__COOMI_BOOT__; const h = { Authorization: 'Bearer ' + b.token }; try { const a = await fetch('http://127.0.0.1:' + b.port + '/api/sessions', { headers: h }); const c = await fetch('http://127.0.0.1:' + b.port + '/api/plugins/views', { headers: h }); const j = await c.json(); return 'sessions HTTP ' + a.status + ' | plugin-views HTTP ' + c.status + ' ' + JSON.stringify(j); } catch (e) { return 'ERR ' + e.message; } })()"));
+console.log('会话状态=' + await ev("(function(){ var d = window.__sessionDebug.read(); return JSON.stringify({ sid: String(d.sessionId||'').slice(0,8), len: d.messagesLen, streaming: !!d.streaming }); })()"));
+console.log('收尾诊断=' + await ev("JSON.stringify(typeof window.__sessionDebug.settleLog === 'function' ? window.__sessionDebug.settleLog() : 'missing')"));
+console.log('窗口=' + await ev("JSON.stringify({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio, scale: getComputedStyle(document.documentElement).getPropertyValue('--ui-font-scale').trim() })"));
+ws.close();

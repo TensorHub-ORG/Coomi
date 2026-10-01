@@ -1,0 +1,30 @@
+/* HarmonyOS Sans SC（华为官方字体，随包分发；许可见 public/fonts/LICENSE-HarmonyOS-Sans.txt）
+   官方只有静态字重、且许可禁止修改，所以按 400/500/700 各声明一条 @font-face。 */
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/harmonyos-sans-sc-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/harmonyos-sans-sc-medium.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/harmonyos-sans-sc-medium.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/harmonyos-sans-sc-bold.woff2') format('woff2');
+}

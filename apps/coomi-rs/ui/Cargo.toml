@@ -1,0 +1,49 @@
+[package]
+name = "coomi-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "coomi"
+
+[[bin]]
+name = "coomi"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+base64 = "0.22"
+clap.workspace = true
+coomi-catalogs = { path = "../catalogs" }
+coomi-engine = { path = "../engine" }
+coomi-security = { path = "../security" }
+coomi-services = { path = "../services" }
+coomi-telemetry = { path = "../telemetry" }
+coomi-tools = { path = "../tools" }
+flate2.workspace = true
+tar.workspace = true
+chrono.workspace = true
+crossterm.workspace = true
+dirs.workspace = true
+fs2.workspace = true
+futures-util.workspace = true
+md5.workspace = true
+ratatui.workspace = true
+pulldown-cmark.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+unicode-width.workspace = true
+uuid.workspace = true
+zip.workspace = true
+croner = "2"
+
+[dev-dependencies]
+chrono.workspace = true
+tempfile.workspace = true

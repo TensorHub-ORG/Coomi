@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang='zh-CN'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Coomi</title>
+    <script>
+      // 内联在 head：在样式表与 bundle 之前定好主题，消除「先深后浅」的闪帧。
+      (function () {
+        try {
+          var mode = localStorage.getItem('coomi.theme') || 'system'
+          var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+          var prefs = JSON.parse(localStorage.getItem('coomi.prefs.v2') || '{}')
+          document.documentElement.dataset.density = prefs.density || 'compact'
+          document.documentElement.dataset.motion = prefs.motion === false ? 'off' : 'on'
+          document.documentElement.dataset.font = prefs.fontFamily || 'harmony'
+          document.documentElement.style.setProperty('--ui-font-scale', String(Number(localStorage.getItem('coomi.fontScale') || 1)))
+          if (prefs.messageWidth) document.documentElement.style.setProperty('--content-w', prefs.messageWidth + 'px')
+        } catch (e) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id='root'></div>
+    <script type='module' src='/src/main.tsx'></script>
+  </body>
+</html>

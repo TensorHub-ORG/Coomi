@@ -1,0 +1,84 @@
+{
+  "name": "深空蓝鲸",
+  "colors": {
+    "--canvas": "rgba(10,23,59,0.55)",
+    "--canvas-side": "rgba(13,18,32,0.70)",
+    "--surface": "rgba(23,35,71,0.78)",
+    "--surface-muted": "rgba(12,19,32,0.72)",
+    "--surface-sunken": "rgba(10,16,28,0.70)",
+    "--surface-raised": "rgba(20,29,48,0.80)",
+    "--surface-overlay": "rgba(22,32,58,0.86)",
+    "--ink": "#e6edf7",
+    "--ink-2": "#c3d2e4",
+    "--ink-3": "#93a7c2",
+    "--ink-4": "#64768f",
+    "--ink-inverse": "#0a0e17",
+    "--line": "rgba(30,43,61,0.70)",
+    "--line-soft": "rgba(255,255,255,0.07)",
+    "--line-strong": "rgba(43,61,83,0.85)",
+    "--control-bg": "rgba(20,29,48,0.85)",
+    "--control-bg-2": "rgba(13,21,34,0.8)",
+    "--hover": "rgba(79,142,247,0.12)",
+    "--active": "rgba(79,142,247,0.18)",
+    "--selected": "rgba(79,142,247,0.16)",
+    "--primary": "#4b95ba",
+    "--primary-hover": "#6ba9d0",
+    "--bubble-user": "rgba(18,58,102,0.85)",
+    "--bubble-user-line": "rgba(29,77,130,0.9)",
+    "--bubble-user-ink": "#eaf3ff",
+    "--code-bg": "rgba(13,18,31,0.75)",
+    "--code-fg": "#cce3ff",
+    "--msg-card": "rgba(16,24,38,0.80)",
+    "--msg-card-line": "rgba(29,43,64,0.90)"
+  },
+  "background": {
+    "image": "assets/whale-bg.png",
+    "fit": "cover",
+    "opacity": 1,
+    "blur": 0
+  },
+  "css": [
+    "body { background: transparent; }",
+    "[data-shell-part='rail'] { background: rgba(10,14,23,0.7) !important; }",
+    ".bubble.bubble-user { border-radius: 12px 4px 12px 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }",
+    ".theme-bg img { filter: saturate(1.05) brightness(0.9); }"
+  ],
+  "mascot": {
+    "logo": "assets/whale-mascot.png",
+    "avatar": "assets/whale-mascot.png",
+    "composer": "assets/whale-mascot.png"
+  },
+  "parts": {
+    "composer": {
+      "sendButton": {
+        "label": "发送",
+        "icon": "assets/whale-mascot.png",
+        "position": "right",
+        "accent": true
+      },
+      "input": {
+        "placeholder": "和深空蓝鲸聊聊…",
+        "radius": 24,
+        "minHeight": 44
+      },
+      "toolbar": {
+        "showAttach": true,
+        "showModel": true,
+        "showSearch": true
+      }
+    },
+    "rail": {
+      "logoRadius": 12,
+      "iconColor": "#e6edf7"
+    },
+    "bubbles": {
+      "user": {
+        "radius": "12px 4px 12px 12px",
+        "shadow": "0 2px 10px rgba(0,0,0,0.35)"
+      },
+      "assistant": {
+        "radius": 14
+      }
+    }
+  }
+}

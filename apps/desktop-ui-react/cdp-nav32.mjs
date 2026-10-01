@@ -1,0 +1,17 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); return r.result.exceptionDetails ? 'EXC' : r.result.result.value; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+console.log('当前视图=' + await ev("document.querySelector('[data-content-layer]') ? document.querySelector('[data-content-layer]').getAttribute('data-view') : '(none)'"));
+console.log('导航按钮=' + await ev("JSON.stringify(Array.from(document.querySelectorAll('[data-nav-key]')).map(function(e){return e.getAttribute('data-nav-key')}))"));
+console.log('点设置=' + await ev("(function(){ var el = document.querySelector('[data-nav-key=\"settings\"]'); if (!el) return 'no-btn'; el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); el.click(); return 'clicked'; })()"));
+await sleep(3000);
+console.log('视图=' + await ev("document.querySelector('[data-content-layer]') ? document.querySelector('[data-content-layer]').getAttribute('data-view') : '(none)'"));
+console.log('设置页可见文本片段=' + await ev("(function(){ var el = document.querySelector('main'); return el ? el.innerText.slice(0, 260).replace(/\n+/g,' | ') : '(no main)' })()"));
+ws.close();

@@ -1,0 +1,22 @@
+[package]
+name = "coomi-catalogs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+coomi-telemetry = { path = "../telemetry" }
+# 读取用户配置的镜像源（GitHub 加速前缀）：技能包从 codeload 下载，必须走同一个镜像，
+# 否则「设置 → 下载与镜像」配了也不生效。services 不依赖 catalogs，方向安全。
+coomi-services = { path = "../services" }
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,11 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+console.log('目标=' + JSON.stringify(list.map((t) => ({ type: t.type, url: (t.url || '').slice(0, 90) })), null, 1));
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+const t = await send('Target.getTargets', {});
+console.log('内部目标=' + JSON.stringify((t.result.targetInfos ?? []).map((x) => ({ type: x.type, url: (x.url || '').slice(0, 80) }))));
+ws.close();

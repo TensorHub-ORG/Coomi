@@ -1,0 +1,15 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {});
+const ev = async (x) => { try { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) return 'EXC:' + String(r.result.exceptionDetails.exception?.description||'').slice(0,200); return r.result.result.value; } catch (e) { return 'ERR:' + e.message; } };
+console.log('engine_info=' + await ev("(async function(){ try { var i = await window.__TAURI__.core.invoke('engine_info'); window.__e = i; return JSON.stringify({port:i.port, hasToken:!!i.token, exe:i.exe}); } catch(e) { return 'ERR:'+String(e&&e.message||e).slice(0,200); } })()"));
+console.log('sid=' + await ev('String(window.__sessionDebug.read().sessionId)'));
+console.log('ws_open 直调=' + await ev("(async function(){ try { await window.__TAURI__.core.invoke('engine_ws_open', { port: window.__e.port, token: window.__e.token, session: window.__sessionDebug.read().sessionId }); return 'ok'; } catch(e) { return 'ERR: ' + String(e && e.message || e).slice(0,300); } })()"));
+console.log('ws_send 直调=' + await ev("(async function(){ try { await window.__TAURI__.core.invoke('engine_ws_send', { frame: JSON.stringify({type:'command',payload:{command:'ping'}}) }); return 'ok'; } catch(e) { return 'ERR: ' + String(e && e.message || e).slice(0,300); } })()"));
+console.log('engine_http 直调=' + await ev("(async function(){ try { var r = await window.__TAURI__.core.invoke('engine_http', { port: window.__e.port, token: window.__e.token, method:'GET', path:'/api/runtime/health', body:null }); return JSON.stringify({status:r.status, body:String(r.body).slice(0,120)}); } catch(e) { return 'ERR: ' + String(e && e.message || e).slice(0,300); } })()"));
+ws.close();

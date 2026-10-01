@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Coomi 默认能力：核心 app（关于页读版本 app.getVersion()）+ 核心 event（前端要 listen 引擎事件与托盘事件；engine:ws-* 传输桥也用事件回传）。少了 core:event，listen 会被 ACL 拒掉且静默失败。","local":true,"windows":["main"],"permissions":["core:app:default","core:event:default"]}}

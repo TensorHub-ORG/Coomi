@@ -1,0 +1,11 @@
+{
+  "name": "coomi-desktop",
+  "private": true,
+  "version": "1.0.2",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5"
+  }
+}

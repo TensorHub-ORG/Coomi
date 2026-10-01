@@ -1,0 +1,9 @@
+{
+  "id": "example-theme",
+  "name": "示例主题",
+  "version": "1.0.0",
+  "description": "深色护眼示例主题：低亮度、低饱和、减少蓝光，长时间使用更舒服。",
+  "type": "theme",
+  "themeName": "深色护眼",
+  "permissions": []
+}

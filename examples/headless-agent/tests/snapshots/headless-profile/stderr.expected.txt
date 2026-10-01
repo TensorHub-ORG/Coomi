@@ -1,1 +1,0 @@
-coomi: SERVER: CLI mock provider failed

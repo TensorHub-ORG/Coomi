@@ -1,0 +1,9 @@
+{
+  "id": "dsh-deep-whale",
+  "name": "深空蓝鲸",
+  "version": "1.0.0",
+  "description": "深空蓝鲸主题：灵感来源 DSH 皮肤 GitHub: Small-tailqwq/dsh-deep-whale；提取其鲸鱼娘女仆立绘与深海蓝蕾丝色板，纯插件实现，不动引擎。",
+  "type": "theme",
+  "themeName": "深空蓝鲸",
+  "permissions": ["theme.apply"]
+}

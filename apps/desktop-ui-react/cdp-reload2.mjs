@@ -1,0 +1,17 @@
+const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+const page = list.find((t) => t.type === 'page' && /tauri|index/i.test(t.url || '')) || list.find((t) => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method: m, params: p })); });
+ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+await new Promise((r) => ws.addEventListener('open', r));
+await send('Runtime.enable', {}); await send('Page.enable', {});
+const ev = async (x) => { const r = await send('Runtime.evaluate', { expression: x, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) return 'EXC'; return r.result.result.value; };
+console.log('scripts=' + await ev("JSON.stringify([].slice.call(document.querySelectorAll('script[src]')).map(function(s){return s.src.split('/').pop();}))"));
+console.log('hasJournal=' + await ev('String(!!window.__sessionDebug && typeof window.__sessionDebug.journal)'));
+await send('Page.reload', { ignoreCache: true });
+await new Promise((r) => setTimeout(r, 9000));
+console.log('afterReload hasJournal=' + await ev('String(!!window.__sessionDebug && typeof window.__sessionDebug.journal)'));
+console.log('scripts=' + await ev("JSON.stringify([].slice.call(document.querySelectorAll('script[src]')).map(function(s){return s.src.split('/').pop();}))"));
+console.log('len=' + await ev('String(window.__sessionDebug && window.__sessionDebug.read().messagesLen)'));
+ws.close();
