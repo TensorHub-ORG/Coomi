@@ -7917,56 +7917,177 @@ async fn balance_status(State(state): State<AppState>) -> Result<Json<Value>, Ap
     if base.is_empty() {
         return Err(ApiError::bad_request("active provider has no base URL"));
     }
-    // 优先 DeepSeek 风格 /v1/user/balance（中转站 / 官方 DeepSeek 均兼容），
-    // 其次 /user/balance，最后 /v1/dashboard/billing/subscription（OpenAI 兼容）。
-    let candidates = [
-        format!("{base}/v1/user/balance"),
-        format!("{base}/user/balance"),
-        format!("{base}/v1/dashboard/billing/subscription"),
-    ];
+    let provider_type = provider.provider_type.to_ascii_lowercase();
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(|e| ApiError::internal(format!("http client: {e}")))?;
+
+    // ── 按厂商/协议选择余额接口 ──
+    // 1) 中转站 / DeepSeek 官方 / 任何带 user/balance 的兼容站：DeepSeek 风格
+    // 2) OpenAI 官方 / 兼容站：/v1/dashboard/billing/subscription + usage
+    // 3) Anthropic：官方无公开余额接口
+    // 4) Gemini：官方 key 无统一余额接口（需 Cloud 计费 API）
+    let wants_deepseek = provider_type.contains("deepseek")
+        || provider_type.contains("account")
+        || base.contains("monai")
+        || base.contains("ccwu")
+        || base.contains("relay");
+    let wants_openai = provider_type.contains("openai")
+        || provider_type.contains("chat_completions")
+        || provider_type.contains("responses")
+        || base.contains("openai");
+
     let mut last_error = String::new();
-    for url in candidates {
-        let mut request = client.get(&url).bearer_auth(key);
-        if provider.provider_type.contains("anthropic") {
-            request = request
-                .header("x-api-key", key)
-                .header("anthropic-version", "2023-06-01");
+
+    // DeepSeek 风格：优先 /v1/user/balance，其次 /user/balance
+    if wants_deepseek {
+        let candidates = [
+            format!("{base}/v1/user/balance"),
+            format!("{base}/user/balance"),
+            format!("{base}/v1/dashboard/billing/subscription"),
+        ];
+        for url in candidates {
+            let response = match client.get(&url).bearer_auth(key).send().await {
+                Ok(r) => r,
+                Err(e) => { last_error = e.to_string(); continue }
+            };
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status.is_success() {
+                if let Ok(value) = serde_json::from_str::<Value>(&body) {
+                    let lamp = value.get("lamp_remaining").and_then(Value::as_u64).unwrap_or(0);
+                    let available_yuan = value
+                        .get("available_yuan")
+                        .and_then(Value::as_f64)
+                        .or_else(|| value.get("balance").and_then(Value::as_f64))
+                        .unwrap_or(0.0);
+                    let expires_at = value.get("expires_at").and_then(Value::as_i64).unwrap_or(0);
+                    return Ok(Json(json!({
+                        "ok": true,
+                        "provider": document.active,
+                        "style": "deepseek",
+                        "balance": {
+                            "currency": "CNY",
+                            "available_yuan": available_yuan,
+                            "lamp_remaining": lamp,
+                            "expires_at": expires_at,
+                        },
+                        "raw": value,
+                    })));
+                }
+            }
+            last_error = format!("HTTP {status}: {}", preview(&body));
         }
-        let response = match request.send().await {
-            Ok(r) => r,
-            Err(e) => { last_error = e.to_string(); continue }
-        };
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        if status.is_success() {
-            if let Ok(value) = serde_json::from_str::<Value>(&body) {
-                let lamp = value.get("lamp_remaining").and_then(Value::as_u64).unwrap_or(0);
-                let available_yuan = value
-                    .get("available_yuan")
-                    .and_then(Value::as_f64)
-                    .or_else(|| value.get("balance").and_then(Value::as_f64))
-                    .unwrap_or(0.0);
-                let expires_at = value.get("expires_at").and_then(Value::as_i64).unwrap_or(0);
-                return Ok(Json(json!({
-                    "ok": true,
-                    "provider": document.active,
-                    "balance": {
-                        "currency": "CNY",
-                        "available_yuan": available_yuan,
-                        "lamp_remaining": lamp,
-                        "expires_at": expires_at,
-                    },
-                    "raw": value,
-                })));
+    } else if wants_openai {
+        // OpenAI 风格：subscription（总额/到期）+ usage（已用）→ 剩余 = hard_limit - total_usage
+        let sub_url = format!("{base}/v1/dashboard/billing/subscription");
+        let usage_url = format!("{base}/v1/dashboard/billing/usage");
+        let mut total_limit: f64 = 0.0;
+        let mut expires_at: i64 = 0;
+        let mut sub_ok = false;
+        if let Ok(response) = client.get(&sub_url).bearer_auth(key).send().await {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status.is_success() {
+                if let Ok(value) = serde_json::from_str::<Value>(&body) {
+                    total_limit = value
+                        .get("hard_limit_usd")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0);
+                    expires_at = value
+                        .get("access_until")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0);
+                    sub_ok = total_limit > 0.0 || expires_at > 0;
+                }
+            } else {
+                last_error = format!("subscription HTTP {status}: {}", preview(&body));
             }
         }
-        last_error = format!("HTTP {status}: {}", preview(&body));
+        let mut used: f64 = 0.0;
+        if let Ok(response) = client.get(&usage_url).bearer_auth(key).send().await {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status.is_success() {
+                if let Ok(value) = serde_json::from_str::<Value>(&body) {
+                    used = value
+                        .pointer("/total_usage")
+                        .and_then(Value::as_f64)
+                        .map(|v| v / 100.0)
+                        .unwrap_or(0.0);
+                }
+            }
+        }
+        if sub_ok {
+            return Ok(Json(json!({
+                "ok": true,
+                "provider": document.active,
+                "style": "openai",
+                "balance": {
+                    "currency": "USD",
+                    "total_limit": total_limit,
+                    "used": used,
+                    "available_yuan": (total_limit - used) * 7.2,
+                    "expires_at": expires_at,
+                },
+            })));
+        }
+        if !sub_ok {
+            // OpenAI 站不支持余额接口时给明确提示
+            return Err(ApiError::bad_gateway(format!(
+                "该 OpenAI 兼容站不支持余额查询（subscription 接口不可用）：{last_error}"
+            )));
+        }
+    } else if provider_type.contains("anthropic") || provider_type.contains("claude") {
+        return Err(ApiError::bad_gateway(
+            "Anthropic 官方 API 不提供余额查询接口（按量计费，无预充值）",
+        ));
+    } else if provider_type.contains("gemini") || provider_type.contains("google") {
+        return Err(ApiError::bad_gateway(
+            "Gemini 官方 API 不提供余额查询接口（按量计费，需在 Google Cloud 控制台查看）",
+        ));
+    } else {
+        // 未知厂商：先试 DeepSeek 风格，再试 OpenAI 风格
+        let candidates = [
+            format!("{base}/v1/user/balance"),
+            format!("{base}/user/balance"),
+            format!("{base}/v1/dashboard/billing/subscription"),
+        ];
+        for url in candidates {
+            let response = match client.get(&url).bearer_auth(key).send().await {
+                Ok(r) => r,
+                Err(e) => { last_error = e.to_string(); continue }
+            };
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status.is_success() {
+                if let Ok(value) = serde_json::from_str::<Value>(&body) {
+                    let lamp = value.get("lamp_remaining").and_then(Value::as_u64).unwrap_or(0);
+                    let available_yuan = value
+                        .get("available_yuan")
+                        .and_then(Value::as_f64)
+                        .or_else(|| value.get("balance").and_then(Value::as_f64))
+                        .unwrap_or(0.0);
+                    let expires_at = value.get("expires_at").and_then(Value::as_i64).unwrap_or(0);
+                    return Ok(Json(json!({
+                        "ok": true,
+                        "provider": document.active,
+                        "style": "auto",
+                        "balance": {
+                            "currency": "CNY",
+                            "available_yuan": available_yuan,
+                            "lamp_remaining": lamp,
+                            "expires_at": expires_at,
+                        },
+                        "raw": value,
+                    })));
+                }
+            }
+            last_error = format!("HTTP {status}: {}", preview(&body));
+        }
     }
     Err(ApiError::bad_gateway(format!("balance query failed: {last_error}")))
 }
@@ -8546,6 +8667,14 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
     if !instructions.trim().is_empty() {
         prompt.push_str("\n\nProject instructions:\n");
         prompt.push_str(instructions);
+    }
+    // 超载 / 狂暴模式：注入思维增强指令（浓缩自 10 个思维类 Skill 的核心方法）。
+    // 普通模式不注入，不占上下文；超载/狂暴时让模型在任务检查与继续时用更强的思维模型。
+    let prod_level = production_mode_level(home);
+    if prod_level == "overload" || prod_level == "berserk" {
+        prompt.push_str(
+            "\n\nThinking enhancement (active in overload/berserk mode): you are expected to think harder and more rigorously. Apply these frameworks when appropriate, but keep final answers concise:\n- Lateral thinking: before settling on an approach, generate at least one alternative that breaks the current frame (De Bono); challenge assumptions explicitly.\n- Critical reasoning: state probabilities and base rates where relevant; prefer falsifiable reasoning; actively hunt for counter-evidence instead of confirming your first hypothesis.\n- Blind-spot check: scan for common cognitive biases (anchoring, confirmation, sunk cost, availability) and state which ones might apply before committing to a major decision.\n- Socratic probing: if the user's request is ambiguous or a key premise is unstated, ask structured follow-up questions (or reason through them) rather than guessing.\n- Depth probes: generate machine-style probing questions about your own plan; answer the hardest one before proceeding.\n- Baloney detection: apply Sagan/Karpathy-style checks (is it testable? what would falsify it? extraordinary claims need extraordinary evidence) before accepting any result.\n- Decomposition: break the task into sub-problems, solve each independently, then integrate; verify integration against the original goal.\n- Verification loop: after completing a step, explicitly check it against the requirement (did it do what was asked, or only what was easy?).\nUse these internally; do not narrate the framework names to the user. Output stays concise and result-first.",
+        );
     }
     if !global_memory {
         prompt.push_str(

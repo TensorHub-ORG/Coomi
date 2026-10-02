@@ -23,6 +23,11 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   'o3': { in: 2, out: 8 },
   'o3-mini': { in: 1.1, out: 4.4 },
   'o4-mini': { in: 1.1, out: 4.4 },
+  'gpt-5': { in: 1.25, out: 10 },
+  'gpt-5-mini': { in: 0.25, out: 2 },
+  'gpt-5-nano': { in: 0.05, out: 0.4 },
+  'gpt-4o-search-preview': { in: 2.5, out: 10 },
+  'gpt-4o-mini-search-preview': { in: 0.15, out: 0.6 },
   'gpt-4o-realtime': { in: 5, out: 20 },
   'gpt-4o-audio': { in: 2.5, out: 10 },
   'chatgpt-4o-latest': { in: 5, out: 15 },
@@ -59,6 +64,9 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   'gemini-2.5-flash': { in: 0.3, out: 2.5 },
   'gemini-2.5-flash-lite': { in: 0.1, out: 0.4 },
   'gemini-2.5-flash-preview': { in: 0.3, out: 2.5 },
+  'gemini-3-pro': { in: 2, out: 12 },
+  'gemini-3-flash': { in: 0.4, out: 3 },
+  'gemini-3-flash-lite': { in: 0.1, out: 0.5 },
   'gemini-exp-1206': { in: 1.25, out: 5 },
   'gemini-2.0-flash-thinking': { in: 0.3, out: 2.5 },
 
@@ -87,6 +95,8 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   'qwen3-turbo': { in: 0.1, out: 0.3 },
   'qwen-vl-max': { in: 3, out: 9 },
   'qwen-vl-plus': { in: 1.5, out: 4.5 },
+  'qwen3-vl-plus': { in: 1.5, out: 4.5 },
+  'qwq-32b': { in: 0.3, out: 0.6 },
 
   // 字节豆包
   'doubao-pro-32k': { in: 0.8, out: 2 },
@@ -105,6 +115,7 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   'kimi-k2-0711': { in: 0.6, out: 2.5 },
   'kimi-k2-turbo': { in: 0.4, out: 8 },
   'kimi-thinking': { in: 1.2, out: 6 },
+  'kimi-k2-thinking': { in: 0.6, out: 5 },
 
   // 百度文心
   'ernie-4.0-turbo-8k': { in: 0.6, out: 2 },

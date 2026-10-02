@@ -100,6 +100,8 @@ export const useSessionStore = defineStore('session', () => {
   let connectedSessionId = ''
   /** 并行会话：每个已打开的会话各持一条 WS（后台任务不断连，切回即可看到结果）。 */
   const transportPool = new Map<string, Transport>()
+  /** 池上限：防止长时间使用后连接无限增长（每个连接 + 引擎事件缓冲都占内存）。 */
+  const TRANSPORT_POOL_MAX = 5
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let turnToolTrace: ToolDiagnosticTrace[] = []
   let consecutiveToolFailures = 0
@@ -173,14 +175,35 @@ export const useSessionStore = defineStore('session', () => {
 
   /** 换 sessionId 后必须重连：WS 的路径里带着 session id。 */
   function connect(wsUrl?: string) {
-    if (transport.value && connectedSessionId === sessionId.value) return
+    // 并行会话：目标会话已有活跃连接则复用（不打断后台任务），否则新建。
+    // 这是并发与「切换不崩」的关键：绝不能 close 还在跑任务的旧连接。
     const targetSessionId = sessionId.value
-    const previous = transport.value
-    transport.value = null
-    connectedSessionId = ''
-    previous?.close()
+    const existing = transportPool.get(targetSessionId)
+    if (existing) {
+      transport.value = existing
+      connectedSessionId = targetSessionId
+      connection.setStatus({ state: 'open' })
+      existing.send({ command: 'set_permission_mode', mode: config.permissionMode })
+      existing.send({ command: 'set_session_mode', mode: mode.value })
+      const meta = sessions.find(targetSessionId)
+      const providerId = meta?.providerId ?? config.currentProviderId
+      const model = meta?.model ?? config.currentModel
+      if (providerId && model) existing.send({ command: 'select_model', provider_id: providerId, model })
+      existing.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
+      existing.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
+      return
+    }
     if (wsUrl) connection.setWsUrl(wsUrl)
+    // 池满：关闭最久未用的连接（Map 迭代顺序 = 插入顺序，第一个即最老）。
+    while (transportPool.size >= TRANSPORT_POOL_MAX) {
+      const oldest = transportPool.keys().next().value as string | undefined
+      if (!oldest || oldest === targetSessionId) break
+      const oldT = transportPool.get(oldest)
+      transportPool.delete(oldest)
+      oldT?.close?.()
+    }
     const t = createTransport(targetSessionId, wsUrl)
+    transportPool.set(targetSessionId, t)
     transport.value = t
     connectedSessionId = targetSessionId
     let lastEventSeq = 0
@@ -201,7 +224,8 @@ export const useSessionStore = defineStore('session', () => {
       }
     })
     t.onMessage(env => {
-      if (transport.value !== t || sessionId.value !== targetSessionId) return
+      // 只过滤「前台会话」：后台会话的事件照常 ack（引擎继续跑），但不刷新前台 UI。
+      const isForeground = sessionId.value === targetSessionId
       if (env.type === 'event' && env.payload.event_seq) {
         const seq = env.payload.event_seq
         if (seq <= lastEventSeq) {
@@ -209,11 +233,11 @@ export const useSessionStore = defineStore('session', () => {
           return
         }
         lastEventSeq = seq
-        onInbound(env)
+        if (isForeground) onInbound(env)
         t.send({ command: 'ack_event', event_seq: seq })
         return
       }
-      onInbound(env)
+      if (isForeground) onInbound(env)
     })
     t.connect()
   }

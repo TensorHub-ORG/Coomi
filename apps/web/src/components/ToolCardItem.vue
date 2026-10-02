@@ -21,6 +21,8 @@ const config = useConfigStore()
 const BIG = new Set(['content', 'old_string', 'new_string', 'prompt'])
 
 const manual = ref<boolean | null>(null)
+/** 收回动画未完成时保持元素可见（否则 v-show 会立即隐藏，动画看不到）。 */
+const collapsing = ref(false)
 const full = ref(false)
 const bodyRef = ref<HTMLElement | null>(null)
 const rootEl = ref<HTMLElement | null>(null)
@@ -250,12 +252,16 @@ watch(open, (value, previous) => {
       })
     }))
   } else {
+    collapsing.value = true
     gsap.to(element, {
       height: 0,
       opacity: 0,
-      duration: 0.16,
+      duration: 0.22,
       ease: 'power2.in',
-      onComplete: () => { gsap.set(element, { clearProps: 'height,opacity' }) },
+      onComplete: () => {
+        gsap.set(element, { clearProps: 'height,opacity' })
+        collapsing.value = false
+      },
     })
   }
 })
@@ -292,7 +298,7 @@ onBeforeUnmount(() => {
       <span>{{ card.riskSummary || '需要你授权后才会执行' }}<template v-if="card.access"> · {{ card.access }}</template></span>
     </div>
 
-    <div v-show="open && hasBody" ref="bodyRef" class="body">
+    <div v-show="(open || collapsing) && hasBody" ref="bodyRef" class="body">
       <!-- 图片瀑布流：工具产生的图片平铺展示，点击全屏预览 -->
       <div v-if="card.images && card.images.length" class="sec" :class="{ showimg: isShowImage }">
         <p class="slabel">图片</p>

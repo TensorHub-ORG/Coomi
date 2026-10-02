@@ -11,6 +11,7 @@ import { useSessionStore } from '@/stores/session'
 import { useRouter } from 'vue-router'
 import { pushTrace, setControlModeActive } from '@/bridge/controlFloat'
 import { MorphIcon } from 'morphicons/vue'
+import { gsap, prefersReducedMotion } from '@/composables/useGsap'
 import { Menu, ChevronUp, Plus, X } from 'lucide'
 import CoomiIcon from './CoomiIcon.vue'
 
@@ -73,6 +74,31 @@ function toggleBar() {
   barOpen.value = !barOpen.value
   barIcon.value = barOpen.value ? ChevronUp : Menu
 }
+
+/** 模式面板：原大小按钮从模式键位置模糊分裂展开（stagger），收回时聚拢消失。 */
+const modePopEl = ref<HTMLElement | null>(null)
+watch(barOpen, (open) => {
+  const panel = modePopEl.value
+  if (!panel) return
+  const buttons = Array.from(panel.querySelectorAll<HTMLElement>('.pill'))
+  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  if (open) {
+    gsap.killTweensOf(buttons)
+    gsap.fromTo(buttons,
+      { opacity: 0, scale: 0.6, filter: 'blur(6px)', y: 10 },
+      {
+        opacity: 1, scale: 1, filter: 'blur(0px)', y: 0,
+        duration: 0.32, ease: 'power2.out', stagger: 0.045,
+      },
+    )
+  } else {
+    gsap.killTweensOf(buttons)
+    gsap.to(buttons, {
+      opacity: 0, scale: 0.6, filter: 'blur(6px)', y: 8,
+      duration: 0.2, ease: 'power2.in', stagger: 0.025,
+    })
+  }
+})
 const modeLabel = computed(() => PERMISSION_MODES.find(m => m.mode === config.permissionMode)?.label ?? '')
 const providerReady = computed(() => config.providers.some(provider => (
   provider.id === config.activeId
@@ -478,20 +504,20 @@ watch(text, () => {
           </button>
         </div>
                 <Transition name="mode-pop">
-          <div v-if="barOpen" class="mode-pop" role="group" aria-label="模式选项">
-            <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode(); barOpen = false">
+          <div v-if="barOpen" ref="modePopEl" class="mode-pop" role="group" aria-label="模式选项">
+            <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode()">
               <CoomiIcon name="target" :size="14" />
               <span>计划</span>
             </button>
-            <button class="pill" :class="{ on: config.permissionMode === 'auto' || config.permissionMode === 'minimal', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode(); barOpen = false">
+            <button class="pill" :class="{ on: config.permissionMode === 'auto' || config.permissionMode === 'minimal', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode()">
               <CoomiIcon name="shield" :size="14" />
               <span>{{ modeLabel }}</span>
             </button>
-            <button class="pill production-pill" :class="{ on: config.productionMode !== 'normal', 'warn-on': config.productionMode === 'berserk' }" @click="toggleProductionMode(); barOpen = false">
+            <button class="pill production-pill" :class="{ on: config.productionMode !== 'normal', 'warn-on': config.productionMode === 'berserk' }" @click="toggleProductionMode()">
               <CoomiIcon name="target" :size="14" />
               <span>{{ config.productionMode === 'berserk' ? '狂暴' : config.productionMode === 'overload' ? '超载' : '普通' }}</span>
             </button>
-            <button class="pill control-pill" :class="{ on: controlMode }" @click="toggleControlMode(); barOpen = false">
+            <button class="pill control-pill" :class="{ on: controlMode }" @click="toggleControlMode()">
               <CoomiIcon name="cursor" :size="14" />
               <span>控制</span>
             </button>
@@ -665,13 +691,14 @@ watch(text, () => {
 /* 模式竖向弹出面板：在输入框上方竖排，带展开动画（由快到慢）。 */
 .mode-pop {
   position: absolute; z-index: 5; left: 10px; right: 10px; bottom: calc(100% + 8px);
-  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
-  padding: 8px;
-  border: 1px solid var(--border); border-radius: var(--r-card);
-  background: var(--bg); box-shadow: var(--shadow-2);
+  display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
+  flex-wrap: wrap; gap: 6px;
+  /* 透明浮层：按钮就是普通 pill 大小，从模式键位置模糊分裂出来 */
+  background: transparent; border: 0; box-shadow: none; padding: 0;
 }
 .mode-pop .pill {
-  justify-content: flex-start; width: 100%; min-height: 38px;
+  /* 保持与以前一样大小的按钮 */
+  min-height: 0; width: auto;
 }
 .mode-pop-enter-active, .mode-pop-leave-active { transition: opacity .18s ease, transform .22s cubic-bezier(.22,.9,.28,1.1); }
 .mode-pop-enter-from, .mode-pop-leave-to { opacity: 0; transform: translateY(12px) scale(.97); }
