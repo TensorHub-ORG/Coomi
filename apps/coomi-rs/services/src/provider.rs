@@ -1804,6 +1804,13 @@ fn openai_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
             Role::System => json!({"role": "system", "content": message.content}),
             Role::User => json!({"role": "user", "content": message.content}),
             Role::Assistant => {
+                // 空 assistant 轮（content 与 tool_calls 均为空）不带任何信息，
+                // 部分 OpenAI 兼容端点（如 DeepSeek 官方）会直接 400 拒绝
+                // “Invalid assistant message: content or tool_calls must be set”。
+                // 跳过它，不影响历史的 tool/assistant 配对。
+                if message.content.is_empty() && message.tool_calls.is_empty() {
+                    continue;
+                }
                 let mut value = json!({
                     "role": "assistant",
                     "content": if message.content.is_empty() { Value::Null } else { Value::String(message.content.clone()) }
@@ -1945,6 +1952,10 @@ fn anthropic_messages(
             Role::System => system.push(message.content.clone()),
             Role::User => output.push(json!({"role": "user", "content": message.content})),
             Role::Assistant => {
+                // 空 assistant 轮（content 与 tool_calls 均为空）不带信息，跳过。
+                if message.content.is_empty() && message.tool_calls.is_empty() {
+                    continue;
+                }
                 let mut blocks = Vec::new();
                 if !message.content.is_empty() {
                     blocks.push(json!({"type": "text", "text": message.content}));
@@ -2008,6 +2019,10 @@ fn gemini_messages(
                 "parts": [{"text": message.content}]
             })),
             Role::Assistant => {
+                // 空 assistant 轮（content 与 tool_calls 均为空）不带信息，跳过。
+                if message.content.is_empty() && message.tool_calls.is_empty() {
+                    continue;
+                }
                 let mut parts = Vec::new();
                 if !message.content.is_empty() {
                     parts.push(json!({"text": message.content}));
