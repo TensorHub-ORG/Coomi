@@ -76,12 +76,18 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # Do not let the action install its default package set: the legacy
+          # "tools" package no longer exists in cmdline-tools 16.x and its
+          # absence makes sdkmanager exit non-zero. We install exactly what we
+          # need in the next step.
+          packages: ""
 
       - name: Install Android NDK, platform and build-tools
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-36" "build-tools;${BUILD_TOOLS_VERSION}" >/dev/null
+          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-36" "build-tools;${BUILD_TOOLS_VERSION}" "platform-tools" >/dev/null
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
