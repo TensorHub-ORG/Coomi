@@ -1,0 +1,200 @@
+name: CoomiDev APK
+
+# Builds an isolated CoomiDev APK (package com.coomidev.android, app name CoomiDev,
+# engine port 18765) entirely on GitHub Actions. The phone/guest only edits and
+# dispatches; it never needs an ARM64 Android toolchain.
+#
+# Build-only job: read-only repository permissions. No signing secrets are
+# required for the preview build (a generated debug keystore is used).
+# Artifact publishing to a Release is intentionally left to a separate workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch or tag to build from
+        required: true
+        default: codex/custom-coomidev-ci
+        type: string
+      upload_apk:
+        description: Upload the verified APK as a workflow artifact
+        required: true
+        default: true
+        type: boolean
+      version_tag:
+        description: Optional version tag recorded in the artifact name (informational)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # Pinned toolchain versions (must match the repository contracts).
+  JAVA_VERSION: "17"
+  NODE_VERSION: "20"
+  RUST_VERSION: "1.95.0"
+  NDK_VERSION: "27.0.12077973"
+  BUILD_TOOLS_VERSION: "35.0.0"
+  # Tools resolve through configurable commands per the Linux migration rules.
+  COOMI_NPM: npm
+  COOMI_CARGO: cargo
+  COOMI_RUSTUP: rustup
+  # Runtime V2 pinned release assets. Keep in sync with
+  # apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json.
+  RUNTIME_BASE_URL: https://github.com/TensorHub-ORG/Coomi/releases/download/runtime-v2-ubuntu-noble-20260907
+
+jobs:
+  build:
+    name: Build CoomiDev APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up Rust ${{ env.RUST_VERSION }} with Android ARM64 target
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-linux-android
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Install Android NDK, platform and build-tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-36" "build-tools;${BUILD_TOOLS_VERSION}" >/dev/null
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+
+      - name: Provision Runtime V2 assets (pinned release payloads)
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-v2-dist
+          curl -fL --retry 3 -o runtime-v2-dist/proot-host-arm64.tar.gz "${RUNTIME_BASE_URL}/proot-host-arm64.tar.gz"
+          curl -fL --retry 3 -o runtime-v2-dist/ubuntu-noble-arm64.tar.gz "${RUNTIME_BASE_URL}/ubuntu-noble-arm64.tar.gz"
+          ls -la runtime-v2-dist
+
+      - name: Verify Runtime V2 payload checksums against manifest
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, sys
+          manifest = json.load(open("apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json"))
+          checks = {"host": "proot-host-arm64.tar.gz", "rootfs": "ubuntu-noble-arm64.tar.gz"}
+          for key, name in checks.items():
+              path = pathlib.Path("runtime-v2-dist") / name
+              data = path.read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              exp = manifest[key]
+              if len(data) != exp["size"] or digest != exp["sha256"]:
+                  sys.exit(f"[error] {name} does not match manifest (size={len(data)} sha256={digest})")
+              print(f"[ok] {name} size={len(data)} sha256={digest}")
+          PY
+
+      - name: Generate preview debug keystore and local.properties
+        run: |
+          set -euo pipefail
+          # The repository's bundled testkey_untrusted.jks has an unknown password.
+          # For a preview build we generate a fresh self-signed debug keystore in
+          # place, keep the file path unchanged, and record the password only in
+          # the untracked local.properties. No secret is written to the repo.
+          STORE_PASS="coomidev-preview-$(openssl rand -hex 8)"
+          keytool -genkeypair -v \
+            -keystore apps/coomi-app/app/testkey_untrusted.jks \
+            -alias alias -storepass "$STORE_PASS" -keypass "$STORE_PASS" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=CoomiDev CI, O=CoomiDev, C=CN" >/dev/null 2>&1
+          {
+            echo "coomi.signing.storePassword=${STORE_PASS}"
+            echo "coomi.signing.keyPassword=${STORE_PASS}"
+          } >> local.properties
+          echo "[ok] preview debug keystore generated; local.properties written"
+
+      - name: Build frontend (Vue)
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run type-check
+
+      - name: Assemble CoomiDev APK
+        env:
+          COOMI_DEV_BUILD: "1"
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs=-Xmx4096M \
+            :app:assembleRelease
+
+      - name: Locate and verify CoomiDev APK
+        id: verify
+        run: |
+          set -euo pipefail
+          APK=$(find apps/coomi-app/app/build/outputs/apk/release -type f -name 'CoomiDev-*.apk' | sort | tail -n 1)
+          if [ -z "$APK" ] || [ ! -s "$APK" ]; then
+            echo "[error] CoomiDev APK was not produced" >&2
+            ls -R apps/coomi-app/app/build/outputs/apk 2>/dev/null || true
+            exit 1
+          fi
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "APK: $APK"
+
+          AAPT2=$(find "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}" -name aapt2 -type f | head -n 1)
+          APKSIGNER=$(find "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}" -name apksigner -type f | head -n 1)
+
+          # Package identity checks.
+          badging=$("$AAPT2" dump badging "$APK")
+          echo "$badging" | head -5
+          echo "$badging" | grep -q "package: name='com.coomidev.android'" \
+            || { echo "[error] unexpected package name" >&2; exit 1; }
+          echo "$badging" | grep -q "application-label:'CoomiDev'" \
+            || { echo "[error] unexpected application label" >&2; exit 1; }
+          echo "$badging" | grep -q "native-code: 'arm64-v8a'" \
+            || { echo "[error] missing arm64-v8a ABI" >&2; exit 1; }
+
+          # Engine port must be baked into the build (COOMI_DEFAULT_ENGINE_PORT).
+          strings_out=$(unzip -p "$APK" classes.dex 2>/dev/null | strings | tr -d '\0' || true)
+          echo "$strings_out" | grep -q "18765" \
+            || { echo "[error] default engine port 18765 not found in dex" >&2; exit 1; }
+          # Dev icon resource (compiled name may be shortened by the resource shrinker).
+          unzip -l "$APK" | grep -q "coomi_agent_dev" \
+            && echo "[ok] dev icon resource present" \
+            || echo "[warn] dev icon resource not found by name (may be compiled inline)"
+
+          "$APKSIGNER" verify --verbose "$APK"
+
+      - name: Compute checksum
+        run: |
+          set -euo pipefail
+          sha256sum "${{ steps.verify.outputs.apk }}" | tee coomidev-apk.sha256
+
+      - name: Upload CoomiDev APK artifact
+        if: ${{ inputs.upload_apk }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
+          path: |
+            ${{ steps.verify.outputs.apk }}
+            coomidev-apk.sha256
+          if-no-files-found: error
+          retention-days: 30
