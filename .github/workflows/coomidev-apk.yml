@@ -203,10 +203,19 @@ jobs:
           echo "$badging" | grep -q "native-code: 'arm64-v8a'" \
             || { echo "[error] missing arm64-v8a ABI" >&2; exit 1; }
 
-          # Engine port must be baked into the build (COOMI_DEFAULT_ENGINE_PORT).
+          # Engine port is injected as an int (COOMI_DEFAULT_ENGINE_PORT) and
+          # R8 inlines it, so it is not guaranteed to appear as the string
+          # "18765" in the release dex. Package id, app label, COOMI_DEV_BUILD
+          # and the port are ALL derived from the same coomiDevBuild boolean in
+          # app/build.gradle, so the verified dev package id (com.coomidev.android)
+          # and label (CoomiDev) prove the dev port 18765 was baked in.
           strings_out=$(unzip -p "$APK" classes.dex 2>/dev/null | strings | tr -d '\0' || true)
           echo "$strings_out" | grep -q "18765" \
-            || { echo "[error] default engine port 18765 not found in dex" >&2; exit 1; }
+            && echo "[ok] '18765' literal present in dex" \
+            || echo "[note] '18765' inlined as int (expected under R8)"
+          echo "$strings_out" | grep -q "COOMI_DEFAULT_ENGINE_PORT" \
+            && echo "[ok] BuildConfig.COOMI_DEFAULT_ENGINE_PORT symbol present" \
+            || echo "[note] COOMI_DEFAULT_ENGINE_PORT inlined away (expected under R8)"
           # Dev icon resource (compiled name may be shortened by the resource shrinker).
           unzip -l "$APK" | grep -q "coomi_agent_dev" \
             && echo "[ok] dev icon resource present" \
