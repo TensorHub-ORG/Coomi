@@ -145,11 +145,15 @@ jobs:
           # place, keep the file path unchanged, and record the password only in
           # the untracked local.properties. No secret is written to the repo.
           STORE_PASS="coomidev-preview-$(openssl rand -hex 8)"
+          # An old keystore of unknown format/password is tracked in the repo;
+          # keytool refuses to overwrite an existing store, so remove it first.
+          rm -f apps/coomi-app/app/testkey_untrusted.jks
           keytool -genkeypair -v \
             -keystore apps/coomi-app/app/testkey_untrusted.jks \
+            -storetype JKS \
             -alias alias -storepass "$STORE_PASS" -keypass "$STORE_PASS" \
             -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=CoomiDev CI, O=CoomiDev, C=CN" >/dev/null 2>&1
+            -dname "CN=CoomiDev CI, O=CoomiDev, C=CN"
           {
             echo "coomi.signing.storePassword=${STORE_PASS}"
             echo "coomi.signing.keyPassword=${STORE_PASS}"
