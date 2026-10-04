@@ -41,9 +41,18 @@ env:
   COOMI_NPM: npm
   COOMI_CARGO: cargo
   COOMI_RUSTUP: rustup
-  # Runtime V2 pinned release assets. Keep in sync with
-  # apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json.
-  RUNTIME_BASE_URL: https://github.com/TensorHub-ORG/Coomi/releases/download/runtime-v2-ubuntu-noble-20260907
+  # Runtime V2 pinned release assets.
+  #
+  # NOTE: the repository's committed runtime-v2-manifest.json points at an
+  # ubuntu-noble release (runtime-v2-ubuntu-noble-20260907) that no longer
+  # exists on the Releases page (HTTP 404). The only published Runtime V2
+  # payload today is the Debian bookworm release below, whose proot host has
+  # the exact same sha256/size as the committed manifest. For the preview
+  # build we provision that published release and align the in-tree manifest
+  # to it inside the runner (no committed source is rewritten).
+  RUNTIME_BASE_URL: https://github.com/TensorHub-ORG/Coomi/releases/download/runtime-v2-debian-bookworm-20260803
+  RUNTIME_ROOTFS_DOWNLOAD: debian-bookworm-arm64.tar.gz
+  RUNTIME_ROOTFS_ASSET: ubuntu-noble-arm64.tar.gz
 
 jobs:
   build:
@@ -91,13 +100,25 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
-      - name: Provision Runtime V2 assets (pinned release payloads)
+      - name: Provision Runtime V2 assets (published bookworm release)
         run: |
           set -euo pipefail
           mkdir -p runtime-v2-dist
-          curl -fL --retry 3 -o runtime-v2-dist/proot-host-arm64.tar.gz "${RUNTIME_BASE_URL}/proot-host-arm64.tar.gz"
-          curl -fL --retry 3 -o runtime-v2-dist/ubuntu-noble-arm64.tar.gz "${RUNTIME_BASE_URL}/ubuntu-noble-arm64.tar.gz"
+          curl -fL --retry 3 -o "runtime-v2-dist/proot-host-arm64.tar.gz" "${RUNTIME_BASE_URL}/proot-host-arm64.tar.gz"
+          curl -fL --retry 3 -o "runtime-v2-dist/${RUNTIME_ROOTFS_DOWNLOAD}" "${RUNTIME_BASE_URL}/${RUNTIME_ROOTFS_DOWNLOAD}"
+          curl -fL --retry 3 -o runtime-v2-dist/runtime-v2-manifest.json "${RUNTIME_BASE_URL}/runtime-v2-manifest.json"
+          # The gradle staging task expects the rootfs asset under a fixed name.
+          cp "runtime-v2-dist/${RUNTIME_ROOTFS_DOWNLOAD}" "runtime-v2-dist/${RUNTIME_ROOTFS_ASSET}"
           ls -la runtime-v2-dist
+
+      - name: Align in-tree manifest with the provisioned release
+        run: |
+          set -euo pipefail
+          # Only the runner workspace is touched; nothing is committed. The
+          # gradle :app:assembleRelease task verifies runtime-v2-dist archives
+          # against this manifest, so it must describe the files we downloaded.
+          cp runtime-v2-dist/runtime-v2-manifest.json \
+             apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json
 
       - name: Verify Runtime V2 payload checksums against manifest
         run: |
