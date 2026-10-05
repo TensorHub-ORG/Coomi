@@ -315,7 +315,7 @@ jobs:
         with:
           name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
 
-      - name: Publish or update preview Release
+      - name: Publish to per-build Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -323,7 +323,10 @@ jobs:
           GH_NO_UPDATE_NOTIFIER: "1"
         run: |
           set -uo pipefail
-          TAG="coomidev-v1.4.8-preview"
+          # Unique tag per successful build: coomidev-v1.4.8-build-<run number>
+          RUN_NUM="${{ github.run_number }}"
+          BASE="coomidev-v1.4.8"
+          TAG="${BASE}-build-${RUN_NUM}"
 
           APK=$(ls CoomiDev-*.apk 2>/dev/null | head -n1 || true)
           [ -n "$APK" ] || APK=$(find . -name 'CoomiDev-*.apk' -print -quit)
@@ -334,12 +337,12 @@ jobs:
 
           set -e
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "[info] Release $TAG exists — replacing assets"
+            echo "[info] Release $TAG exists — updating assets (re-run of same build)"
             gh release upload "$TAG" "$APK" coomidev-apk.sha256 --clobber
           else
-            echo "[info] Release $TAG does not exist — creating"
+            echo "[info] Creating per-build Release $TAG"
             gh release create "$TAG" "$APK" coomidev-apk.sha256 \
-              --title "CoomiDev v1.4.8 preview（私有）" \
-              --notes "Automated preview build from CoomiDev APK workflow."
+              --title "CoomiDev v1.4.8 build ${RUN_NUM}（私有）" \
+              --notes "Automated per-build release from CoomiDev APK workflow. Each successful build gets its own tag so previous working builds are never overwritten."
           fi
-          echo "[ok] Release $TAG is up to date"
+          echo "[ok] Release $TAG published"
