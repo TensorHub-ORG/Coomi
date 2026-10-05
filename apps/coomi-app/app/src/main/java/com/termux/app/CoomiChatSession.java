@@ -117,8 +117,20 @@ public final class CoomiChatSession extends ContextWrapper {
         mWebView.setVisibility(mPageFinished ? View.VISIBLE : View.GONE);
         host.showSessionState(mLoadingMessage, mLoadingFailed, mPageFinished);
         setFloating(false);
-        if (mPageLoaded) navigateToRoute(intent);
-        else start();
+        if (!mPageLoaded) {
+            start();
+            return;
+        }
+        // 页面尚未加载完成（正在加载 / WebView 曾被回收后重建）时，切换 hash 会被
+        // vue-router 的初始导航覆盖，表现为"先停在主页、需再点一次"。此时直接用
+        // 带目标路由的 URL 重新加载，确保一次到位。
+        String route = intent.getStringExtra(EXTRA_ROUTE);
+        if (!mPageFinished && route != null && route.startsWith("#/")) {
+            mPendingRoute = route;
+            reloadWithRoute(route);
+        } else {
+            navigateToRoute(intent);
+        }
     }
 
     public void detach(CoomiActivity host, boolean changingConfigurations) {
@@ -299,6 +311,8 @@ public final class CoomiChatSession extends ContextWrapper {
     private CoomiService mCoomiService;
     private boolean mStartRequested;
     private boolean mPageLoaded;
+    /** SPA 路由（如 "#\/catalog"）在页面尚未就绪时暂存，onPageFinished 后补跳。 */
+    private String mPendingRoute;
     private int mAutomaticRecoveryAttempts;
     private String mPendingExportPath;
     private String mPendingExportName;
@@ -466,8 +480,13 @@ public final class CoomiChatSession extends ContextWrapper {
         String route = intent.getStringExtra(EXTRA_ROUTE);
         String prefill = intent.getStringExtra(EXTRA_PREFILL_DRAFT);
         String sessionId = intent.getStringExtra(EXTRA_SESSION_ID);
+        // 页面尚未加载完成时，evaluateJavascript 可能被 vue-router 的初始导航覆盖，
+        // 导致先停在默认 "/"（对话主页）再需二次点击才跳转。此时暂存路由，onPageFinished 后补跳。
+        if (route != null && route.startsWith("#/") && !mPageFinished) {
+            mPendingRoute = route;
+        }
         runOnUiThread(() -> {
-            if (route != null && route.startsWith("#/")) {
+            if (route != null && route.startsWith("#/") && mPageFinished) {
                 mWebView.evaluateJavascript("window.location.hash=" + JSONObject.quote(route.substring(1)), null);
             }
             if (sessionId != null && !sessionId.isEmpty()) {
@@ -479,6 +498,35 @@ public final class CoomiChatSession extends ContextWrapper {
                 mHandler.postDelayed(() -> evaluateJavascript(
                     "window.dispatchEvent(new CustomEvent('coomi:prefill-draft',{detail:{text:" + JSONObject.quote(prefill) + "}}))"), 350);
             }
+        });
+    }
+
+    /** 用带目标路由的 URL 重新加载 WebView（页面未就绪时使用，确保直达目标页）。 */
+    private void reloadWithRoute(String route) {
+        if (mWebView == null || mCoomiService == null) return;
+        final int port = mCoomiService.getEnginePort();
+        if (port <= 0) return;
+        String token = mCoomiService.getEngineToken();
+        String sessionId = mIntent != null ? mIntent.getStringExtra(EXTRA_SESSION_ID) : null;
+        String url = "http://127.0.0.1:" + port + "/?token=" + token
+            + (sessionId != null && !sessionId.isEmpty() ? "&session_id=" + Uri.encode(sessionId) : "")
+            + (route != null && route.startsWith("#") ? route : "");
+        mPageFinished = false;  // 重新加载，等 onPageFinished 恢复可见性
+        CoomiActivity host = activity();
+        if (host != null) host.showSessionState(mLoadingMessage, false, false);
+        runOnUiThread(() -> {
+            if (mWebView != null) mWebView.loadUrl(url);
+        });
+    }
+
+    /** onPageFinished 后补跳暂存的 SPA 路由，避免落在默认主页。 */
+    private void flushPendingRoute() {
+        final String route = mPendingRoute;
+        if (route == null) return;
+        mPendingRoute = null;
+        runOnUiThread(() -> {
+            if (mWebView == null) return;
+            mWebView.evaluateJavascript("window.location.hash=" + JSONObject.quote(route.substring(1)), null);
         });
     }
 
@@ -532,6 +580,8 @@ public final class CoomiChatSession extends ContextWrapper {
                 // 页面加载完把系统深浅色同步给前端（重新加载会清掉之前注入的属性）。
                 applyThemeToWebView();
                 setFloating(mFloating);
+                // 补跳页面就绪前被暂存的 SPA 路由（防止落在默认主页）。
+                flushPendingRoute();
             }
 
             @Override

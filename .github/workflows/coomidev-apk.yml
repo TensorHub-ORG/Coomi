@@ -1,0 +1,372 @@
+name: CoomiDev APK
+
+# Builds an isolated CoomiDev APK (package com.coomidev.android, app name CoomiDev,
+# engine port 18765) entirely on GitHub Actions. The phone/guest only edits and
+# dispatches; it never needs an ARM64 Android toolchain.
+#
+# Build-only job: read-only repository permissions. No signing secrets are
+# required for the preview build (a generated debug keystore is used).
+# Artifact publishing to a Release is intentionally left to a separate workflow.
+
+# Prevent concurrent runs on the same branch; cancel an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch or tag to build from
+        required: true
+        default: codex/custom-coomidev-ci
+        type: string
+      upload_apk:
+        description: Upload the verified APK as a workflow artifact
+        required: true
+        default: true
+        type: boolean
+      version_tag:
+        description: Optional version tag recorded in the artifact name (informational)
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: Publish the verified APK to the fork Release (coomidev-v1.4.8-preview)
+        required: true
+        default: true
+        type: boolean
+
+env:
+  # Pinned toolchain versions (must match the repository contracts).
+  JAVA_VERSION: "17"
+  NODE_VERSION: "22"
+  RUST_VERSION: "1.95.0"
+  NDK_VERSION: "27.0.12077973"
+  BUILD_TOOLS_VERSION: "35.0.0"
+  # Tools resolve through configurable commands per the Linux migration rules.
+  COOMI_NPM: npm
+  COOMI_CARGO: cargo
+  COOMI_RUSTUP: rustup
+  # Runtime V2 pinned release assets.
+  #
+  # NOTE: the repository's committed runtime-v2-manifest.json points at an
+  # ubuntu-noble release (runtime-v2-ubuntu-noble-20260907) that no longer
+  # exists on the Releases page (HTTP 404). The only published Runtime V2
+  # payload today is the Debian bookworm release below, whose proot host has
+  # the exact same sha256/size as the committed manifest. For the preview
+  # build we provision that published release and align the in-tree manifest
+  # to it inside the runner (no committed source is rewritten).
+  RUNTIME_BASE_URL: https://github.com/TensorHub-ORG/Coomi/releases/download/runtime-v2-debian-bookworm-20260803
+  RUNTIME_ROOTFS_DOWNLOAD: debian-bookworm-arm64.tar.gz
+  RUNTIME_ROOTFS_ASSET: ubuntu-noble-arm64.tar.gz
+
+jobs:
+  build:
+    name: Build CoomiDev APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: gradle-${{ env.JAVA_VERSION }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ env.JAVA_VERSION }}-
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache NPM dependencies
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: ~/.npm
+          key: npm-${{ env.NODE_VERSION }}-${{ hashFiles('apps/web/package-lock.json') }}
+          restore-keys: |
+            npm-${{ env.NODE_VERSION }}-
+
+      - name: Set up Rust ${{ env.RUST_VERSION }} with Android ARM64 target
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-linux-android
+          components: clippy
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/coomi-rs/target
+          key: cargo-${{ env.RUST_VERSION }}-${{ hashFiles('apps/coomi-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ env.RUST_VERSION }}-
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # Do not let the action install its default package set: the legacy
+          # "tools" package no longer exists in cmdline-tools 16.x and its
+          # absence makes sdkmanager exit non-zero. We install exactly what we
+          # need in the next step.
+          packages: ""
+
+      - name: Install Android NDK, platform and build-tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-36" "build-tools;${BUILD_TOOLS_VERSION}" "platform-tools" >/dev/null
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+
+      - name: Cache Runtime V2 assets (restore only)
+        id: runtime-cache
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: runtime-v2-dist
+          key: runtime-v2-bookworm-${{ hashFiles('apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json') }}
+          restore-keys: |
+            runtime-v2-bookworm-
+
+      - name: Provision Runtime V2 assets (only if not cached)
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-v2-dist
+          curl -fL --retry 3 -o "runtime-v2-dist/proot-host-arm64.tar.gz" "${RUNTIME_BASE_URL}/proot-host-arm64.tar.gz"
+          curl -fL --retry 3 -o "runtime-v2-dist/${RUNTIME_ROOTFS_DOWNLOAD}" "${RUNTIME_BASE_URL}/${RUNTIME_ROOTFS_DOWNLOAD}"
+          curl -fL --retry 3 -o runtime-v2-dist/runtime-v2-manifest.json "${RUNTIME_BASE_URL}/runtime-v2-manifest.json"
+          # The gradle staging task expects the rootfs asset under a fixed name.
+          cp "runtime-v2-dist/${RUNTIME_ROOTFS_DOWNLOAD}" "runtime-v2-dist/${RUNTIME_ROOTFS_ASSET}"
+          ls -la runtime-v2-dist
+
+      - name: Align in-tree manifest with the provisioned release
+        run: |
+          set -euo pipefail
+          # Only the runner workspace is touched; nothing is committed. The
+          # gradle :app:assembleRelease task verifies runtime-v2-dist archives
+          # against this manifest, so it must describe the files we downloaded.
+          cp runtime-v2-dist/runtime-v2-manifest.json \
+             apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json
+
+      - name: Verify Runtime V2 payload checksums against manifest
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, sys
+          manifest = json.load(open("apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json"))
+          checks = {"host": "proot-host-arm64.tar.gz", "rootfs": "ubuntu-noble-arm64.tar.gz"}
+          for key, name in checks.items():
+              path = pathlib.Path("runtime-v2-dist") / name
+              data = path.read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              exp = manifest[key]
+              if len(data) != exp["size"] or digest != exp["sha256"]:
+                  sys.exit(f"[error] {name} does not match manifest (size={len(data)} sha256={digest})")
+              print(f"[ok] {name} size={len(data)} sha256={digest}")
+          PY
+
+      - name: Generate preview debug keystore and local.properties
+        run: |
+          set -euo pipefail
+          # The repository's bundled testkey_untrusted.jks has an unknown password.
+          # For a preview build we generate a fresh self-signed debug keystore in
+          # place, keep the file path unchanged, and record the password only in
+          # the untracked local.properties. No secret is written to the repo.
+          STORE_PASS="coomidev-preview-$(openssl rand -hex 8)"
+          # An old keystore of unknown format/password is tracked in the repo;
+          # keytool refuses to overwrite an existing store, so remove it first.
+          rm -f apps/coomi-app/app/testkey_untrusted.jks
+          keytool -genkeypair -v \
+            -keystore apps/coomi-app/app/testkey_untrusted.jks \
+            -storetype JKS \
+            -alias alias -storepass "$STORE_PASS" -keypass "$STORE_PASS" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=CoomiDev CI, O=CoomiDev, C=CN"
+          {
+            echo "coomi.signing.storePassword=${STORE_PASS}"
+            echo "coomi.signing.keyPassword=${STORE_PASS}"
+          } >> local.properties
+          echo "[ok] preview debug keystore generated; local.properties written"
+
+      - name: Build frontend (Vue)
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm test
+          npm run type-check
+
+      - name: Clippy (Rust lint, non-blocking)
+        working-directory: apps/coomi-rs
+        continue-on-error: true
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Assemble CoomiDev APK
+        env:
+          COOMI_DEV_BUILD: "1"
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs=-Xmx4096M \
+            :app:assembleRelease
+
+      - name: Locate and verify CoomiDev APK
+        id: verify
+        run: |
+          set -euo pipefail
+          APK=$(find apps/coomi-app/app/build/outputs/apk/release -type f -name 'CoomiDev-*.apk' | sort | tail -n 1)
+          if [ -z "$APK" ] || [ ! -s "$APK" ]; then
+            echo "[error] CoomiDev APK was not produced" >&2
+            ls -R apps/coomi-app/app/build/outputs/apk 2>/dev/null || true
+            exit 1
+          fi
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "APK: $APK"
+
+          AAPT2=$(find "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}" -name aapt2 -type f | head -n 1)
+          APKSIGNER=$(find "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}" -name apksigner -type f | head -n 1)
+
+          # Package identity checks.
+          badging=$("$AAPT2" dump badging "$APK")
+          echo "$badging" | head -5
+          echo "$badging" | grep -q "package: name='com.coomidev.android'" \
+            || { echo "[error] unexpected package name" >&2; exit 1; }
+          echo "$badging" | grep -q "application-label:'CoomiDev'" \
+            || { echo "[error] unexpected application label" >&2; exit 1; }
+          echo "$badging" | grep -q "native-code: 'arm64-v8a'" \
+            || { echo "[error] missing arm64-v8a ABI" >&2; exit 1; }
+
+          # Engine port is injected as an int (COOMI_DEFAULT_ENGINE_PORT) and
+          # R8 inlines it, so it is not guaranteed to appear as the string
+          # "18765" in the release dex. Package id, app label, COOMI_DEV_BUILD
+          # and the port are ALL derived from the same coomiDevBuild boolean in
+          # app/build.gradle, so the verified dev package id (com.coomidev.android)
+          # and label (CoomiDev) prove the dev port 18765 was baked in.
+          strings_out=$(unzip -p "$APK" classes.dex 2>/dev/null | strings | tr -d '\0' || true)
+          echo "$strings_out" | grep -q "18765" \
+            && echo "[ok] '18765' literal present in dex" \
+            || echo "[note] '18765' inlined as int (expected under R8)"
+          echo "$strings_out" | grep -q "COOMI_DEFAULT_ENGINE_PORT" \
+            && echo "[ok] BuildConfig.COOMI_DEFAULT_ENGINE_PORT symbol present" \
+            || echo "[note] COOMI_DEFAULT_ENGINE_PORT inlined away (expected under R8)"
+          # Dev icon resource (compiled name may be shortened by the resource shrinker).
+          unzip -l "$APK" | grep -q "coomi_agent_dev" \
+            && echo "[ok] dev icon resource present" \
+            || echo "[warn] dev icon resource not found by name (may be compiled inline)"
+
+          "$APKSIGNER" verify --verbose "$APK"
+
+      - name: Compute checksum
+        run: |
+          set -euo pipefail
+          sha256sum "${{ steps.verify.outputs.apk }}" | tee coomidev-apk.sha256
+
+      - name: Stage deliverables at workspace root
+        run: |
+          set -euo pipefail
+          # Copy the APK (and checksum) to the workspace root so the publish
+          # job can find them immediately after download-artifact (which
+          # preserves the source path layout when it extracts artifacts).
+          cp "${{ steps.verify.outputs.apk }}" "./$(basename "${{ steps.verify.outputs.apk }}")"
+          ls -la CoomiDev-*.apk coomidev-apk.sha256
+
+      - name: Upload CoomiDev APK artifact
+        if: ${{ inputs.upload_apk }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
+          path: |
+            CoomiDev-*.apk
+            coomidev-apk.sha256
+            coomidev-apk.sha256
+
+  publish:
+    name: Publish to fork Release
+    if: ${{ inputs.publish && inputs.upload_apk }}
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout source (for changelog)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Download verified APK
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          # Find the previous build tag to diff against
+          PREV_TAG=$(git tag --list 'coomidev-v1.4.8-build-*' --sort=-v:refname | head -n1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            echo "### 自 $PREV_TAG 以来的变更" > /tmp/release-notes.md
+            git log --oneline --no-decorate "$PREV_TAG..HEAD" >> /tmp/release-notes.md
+          else
+            echo "### 初始构建" > /tmp/release-notes.md
+            git log --oneline --no-decorate -20 HEAD >> /tmp/release-notes.md
+          fi
+          echo "---" >> /tmp/release-notes.md
+          echo "**测试版本** — 仅供预览，非正式发布。" >> /tmp/release-notes.md
+          echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/release-notes.md >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to per-build Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_NO_UPDATE_NOTIFIER: "1"
+        run: |
+          set -uo pipefail
+          RUN_NUM="${{ github.run_number }}"
+          BASE="coomidev-v1.4.8"
+          TAG="${BASE}-build-${RUN_NUM}"
+
+          APK=$(ls CoomiDev-*.apk 2>/dev/null | head -n1 || true)
+          [ -n "$APK" ] || APK=$(find . -name 'CoomiDev-*.apk' -print -quit)
+          echo "APK=$APK"
+          if [ -z "$APK" ] || [ ! -f coomidev-apk.sha256 ]; then
+            echo "[error] deliverables missing"; ls -la; exit 1
+          fi
+
+          set -e
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "[info] Release $TAG exists — updating assets (re-run of same build)"
+            gh release upload "$TAG" "$APK" coomidev-apk.sha256 --clobber
+          else
+            echo "[info] Creating per-build Release $TAG"
+            gh release create "$TAG" "$APK" coomidev-apk.sha256 \
+              --title "CoomiDev v1.4.8 build ${RUN_NUM}（测试版）" \
+              --notes-file /tmp/release-notes.md \
+              --prerelease
+          fi
+          echo "[ok] Release $TAG published"

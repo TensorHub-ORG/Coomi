@@ -4,6 +4,9 @@ import { RouterView } from 'vue-router'
 
 const floating = ref(window.__coomiFloating === true)
 
+// 所有页面切换统一为「从左侧滑入 / 往左侧滑出」的单一转场，不区分进入或退出
+const slideName = 'view-slide'
+
 function applyFloatingState(value: boolean) {
   floating.value = value
   window.__coomiFloating = value
@@ -24,7 +27,10 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <RouterView v-slot="{ Component, route }">
-    <Transition name="view" mode="out-in">
+    <Transition
+      :name="slideName"
+      mode="out-in"
+    >
       <component
         :is="Component"
         :key="route.name"

@@ -1,7 +1,25 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouterScrollBehavior } from 'vue-router'
+
+// ── 记住每个路由的滚动位置，返回时恢复 ─────────────────────────
+const posCache = new Map<string, number>()
+const scrollBehavior: RouterScrollBehavior = (to, from, savedPosition) => {
+  if (from?.fullPath && from.matched.length) {
+    posCache.set(from.fullPath, window.scrollY ?? posCache.get(from.fullPath) ?? 0)
+  }
+  // savedPosition 在「系统返回」时为非空，恢复到原位置；否则（前进）回到顶部。
+  // 统一转场，不区分方向，仅在此恢复滚动的位置。
+  if (savedPosition) {
+    return new Promise<{ left: number; top: number }>((resolve) => setTimeout(() => resolve(savedPosition), 280))
+  }
+  const y = posCache.get(to.fullPath)
+  if (y !== undefined) return new Promise<{ left: number; top: number }>((resolve) => setTimeout(() => resolve({ left: 0, top: y }), 280))
+  if (to.hash) return { el: to.hash, behavior: 'smooth' }
+  return { top: 0 }
+}
 
 export const router = createRouter({
   history: createWebHashHistory(),
+  scrollBehavior,
   routes: [
     { path: '/', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('@/views/SessionsView.vue') },

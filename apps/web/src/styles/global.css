@@ -378,12 +378,7 @@ input, textarea, select {
   animation: rise-in 0.32s var(--ease-out-quart) both;
   animation-delay: calc(min(var(--i, 0), 6) * 40ms);
 }
-
-/* ── 路由过渡：视图切换 crossfade + 轻抬 ── */
-.view-enter-active { transition: opacity var(--dur-2) var(--ease-out-quart), transform var(--dur-2) var(--ease-out-quart); }
-.view-leave-active { transition: opacity var(--dur-1) var(--ease-in); }
-.view-enter-from { opacity: 0; transform: translateY(8px); }
-.view-leave-to { opacity: 0; }
+/* view-slide-* 已移至底部统一转场 */
 
 @keyframes coomi-spin { to { transform: rotate(360deg); } }
 @keyframes coomi-blink { 50% { opacity: 0; } }
@@ -458,4 +453,24 @@ input, textarea, select {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ── 页面转场：统一从左侧滑入 / 往左侧滑出 ── */
+/* 不管进入还是退出，方向统一为「从左边」：
+   新页面从屏幕左侧滑入，旧页面同时往左侧滑出让位。 */
+.view-slide-enter-active {
+  transition: opacity var(--dur-2) var(--ease-out-quart),
+              transform var(--dur-2) var(--ease-out-quart);
+}
+.view-slide-leave-active {
+  transition: opacity var(--dur-1) var(--ease-in),
+              transform var(--dur-1) var(--ease-in);
+}
+.view-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+.view-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-30%);
 }
