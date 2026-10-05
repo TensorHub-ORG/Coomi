@@ -304,7 +304,6 @@ jobs:
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
-          path: release-assets
 
       - name: Publish or update preview Release
         env:
@@ -312,19 +311,27 @@ jobs:
         run: |
           set -euo pipefail
           TAG="coomidev-v1.4.8-preview"
-          mkdir -p release-assets
+
+          # download-artifact@v4 extracts into $GITHUB_WORKSPACE by default
+          echo "[info] Contents of workspace:"
+          ls -la *.apk coomidev-apk.sha256 2>/dev/null || echo "(no files at root)"
+          ls -la ./*/CoomiDev-*.apk 2>/dev/null || echo "(no files in subdir)"
+
+          APK=$(ls CoomiDev-*.apk 2>/dev/null || true)
+          if [ -z "$APK" ]; then
+            # try subdirs
+            APK=$(find . -maxdepth 2 -name 'CoomiDev-*.apk' -print -quit)
+          fi
+          echo "APK=$APK"
+          ls -la "$APK"
+          ls -la coomidev-apk.sha256
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "[info] Release $TAG exists — updating assets"
-            gh release upload "$TAG" \
-              release-assets/CoomiDev-*.apk \
-              release-assets/coomidev-apk.sha256 \
-              --clobber
+            gh release upload "$TAG" "$APK" coomidev-apk.sha256 --clobber
           else
             echo "[info] Release $TAG does not exist — creating"
-            gh release create "$TAG" \
-              release-assets/CoomiDev-*.apk \
-              release-assets/coomidev-apk.sha256 \
+            gh release create "$TAG" "$APK" coomidev-apk.sha256 \
               --title "CoomiDev v1.4.8 preview（私有）" \
               --notes "Automated preview build from CoomiDev APK workflow."
           fi
