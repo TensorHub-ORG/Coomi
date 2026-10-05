@@ -316,15 +316,30 @@ jobs:
           name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
 
       - name: Publish or update preview Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          tag_name: coomidev-v1.4.8-preview
-          name: CoomiDev v1.4.8 preview（私有）
-          body: Automated preview build from CoomiDev APK workflow.
-          draft: false
-          prerelease: true
-          fail_on_unmatched_files: false
-          files: |
-            CoomiDev-*.apk
-            coomidev-apk.sha256
-          generate_release_notes: false
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_NO_UPDATE_NOTIFIER: "1"
+        run: |
+          set -uo pipefail
+          TAG="coomidev-v1.4.8-preview"
+
+          APK=$(ls CoomiDev-*.apk 2>/dev/null | head -n1 || true)
+          [ -n "$APK" ] || APK=$(find . -name 'CoomiDev-*.apk' -print -quit)
+          echo "APK=$APK"
+          if [ -z "$APK" ] || [ ! -f coomidev-apk.sha256 ]; then
+            echo "[error] deliverables missing"; ls -la; exit 1
+          fi
+
+          set -e
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "[info] Release $TAG exists — replacing assets"
+            gh release upload "$TAG" "$APK" coomidev-apk.sha256 --clobber
+          else
+            echo "[info] Release $TAG does not exist — creating"
+            gh release create "$TAG" "$APK" coomidev-apk.sha256 \
+              --title "CoomiDev v1.4.8 preview（私有）" \
+              --notes "Automated preview build from CoomiDev APK workflow."
+          fi
+          echo "[ok] Release $TAG is up to date"
