@@ -45,13 +45,10 @@ public class CoomiDashboardActivity extends Activity {
     private TextView mStatusText;
     private TextView mRuntimeVersionText;
     private View mOpenChatButton;
-    private View mAiStudioButton;
     private Button mRestartButton;
     private Button mStopButton;
     private View mOpenTerminalButton;
     private View mOpenTuiButton;
-    private View mOpenWebUiButton;
-    private View mWebUiButtonContainer;
     private View mCatalogButton;
     private View mWorkflowsButton;
     private View mHooksButton;
@@ -61,7 +58,6 @@ public class CoomiDashboardActivity extends Activity {
     private View mProvidersButton;
     private View mRuntimeButton;
     private View mCheckUpdateButton;
-    private View mCustomIterationButton;
     private TextView mCheckUpdateDesc;
     private View mUpdateDot;
     private View mHomeSettingsButton;
@@ -112,13 +108,10 @@ public class CoomiDashboardActivity extends Activity {
         mStatusText = findViewById(R.id.dashboard_status_text);
         mRuntimeVersionText = findViewById(R.id.dashboard_runtime_version);
         mOpenChatButton = findViewById(R.id.btn_open_chat);
-        mAiStudioButton = findViewById(R.id.btn_ai_studio);
         mRestartButton = findViewById(R.id.btn_restart);
         mStopButton = findViewById(R.id.btn_stop);
         mOpenTerminalButton = findViewById(R.id.btn_open_terminal);
         mOpenTuiButton = findViewById(R.id.btn_open_tui);
-        mOpenWebUiButton = findViewById(R.id.btn_open_webui);
-        mWebUiButtonContainer = findViewById(R.id.webui_button_container);
         mCatalogButton = findViewById(R.id.btn_web_catalog);
         mWorkflowsButton = findViewById(R.id.btn_web_workflows);
         mHooksButton = findViewById(R.id.btn_web_hooks);
@@ -126,7 +119,6 @@ public class CoomiDashboardActivity extends Activity {
         mLifeButton = findViewById(R.id.btn_web_life);
         mFilesButton = findViewById(R.id.btn_web_files);
         mCheckUpdateButton = findViewById(R.id.btn_check_update);
-        mCustomIterationButton = findViewById(R.id.btn_custom_iteration);
         mCheckUpdateDesc = findViewById(R.id.txt_check_update_desc);
         mUpdateDot = findViewById(R.id.dot_update);
         mHomeSettingsButton = findViewById(R.id.btn_home_settings);
@@ -142,12 +134,10 @@ public class CoomiDashboardActivity extends Activity {
         mAppearanceButton = findViewById(R.id.btn_appearance);
 
         mOpenChatButton.setOnClickListener(v -> openChat());
-        mAiStudioButton.setOnClickListener(v -> openCoomiRoute("#/studio"));
         mRestartButton.setOnClickListener(v -> restartEngine());
         mStopButton.setOnClickListener(v -> stopEngine());
         mOpenTuiButton.setOnClickListener(v -> openTui());
         mOpenTerminalButton.setOnClickListener(v -> openTerminal());
-        mOpenWebUiButton.setOnClickListener(v -> openWebUi());
         mCatalogButton.setOnClickListener(v -> openCatalog());
         mWorkflowsButton.setOnClickListener(v -> openWorkflows());
         mHooksButton.setOnClickListener(v -> openCoomiRoute("#/hooks"));
@@ -159,7 +149,6 @@ public class CoomiDashboardActivity extends Activity {
         mProvidersButton.setOnClickListener(v -> openProviders());
         mRuntimeButton.setOnClickListener(v -> openRuntime());
         mCheckUpdateButton.setOnClickListener(v -> checkUpdate());
-        mCustomIterationButton.setOnClickListener(v -> openCoomiRoute("#/custom-iteration"));
         mHomeSettingsButton.setOnClickListener(v ->
             startActivity(new Intent(this, CoomiHomeSettingActivity.class)));
         mAppearanceButton.setOnClickListener(v ->
@@ -170,8 +159,6 @@ public class CoomiDashboardActivity extends Activity {
         mUsageButton.setOnClickListener(v -> openCoomiRoute("#/usage"));
         mFeedbackButton.setOnClickListener(v ->
             startActivity(new Intent(this, CoomiFeedbackActivity.class)));
-        View uxProgramButton = findViewById(R.id.btn_ux_program);
-        uxProgramButton.setOnClickListener(v -> openCoomiRoute("#/ux-program"));
         mPermissionSettingsButton.setOnClickListener(v -> openPermissionSettings());
         mStorageSettingsButton.setOnClickListener(v -> openStorageSettings());
 
@@ -202,7 +189,6 @@ public class CoomiDashboardActivity extends Activity {
         mRuntimeVersionText.setText(R.string.coomi_demo_dash_runtime);
         mRestartButton.setEnabled(false);
         mStopButton.setEnabled(false);
-        if (mWebUiButtonContainer != null) mWebUiButtonContainer.setVisibility(View.GONE);
     }
 
     @Override
@@ -255,9 +241,6 @@ public class CoomiDashboardActivity extends Activity {
                 mStatusText.setText(label);
                 mRestartButton.setEnabled(!starting);
                 mStopButton.setEnabled(running);
-                if (mWebUiButtonContainer != null) {
-                    mWebUiButtonContainer.setVisibility(running ? View.VISIBLE : View.GONE);
-                }
                 if (running && !mRegistryRefreshRequested) {
                     mRegistryRefreshRequested = true;
                     mCoomiService.refreshRegistryCache();
@@ -412,20 +395,6 @@ public class CoomiDashboardActivity extends Activity {
         return true;
     }
 
-    private void openWebUi() {
-        if (!mBound || mCoomiService == null) return;
-        int port = mCoomiService.getEnginePort();
-        // 与 WebView 一致：携带引擎令牌，浏览器打开后所有 API 才可用。
-        String token = mCoomiService.getEngineToken();
-        String url = "http://127.0.0.1:" + port + "/?token=" + token;
-        Intent intent = new Intent(Intent.ACTION_VIEW);
-        intent.setData(android.net.Uri.parse(url));
-        try {
-            startActivity(intent);
-        } catch (Exception e) {
-            Toast.makeText(this, R.string.coomi_dash_toast_no_browser, Toast.LENGTH_SHORT).show();
-        }
-    }
 
     /** 打开应用内 SKILL / MCP 管理页（WebView 直达 #/catalog）。 */
     private void openCatalog() {
