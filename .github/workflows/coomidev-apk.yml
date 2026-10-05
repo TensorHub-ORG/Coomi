@@ -8,6 +8,11 @@ name: CoomiDev APK
 # required for the preview build (a generated debug keystore is used).
 # Artifact publishing to a Release is intentionally left to a separate workflow.
 
+# Prevent concurrent runs on the same branch; cancel an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -72,16 +77,46 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
+      - name: Cache Gradle dependencies
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: gradle-${{ env.JAVA_VERSION }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ env.JAVA_VERSION }}-
+
       - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache NPM dependencies
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: ~/.npm
+          key: npm-${{ env.NODE_VERSION }}-${{ hashFiles('apps/web/package-lock.json') }}
+          restore-keys: |
+            npm-${{ env.NODE_VERSION }}-
 
       - name: Set up Rust ${{ env.RUST_VERSION }} with Android ARM64 target
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android
+          components: clippy
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/coomi-rs/target
+          key: cargo-${{ env.RUST_VERSION }}-${{ hashFiles('apps/coomi-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ env.RUST_VERSION }}-
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
@@ -100,7 +135,17 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
-      - name: Provision Runtime V2 assets (published bookworm release)
+      - name: Cache Runtime V2 assets (restore only)
+        id: runtime-cache
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: runtime-v2-dist
+          key: runtime-v2-bookworm-${{ hashFiles('apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json') }}
+          restore-keys: |
+            runtime-v2-bookworm-
+
+      - name: Provision Runtime V2 assets (only if not cached)
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p runtime-v2-dist
@@ -165,7 +210,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          npm test
           npm run type-check
+
+      - name: Clippy (Rust lint)
+        working-directory: apps/coomi-rs
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Assemble CoomiDev APK
         env:
