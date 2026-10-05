@@ -316,34 +316,15 @@ jobs:
           name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
 
       - name: Publish or update preview Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          GH_NO_UPDATE_NOTIFIER: 1
-        run: |
-          set -euo pipefail
-          TAG="coomidev-v1.4.8-preview"
-          REPO="${{ github.repository }}"
-
-          APK=$(ls CoomiDev-*.apk 2>/dev/null | head -n1 || true)
-          if [ -z "$APK" ]; then
-            APK=$(find . -name 'CoomiDev-*.apk' -print -quit)
-          fi
-          echo "APK=$APK"
-          test -n "$APK" || { echo "[error] APK not found in workspace" >&2; exit 1; }
-          test -f coomidev-apk.sha256 || { echo "[error] coomidev-apk.sha256 not found" >&2; exit 1; }
-
-          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "[info] Release $TAG exists — updating assets"
-            gh release upload "$TAG" "$APK" coomidev-apk.sha256 \
-              --repo "$REPO" --clobber
-          else
-            echo "[info] Release $TAG does not exist — creating"
-            gh release create "$TAG" "$APK" coomidev-apk.sha256 \
-              --repo "$REPO" \
-              --title "CoomiDev v1.4.8 preview（私有）" \
-              --notes "Automated preview build from CoomiDev APK workflow."
-          fi
-          echo "[ok] Release $TAG is up to date"
-          if-no-files-found: error
-          retention-days: 30
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: coomidev-v1.4.8-preview
+          name: CoomiDev v1.4.8 preview（私有）
+          body: Automated preview build from CoomiDev APK workflow.
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: false
+          files: |
+            CoomiDev-*.apk
+            coomidev-apk.sha256
+          generate_release_notes: false
