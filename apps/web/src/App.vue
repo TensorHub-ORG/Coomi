@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { RouterView } from 'vue-router'
-import { getNavDirection } from '@/router'
 
 const floating = ref(window.__coomiFloating === true)
 
-// 根据导航方向选择转场动画：前进从左滑入，返回从右滑回（原生 push/pop 风格）
-const slideName = computed(() => (getNavDirection() === 'back' ? 'view-slide-back' : 'view-slide-forward'))
+// 所有页面切换统一为「从左侧滑入 / 往左侧滑出」的单一转场，不区分进入或退出
+const slideName = 'view-slide'
 
 function applyFloatingState(value: boolean) {
   floating.value = value
