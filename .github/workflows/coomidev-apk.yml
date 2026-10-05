@@ -283,13 +283,23 @@ jobs:
           set -euo pipefail
           sha256sum "${{ steps.verify.outputs.apk }}" | tee coomidev-apk.sha256
 
+      - name: Stage deliverables at workspace root
+        run: |
+          set -euo pipefail
+          # Copy the APK (and checksum) to the workspace root so the publish
+          # job can find them immediately after download-artifact (which
+          # preserves the source path layout when it extracts artifacts).
+          cp "${{ steps.verify.outputs.apk }}" "./$(basename "${{ steps.verify.outputs.apk }}")"
+          ls -la CoomiDev-*.apk coomidev-apk.sha256
+
       - name: Upload CoomiDev APK artifact
         if: ${{ inputs.upload_apk }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coomidev-apk${{ inputs.version_tag != '' && format('-{0}', inputs.version_tag) || '' }}
           path: |
-            ${{ steps.verify.outputs.apk }}
+            CoomiDev-*.apk
+            coomidev-apk.sha256
             coomidev-apk.sha256
 
   publish:
@@ -317,12 +327,12 @@ jobs:
           ls -la *.apk coomidev-apk.sha256 2>/dev/null || echo "(no files at root)"
           ls -la ./*/CoomiDev-*.apk 2>/dev/null || echo "(no files in subdir)"
 
-          APK=$(ls CoomiDev-*.apk 2>/dev/null || true)
+          APK=$(ls CoomiDev-*.apk 2>/dev/null | head -n1 || true)
           if [ -z "$APK" ]; then
-            # try subdirs
-            APK=$(find . -maxdepth 2 -name 'CoomiDev-*.apk' -print -quit)
+            APK=$(find . -name 'CoomiDev-*.apk' -print -quit)
           fi
           echo "APK=$APK"
+          test -n "$APK" || { echo "[error] APK not found in workspace" >&2; exit 1; }
           ls -la "$APK"
           ls -la coomidev-apk.sha256
 
