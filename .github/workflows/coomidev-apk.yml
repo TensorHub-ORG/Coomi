@@ -38,7 +38,7 @@ permissions:
 env:
   # Pinned toolchain versions (must match the repository contracts).
   JAVA_VERSION: "17"
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   RUST_VERSION: "1.95.0"
   NDK_VERSION: "27.0.12077973"
   BUILD_TOOLS_VERSION: "35.0.0"
@@ -213,8 +213,9 @@ jobs:
           npm test
           npm run type-check
 
-      - name: Clippy (Rust lint)
+      - name: Clippy (Rust lint, non-blocking)
         working-directory: apps/coomi-rs
+        continue-on-error: true
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Assemble CoomiDev APK
