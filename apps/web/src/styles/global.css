@@ -459,3 +459,40 @@ input, textarea, select {
     scroll-behavior: auto !important;
   }
 }
+
+/* ── 页面转场：方向性滑动（原生 push/pop 风格） ── */
+/* 前进：新页从右滑入，旧页向左让出 */
+.view-slide-forward-enter-active {
+  transition: opacity var(--dur-2) var(--ease-out-quart),
+              transform var(--dur-2) var(--ease-out-quart);
+}
+.view-slide-forward-leave-active {
+  transition: opacity var(--dur-1) var(--ease-in),
+              transform var(--dur-1) var(--ease-in);
+}
+.view-slide-forward-enter-from {
+  opacity: 0;
+  transform: translateX(100%);
+}
+.view-slide-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-22%);
+}
+
+/* 返回：当前页从右滑出，上一页从右滑回原位 */
+.view-slide-back-enter-active {
+  transition: opacity var(--dur-2) var(--ease-out-quart),
+              transform var(--dur-2) var(--ease-out-quart);
+}
+.view-slide-back-leave-active {
+  transition: opacity var(--dur-1) var(--ease-in),
+              transform var(--dur-1) var(--ease-in);
+}
+.view-slide-back-enter-from {
+  opacity: 0;
+  transform: translateX(-22%);
+}
+.view-slide-back-leave-to {
+  opacity: 0;
+  transform: translateX(100%);
+}

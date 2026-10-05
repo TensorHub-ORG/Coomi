@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { RouterView } from 'vue-router'
+import { getNavDirection } from '@/router'
 
 const floating = ref(window.__coomiFloating === true)
+
+// 根据导航方向选择转场动画：前进从左滑入，返回从右滑回（原生 push/pop 风格）
+const slideName = computed(() => (getNavDirection() === 'back' ? 'view-slide-back' : 'view-slide-forward'))
 
 function applyFloatingState(value: boolean) {
   floating.value = value
@@ -24,7 +28,10 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <RouterView v-slot="{ Component, route }">
-    <Transition name="view" mode="out-in">
+    <Transition
+      :name="slideName"
+      mode="out-in"
+    >
       <component
         :is="Component"
         :key="route.name"

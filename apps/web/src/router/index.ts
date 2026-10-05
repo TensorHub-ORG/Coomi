@@ -1,7 +1,34 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouteLocationNormalized, type RouterScrollBehavior } from 'vue-router'
+
+// ── 导航方向跟踪 ──────────────────────────────────────────────
+// 记录导航历史，判断当前导航是「前进」还是「返回」，
+// 用于给页面转场指定滑动方向（进入从左滑入，返回从右滑回）。
+const navHist: string[] = []   // 栈，元素为 route.fullPath
+let navDirection: 'forward' | 'back' | 'replace' = 'replace'
+
+export function getNavDirection() { return navDirection }
+
+// ── 记住每个路由的滚动位置，返回时恢复 ─────────────────────────
+// 记住每个路由的滚动位置，返回时恢复
+const posCache = new Map<string, number>()
+const scrollBehavior: RouterScrollBehavior = (to, from, savedPosition) => {
+  if (from?.fullPath && from.matched.length) {
+    posCache.set(from.fullPath, window.scrollY ?? posCache.get(from.fullPath) ?? 0)
+  }
+  if (navDirection === 'back' && savedPosition) {
+    return new Promise<typeof savedPosition>((resolve) => setTimeout(() => resolve(savedPosition), 280))
+  }
+  if (navDirection === 'back') {
+    const y = posCache.get(to.fullPath)
+    if (y !== undefined) return new Promise<{ left: number; top: number }>((resolve) => setTimeout(() => resolve({ left: 0, top: y }), 280))
+  }
+  if (to.hash) return { el: to.hash, behavior: 'smooth' }
+  return { top: 0 }
+}
 
 export const router = createRouter({
   history: createWebHashHistory(),
+  scrollBehavior,
   routes: [
     { path: '/', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('@/views/SessionsView.vue') },
@@ -40,4 +67,22 @@ export const router = createRouter({
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
     { path: '/ux-program', name: 'ux-program', component: () => import('@/views/UxProgramView.vue') },
   ],
+})
+
+// ── 导航方向跟踪：区分前进 / 返回，供转场动画使用 ──────────────
+router.afterEach((to) => {
+  const prev = navHist[navHist.length - 1]
+  if (to.fullPath === prev) {
+    // popstate（系统返回 / 浏览器返回）—— 同一路由又出现了 = 返回
+    navDirection = 'back'
+    navHist.pop()
+  } else if (to.fullPath === navHist[navHist.length - 2]) {
+    // push 后返回历史中较早的页面 —— 也视为返回
+    navDirection = 'back'
+    navHist.pop()
+  } else {
+    // 新路由压栈 —— 前进
+    navDirection = 'forward'
+    navHist.push(to.fullPath)
+  }
 })
