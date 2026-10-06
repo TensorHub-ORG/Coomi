@@ -50,9 +50,14 @@ export function installSystemBackHandler(router: Router): void {
       || route === '/updates'
       || route === '/ux-program'
       || route === '/studio'
+      || route === '/collab'
+      || route === '/im'
+      || route === '/home'
       || route === '/providers'
       || route.startsWith('/providers/')
     ) goBack(router, 'dashboard')
+    else if (route.startsWith('/im/')) goBack(router, '/im')
+    else if (route.startsWith('/collab/')) goBack(router, '/collab')
     else goBack(router, '/')
     return true
   }

@@ -70,7 +70,7 @@ impl ProviderKind {
             "openai_responses" | "responses" => Ok(Self::OpenAiResponses),
             "anthropic" | "anthropic_messages" => Ok(Self::AnthropicMessages),
             "gemini" | "gemini_native" => Ok(Self::GeminiNative),
-            "deepseek_account" | "deep_seek_account" | "deepseek_account_login" => {
+            "deepseek_account" | "deep_seek_account" | "deepseek_account_login" | "deepseek_login" => {
                 Ok(Self::DeepSeekAccount)
             }
             other => anyhow::bail!("unsupported provider protocol: {other}"),
@@ -84,6 +84,7 @@ pub struct ProviderConfig {
     pub kind: ProviderKind,
     pub display: String,
     pub api_key: String,
+    pub api_keys: Vec<String>,
     pub base_url: String,
     pub model: String,
     pub fast_model: Option<String>,
@@ -97,6 +98,12 @@ pub struct ProviderConfig {
     pub model_parameters: BTreeMap<String, Value>,
     pub capabilities: coomi_engine::ModelCapabilities,
     pub remote_compaction_mode: RemoteCompactionMode,
+    /// 附加请求头（如 ZCode 验证码 X-Aliyun-Captcha-Verify-Param）。
+    pub extra_headers: BTreeMap<String, String>,
+    /// DeepSeek 账号：是否开启深度思考。
+    pub deepseek_thinking_enabled: bool,
+    /// DeepSeek 账号：是否开启联网搜索。
+    pub deepseek_search_enabled: bool,
 }
 
 impl std::fmt::Debug for ProviderConfig {
@@ -154,6 +161,9 @@ pub struct ProviderSettings {
     pub display: String,
     #[serde(default)]
     pub api_key: String,
+    /// 多 key 轮换：优先用 api_keys（非空时忽略 api_key），每次请求轮换。
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     #[serde(default)]
     pub base_url: String,
     #[serde(default)]
@@ -282,6 +292,7 @@ impl ProviderRegistry {
                     kind,
                     display,
                     api_key: provider.api_key,
+                    api_keys: provider.api_keys.clone(),
                     base_url: provider.base_url,
                     model: provider.model,
                     fast_model: provider.fast_model.filter(|value| !value.trim().is_empty()),
@@ -309,6 +320,26 @@ impl ProviderRegistry {
                         .unwrap_or_default(),
                     capabilities,
                     remote_compaction_mode: provider.remote_compaction_mode,
+                    deepseek_thinking_enabled: provider
+                        .extra
+                        .get("deepseekThinking")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
+                    deepseek_search_enabled: provider
+                        .extra
+                        .get("deepseekSearch")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    extra_headers: provider
+                        .extra
+                        .get("headers")
+                        .and_then(Value::as_object)
+                        .map(|h| {
+                            h.iter()
+                                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 },
             );
         }
@@ -394,7 +425,7 @@ impl ProviderRegistry {
                     .as_deref()
                     .is_some_and(|candidate| candidate.eq_ignore_ascii_case(model))
                 || in_models;
-            if allowed || !model.trim().is_empty() {
+            if allowed {
                 let mut provider = provider.clone();
                 provider.model = model.to_string();
                 apply_model_context_window(&mut provider);
@@ -484,6 +515,7 @@ impl Default for ProviderSettings {
             tool_protocol: Some("openai_compatible".into()),
             display: String::new(),
             api_key: String::new(),
+            api_keys: Vec::new(),
             base_url: String::new(),
             model: String::new(),
             fast_model: None,
@@ -514,6 +546,7 @@ pub fn deepseek_account_settings(api_key: &str, model: &str) -> ProviderSettings
         tool_protocol: Some("deepseek_account".into()),
         display: "DeepSeek 账号".into(),
         api_key: api_key.to_string(),
+        api_keys: Vec::new(),
         base_url: "https://chat.deepseek.com".into(),
         model: model.to_string(),
         fast_model: Some("deepseek-chat".into()),

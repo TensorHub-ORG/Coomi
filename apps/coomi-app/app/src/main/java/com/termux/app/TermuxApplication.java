@@ -28,7 +28,7 @@ public class TermuxApplication extends android.app.Application {
         // Set crash handler for the app
         TermuxCrashUtils.setDefaultCrashHandler(this);
 
-        // Coomi 崩溃采集（Java 崩溃链式记录 + logcat 快照，覆盖原生闪退场景）
+        // Comax 崩溃采集（Java 崩溃链式记录 + logcat 快照，覆盖原生闪退场景）
         app.coomi.CrashLog.install(this);
 
         // Coomi 反馈 Outbox 补传：上次崩溃/离线期间未发出的反馈记录，

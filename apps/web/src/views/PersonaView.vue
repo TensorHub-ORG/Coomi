@@ -14,7 +14,7 @@ const router = useRouter()
 const config = useConfigStore()
 
 /** 与后端 CUSTOM_PROMPT_MAX_CHARS 保持一致。 */
-const MAX_CHARS = 4000
+const MAX_CHARS = 20000
 
 const text = ref('')
 const loading = ref(true)
@@ -66,11 +66,6 @@ async function save() {
           />
           <span class="count">{{ text.length }}/{{ MAX_CHARS }}</span>
         </label>
-        <pre class="example">身份：你是谁
-性格：你的主要性格特点
-语气：你希望如何表达
-行为规则：你应该遵守的行为规则
-禁止：你不能做什么</pre>
         <button class="btn btn-primary" :disabled="loading || saving" @click="save">
           {{ saving ? '保存中…' : '保存' }}
         </button>
@@ -105,7 +100,6 @@ async function save() {
   font-size: 14px; line-height: 1.65;
 }
 .count { align-self: flex-end; padding-right: 4px; font-size: 11.5px; color: var(--text-3); }
-.example { margin: 10px 4px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--fill); color: var(--text-2); font: 12px/1.7 var(--font-mono); white-space: pre-wrap; }
 .card .btn { margin-top: 14px; width: 100%; }
 .note { margin-top: 12px; padding: 0 4px; font-size: 12px; line-height: 1.7; color: var(--text-3); }
 .ok-note { color: var(--ok); }

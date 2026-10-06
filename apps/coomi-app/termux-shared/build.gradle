@@ -2,8 +2,9 @@ apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
 
 def coomiDevBuild = System.getenv("COOMI_DEV_BUILD") == "1"
-def coomiTermuxPackageName = coomiDevBuild ? "com.coomidev.android" : "com.coomi.android"
+def coomiTermuxPackageName = coomiDevBuild ? "com.coomidev.android" : "com.cubee.newapp4"
 def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
+def coomiPrebuiltNative = System.getenv("COOMI_PREBUILT_NATIVE") == "1"
 
 android {
     namespace = "com.termux.shared"
@@ -71,9 +72,15 @@ android {
         buildConfig true
     }
 
-    externalNativeBuild {
-        ndkBuild {
-            path file('src/main/cpp/Android.mk')
+    packagingOptions {
+        jniLibs { keepDebugSymbols += ['**/*.so'] }
+    }
+
+    if (!coomiPrebuiltNative) {
+        externalNativeBuild {
+            ndkBuild {
+                path file('src/main/cpp/Android.mk')
+            }
         }
     }
 

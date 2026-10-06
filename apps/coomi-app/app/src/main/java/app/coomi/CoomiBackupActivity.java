@@ -109,7 +109,7 @@ public class CoomiBackupActivity extends Activity {
         mBackupImport.setOnClickListener(v -> pickBackupZip());
         findViewById(R.id.btn_backup_folder).setOnClickListener(v -> chooseVirtualFolderForBackup());
         mSmartPrompt = findViewById(R.id.edit_smart_backup_prompt);
-        String defaultPrompt = "请检查 Coomi 当前工作区和配置，识别重要文件与设置，排除缓存和构建产物，生成一份可恢复的备份清单，并执行安全备份。";
+        String defaultPrompt = "请检查 Comax 当前工作区和配置，识别重要文件与设置，排除缓存和构建产物，生成一份可恢复的备份清单，并执行安全备份。";
         mSmartPrompt.setText(getPreferences(MODE_PRIVATE).getString("smart_backup_prompt", defaultPrompt));
         findViewById(R.id.btn_smart_backup_save).setOnClickListener(v -> getPreferences(MODE_PRIVATE).edit().putString("smart_backup_prompt", mSmartPrompt.getText().toString()).apply());
         findViewById(R.id.btn_smart_backup_reset).setOnClickListener(v -> mSmartPrompt.setText(defaultPrompt));
@@ -817,7 +817,7 @@ public class CoomiBackupActivity extends Activity {
     /** 人类可读的环境配置清单。 */
     private String buildEnvInventory(File configDir, File skillsDir) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Coomi 环境配置备份\n");
+        sb.append("Comax 环境配置备份\n");
         sb.append("生成时间：").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())).append('\n');
         sb.append("应用版本：").append(UpdateChecker.currentVersionCode(this)).append("\n\n");
 

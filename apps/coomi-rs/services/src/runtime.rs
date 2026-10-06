@@ -450,6 +450,14 @@ impl RuntimeBackend for ProotLinuxBackend {
             "-0".into(),
             "-r".into(),
             rootfs.to_string_lossy().into_owned(),
+            // 需求 4：把 Android 外部存储根 bind 进 guest，使授权目录
+            // （/storage/emulated/0/... 与 /sdcard）在 proot 环境内可直接访问。
+            "-b".into(),
+            "/storage/emulated/0:/storage/emulated/0".into(),
+            "-b".into(),
+            "/sdcard:/sdcard".into(),
+            "-b".into(),
+            "/storage/emulated/0:/sdcard".into(),
             "-b".into(),
             format!("{}:/workspace", workspace.display()),
             "-b".into(),
@@ -1658,7 +1666,7 @@ mod tests {
 
     #[test]
     fn termux_resolves_linux_shell_names_inside_prefix() {
-        let prefix = Path::new("/data/data/com.coomi.android/files/usr");
+        let prefix = Path::new("/data/data/com.cubee.newapp4/files/usr");
         assert_eq!(
             termux_program_path(prefix, "/bin/sh"),
             prefix.join("bin/sh")
@@ -1673,15 +1681,15 @@ mod tests {
     #[test]
     fn termux_layout_is_derived_from_android_coomi_home() {
         let backend = LegacyTermuxBackend::from_coomi_home(Path::new(
-            "/data/data/com.coomi.android/files/home/.coomi",
+            "/data/data/com.cubee.newapp4/files/home/.coomi",
         ));
         assert_eq!(
             backend.prefix,
-            PathBuf::from("/data/data/com.coomi.android/files/usr")
+            PathBuf::from("/data/data/com.cubee.newapp4/files/usr")
         );
         assert_eq!(
             backend.home,
-            PathBuf::from("/data/data/com.coomi.android/files/home")
+            PathBuf::from("/data/data/com.cubee.newapp4/files/home")
         );
     }
 

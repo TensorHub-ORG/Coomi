@@ -2,7 +2,7 @@
 
 <!DOCTYPE resources [
     <!ENTITY TERMUX_PACKAGE_NAME "app.botdrop">
-    <!ENTITY TERMUX_APP_NAME "Coomi">
+    <!ENTITY TERMUX_APP_NAME "Comax">
     <!ENTITY TERMUX_API_APP_NAME "BotDrop:API">
     <!ENTITY TERMUX_BOOT_APP_NAME "BotDrop:Boot">
     <!ENTITY TERMUX_FLOAT_APP_NAME "BotDrop:Float">
@@ -650,5 +650,10 @@
     <string name="coomi_engine_failed">引擎启动失败</string>
     <string name="coomi_engine_exited">引擎已退出</string>
     <string name="coomi_engine_timeout">引擎启动超时</string>
+
+    <!-- 控制模式：无障碍服务说明（会显示在系统无障碍设置里） -->
+    <string name="coomi_accessibility_summary">控制模式：让 Coomi 替你操作屏幕</string>
+    <string name="coomi_accessibility_description">开启后，控制模式可以读取当前界面的控件，并代你填写和发送聊天消息、点击与滑动页面。用于「自动回复 / 自动操作 App」这类需要动手的任务，不会在后台自行操作。</string>
+    <string name="coomi_float_channel_name">控制模式悬浮层</string>
 
 </resources>

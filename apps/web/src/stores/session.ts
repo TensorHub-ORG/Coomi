@@ -16,6 +16,7 @@ import { reportErrorToNative, sendFeedbackViaBridge } from '@/bridge/feedback'
 import { speak } from '@/bridge/tts'
 import { router } from '@/router'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
+import { pushStatus as pushControlStatus, pushTrace, setControlModeActive } from '@/bridge/controlFloat'
 import type { ChatAttachment } from '@/utils/attachments'
 import { buildAttachmentRequest, parseAttachmentRequest } from '@/utils/attachments'
 
@@ -58,11 +59,53 @@ return defineStore(storeId, () => {
 
   let currentAssistant: AssistantMessage | null = null
   let currentReasoning: ReasoningBlock | null = null
+  /**
+   * 控制模式悬浮层的思考缓冲。
+   *
+   * reasoning_chunk 是按 token 来的，一秒能来几十条。逐条转发到原生层会不停跨进程调用、
+   * 把悬浮层刷成走马灯。所以攒一段再送：要么攒够长度，要么静了 500ms。
+   */
+  let floatReasoningBuffer = ''
+  let floatReasoningTimer: ReturnType<typeof setTimeout> | null = null
+
+  function queueFloatReasoning(chunk: string) {
+    floatReasoningBuffer += chunk
+    if (floatReasoningBuffer.length >= 300) { flushFloatReasoning(); return }
+    if (floatReasoningTimer) return
+    floatReasoningTimer = setTimeout(flushFloatReasoning, 500)
+  }
+
+  function flushFloatReasoning() {
+    if (floatReasoningTimer) { clearTimeout(floatReasoningTimer); floatReasoningTimer = null }
+    const text = floatReasoningBuffer.trim()
+    floatReasoningBuffer = ''
+    if (text) pushTrace('思考', text)
+  }
+
+  /**
+   * 把工具参数压成一行给悬浮层看。
+   *
+   * 悬浮层只有一小条宽度，塞不下完整的参数 JSON；只取前几个键值，够让用户判断
+   * 「它现在在动哪个文件 / 点哪个按钮」就行。
+   */
+  function describeFloatArguments(args: Record<string, unknown> | undefined): string {
+    if (!args) return ''
+    const parts: string[] = []
+    for (const [key, value] of Object.entries(args)) {
+      if (value == null || value === '') continue
+      const text = typeof value === 'string' ? value : JSON.stringify(value)
+      if (!text) continue
+      parts.push(`${key}=${text}`)
+      if (parts.length >= 4) break
+    }
+    return parts.join(' · ')
+  }
   let connectedSessionId = ''
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let turnToolTrace: ToolDiagnosticTrace[] = []
   let consecutiveToolFailures = 0
   let maxConsecutiveToolFailures = 0
+  let failureNoticeCreated = false
   /** 回合级异常信号：任一工具失败 / agent_error / 输出流停滞都会置位，turn_end 汇总成一张反馈卡。 */
   let turnHadError = false
   let lastTurnErrorDetail = ''
@@ -229,8 +272,8 @@ return defineStore(storeId, () => {
     lastEventAt = Date.now()
     switch (ev.event_type) {
       // 兜底：turn_end 之后又开始吐字（引擎续了一轮），状态得跟着回到忙。
-      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; endReasoningStream(); appendAssistant(ev.content); break
-      case 'reasoning_chunk': if (runState.value === 'idle') runState.value = 'thinking'; appendReasoning(ev.content); break
+      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; endReasoningStream(); appendAssistant(ev.content); pushControlStatus('正在输出'); break
+      case 'reasoning_chunk': if (runState.value === 'idle') runState.value = 'thinking'; appendReasoning(ev.content); pushControlStatus('正在思考'); queueFloatReasoning(ev.content); break
       case 'tool_start':
         connection.setRetry(null)
         endAssistantStream()
@@ -280,6 +323,14 @@ return defineStore(storeId, () => {
               trace.errorSummary = sanitizeDiagnosticText(ev.result_preview)
               turnHadError = true
               lastTurnErrorDetail = trace.errorSummary
+              if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
+                failureNoticeCreated = true
+                const noticeId = nextId()
+                timeline.value.push({
+                    kind: 'notice', id: noticeId, tone: 'warn',
+                    text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，请检查工具参数或环境。`,
+                })
+              }
             } else consecutiveToolFailures = 0
           }
         }
@@ -378,6 +429,9 @@ return defineStore(storeId, () => {
           pushFeedbackCard('runtime_error', `本轮执行异常终止：${ev.message.slice(0, 80)}`, lastTurnErrorDetail, false)
           resetTurnFeedbackSignals()
         }
+        if ((ev as any).captcha_required) {
+          pushNotice('warn', '该模型需要账号登录验证，请重新登录该账号')
+        }
         persistSoon(); break
       case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); if (!auxiliary) void router.push(ev.route); break
       case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); turnCancelled = true; pushNotice('warn', '已停止本轮执行'); disarmStallWatch(); break
@@ -438,6 +492,13 @@ return defineStore(storeId, () => {
               lastTurnErrorDetail,
               failures > 0,
             )
+          }
+          if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
+            const noticeId = nextId()
+            timeline.value.push({
+              kind: 'notice', id: noticeId, tone: 'warn',
+              text: `同一任务链连续 ${maxConsecutiveToolFailures} 次工具调用未恢复，请检查工具参数或环境。`,
+            })
           }
         }
         resetTurnFeedbackSignals()

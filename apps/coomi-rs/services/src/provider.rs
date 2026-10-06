@@ -25,30 +25,39 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use reqwest::RequestBuilder;
 use reqwest::Response;
+use reqwest::header;
 use reqwest::header::HeaderMap;
 use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::error::Error as StdError;
 use std::time::Duration;
 
 pub struct HttpModelProvider {
     config: ProviderConfig,
     client: Client,
+    key_cursor: std::sync::atomic::AtomicUsize,
 }
 
 impl HttpModelProvider {
     pub fn new(config: ProviderConfig) -> Result<Self> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            // A streamed completion has no fixed body length. A total timeout
-            // would abort otherwise healthy generations after 180 seconds;
-            // use a per-read timeout so every received chunk resets the clock.
-            .read_timeout(Duration::from_secs(180))
+            .timeout(Duration::from_secs(180))
             .build()
             .context("failed to build provider HTTP client")?;
-        Ok(Self { config, client })
+        Ok(Self { config, client, key_cursor: std::sync::atomic::AtomicUsize::new(0) })
+    }
+
+    #[cfg(test)]
+    fn build_authenticated_request(
+        &self,
+        url: &str,
+        session_id: Option<&str>,
+    ) -> reqwest::Request {
+        self.with_provider_headers(self.authenticated(self.client.get(url)), session_id)
+            .build()
+            .expect("provider request")
     }
 
     async fn openai_compatible(&self, request: ModelRequest) -> Result<ModelResponse> {
@@ -96,8 +105,8 @@ impl HttpModelProvider {
             .send_with_reasoning_fallback(
                 &endpoint,
                 &body,
-                false,
                 Some(responses_body_legacy(&body)),
+                request.session_id.as_deref(),
             )
             .await?;
         let value = checked_json(response, "response_body").await?;
@@ -161,7 +170,7 @@ impl HttpModelProvider {
             Some(false),
         );
         let response = self
-            .send_with_reasoning_fallback(&endpoint, &body, true, None)
+            .send_with_reasoning_fallback(&endpoint, &body, None, request.session_id.as_deref())
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -187,7 +196,7 @@ impl HttpModelProvider {
     ) -> Result<ModelResponse> {
         use crate::deepseek::client::{chat_completion, create_session};
 
-        if self.config.api_key.trim().is_empty() {
+        if self.current_api_key().trim().is_empty() {
             anyhow::bail!("DeepSeek 账号尚未登录");
         }
         let mut prompt = String::new();
@@ -215,12 +224,12 @@ impl HttpModelProvider {
                 prompt.push_str("\n");
             }
         }
-        let session = create_session(&self.client, &self.config.api_key).await?;
+        let session = create_session(&self.client, &self.current_api_key()).await?;
         let thinking = request.model.contains("reasoner")
             || request.reasoning_effort.as_deref().is_some_and(|v| v != "low");
         let response = chat_completion(
             &self.client,
-            &self.config.api_key,
+            &self.current_api_key(),
             session.chat_session_id,
             &request.model,
             &prompt,
@@ -297,7 +306,10 @@ impl HttpModelProvider {
         });
         let value = checked_json(
             send_request(
-                self.authenticated(self.client.post(endpoint)).json(&body),
+                self.with_provider_headers(
+                    self.authenticated(self.client.post(endpoint)),
+                    request.session_id.as_deref(),
+                ).json(&body),
                 "request_send",
             )
             .await?,
@@ -373,7 +385,10 @@ impl HttpModelProvider {
             self.config.capabilities.supports_vision,
         )?;
         let response = self
-            .authenticated(self.client.post(endpoint))
+            .with_provider_headers(
+                self.authenticated(self.client.post(endpoint)),
+                request.session_id.as_deref(),
+            )
             .json(&body)
             .send()
             .await
@@ -423,8 +438,8 @@ impl HttpModelProvider {
             .send_with_reasoning_fallback(
                 &endpoint,
                 &body,
-                false,
                 Some(responses_body_legacy(&body)),
+                request.session_id.as_deref(),
             )
             .await?;
         let value = checked_json(response, "response_body").await?;
@@ -504,8 +519,8 @@ impl HttpModelProvider {
             .send_with_reasoning_fallback(
                 &endpoint,
                 &body,
-                true,
                 Some(responses_body_legacy(&body)),
+                request.session_id.as_deref(),
             )
             .await?;
         let status = response.status();
@@ -523,7 +538,14 @@ impl HttpModelProvider {
     }
 
     async fn anthropic_messages(&self, request: ModelRequest) -> Result<ModelResponse> {
-        let endpoint = endpoint(&self.config.base_url, "messages");
+        // ZCode / 智谱 Coding Plan 代理端点的 Anthropic 路径是 {base}/v1/messages（不是 {base}/messages）。
+        let endpoint = if self.config.base_url.contains("zcode-plan")
+            || self.config.base_url.contains("z.ai/api/anthropic")
+        {
+            format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'))
+        } else {
+            endpoint(&self.config.base_url, "messages")
+        };
         let (system, messages) =
             anthropic_messages(&request.messages, self.config.capabilities.supports_vision)?;
         let mut body = json!({
@@ -532,24 +554,40 @@ impl HttpModelProvider {
             "messages": messages,
             "stream": false
         });
+        // ZCode / 智谱 Coding Plan 代理端点要求对齐 ZCode 桌面端请求格式：
+        // max_tokens=4096、temperature=0.2、不含 stream 字段，否则返回 400。
+        let base = self.config.base_url.trim_end_matches('/');
+        if base.contains("zcode-plan") || base.contains("z.ai") || base.contains("zcode")
+            || base.contains("open.bigmodel.cn/api/anthropic") || base.contains("api.z.ai/api/anthropic") {
+            body["max_tokens"] = json!(4096);
+            body["temperature"] = json!(0.2);
+            body.as_object_mut().map(|m| m.remove("stream"));
+        }
         if !system.is_empty() {
             body["system"] = Value::String(system);
         }
-        let mut provider_tools = request
-            .tools
-            .iter()
-            .filter(|_| self.config.capabilities.supports_native_tools)
-            .filter(|tool| {
-                !(self.config.capabilities.supports_web_search && tool.name == "web_search")
-            })
-            .map(|tool| {
-                json!({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.parameters
+        // ZCode / 智谱 Coding Plan 代理端点不接受 tools 字段，禁用（对齐 ZCode 桌面端默认请求）。
+        let zcode_plan = base.contains("zcode-plan") || base.contains("z.ai") || base.contains("zcode")
+            || base.contains("open.bigmodel.cn/api/anthropic") || base.contains("api.z.ai/api/anthropic");
+        let mut provider_tools = if zcode_plan {
+            Vec::new()
+        } else {
+            request
+                .tools
+                .iter()
+                .filter(|_| self.config.capabilities.supports_native_tools)
+                .filter(|tool| {
+                    !(self.config.capabilities.supports_web_search && tool.name == "web_search")
                 })
-            })
-            .collect::<Vec<_>>();
+                .map(|tool| {
+                    json!({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.parameters
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
         if self.config.capabilities.supports_web_search {
             provider_tools.push(json!({
                 "type": "web_search_20250305",
@@ -572,8 +610,28 @@ impl HttpModelProvider {
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json");
         if !self.config.api_key.is_empty() {
-            builder = builder.header("x-api-key", &self.config.api_key);
+            builder = builder.header("x-api-key", self.current_api_key());
+            // ZCode / 智谱 Coding Plan 代理端点要求 Authorization: Bearer <JWT>，仅 x-api-key 会 404
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", self.current_api_key()));
         }
+        // ZCode / 智谱 Coding Plan 代理要求带客户端环境头，否则判定为异常活动（3012）
+        if base.contains("zcode-plan") || base.contains("z.ai") {
+            builder = builder
+                .header("X-Client-Language", "zh-CN")
+                .header("X-Client-Timezone", "Asia/Shanghai")
+                .header("X-Os-Category", "android")
+                .header("X-Device-Mid", "coomi-android-0001")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Coomi) AppleWebKit/537.36");
+        }
+        // 附加用户配置的自定义请求头（如 ZCode 验证码 X-Aliyun-Captcha-Verify-Param）
+        for (name, value) in &self.config.extra_headers {
+            if let Ok(name) = reqwest::header::HeaderName::from_bytes(name.as_bytes()) {
+                if let Ok(value) = reqwest::header::HeaderValue::from_str(value) {
+                    builder = builder.header(name, value);
+                }
+            }
+        }
+        let builder = self.with_provider_headers(builder, request.session_id.as_deref());
         let value = checked_json(
             send_request(builder.json(&body), "request_send").await?,
             "response_body",
@@ -582,10 +640,16 @@ impl HttpModelProvider {
         let mut content = String::new();
         let mut tool_calls = Vec::new();
         let mut invalid_tool_calls = Vec::new();
-        for block in value
+        let content_blocks = value
             .get("content")
             .and_then(Value::as_array)
-            .context("anthropic response has no content array")?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "anthropic response has no content array: {}",
+                    serde_json::to_string(&value).unwrap_or_default().chars().take(400).collect::<String>()
+                )
+            })?;
+        for block in content_blocks
         {
             match block.get("type").and_then(Value::as_str) {
                 Some("text") => {
@@ -668,8 +732,9 @@ impl HttpModelProvider {
             .post(endpoint)
             .header("content-type", "application/json");
         if !self.config.api_key.is_empty() {
-            builder = builder.header("x-goog-api-key", &self.config.api_key);
+            builder = builder.header("x-goog-api-key", self.current_api_key());
         }
+        let builder = self.with_provider_headers(builder, request.session_id.as_deref());
         let value = checked_json(
             send_request(builder.json(&body), "request_send").await?,
             "response_body",
@@ -702,7 +767,7 @@ impl HttpModelProvider {
                         name: call
                             .get("name")
                             .and_then(Value::as_str)
-                            .unwrap_or("provider_protocol_error")
+                            .unwrap_or("unknown")
                             .to_owned(),
                         reason: error.to_string(),
                     }),
@@ -732,12 +797,47 @@ impl HttpModelProvider {
         })
     }
 
+    fn current_api_key(&self) -> String {
+        if self.config.api_keys.is_empty() {
+            return self.config.api_key.clone();
+        }
+        let len = self.config.api_keys.len();
+        let idx = self.key_cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % len;
+        self.config.api_keys[idx].clone()
+    }
+
     fn authenticated(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if self.config.api_key.is_empty() {
+        let key = self.current_api_key();
+        if key.is_empty() {
             builder
         } else {
-            builder.bearer_auth(&self.config.api_key)
+            builder.bearer_auth(key)
         }
+    }
+
+    fn with_provider_headers(
+        &self,
+        mut builder: reqwest::RequestBuilder,
+        session_id: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        for (name, value) in &self.config.extra_headers {
+            if let (Ok(name), Ok(value)) = (
+                reqwest::header::HeaderName::from_bytes(name.as_bytes()),
+                reqwest::header::HeaderValue::from_str(value),
+            ) {
+                builder = builder.header(name, value);
+            }
+        }
+        if self.config.id.eq_ignore_ascii_case("opencode")
+            || self.config.base_url.contains("opencode.ai/zen/go")
+        {
+            let stable = session_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(&self.config.id);
+            builder = builder.header("x-opencode-session", stable);
+        }
+        builder
     }
 
     /// 400 兜底：逐级剥离非标准参数后重试（reasoning → top_k → 并行工具 → 全部工具），
@@ -746,20 +846,14 @@ impl HttpModelProvider {
         &self,
         endpoint: &str,
         body: &Value,
-        streaming: bool,
         extra_fallback: Option<Value>,
+        session_id: Option<&str>,
     ) -> Result<Response> {
-        let request = || {
-            let builder = self.authenticated(self.client.post(endpoint));
-            if streaming {
-                builder
-                    .header(reqwest::header::ACCEPT, "text/event-stream")
-                    .header(reqwest::header::CACHE_CONTROL, "no-cache")
-            } else {
-                builder
-            }
-        };
-        let response = request()
+        let response = self
+            .with_provider_headers(
+                self.authenticated(self.client.post(endpoint)),
+                session_id,
+            )
             .json(body)
             .send()
             .await
@@ -783,6 +877,14 @@ impl HttpModelProvider {
                 steps.push(value);
             }
         };
+        push_step(
+            {
+                let mut value = body.clone();
+                downgrade_xhigh_reasoning(&mut value);
+                value
+            },
+            &mut steps,
+        );
         push_step(
             {
                 let mut value = body.clone();
@@ -841,7 +943,11 @@ impl HttpModelProvider {
         }
 
         for fallback in &steps {
-            let retry = request()
+            let retry = self
+                .with_provider_headers(
+                    self.authenticated(self.client.post(endpoint)),
+                    session_id,
+                )
                 .json(fallback)
                 .send()
                 .await
@@ -864,6 +970,50 @@ impl HttpModelProvider {
         }
         .into())
     }
+}
+
+/// Some OpenAI-compatible gateways understand reasoning but only accept `high`.
+/// Preserve the strongest supported level before falling back to removing reasoning entirely.
+fn downgrade_xhigh_reasoning(body: &mut Value) {
+    if body.get("reasoning_effort").and_then(Value::as_str) == Some("xhigh") {
+        body["reasoning_effort"] = Value::String("high".into());
+    }
+    if body.pointer("/reasoning/effort").and_then(Value::as_str) == Some("xhigh") {
+        set_json_path(body, "reasoning.effort", Value::String("high".into()));
+    }
+    if body.pointer("/thinking/effort").and_then(Value::as_str) == Some("xhigh") {
+        set_json_path(body, "thinking.effort", Value::String("high".into()));
+    }
+}
+
+fn parse_deepseek_tool_call(content: &str) -> Option<ToolCall> {
+    let trimmed = content.trim().trim_matches('`').trim();
+    let json_text = trimmed
+        .strip_prefix("json")
+        .map(str::trim)
+        .unwrap_or(trimmed);
+    let value: Value = serde_json::from_str(json_text).ok()?;
+    let object = value.as_object()?;
+    let name = object.get("tool").or_else(|| object.get("name"))?.as_str()?.trim();
+    if name.is_empty() { return None; }
+    let arguments = object.get("arguments").or_else(|| object.get("args")).cloned().unwrap_or_else(|| json!({}));
+    Some(ToolCall { id: format!("deepseek-tool-{:x}", md5::compute(content.as_bytes())), name: name.into(), arguments })
+}
+
+fn nested_string<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    if let Some(object) = value.as_object() {
+        for key in keys {
+            if let Some(text) = object.get(*key).and_then(Value::as_str) { return Some(text); }
+        }
+        for child in object.values() {
+            if let Some(text) = nested_string(child, keys) { return Some(text); }
+        }
+    } else if let Some(items) = value.as_array() {
+        for child in items {
+            if let Some(text) = nested_string(child, keys) { return Some(text); }
+        }
+    }
+    None
 }
 
 fn apply_model_parameters(
@@ -1110,6 +1260,7 @@ impl ModelProvider for HttpModelProvider {
                 self.openai_compatible_stream(request, observer).await
             }
             ProviderKind::OpenAiResponses => self.openai_responses_stream(request, observer).await,
+            ProviderKind::DeepSeekAccount => self.deepseek_account(request, Some(observer)).await,
             ProviderKind::AnthropicMessages | ProviderKind::GeminiNative => {
                 self.complete(request).await
             }
@@ -1141,22 +1292,16 @@ async fn send_request(builder: RequestBuilder, phase: &'static str) -> Result<Re
 }
 
 fn transport_error(phase: &'static str, error: reqwest::Error) -> anyhow::Error {
-    let is_builder = error.is_builder();
-    let is_body = error.is_body();
-    let is_redirect = error.is_redirect();
-    let is_timeout = error.is_timeout();
-    let is_connect = error.is_connect();
-    let detail = transport_error_chain(error);
-    let chain = detail.to_ascii_lowercase();
-    let kind = if is_builder {
+    let chain = format!("{error:#}").to_ascii_lowercase();
+    let kind = if error.is_builder() {
         ProviderErrorKind::RequestBuild
-    } else if is_body {
+    } else if error.is_body() {
         ProviderErrorKind::RequestBody
-    } else if is_redirect {
+    } else if error.is_redirect() {
         ProviderErrorKind::Redirect
-    } else if is_timeout {
+    } else if error.is_timeout() {
         ProviderErrorKind::Timeout
-    } else if is_connect {
+    } else if error.is_connect() {
         if chain.contains("dns")
             || chain.contains("name resolution")
             || chain.contains("lookup address")
@@ -1178,6 +1323,7 @@ fn transport_error(phase: &'static str, error: reqwest::Error) -> anyhow::Error 
         ProviderErrorKind::Request
     };
     let retryable = retryable_transport_kind(kind);
+    let detail = error.without_url().to_string();
     ProviderRequestError {
         phase,
         kind,
@@ -1197,25 +1343,7 @@ fn retryable_transport_kind(kind: ProviderErrorKind) -> bool {
             | ProviderErrorKind::Connect
             | ProviderErrorKind::Dns
             | ProviderErrorKind::Request
-            | ProviderErrorKind::Stream
     )
-}
-
-/// reqwest intentionally displays only a generic message for body decoder
-/// failures. Preserve its source chain (without the request URL) so logs can
-/// distinguish a timeout, peer reset, incomplete chunked body, or HTTP/2 error.
-fn transport_error_chain(error: reqwest::Error) -> String {
-    let error = error.without_url();
-    let mut parts = vec![error.to_string()];
-    let mut source = error.source();
-    while let Some(cause) = source {
-        let text = cause.to_string();
-        if !text.is_empty() && parts.last().is_none_or(|previous| previous != &text) {
-            parts.push(text);
-        }
-        source = cause.source();
-    }
-    parts.join(": ")
 }
 
 async fn read_sse(
@@ -1223,70 +1351,22 @@ async fn read_sse(
     phase: &'static str,
     mut consume: impl FnMut(Value) -> Result<()>,
 ) -> Result<()> {
-    let status = response.status();
-    let version = response.version();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("unknown")
-        .to_owned();
-    let transfer_encoding = response
-        .headers()
-        .get(reqwest::header::TRANSFER_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("none")
-        .to_owned();
-    let content_encoding = response
-        .headers()
-        .get(reqwest::header::CONTENT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("identity")
-        .to_owned();
-    let content_length = response
-        .headers()
-        .get(reqwest::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("unknown")
-        .to_owned();
     let request_id = response_request_id(response.headers());
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
-    let mut bytes_received = 0_u64;
-    let mut chunks_received = 0_u64;
-    let mut saw_done = false;
-    'stream: while let Some(chunk) = stream.next().await {
+    while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| {
-            let kind = if error.is_timeout() {
-                ProviderErrorKind::Timeout
-            } else {
-                ProviderErrorKind::Stream
-            };
-            let detail = format!(
-                "{}; http_status={} http_version={:?} content_type={} transfer_encoding={} content_encoding={} content_length={} bytes_received={} chunks_received={} saw_done={}",
-                transport_error_chain(error),
-                status.as_u16(),
-                version,
-                content_type,
-                transfer_encoding,
-                content_encoding,
-                content_length,
-                bytes_received,
-                chunks_received,
-                saw_done,
-            );
+            let detail = error.without_url().to_string();
             anyhow::Error::new(ProviderRequestError {
                 phase,
-                kind,
-                status: Some(status.as_u16()),
+                kind: ProviderErrorKind::Stream,
+                status: None,
                 retry_after_ms: None,
                 request_id: request_id.clone(),
-                retryable: retryable_transport_kind(kind),
+                retryable: true,
                 detail,
             })
         })?;
-        chunks_received = chunks_received.saturating_add(1);
-        bytes_received = bytes_received.saturating_add(chunk.len() as u64);
         buffer.extend_from_slice(&chunk);
         while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
             let mut line = buffer.drain(..=newline).collect::<Vec<_>>();
@@ -1308,14 +1388,8 @@ async fn read_sse(
                 continue;
             };
             let data = data.trim();
-            if data.is_empty() {
+            if data.is_empty() || data == "[DONE]" {
                 continue;
-            }
-            if data == "[DONE]" {
-                saw_done = true;
-                // The SSE protocol has an explicit terminator. Do not wait
-                // for a proxy/provider to close the keep-alive connection.
-                break 'stream;
             }
             let value = serde_json::from_str(data).map_err(|_| {
                 anyhow::Error::new(ProviderRequestError {
@@ -1330,9 +1404,6 @@ async fn read_sse(
             })?;
             consume(value)?;
         }
-    }
-    if saw_done {
-        return Ok(());
     }
     Ok(())
 }
@@ -1393,26 +1464,6 @@ impl ChatStreamState {
                     target.arguments.push_str(arguments);
                 }
             }
-            if let Some(name) = item.get("name").and_then(Value::as_str) {
-                // A few OpenAI-compatible gateways flatten function.name onto
-                // the tool-call item while keeping arguments under function.
-                target.name.push_str(name);
-            }
-            if let Some(arguments) = item.get("arguments").and_then(Value::as_str) {
-                target.arguments.push_str(arguments);
-            }
-        }
-        // Legacy Chat Completions implementations may emit one tool call as
-        // delta.function_call instead of delta.tool_calls[]. Preserve it as
-        // index zero so the call can still be validated and executed.
-        if let Some(function) = delta.get("function_call") {
-            let target = self.tools.entry(0).or_default();
-            if let Some(name) = function.get("name").and_then(Value::as_str) {
-                target.name.push_str(name);
-            }
-            if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
-                target.arguments.push_str(arguments);
-            }
         }
         Ok(())
     }
@@ -1430,11 +1481,8 @@ impl ChatStreamState {
             if call.name.trim().is_empty() {
                 invalid_tool_calls.push(InvalidToolCall {
                     id,
-                    name: "provider_protocol_error".into(),
-                    reason: format!(
-                        "streamed tool call has no function name (arguments_bytes={})",
-                        call.arguments.len()
-                    ),
+                    name: "unknown".into(),
+                    reason: "streamed tool call has no function name".into(),
                 });
                 continue;
             }
@@ -1592,7 +1640,7 @@ impl ResponsesStreamState {
             if call.name.trim().is_empty() {
                 invalid_tool_calls.push(InvalidToolCall {
                     id,
-                    name: "provider_protocol_error".into(),
+                    name: "unknown".into(),
                     reason: "streamed tool call has no function name".into(),
                 });
                 continue;
@@ -1799,12 +1847,26 @@ fn safe_http_error_detail(status: u16, body: &str) -> String {
             .filter(|value| !value.is_empty())
             .map(redact_upstream_message)
     });
-    match (code, upstream_message) {
+    let has_upstream = upstream_message.is_some();
+    let base = match (code, upstream_message) {
         (Some(code), Some(message)) => format!("{summary} (code={code}) {message}"),
         (Some(code), None) => format!("{summary} (code={code})"),
         (None, Some(message)) => format!("{summary}: {message}"),
         (None, None) => summary.to_owned(),
+    };
+    // 400/405 时附带响应体摘要，便于定位 ZCode/智谱等代理的具体拒绝原因。
+    if !has_upstream && (status == 400 || status == 405) {
+        let detail = body.trim();
+        let truncated: String = if detail.len() > 220 {
+            detail.chars().take(220).collect()
+        } else {
+            detail.to_owned()
+        };
+        if !truncated.is_empty() {
+            return format!("{base} :: {truncated}");
+        }
     }
+    base
 }
 
 /// 上游错误消息脱敏：截断到 400 字符；sk- 开头的密钥、含 token=/key= 的参数
@@ -1877,6 +1939,13 @@ fn openai_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
             Role::System => json!({"role": "system", "content": message.content}),
             Role::User => json!({"role": "user", "content": message.content}),
             Role::Assistant => {
+                // 空 assistant 轮（content 与 tool_calls 均为空）不带任何信息，
+                // 部分 OpenAI 兼容端点（如 DeepSeek 官方）会直接 400 拒绝
+                // “Invalid assistant message: content or tool_calls must be set”。
+                // 跳过它，不影响历史的 tool/assistant 配对。
+                if message.content.is_empty() && message.tool_calls.is_empty() {
+                    continue;
+                }
                 let mut value = json!({
                     "role": "assistant",
                     "content": if message.content.is_empty() { Value::Null } else { Value::String(message.content.clone()) }
@@ -2047,6 +2116,10 @@ fn anthropic_messages(
             Role::System => system.push(message.content.clone()),
             Role::User => output.push(json!({"role": "user", "content": message.content})),
             Role::Assistant => {
+                // 空 assistant 轮（content 与 tool_calls 均为空）不带信息，跳过。
+                if message.content.is_empty() && message.tool_calls.is_empty() {
+                    continue;
+                }
                 let mut blocks = Vec::new();
                 if !message.content.is_empty() {
                     blocks.push(json!({"type": "text", "text": message.content}));
@@ -2110,6 +2183,10 @@ fn gemini_messages(
                 "parts": [{"text": message.content}]
             })),
             Role::Assistant => {
+                // 空 assistant 轮（content 与 tool_calls 均为空）不带信息，跳过。
+                if message.content.is_empty() && message.tool_calls.is_empty() {
+                    continue;
+                }
                 let mut parts = Vec::new();
                 if !message.content.is_empty() {
                     parts.push(json!({"text": message.content}));
@@ -2191,7 +2268,7 @@ fn invalid_tool_call(value: &Value, error: anyhow::Error) -> InvalidToolCall {
         name: function
             .get("name")
             .and_then(Value::as_str)
-            .unwrap_or("provider_protocol_error")
+            .unwrap_or("unknown")
             .to_owned(),
         reason: error.to_string(),
     }
@@ -2477,6 +2554,33 @@ mod tests {
     }
 
     #[test]
+    fn opencode_go_request_uses_stable_session_header() {
+        let provider = HttpModelProvider::new(ProviderConfig {
+            id: "opencode".into(),
+            kind: ProviderKind::OpenAiCompatible,
+            display: "OpenCode".into(),
+            api_key: "test-key".into(),
+            api_keys: Vec::new(),
+            base_url: "https://opencode.ai/zen/go/v1".into(),
+            model: "test-model".into(),
+            fast_model: None,
+            models: vec!["test-model".into()],
+            model_context_windows: BTreeMap::new(),
+            model_vision_support: BTreeMap::new(),
+            model_parameters: BTreeMap::new(),
+            capabilities: ModelCapabilities::default(),
+            remote_compaction_mode: RemoteCompactionMode::default(),
+            extra_headers: BTreeMap::new(),
+            deepseek_thinking_enabled: true,
+            deepseek_search_enabled: false,
+        }).expect("OpenCode provider");
+        let first = provider.build_authenticated_request("https://example.test", Some("session-42"));
+        let second = provider.build_authenticated_request("https://example.test", Some("session-42"));
+        assert_eq!(first.headers().get("x-opencode-session").unwrap(), "session-42");
+        assert_eq!(second.headers().get("x-opencode-session").unwrap(), "session-42");
+    }
+
+    #[test]
     fn rejects_non_object_tool_arguments() {
         assert!(parse_arguments(&Value::String("[]".into())).is_err());
     }
@@ -2533,64 +2637,6 @@ mod tests {
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.invalid_tool_calls.len(), 1);
         assert_eq!(response.invalid_tool_calls[0].name, "read_file");
-    }
-
-    #[test]
-    fn streamed_tool_calls_accept_flattened_and_legacy_function_shapes() {
-        let mut flattened = ChatStreamState::default();
-        flattened
-            .consume(
-                &json!({
-                    "choices": [{"delta": {"tool_calls": [{
-                        "index": 0,
-                        "id": "call-flat",
-                        "name": "read_file",
-                        "arguments": "{\"path\":\"README.md\"}"
-                    }]}}]
-                }),
-                &IgnoreStream,
-            )
-            .expect("consume flattened tool delta");
-        let response = flattened.finish().expect("finish flattened stream");
-        assert_eq!(response.tool_calls[0].name, "read_file");
-
-        let mut legacy = ChatStreamState::default();
-        legacy
-            .consume(
-                &json!({
-                    "choices": [{"delta": {"function_call": {
-                        "name": "read_file",
-                        "arguments": "{\"path\":\"README.md\"}"
-                    }}}]
-                }),
-                &IgnoreStream,
-            )
-            .expect("consume legacy function delta");
-        let response = legacy.finish().expect("finish legacy stream");
-        assert_eq!(response.tool_calls[0].name, "read_file");
-    }
-
-    #[test]
-    fn streamed_tool_call_without_name_is_protocol_error() {
-        let mut state = ChatStreamState::default();
-        state
-            .consume(
-                &json!({
-                    "choices": [{"delta": {"tool_calls": [{
-                        "index": 0,
-                        "id": "call-missing-name",
-                        "function": {"arguments": "{}"}
-                    }]}}]
-                }),
-                &IgnoreStream,
-            )
-            .expect("consume malformed tool delta");
-        let response = state.finish().expect("finish malformed stream");
-        assert!(response.tool_calls.is_empty());
-        assert_eq!(response.invalid_tool_calls[0].name, "provider_protocol_error");
-        assert!(response.invalid_tool_calls[0]
-            .reason
-            .contains("arguments_bytes=2"));
     }
 
     #[test]
@@ -2910,6 +2956,7 @@ mod tests {
                     description: "Read a file".into(),
                     parameters: json!({"type": "object"}),
                 }],
+                session_id: Some("test-session".into()),
             },
             false,
             true,

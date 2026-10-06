@@ -31,7 +31,7 @@ import com.termux.shared.logger.Logger;
 import java.io.File;
 
 /**
- * Coomi Launcher / Splash Activity.
+ * Comax Launcher / Splash Activity.
  *
  * Phase 1 (Welcome): Permission guides (notification + battery).
  * Phase 2 (Loading): Route based on setup state:

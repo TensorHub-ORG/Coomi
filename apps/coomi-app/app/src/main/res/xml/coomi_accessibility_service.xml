@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  控制模式的无障碍能力声明。
+
+  canRetrieveWindowContent：读界面结构，用于按文字定位输入框和发送按钮（而不是盲点坐标）。
+  canPerformGestures：API 24+ 的手势分发，用于点击与滑动。
+  事件只收窗口状态与内容变化，够判断前台包名和聊天页就够了，不做全量监听。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/coomi_accessibility_description"
+    android:notificationTimeout="80"
+    android:summary="@string/coomi_accessibility_summary" />

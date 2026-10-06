@@ -22,6 +22,7 @@ import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.text.TextUtils;
@@ -45,6 +46,9 @@ import app.coomi.CoomiService;
 import app.coomi.CoomiDashboardActivity;
 import app.coomi.CoomiSetupActivity;
 import app.coomi.CoomiTheme;
+import app.coomi.CoomiAccessibilityService;
+import app.coomi.CoomiFloatService;
+import app.coomi.ShizukuAccessController;
 import com.termux.R;
 import com.termux.shared.logger.Logger;
 
@@ -304,6 +308,10 @@ public final class CoomiChatSession extends ContextWrapper {
     private String mPendingExportName;
     private String mPendingImportRequestId;
     private String mPendingExportRequestId;
+    /** 控制模式悬浮层的悬浮窗权限回传码（区别于 CoomiActivity 自己的 2105）。 */
+    public static final int REQUEST_CONTROL_FLOAT_OVERLAY = 2106;
+    private final ShizukuAccessController shizukuController = new ShizukuAccessController();
+    private String pendingShizukuCommand;
     private final Runnable mExportTimeout = () -> {
         if (mPendingExportRequestId == null) return;
         String requestId = mPendingExportRequestId;
@@ -981,6 +989,265 @@ public final class CoomiChatSession extends ContextWrapper {
         @JavascriptInterface
         public void setTaskNotifyEnabled(boolean enabled) {
             CoomiEngineMonitor.setTaskNotifyEnabled(CoomiChatSession.this, enabled);
+        }
+
+        // ── 控制模式（来自 Comax：无障碍 + 悬浮层 + Shizuku 兜底）──────
+
+        /** 控制模式：返回当前前台应用包名（用于待机检测进入微信/QQ 聊天页）。
+         *  优先用无障碍服务的事件与窗口信息（免授权、无额外依赖），
+         *  无障碍未开启时回退到 ActivityManager。 */
+        @JavascriptInterface
+        public String controlForegroundApp() {
+            String fromAccessibility = CoomiAccessibilityService.currentPackage();
+            if (fromAccessibility != null && !fromAccessibility.isEmpty()) return fromAccessibility;
+            try {
+                android.app.ActivityManager am =
+                    (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) {
+                    java.util.List<android.app.ActivityManager.RunningTaskInfo> tasks =
+                        am.getRunningTasks(1);
+                    if (tasks != null && !tasks.isEmpty() && tasks.get(0) != null
+                        && tasks.get(0).topActivity != null) {
+                        return tasks.get(0).topActivity.getPackageName();
+                    }
+                }
+            } catch (Exception ignored) { }
+            return "";
+        }
+
+        /** 控制模式：把文本写入当前前台聊天输入框并发送。
+         *  无障碍可用时直接按控件定位（不受输入法、布局位置影响）；
+         *  否则回退到 Shizuku 的 input 命令。 */
+        @JavascriptInterface
+        public void controlSendText(String text) {
+            if (text == null || text.isEmpty()) return;
+            if (CoomiAccessibilityService.isReady()) {
+                boolean ok = CoomiAccessibilityService.get().pasteAndSend(text);
+                if (ok) {
+                    runOnUiThread(() -> Toast.makeText(CoomiChatSession.this,
+                        "已发送", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+            }
+            String result = runShizukuCommand(
+                "input text '" + text.replace("'", "") + "' && sleep 0.3 && input keyevent 66");
+            runOnUiThread(() -> Toast.makeText(CoomiChatSession.this,
+                "控制发送：" + (result.isEmpty() ? "等待授权/执行" : result), Toast.LENGTH_SHORT).show());
+        }
+
+        /** 无障碍服务是否已开启（控制模式的主要操控后端）。 */
+        @JavascriptInterface
+        public boolean isAccessibilityEnabled() {
+            return CoomiAccessibilityService.isReady();
+        }
+
+        /** 跳到系统无障碍设置页，让用户手动开启（系统不允许 App 自行开启）。 */
+        @JavascriptInterface
+        public void requestAccessibilityPermission() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                    Toast.makeText(CoomiChatSession.this,
+                        "请在「已下载的服务」里开启「控制模式：让 Coomi 替你操作屏幕」",
+                        Toast.LENGTH_LONG).show();
+                } catch (Exception error) {
+                    Toast.makeText(CoomiChatSession.this, "无法打开无障碍设置", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        /** 悬浮层权限（SYSTEM_ALERT_WINDOW）是否已授予。 */
+        @JavascriptInterface
+        public boolean isOverlayGranted() {
+            return canDrawOverlays();
+        }
+
+        /** 申请悬浮层权限；低版本 ROM 无此开关时退化为直接可用。 */
+        @JavascriptInterface
+        public void requestOverlayPermission() {
+            runOnUiThread(() -> {
+                if (canDrawOverlays()) {
+                    Toast.makeText(CoomiChatSession.this, "悬浮窗权限已开启", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                CoomiActivity host = activity();
+                if (host == null) {
+                    Toast.makeText(CoomiChatSession.this, "请先回到聊天页面再授权悬浮窗", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                try {
+                    Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName()));
+                    host.startActivityForResult(intent, REQUEST_CONTROL_FLOAT_OVERLAY);
+                } catch (Exception error) {
+                    Toast.makeText(CoomiChatSession.this, "无法打开悬浮窗权限设置", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        /** 显示桌面悬浮层（展开态卡片）。 */
+        @JavascriptInterface
+        public void startControlFloat() {
+            if (!canDrawOverlays()) {
+                runOnUiThread(() -> Toast.makeText(CoomiChatSession.this,
+                    "需要先开启悬浮窗权限", Toast.LENGTH_SHORT).show());
+                return;
+            }
+            CoomiFloatService.start(CoomiChatSession.this);
+        }
+
+        /** 关闭桌面悬浮层。 */
+        @JavascriptInterface
+        public void stopControlFloat() {
+            CoomiFloatService.stop(CoomiChatSession.this);
+        }
+
+        /** 悬浮层是否在运行。 */
+        @JavascriptInterface
+        public boolean isControlFloatRunning() {
+            return CoomiFloatService.isRunning();
+        }
+
+        /** 追加一条到悬浮层的思考区：title 是当前动作，body 是细节。 */
+        @JavascriptInterface
+        public void pushControlFloat(String title, String body) {
+            CoomiFloatService.pushTrace(CoomiChatSession.this, title, body);
+        }
+
+        /** 只刷新悬浮层顶部的状态行（如「正在思考」「正在调用工具」）。 */
+        @JavascriptInterface
+        public void pushControlStatus(String status) {
+            CoomiFloatService.pushStatus(CoomiChatSession.this, status);
+        }
+
+        /** 跳转到 QQ 群（捐赠/交流）。Android 里跳群需要走 QQ 的临时会话协议。 */
+        @JavascriptInterface
+        public void openQQGroup() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_VIEW);
+                    intent.setData(Uri.parse("https://qm.qq.com/q/2JVYVRKnBe"));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } catch (Throwable error) {
+                    Toast.makeText(CoomiChatSession.this, "无法打开 QQ，请手动搜索群号 1108467806", Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+
+        /** 收起成小球 / 重新展开。 */
+        @JavascriptInterface
+        public void setControlFloatCollapsed(boolean collapsed) {
+            CoomiFloatService.setCollapsed(CoomiChatSession.this, collapsed);
+        }
+
+        /** 点击屏幕坐标（无障碍手势）。 */
+        @JavascriptInterface
+        public boolean controlTap(float x, float y) {
+            if (CoomiAccessibilityService.isReady()
+                && CoomiAccessibilityService.get().tap(x, y)) {
+                return true;
+            }
+            // 无障碍不可用或手势失败时，退回 Shizuku 的 input tap。
+            String result = runShizukuCommand(
+                "input tap " + Math.round(x) + " " + Math.round(y));
+            return result != null && !result.contains("waiting_auth") && !result.isEmpty();
+        }
+
+        /** 滑动（x1,y1 → x2,y2，durationMs 毫秒）。 */
+        @JavascriptInterface
+        public boolean controlSwipe(float x1, float y1, float x2, float y2, long durationMs) {
+            if (CoomiAccessibilityService.isReady()
+                && CoomiAccessibilityService.get().swipe(x1, y1, x2, y2, durationMs)) {
+                return true;
+            }
+            String result = runShizukuCommand("input swipe "
+                + Math.round(x1) + " " + Math.round(y1) + " "
+                + Math.round(x2) + " " + Math.round(y2) + " " + durationMs);
+            return result != null && !result.contains("waiting_auth") && !result.isEmpty();
+        }
+
+        /** 全局动作：back / home / recents / notifications。 */
+        @JavascriptInterface
+        public boolean controlGlobalAction(String action) {
+            if (!CoomiAccessibilityService.isReady()) return false;
+            return CoomiAccessibilityService.get().globalAction(action);
+        }
+
+        /** 按文字点击控件（如「发送」「确定」）。 */
+        @JavascriptInterface
+        public boolean controlClickText(String label) {
+            if (!CoomiAccessibilityService.isReady()) return false;
+            return CoomiAccessibilityService.get().clickText(label);
+        }
+
+        /** 当前输入框里的文字，便于上层判断是否已填充。 */
+        @JavascriptInterface
+        public String controlCurrentInput() {
+            if (!CoomiAccessibilityService.isReady()) return "";
+            return CoomiAccessibilityService.get().currentInputText();
+        }
+    }
+
+    private boolean canDrawOverlays() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        return Settings.canDrawOverlays(this);
+    }
+
+    /** Shizuku 通道执行 shell 命令（无障碍不可用时的控制模式兜底）；未授权时挂起，授权后自动重试。 */
+    private String runShizukuCommand(String command) {
+        if (command == null || command.isEmpty()) return "";
+        try {
+            if (shizukuController.getStatus().status != ShizukuAccessController.Status.GRANTED) {
+                // 未授权：记住本次命令，请求授权；授权成功后自动重试。
+                pendingShizukuCommand = command;
+                shizukuController.request(result -> runOnUiThread(() -> {
+                    if (result.status == ShizukuAccessController.Status.GRANTED) {
+                        Toast.makeText(CoomiChatSession.this, "Shizuku 已授权，正在执行", Toast.LENGTH_SHORT).show();
+                        String pending = pendingShizukuCommand;
+                        pendingShizukuCommand = null;
+                        if (pending != null) new Thread(() -> runShizukuCommand(pending)).start();
+                    } else {
+                        pendingShizukuCommand = null;
+                        Toast.makeText(CoomiChatSession.this, "Shizuku 未授权：" + result.message, Toast.LENGTH_SHORT).show();
+                    }
+                }));
+                return "waiting_auth";
+            }
+            // 使用 ShizukuRemoteProcess 执行（Shizuku API 13 提供）
+            try {
+                rikka.shizuku.ShizukuRemoteProcess proc = rikka.shizuku.Shizuku.newProcess(
+                    new String[]{"/system/bin/sh", "-c", command}, null, null);
+                if (proc != null) {
+                    java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(proc.getInputStream()));
+                    StringBuilder output = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) output.append(line).append('\n');
+                    int code = proc.waitFor();
+                    return "exit=" + code + " " + output.toString().trim();
+                }
+            } catch (Throwable ignored) {
+                // 旧 API 或受限环境：走 su 兜底
+            }
+            // 兜底：su -c
+            try {
+                Process process = new ProcessBuilder("/system/bin/sh", "-c", "su -c '" + command.replace("'", "'\''") + "'")
+                    .redirectErrorStream(true).start();
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()));
+                StringBuilder output = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
+                process.waitFor();
+                return output.toString().trim();
+            } catch (Exception error) {
+                return "error: " + error.getMessage();
+            }
+        } catch (Throwable error) {
+            return "error: " + error.getMessage();
         }
     }
 

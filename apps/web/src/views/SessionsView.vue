@@ -5,18 +5,17 @@
  * 列表来自引擎磁盘会话（/api/sessions 为权威源），本地 localStorage 保存标题/置顶等
  * 元数据与最近对话正文；删除会话会同时删除引擎磁盘记录与本地记录。
  */
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore, formatSessionTime, type SessionMeta } from '@/stores/sessions'
-import { useConfigStore } from '@/stores/config'
+import { authedFetch } from '@/bridge/http'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 
 const router = useRouter()
 const session = useSessionStore()
 const sessions = useSessionsStore()
-const config = useConfigStore()
 
 const menuFor = ref<SessionMeta | null>(null)
 const askDelete = ref<SessionMeta | null>(null)
@@ -50,11 +49,136 @@ function doClear() {
   router.push('/')
 }
 
-// 进入页面时先同步引擎磁盘会话（权威源），再刷新各会话的后台运行状态。
-// 只刷新 running 会导致直接从对话页跳进来时列表为空/无摘要。
+// ── 聊天记录导入 ──
+interface ImportItem {
+  title: string
+  messages: Array<{ role: string; content: string }>
+}
+
+const importItems = ref<ImportItem[]>([])
+const importLoading = ref(false)
+const importError = ref('')
+const showImportSheet = ref(false)
+const importPaths = ref<string[]>([])
+
+function importFiles() {
+  importError.value = ''
+  importItems.value = []
+  importPaths.value = []
+  showImportSheet.value = false
+  window.CoomiAndroid?.importFiles?.()
+}
+
+function onFilesImported(event: Event) {
+  const detail = (event as CustomEvent<{ paths?: string[] }>).detail ?? {}
+  const paths = detail.paths ?? []
+  if (paths.length === 0) return
+  void handleFiles(paths)
+}
+
+async function handleFiles(paths: string[]) {
+  importLoading.value = true
+  importError.value = ''
+  importItems.value = []
+  importPaths.value = paths.slice()
+
+  try {
+    const res = await authedFetch('/api/sessions/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ paths, preview: true }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `请求失败 (${res.status})`)
+    }
+    const data = await res.json()
+    importItems.value = (data.preview ?? []) as ImportItem[]
+    if (data.errors?.length) {
+      importError.value = data.errors.map((e: { path: string; error: string }) => `${e.path}: ${e.error}`).join('\n')
+    }
+    if (importItems.value.length > 0) {
+      showImportSheet.value = true
+    } else {
+      importError.value = importError.value || '未识别到可导入的聊天记录'
+    }
+  } catch (e: unknown) {
+    importError.value = e instanceof Error ? e.message : '导入失败'
+  } finally {
+    importLoading.value = false
+  }
+}
+
+async function confirmImport() {
+  if (importItems.value.length === 0) return
+  importLoading.value = true
+  try {
+    const paths: string[] = importPaths.value.slice()
+    if (paths.length === 0) return
+    const res = await authedFetch('/api/sessions/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ paths, preview: false }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `导入失败 (${res.status})`)
+    }
+    showImportSheet.value = false
+    importItems.value = []
+    await sessions.syncFromEngine()
+    await sessions.refreshRunning()
+  } catch (e: unknown) {
+    importError.value = e instanceof Error ? e.message : '导入失败'
+  } finally {
+    importLoading.value = false
+  }
+}
+
+function cancelImport() {
+  showImportSheet.value = false
+  importItems.value = []
+  importPaths.value = []
+  importError.value = ''
+}
+
+const exportLoading = ref(false)
+const exportNotice = ref('')
+
+async function exportSessions() {
+  exportLoading.value = true
+  exportNotice.value = ''
+  try {
+    const res = await authedFetch('/api/sessions/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ ids: [], format: 'json' }),
+    })
+    if (!res.ok) { const t = await res.text(); throw new Error(t || `导出失败 (${res.status})`) }
+    const data = await res.json()
+    const blob = new Blob([data.content ?? ''], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `coomi-sessions-${Date.now()}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    exportNotice.value = `已导出 ${data.count ?? 0} 个会话`
+  } catch (e: unknown) {
+    exportNotice.value = e instanceof Error ? e.message : '导出失败'
+  } finally { exportLoading.value = false }
+}
+
 onMounted(() => {
   void sessions.syncFromEngine()
   sessions.refreshRunning()
+  window.addEventListener('coomi:files-imported', onFilesImported)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('coomi:files-imported', onFilesImported)
 })
 async function openAuxiliary(parentId: string, sessionId: string) {
   await router.push('/')
@@ -69,6 +193,12 @@ async function openAuxiliary(parentId: string, sessionId: string) {
         <button class="tm" aria-label="对话时光机" @click="router.push('/life/timemachine')">
           <CoomiIcon name="clock" :size="14" />
           <span>对话时光机</span>
+        </button>
+        <button class="icon-btn" aria-label="导入" @click="importFiles" :disabled="importLoading">
+          <CoomiIcon name="import" />
+        </button>
+        <button class="icon-btn" aria-label="导出" @click="exportSessions" :disabled="exportLoading">
+          <CoomiIcon name="arrowDown" :size="18" />
         </button>
         <button class="icon-btn blue" aria-label="新对话" @click="startNew">
           <CoomiIcon name="plus" />
@@ -123,6 +253,36 @@ async function openAuxiliary(parentId: string, sessionId: string) {
           就只剩本机这份记录。
         </p>
     </main>
+
+    <!-- 导入错误提示 -->
+    <div v-if="importError && !showImportSheet" class="import-error">
+      <CoomiIcon name="alert" :size="16" />
+      <span>{{ importError }}</span>
+      <button class="icon-btn-sm" @click="importError = ''"><CoomiIcon name="close" :size="14" /></button>
+    </div>
+
+    <!-- 导入预览面板 -->
+    <div v-if="showImportSheet" class="scrim" @click.self="cancelImport">
+      <div class="sheet import-sheet">
+        <div class="grip" />
+        <p class="stitle">导入预览</p>
+        <p class="ssub">共 {{ importItems.length }} 个会话，确认后导入到引擎</p>
+        <div class="import-list">
+          <div v-for="(item, i) in importItems" :key="i" class="import-item">
+            <span class="import-title">{{ item.title }}</span>
+            <span class="import-count">{{ item.messages.length }} 条消息</span>
+          </div>
+        </div>
+        <div class="sacts">
+          <button class="btn" @click="cancelImport" :disabled="importLoading">取消</button>
+          <button class="btn btn-primary" @click="confirmImport" :disabled="importLoading">
+            <span v-if="importLoading" class="btn-spin"></span>
+            <span v-else>确认导入</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="menuFor" class="scrim" @click.self="menuFor = null">
       <div class="sheet">
         <div class="grip" />
@@ -258,6 +418,50 @@ async function openAuxiliary(parentId: string, sessionId: string) {
 .sacts { display: flex; gap: 8px; margin-top: 16px; }
 .sacts .btn { flex: 1; }
 
+/* ── 导入相关 ── */
+.import-error {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 12px 0; padding: 10px 12px;
+  border-radius: var(--r-md); background: var(--danger-soft);
+  font-size: 12.5px; color: var(--danger);
+  animation: fade .2s ease-out;
+}
+.import-error span { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-all; }
+.icon-btn-sm {
+  display: grid; place-items: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--fill-strong); color: var(--text-2);
+}
+
+.import-sheet { max-height: 70vh; display: flex; flex-direction: column; }
+.import-list {
+  flex: 1; overflow-y: auto; margin: 8px 0; padding: 0 6px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.import-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--fill); font-size: 13px;
+}
+.import-title {
+  flex: 1; min-width: 0; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.import-count {
+  flex-shrink: 0; margin-left: 12px;
+  font-size: 11.5px; color: var(--text-3);
+}
+.btn-primary {
+  background: var(--blue); color: #fff; border-color: var(--blue);
+}
+.btn-primary:disabled { opacity: .6; }
+.btn-spin {
+  display: inline-block;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.3);
+  border-top-color: #fff;
+  animation: coomi-rspin 0.7s linear infinite;
+  vertical-align: middle;
+}
+
 </style>
-
-

@@ -50,27 +50,6 @@
       "required_parameters": [
         {"key": "github_token", "label": "GitHub token", "secret": true}
       ]
-    },
-    {
-      "id": "tavily",
-      "name": "Tavily",
-      "description": "Search the web with Tavily.",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "tavily-mcp"],
-      "env": {"TAVILY_API_KEY": "{{tavily_api_key}}"},
-      "required_parameters": [
-        {"key": "tavily_api_key", "label": "Tavily API key", "secret": true}
-      ]
-    },
-    {
-      "id": "serena",
-      "name": "Serena",
-      "description": "Semantic coding assistance for repositories.",
-      "transport": "stdio",
-      "command": "uvx",
-      "args": ["--from", "serena-agent", "serena"],
-      "required_parameters": []
     }
   ]
 }

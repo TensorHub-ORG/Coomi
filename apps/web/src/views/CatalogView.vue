@@ -363,6 +363,56 @@ async function installSkill(item: SkillItem) {
 
 onMounted(load)
 // 从控制台进入：返回统一回控制台（浏览器环境回聊天主页）
+const importError = ref('')
+const customMcp = ref(false)
+const customMcpName = ref('')
+const customMcpConfig = ref('')
+
+async function openImport() {
+  if (tab.value === 'mcp') {
+    // 自定义 MCP：行内表单（name + JSON config）
+    customMcp.value = true
+    customMcpName.value = ''
+    customMcpConfig.value = ''
+    notice.value = ''
+    return
+  }
+  // Skill 文件导入：系统文件选择器，选 zip 由引擎解包安装
+  notice.value = '请选择 Skill 包（zip 文件）'
+  importError.value = ''
+  window.CoomiAndroid?.importFiles?.()
+}
+
+async function submitCustomMcp() {
+  const name = customMcpName.value.trim()
+  let config: any
+  try {
+    config = customMcpConfig.value.trim() ? JSON.parse(customMcpConfig.value) : { transport: 'stdio', command: '', args: [] }
+  } catch {
+    importError.value = 'MCP 配置必须是合法 JSON'
+    return
+  }
+  if (!name) { importError.value = '请输入 MCP 名称'; return }
+  busy.value = 'custom-mcp'
+  notice.value = ''
+  importError.value = ''
+  try {
+    const res = await authedFetch('/api/catalog/mcp/custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, config }),
+    })
+    await parseRes(res)
+    notice.value = `已导入自定义 MCP「${name}」，重启引擎或新开会话后生效`
+    customMcp.value = false
+    await load()
+  } catch (e) {
+    importError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    busy.value = null
+  }
+}
+
 function goDashboard() {
   if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
   else router.push('/')
@@ -396,6 +446,22 @@ function goDashboard() {
           <CoomiIcon name="wrench" :size="15" />Skills
           <span class="cnt">{{ skillsCount }}</span>
         </button>
+        <button class="import-btn" type="button" @click="openImport">
+          <CoomiIcon :name="tab === 'mcp' ? 'plug' : 'wrench'" :size="14" />
+          {{ tab === 'mcp' ? '自定义 MCP' : '导入 Skill 文件' }}
+        </button>
+      </div>
+
+      <div v-if="customMcp" class="custom-mcp-form">
+        <p class="form-title">自定义 MCP</p>
+        <input v-model="customMcpName" class="form-input" placeholder="服务器名称，如 my-git" />
+        <textarea v-model="customMcpConfig" class="form-input mono" rows="4"
+          placeholder='配置 JSON，如 {"transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-git"]} 或 {"transport":"http","url":"https://..."}' />
+        <p v-if="importError" class="form-error">{{ importError }}</p>
+        <div class="form-actions">
+          <button class="btn ghost" @click="customMcp = false">取消</button>
+          <button class="btn primary" :disabled="busy !== null" @click="submitCustomMcp">导入</button>
+        </div>
       </div>
 
       <label v-if="scope === 'market'" class="market-search">
@@ -491,8 +557,7 @@ function goDashboard() {
                   <button class="act" :disabled="busy !== null" @click.stop="setEnabled('skill', item, !item.enabled)">
                     {{ item.enabled ? '停用' : '启用' }}
                   </button>
-                  <button v-if="item.id !== 'skill-creator'" class="act danger" :disabled="busy !== null" @click.stop="confirmDelete('skill', item)">删除</button>
-                  <span v-else class="cmeta">内置 Skill，不可卸载</span>
+                  <button class="act danger" :disabled="busy !== null" @click.stop="confirmDelete('skill', item)">删除</button>
                 </template>
                 <button v-else class="act" :disabled="busy !== null" @click.stop="confirmSkillInstall(item)">
                   {{ busy === item.id ? '安装中…' : '安装' }}
@@ -547,8 +612,7 @@ function goDashboard() {
                 </div>
                 <div class="dops">
                   <template v-if="item.installed">
-                    <button v-if="item.id !== 'skill-creator'" class="act danger" :disabled="busy !== null" @click.stop="confirmDelete('skill', item)">删除</button>
-                    <span v-else class="cmeta">内置 Skill，不可卸载</span>
+                    <button class="act danger" :disabled="busy !== null" @click.stop="confirmDelete('skill', item)">删除</button>
                   </template>
                   <button v-else class="act" :disabled="busy !== null" @click.stop="confirmSkillInstall(item)">
                     {{ busy === item.id ? '安装中…' : '安装' }}
@@ -676,7 +740,21 @@ function goDashboard() {
   padding: 14px 12px calc(var(--safe-bottom) + 24px);
   -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
 }
-.tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.tabs { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.import-btn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  height: 34px; padding: 0 12px; border-radius: var(--r-pill);
+  background: var(--blue-soft); color: var(--blue); font-size: 12.5px; font-weight: 650;
+}
+.custom-mcp-form { margin-bottom: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--bg); display: flex; flex-direction: column; gap: 8px; }
+.form-title { margin: 0; font-size: 13px; font-weight: 700; color: var(--text); }
+.form-input { width: 100%; padding: 9px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--page); color: var(--text); font-size: 13px; outline: none; }
+.form-input.mono { font-family: var(--font-mono); font-size: 11.5px; }
+.form-error { margin: 0; font-size: 12px; color: var(--danger); }
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.form-actions .btn { min-height: 34px; padding: 0 14px; border-radius: 8px; font-size: 13px; }
+.form-actions .btn.primary { background: var(--blue); color: #fff; }
+.form-actions .btn.ghost { background: var(--fill); color: var(--text-2); }
 .market-search {
   display: flex; align-items: center; gap: 8px;
   height: 42px; margin: -2px 0 12px; padding: 0 12px;

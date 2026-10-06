@@ -1,6 +1,7 @@
 apply plugin: 'com.android.library'
 
 def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
+def coomiPrebuiltNative = System.getenv("COOMI_PREBUILT_NATIVE") == "1"
 apply plugin: 'maven-publish'
 
 android {
@@ -35,15 +36,21 @@ android {
         }
     }
 
-    externalNativeBuild {
-        ndkBuild {
-            path "src/main/jni/Android.mk"
+    if (!coomiPrebuiltNative) {
+        externalNativeBuild {
+            ndkBuild {
+                path "src/main/jni/Android.mk"
+            }
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    packagingOptions {
+        jniLibs { keepDebugSymbols += ['**/*.so'] }
     }
 
     testOptions {

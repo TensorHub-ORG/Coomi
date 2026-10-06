@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 coomi-engine = { path = "../engine" }
 coomi-telemetry = { path = "../telemetry" }
 chrono.workspace = true
@@ -22,11 +23,10 @@ md5.workspace = true
 fs2.workspace = true
 flate2.workspace = true
 sha2.workspace = true
+wasmi = "0.31"
 tokio.workspace = true
 uuid.workspace = true
 tar.workspace = true
-wasmi = "0.31"
-base64 = "0.22"
 
 [dev-dependencies]
 tempfile.workspace = true

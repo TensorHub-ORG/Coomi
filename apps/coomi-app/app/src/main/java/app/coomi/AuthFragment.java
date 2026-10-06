@@ -20,6 +20,7 @@ import com.termux.R;
 public class AuthFragment extends Fragment implements CoomiSetupActivity.StepFragment {
 
     private TextView mStatusText;
+  private boolean mOpeningProviders;
 
     @Nullable
     @Override
@@ -40,14 +41,23 @@ public class AuthFragment extends Fragment implements CoomiSetupActivity.StepFra
     @Override
     public void onResume() {
         super.onResume();
+        mOpeningProviders = false;
         updateStatus();
     }
 
     private void openProviders() {
-        Intent intent = new Intent(requireContext(), com.termux.app.CoomiActivity.class);
-        intent.putExtra(com.termux.app.CoomiActivity.EXTRA_ROUTE, "#/providers");
-        intent.putExtra(com.termux.app.CoomiActivity.EXTRA_RETURN_TO_SETUP, true);
-        startActivity(intent);
+        if (mOpeningProviders || !isAdded()) return;
+        mOpeningProviders = true;
+        try {
+            Intent intent = new Intent(requireActivity(), com.termux.app.CoomiActivity.class);
+            intent.putExtra(com.termux.app.CoomiActivity.EXTRA_ROUTE, "#/providers");
+            intent.putExtra(com.termux.app.CoomiActivity.EXTRA_RETURN_TO_SETUP, true);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(intent);
+        } catch (RuntimeException error) {
+            mOpeningProviders = false;
+            setStatus(R.string.coomi_auth_provider_required, R.color.coomi_danger);
+        }
     }
 
     private void updateStatus() {

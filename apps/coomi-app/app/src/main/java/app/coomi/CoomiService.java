@@ -518,6 +518,8 @@ public class CoomiService extends Service {
             String token = generateToken();
             mEngineToken = token;
             String command = termuxEnvironment()
+                // 告诉引擎它的配置目录（也就是 .coomi），PoW 求解队列要用它定位。
+                + "export COOMI_HOME=" + shellQuote(CoomiConstants.COOMI_CONFIG_DIR) + "; "
                 + "export RUST_BACKTRACE=1; cd " + shellQuote(workspaceDir(this)) + "; "
                 + "exec >>" + shellQuote(CoomiConstants.ENGINE_LOG_PATH) + " 2>&1; "
                 + "exec " + shellQuote(binary.getAbsolutePath())

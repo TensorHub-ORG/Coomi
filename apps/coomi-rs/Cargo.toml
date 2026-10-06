@@ -10,6 +10,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1"
+base64 = "0.22"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 md5 = "0.7"

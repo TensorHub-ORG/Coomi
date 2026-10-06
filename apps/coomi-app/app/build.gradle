@@ -3,8 +3,8 @@ plugins {
 }
 
 def coomiDevBuild = System.getenv("COOMI_DEV_BUILD") == "1"
-def coomiPackageName = coomiDevBuild ? "com.coomidev.android" : "com.coomi.android"
-def coomiAppName = coomiDevBuild ? "CoomiDev" : "Coomi"
+def coomiPackageName = coomiDevBuild ? "com.coomidev.android" : "com.cubee.newapp4"
+def coomiAppName = coomiDevBuild ? "CoomiDev" : "Comax"
 def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
 // A rollback release keeps the chosen stable source/versionName but must use a
 // newer Android versionCode. A project property takes precedence over the env.
@@ -19,6 +19,7 @@ if (coomiVersionCodeInput != null) {
     }
     coomiVersionCodeOverride = coomiVersionCodeInput.toInteger()
 }
+def coomiPrebuiltNative = System.getenv("COOMI_PREBUILT_NATIVE") == "1"
 
 configurations.configureEach {
     resolutionStrategy.force "com.google.guava:guava:24.1-jre"
@@ -63,8 +64,8 @@ android {
         implementation "androidx.viewpager:viewpager:1.0.0"
         implementation "androidx.viewpager2:viewpager2:1.0.0"
         implementation "com.google.android.material:material:1.12.0"
-        implementation "dev.rikka.shizuku:api:13.1.5"
-        implementation "dev.rikka.shizuku:provider:13.1.5"
+        implementation "dev.rikka.shizuku:api:12.2.0"
+        implementation "dev.rikka.shizuku:provider:12.2.0"
         implementation "com.google.guava:guava:24.1-jre"
         implementation "io.noties.markwon:core:$markwonVersion"
         implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
@@ -85,8 +86,8 @@ android {
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion coomiTargetSdk
         // Keep the executable Termux bootstrap security domain for v1.4.0.
-        versionCode 75
-        versionName "1.4.8"
+        versionCode 77
+        versionName "1.5.0o1"
 
         if (coomiVersionCodeOverride != null) versionCode = coomiVersionCodeOverride
         if (appVersionName) versionName = appVersionName
@@ -124,8 +125,6 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file('testkey_untrusted.jks')
-            keyAlias 'alias'
             // 签名口令从 local.properties 读取（不入库）；缺失时明确报错，禁止明文回退。
             def signingProps = new Properties()
             def signingPropsFile = rootProject.file('local.properties')
@@ -134,6 +133,8 @@ android {
             }
             storePassword signingProps.getProperty('coomi.signing.storePassword')
             keyPassword signingProps.getProperty('coomi.signing.keyPassword')
+            storeFile file(signingProps.getProperty('coomi.signing.storeFile', 'testkey_untrusted.jks'))
+            keyAlias signingProps.getProperty('coomi.signing.keyAlias', 'alias')
             if (!storePassword || !keyPassword) {
                 throw new GradleException(
                     '签名口令缺失：请在 local.properties 配置 coomi.signing.storePassword 与 coomi.signing.keyPassword')
@@ -185,9 +186,11 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    externalNativeBuild {
-        ndkBuild {
-            path "src/main/cpp/Android.mk"
+    if (!coomiPrebuiltNative) {
+        externalNativeBuild {
+            ndkBuild {
+                path "src/main/cpp/Android.mk"
+            }
         }
     }
 
@@ -224,6 +227,14 @@ android {
 
     buildFeatures {
         buildConfig true
+    }
+
+    packagingOptions {
+        jniLibs {
+            // ARM64 本机构建复用已发布的 Termux 壳库，并打入已剥离的 Rust 引擎。
+            // 不再调用官方 x86_64 NDK 的 llvm-strip。
+            keepDebugSymbols += ['**/*.so']
+        }
     }
 }
 
@@ -416,6 +427,8 @@ tasks.register("printVersionInfo") {
 }
 
 def validateVersionName(String versionName) {
+    // Custom Android builds use the established 1.4.6o5-style release suffix.
+    if (java.util.regex.Pattern.matches("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)o[1-9]\\d*\$", versionName)) return
     // https://semver.org/spec/v2.0.0.html#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
     if (!java.util.regex.Pattern.matches("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?\$", versionName))
         throw new GradleException("The versionName '"  + versionName + "' is not a valid version as per semantic version '2.0.0' spec in the format 'major.minor.patch(-prerelease)(+buildmetadata)'. https://semver.org/spec/v2.0.0.html.")

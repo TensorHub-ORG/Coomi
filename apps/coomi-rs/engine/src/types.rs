@@ -357,6 +357,12 @@ pub struct ModelRequest {
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<ToolSpec>,
     pub reasoning_effort: Option<String>,
+    /// 上游可用于路由与提示词缓存的稳定 Coomi 会话标识。
+    pub session_id: Option<String>,
+    /// DeepSeek 账号：是否开启联网搜索（网页版开关）。
+    pub search_enabled: bool,
+    /// DeepSeek 账号：是否开启深度思考（网页版开关）。
+    pub thinking_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -365,6 +371,7 @@ pub struct CompactionRequest {
     pub messages: Vec<ChatMessage>,
     pub system_prompt: String,
     pub tools: Vec<ToolSpec>,
+    pub session_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]

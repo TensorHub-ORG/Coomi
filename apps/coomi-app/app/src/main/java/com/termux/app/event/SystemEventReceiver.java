@@ -57,7 +57,7 @@ public class SystemEventReceiver extends BroadcastReceiver {
         TermuxShellManager.onActionBootCompleted(context, intent);
     }
     /**
-     * 开机自启：用户开启「开机自启」开关后，开机时把 Coomi 带到前台。
+     * 开机自启：用户开启「开机自启」开关后，开机时把 Comax 带到前台。
      * Launcher 走正常引导（已同意过直接进控制台并拉起引擎），引擎启动后
      * WorkflowScheduler 自动加载启用定时的工作流。
      */

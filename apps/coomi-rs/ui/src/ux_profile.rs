@@ -415,6 +415,9 @@ async fn generate_sync(home: &Path, provider_config: coomi_services::ProviderCon
         ],
         tools: Vec::new(),
         reasoning_effort: Some("low".to_owned()),
+                session_id: None,
+                search_enabled: false,
+                thinking_enabled: false,
     };
     let response = tokio::time::timeout(Duration::from_secs(300), provider.complete(request))
         .await

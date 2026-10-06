@@ -20,6 +20,7 @@ export const API_BASE = deriveBase()
  * 仅在模块加载时读取一次，并立即用 history.replaceState 从地址栏/浏览器历史中
  * 清除，避免令牌持久留在系统浏览器历史、跨设备同步或扩展可见范围内。
  */
+const TOKEN_STORAGE_KEY = 'coomi.engine.token'
 const ENGINE_TOKEN: string = (() => {
   try {
     const token = new URLSearchParams(window.location.search).get('token') ?? ''
@@ -34,10 +35,29 @@ const ENGINE_TOKEN: string = (() => {
   }
 })()
 
-/** 引擎访问令牌（模块加载时已捕获；URL query 已即时清除）。 */
+/**
+ * 引擎访问令牌：
+ * 1) 模块加载时从 URL query 捕获（已即时清除）；
+ * 2) 否则回退到 sessionStorage（OAuth 整页跳转场景：登录页跳走前由调用方写入，
+ *    授权跳回后同源 sessionStorage 仍在，可恢复 token）。
+ */
 export function engineToken(): string {
-  return ENGINE_TOKEN
+  if (ENGINE_TOKEN) return ENGINE_TOKEN
+  try {
+    return sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
+  } catch {
+    return ''
+  }
 }
+
+/** 写入引擎 token 供 OAuth 跳转回跳后恢复（与 engineToken 同 key）。 */
+export function stashEngineToken(token: string): void {
+  if (!token) return
+  try { sessionStorage.setItem(TOKEN_STORAGE_KEY, token) } catch { /* ignore */ }
+}
+
+/** 引擎 token 存储 key（供前端在跳转前写入）。 */
+export const ENGINE_TOKEN_KEY = TOKEN_STORAGE_KEY
 
 /** 带引擎令牌的 fetch：所有 /api/* 与 /ws/* 请求必须携带 Bearer token。 */
 export async function authedFetch(

@@ -194,6 +194,14 @@ public class CoomiActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        // 控制模式悬浮层的悬浮窗权限回传（bridge 在 CoomiChatSession，码 2106）。
+        if (request == CoomiChatSession.REQUEST_CONTROL_FLOAT_OVERLAY) {
+            boolean granted = Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
+            Toast.makeText(this, granted
+                ? "悬浮窗权限已开启，正在显示悬浮层" : "悬浮窗权限未开启", Toast.LENGTH_SHORT).show();
+            if (granted) app.coomi.CoomiFloatService.start(this);
+            return;
+        }
         if (request != REQUEST_OVERLAY || !mWaitingForPermission) return;
         mWaitingForPermission = false;
         if (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)) startFloating();

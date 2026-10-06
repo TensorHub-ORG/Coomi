@@ -291,17 +291,27 @@ impl McpRuntime {
     }
 
     pub async fn call(&self, name: &str, arguments: Value) -> Option<ToolResult> {
-        let tool = self
-            .tools
-            .read()
-            .expect("MCP tool lock poisoned")
-            .get(name)
-            .cloned()?;
-        let result = tool
+        let hit = {
+            let tools = self.tools.read().expect("MCP tool lock poisoned");
+            // 模型可能用完整扁平名（mcp__server__tool）或只写 server__tool / tool 名，
+            // 逐个尝试解析；命中后 clone 出来再 drop 锁（锁不能跨 await）。
+            let bare = name
+                .strip_prefix("mcp__")
+                .map(|rest| rest.split("__").last().unwrap_or(rest))
+                .unwrap_or(name);
+            tools.get(name).cloned().or_else(|| {
+                tools.values().find(|tool| {
+                    tool.original_name == bare
+                        || tool.spec.name == name
+                        || tool.spec.name.ends_with(&format!("__{bare}"))
+                }).cloned()
+            })?
+        };
+        let result = hit
             .client
             .request(
                 "tools/call",
-                json!({"name": tool.original_name, "arguments": arguments}),
+                json!({"name": hit.original_name, "arguments": arguments}),
             )
             .await;
         Some(match result {

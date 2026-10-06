@@ -3658,7 +3658,7 @@ mod tests {
     fn settings_merge_curated_catalogs_and_confirm_installed_deletions() {
         let (_home, mut state) = test_state();
         state.open_overlay(OverlayKind::Settings);
-        assert_eq!(settings_mcp_items(&state).len(), state.mcp_entries.len());
+        assert_eq!(settings_mcp_items(&state).len(), 5);
         assert_eq!(
             settings_skill_items(&state).len(),
             state.skill_entries.len()

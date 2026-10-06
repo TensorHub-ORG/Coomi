@@ -6,10 +6,21 @@ use uuid::Uuid;
 pub struct StudioRoute { pub member_ids: Vec<String>, pub direct: bool }
 
 pub fn route_message(studio: &Studio, text: &str) -> Result<StudioRoute> {
+    let broadcast = ["@全体", "@所有人", "@all", "@everyone"]
+        .iter()
+        .any(|marker| text.to_ascii_lowercase().contains(&marker.to_ascii_lowercase()));
+    if broadcast {
+        return Ok(StudioRoute {
+            member_ids: studio.members.iter().map(|member| member.id.clone()).collect(),
+            direct: true,
+        });
+    }
     let mut ids = Vec::new();
     for member in &studio.members {
         if text.contains(&format!("@{}", member.name)) || text.contains(&format!("@{}", member.id)) { ids.push(member.id.clone()); }
     }
+    ids.sort();
+    ids.dedup();
     if ids.is_empty() { ids.push(studio.host_id.clone()); Ok(StudioRoute { member_ids: ids, direct: false }) }
     else { Ok(StudioRoute { member_ids: ids, direct: true }) }
 }

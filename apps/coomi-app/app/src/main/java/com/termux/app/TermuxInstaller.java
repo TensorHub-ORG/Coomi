@@ -110,7 +110,7 @@ public final class TermuxInstaller {
             if (TermuxFileUtils.isTermuxPrefixDirectoryEmpty()) {
                 Logger.logInfo(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH + "\" exists but is empty or only contains specific unimportant files.");
             } else if (isBootstrapComplete()) {
-                // Upgrade path: refresh the Coomi install script and shell environment.
+                // Upgrade path: refresh the Comax install script and shell environment.
                 createCoomiScripts(activity);
                 whenDone.run();
                 return;
@@ -237,7 +237,7 @@ public final class TermuxInstaller {
                     // Recreate env file since termux prefix was wiped earlier
                     TermuxShellEnvironment.writeEnvironmentToFile(activity);
 
-                    // Create the Coomi install script and shell environment
+                    // Create the Comax install script and shell environment
                     createCoomiScripts(activity);
 
                     activity.runOnUiThread(whenDone);
@@ -428,7 +428,7 @@ public final class TermuxInstaller {
             File envScript = new File(profileDir, "coomi-env.sh");
             String envContent =
                 "#!" + TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/bash\n" +
-                "# Coomi Rust shell environment\n" +
+                "# Comax Rust shell environment\n" +
                 "export COOMI_HOME=\"$HOME/.coomi\"\n" +
                 "export COOMI_SHELL=\"$PREFIX/bin/bash\"\n" +
                 "export SSL_CERT_FILE=\"$PREFIX/etc/tls/cert.pem\"\n" +
@@ -441,14 +441,14 @@ public final class TermuxInstaller {
             Os.chmod(envScript.getAbsolutePath(), 0644);
 
             // bootstrap 由官方 Termux 构建，login 等 shell 脚本把包路径硬编码为
-            // "/data/data/com.termux/files"，在本包名（如 com.coomi.android）下
+            // "/data/data/com.termux/files"，在本包名（如 com.cubee.newapp4）下
             // interpreter 不存在 → exec $PREFIX/bin/login 报 ENOENT（"No such file"）。
             // 解压后把文本脚本中的包路径替换为本包路径（ELF 二进制不在此替换）。
             patchBootstrapPackagePaths();
 
             Logger.logInfo(LOG_TAG, "Created coomi-rs shell environment");
         } catch (Exception e) {
-            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to create Coomi scripts", e);
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to create Comax scripts", e);
         }
     }
 

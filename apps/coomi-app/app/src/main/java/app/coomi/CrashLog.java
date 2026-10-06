@@ -22,7 +22,7 @@ import java.util.Locale;
  *
  * 日志同时写入内部 files/logs 与外部 /sdcard/Android/data/&lt;包名&gt;/files/logs 镜像——
  * 启动即崩溃（UI 都进不去）时，外部副本仍可被 adb 直接提取：
- *   adb pull /sdcard/Android/data/com.coomi.android/files/logs/
+ *   adb pull /sdcard/Android/data/com.cubee.newapp4/files/logs/
  */
 public final class CrashLog {
 
@@ -59,7 +59,7 @@ public final class CrashLog {
             throwable.printStackTrace(new PrintWriter(stack));
             String stackText = stack.toString();
             StringBuilder builder = new StringBuilder();
-            builder.append("==== Coomi Crash ").append(stamp()).append(" ====\n");
+            builder.append("==== Comax Crash ").append(stamp()).append(" ====\n");
             builder.append("thread: ").append(thread.getName())
                     .append(" (id=").append(thread.getId()).append(")\n");
             builder.append("device: ").append(Build.MANUFACTURER).append(' ')

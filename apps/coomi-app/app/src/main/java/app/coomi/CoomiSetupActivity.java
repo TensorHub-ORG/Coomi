@@ -16,7 +16,7 @@ import com.termux.R;
 import com.termux.shared.logger.Logger;
 
 /**
- * Coomi setup wizard — 2 steps:
+ * Comax setup wizard — 2 steps:
  * Step 0: Deploy the native Rust runtime
  * Step 1: Configure API Key + Provider
  */

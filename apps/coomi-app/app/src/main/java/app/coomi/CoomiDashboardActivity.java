@@ -16,6 +16,9 @@ import android.net.Uri;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,7 +32,7 @@ import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.TermuxConstants;
 
 /**
- * Coomi Dashboard — main screen after setup.
+ * Comax Dashboard — main screen after setup.
  *
  * Shows engine status, restart/stop controls, and quick links.
  */
@@ -46,6 +49,7 @@ public class CoomiDashboardActivity extends Activity {
     private TextView mRuntimeVersionText;
     private View mOpenChatButton;
     private View mAiStudioButton;
+    private View mCollabButton;
     private Button mRestartButton;
     private Button mStopButton;
     private View mOpenTerminalButton;
@@ -72,6 +76,9 @@ public class CoomiDashboardActivity extends Activity {
     private View mMaintenanceButton;
     private View mUsageButton;
     private View mFeedbackButton;
+    private View mDonateButton;
+    private boolean mUpdateCheckStarted;
+    private AlertDialog mUpdateDialog;
     private String mAppliedThemeMode;
     private String mAppliedAppearanceSignature;
 
@@ -113,6 +120,7 @@ public class CoomiDashboardActivity extends Activity {
         mRuntimeVersionText = findViewById(R.id.dashboard_runtime_version);
         mOpenChatButton = findViewById(R.id.btn_open_chat);
         mAiStudioButton = findViewById(R.id.btn_ai_studio);
+        mCollabButton = findViewById(R.id.btn_collab);
         mRestartButton = findViewById(R.id.btn_restart);
         mStopButton = findViewById(R.id.btn_stop);
         mOpenTerminalButton = findViewById(R.id.btn_open_terminal);
@@ -136,6 +144,7 @@ public class CoomiDashboardActivity extends Activity {
         mBackupButton = findViewById(R.id.btn_backup_data);
         mMaintenanceButton = findViewById(R.id.btn_maintenance);
         mUsageButton = findViewById(R.id.btn_usage);
+        mDonateButton = findViewById(R.id.btn_donate);
         mFeedbackButton = findViewById(R.id.btn_feedback);
         mPermissionSettingsButton = findViewById(R.id.btn_permission_settings);
         mStorageSettingsButton = findViewById(R.id.btn_storage_settings);
@@ -143,6 +152,7 @@ public class CoomiDashboardActivity extends Activity {
 
         mOpenChatButton.setOnClickListener(v -> openChat());
         mAiStudioButton.setOnClickListener(v -> openCoomiRoute("#/studio"));
+        mCollabButton.setOnClickListener(v -> openCoomiRoute("#/collab"));
         mRestartButton.setOnClickListener(v -> restartEngine());
         mStopButton.setOnClickListener(v -> stopEngine());
         mOpenTuiButton.setOnClickListener(v -> openTui());
@@ -172,6 +182,7 @@ public class CoomiDashboardActivity extends Activity {
             startActivity(new Intent(this, CoomiFeedbackActivity.class)));
         View uxProgramButton = findViewById(R.id.btn_ux_program);
         uxProgramButton.setOnClickListener(v -> openCoomiRoute("#/ux-program"));
+        mDonateButton.setOnClickListener(v -> showDonateDialog());
         mPermissionSettingsButton.setOnClickListener(v -> openPermissionSettings());
         mStorageSettingsButton.setOnClickListener(v -> openStorageSettings());
 
@@ -392,7 +403,7 @@ public class CoomiDashboardActivity extends Activity {
                 String.valueOf(TermuxConstants.TERMUX_APP.TERMUX_SERVICE.VALUE_EXTRA_SESSION_ACTION_SWITCH_TO_NEW_SESSION_AND_OPEN_ACTIVITY));
             startService(intent);
         } catch (Exception e) {
-            Logger.logError(LOG_TAG, "Failed to launch Coomi TUI: " + e.getMessage());
+            Logger.logError(LOG_TAG, "Failed to launch Comax TUI: " + e.getMessage());
         }
     }
 
@@ -454,20 +465,177 @@ public class CoomiDashboardActivity extends Activity {
 
     /** Collect a proactive suggestion or issue without including conversations or credentials.
      *  主动反馈已迁移至「问题反馈与诊断」二级页（CoomiFeedbackActivity）。 */
+    /** 捐赠者计划弹窗：微信收款码 + 加 QQ 群。 */
+    private void showDonateDialog() {
+        int padding = (int) (16 * getResources().getDisplayMetrics().density);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        root.setPadding(padding, padding, padding, padding);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.coomi_dash_donate_hint);
+        hint.setTextSize(13);
+        hint.setTextColor(resolveThemeColor(R.attr.coomiText2));
+        hint.setGravity(android.view.Gravity.CENTER);
+        root.addView(hint, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        ImageView qr = new ImageView(this);
+        qr.setImageResource(R.drawable.coomi_donate_qr);
+        qr.setAdjustViewBounds(true);
+        int qrSize = (int) (240 * getResources().getDisplayMetrics().density);
+        LinearLayout.LayoutParams qrParams = new LinearLayout.LayoutParams(qrSize, qrSize);
+        qrParams.topMargin = (int) (14 * getResources().getDisplayMetrics().density);
+        root.addView(qr, qrParams);
+
+        Button qqButton = new Button(this);
+        qqButton.setText(R.string.coomi_dash_donate_qq);
+        qqButton.setTextColor(0xFFFFFFFF);
+        qqButton.setTextSize(13);
+        qqButton.setAllCaps(false);
+        qqButton.setBackgroundResource(R.drawable.coomi_bg_button_primary);
+        LinearLayout.LayoutParams qqParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, (int) (46 * getResources().getDisplayMetrics().density));
+        qqParams.topMargin = (int) (16 * getResources().getDisplayMetrics().density);
+        qqButton.setLayoutParams(qqParams);
+        qqButton.setOnClickListener(v -> openQQGroup());
+        root.addView(qqButton);
+
+        CoomiTheme.applyCustomColors(this, root);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.coomi_dash_donate_title)
+            .setView(root)
+            .setNegativeButton(R.string.coomi_dash_donate_close, null)
+            .create();
+        dialog.setOnShowListener(ignored -> {
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawableResource(R.drawable.coomi_bg_dialog);
+                CoomiTheme.applyCustomColors(this, dialog.getWindow().getDecorView());
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(resolveThemeColor(R.attr.coomiText2));
+        });
+        dialog.show();
+    }
+
+    /** 跳转 QQ 加群链接（群里反馈 / 捐赠交流）。 */
+    private int resolveThemeColor(int attribute) {
+        android.util.TypedValue value = new android.util.TypedValue();
+        if (!getTheme().resolveAttribute(attribute, value, true)) return 0;
+        return value.resourceId != 0 ? getColor(value.resourceId) : value.data;
+    }
+
+    private void openQQGroup() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://qm.qq.com/q/2JVYVRKnBe"));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Throwable error) {
+            Toast.makeText(this, "无法打开 QQ，请手动搜索群号 1108467806",
+                Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private JSONObject readReasoningStatistics() {
+        File file = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".coomi/usage/summary.json");
+        try {
+            if (!file.isFile()) return new JSONObject();
+            byte[] bytes;
+            try (InputStream input = new FileInputStream(file);
+                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = input.read(buffer)) >= 0) output.write(buffer, 0, count);
+                bytes = output.toByteArray();
+            }
+            JSONObject document = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            JSONObject totals = document.optJSONObject("efforts");
+            if (totals == null) totals = document;
+            JSONObject averages = new JSONObject();
+            String[] efforts = {"auto", "low", "medium", "high", "xhigh"};
+            for (String effort : efforts) {
+                JSONObject total = totals.optJSONObject(effort);
+                JSONObject average = new JSONObject();
+                long turns = total == null ? 0 : total.optLong("turns", 0);
+                long input = total == null ? 0 : total.optLong(
+                    "cache_observed_input_tokens",
+                    total.optLong("total_input_tokens", 0)
+                );
+                long cached = total == null ? 0 : total.optLong("total_cached_input_tokens", 0);
+                long tokens = total == null ? 0 : total.optLong("total_tokens", 0);
+                long duration = total == null ? 0 : total.optLong("total_duration_ms", 0);
+                long cacheTurns = total == null ? 0 : total.optLong("cache_turns", 0);
+                average.put("turns", turns);
+                average.put("cache_available", cacheTurns > 0 && input > 0);
+                if (cacheTurns > 0 && input > 0) {
+                    average.put("cache_hit_rate", Math.min(1.0d, (double) cached / input));
+                }
+                if (turns > 0) {
+                    average.put("average_duration_ms", duration / turns);
+                    average.put("average_total_tokens", tokens / turns);
+                }
+                averages.put(effort, average);
+            }
+            return averages;
+        } catch (Exception ignored) {
+            return new JSONObject();
+        }
+    }
+
+    private static String isoUtcNow() {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(new Date());
+    }
 
     /** 检查更新：进入二级页面（正式/测试通道），页面内发起下载与安装。 */
     private void checkUpdate() {
         openCoomiRoute("#/updates");
     }
 
-    /** 进入控制台时静默检查一次：有新版本则在「检查更新」旁亮红点提示。 */
+    /** 每次应用启动进入控制台时检查一次；发现新版时展示版本与更新内容。 */
     private void checkUpdateSilently() {
-        UpdateChecker.checkSilent(this, (hasUpdate, version, notes, error) -> {
-            if (hasUpdate) {
-                mUpdateDot.setVisibility(View.VISIBLE);
-                mCheckUpdateDesc.setText("发现新版本 " + version + "，点击更新");
-            }
-        });
+        if (mUpdateCheckStarted) return;
+        mUpdateCheckStarted = true;
+        UpdateChecker.checkDetails(this, (info, error) -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || info == null || !info.hasUpdate(this)) return;
+            mUpdateDot.setVisibility(View.VISIBLE);
+            mCheckUpdateDesc.setText("发现新版本 " + info.version + "，点击更新");
+            showStartupUpdateDialog(info);
+        }));
+    }
+
+    private void showStartupUpdateDialog(UpdateChecker.UpdateInfo info) {
+        if (mUpdateDialog != null && mUpdateDialog.isShowing()) return;
+        StringBuilder message = new StringBuilder();
+        message.append("当前版本：").append(BuildConfig.VERSION_NAME)
+            .append("\n新版本：").append(info.version);
+        if (info.publishedAt != null && !info.publishedAt.trim().isEmpty()) {
+            message.append("\n发布时间：").append(info.publishedAt.trim());
+        }
+        if (info.size > 0L) {
+            message.append("\n安装包：")
+                .append(String.format(Locale.US, "%.1f MB", info.size / 1024d / 1024d));
+        }
+        if (info.notes != null && !info.notes.trim().isEmpty()) {
+            message.append("\n\n更新内容\n").append(info.notes.trim());
+        }
+        mUpdateDialog = new AlertDialog.Builder(this)
+            .setTitle("发现新版本 " + info.version)
+            .setMessage(message.toString())
+            .setNegativeButton("稍后", null)
+            .setNeutralButton("查看更新", (dialog, which) -> openCoomiRoute("#/updates"))
+            .setPositiveButton("立即更新", (dialog, which) -> {
+                if (info.apkUrl == null || info.apkUrl.trim().isEmpty()) {
+                    Toast.makeText(this, "更新信息缺少下载地址", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                UpdateChecker.downloadAndInstall(this, info.apkUrl, info.version);
+            })
+            .create();
+        mUpdateDialog.setOnDismissListener(dialog -> mUpdateDialog = null);
+        mUpdateDialog.show();
     }
 
 }

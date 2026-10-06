@@ -12,6 +12,10 @@ import { useSessionsStore } from '@/stores/sessions'
 import { gitLog, gitStatus, type CommitInfo } from '@/bridge/git'
 import type { SessionMeta } from '@/stores/sessions'
 import { useRouter } from 'vue-router'
+import { pushTrace, setControlModeActive } from '@/bridge/controlFloat'
+import { MorphIcon } from 'morphicons/vue'
+import { gsap, prefersReducedMotion } from '@/composables/useGsap'
+import { Menu, ChevronUp, Plus, X } from 'lucide'
 import CoomiIcon from './CoomiIcon.vue'
 import AttachmentStrip from './AttachmentStrip.vue'
 import { normalizeAttachments, type ChatAttachment } from '@/utils/attachments'
@@ -43,19 +47,79 @@ const SLASH_COMMANDS = [
 const text = ref('')
 const attachments = ref<ChatAttachment[]>([])
 const textarea = ref<HTMLTextAreaElement | null>(null)
+const controlText = ref('')
+const controlInput = ref<HTMLTextAreaElement | null>(null)
+function toggleModelForControl() { /* 复用顶栏模型选择 */ (window as any).dispatchEvent(new Event('coomi:open-model-picker')) }
+function sendControl() {
+  const t = controlText.value.trim()
+  if (!t) return
+  controlText.value = ''
+  const bridge = nativeBridge()
+  if (!accessibilityReady.value && !overlayReady.value) {
+    controlThinking.value = '还没有屏幕操控权限，请先点上方「开启无障碍」'
+    return
+  }
+  controlThinking.value = `已发送：${t}`
+  pushFloat('控制模式 · 正在发送', t)
+  if (bridge?.controlSendText) {
+    try { bridge.controlSendText(t) } catch { /* 原生桥不可用时保持提示 */ }
+  }
+}
+const sendButton = ref<HTMLButtonElement | null>(null)
 const quickOpen = ref(false)
 const lifeStatsOpen = ref(false)
 const transferText = ref('')
 const transferProgress = ref(0)
+
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
 
 const canSend = computed(() => text.value.trim().length > 0 || attachments.value.length > 0)
+
 const isJumpIn = computed(() => session.isBusy && canSend.value)
 const showStop = computed(() => session.isBusy && !canSend.value)
+
+/**
+ * 底部模式按钮溢出折叠。
+ *
+ * 其他机型上「计划 / 权限 / 超载 / 控制」一排按钮可能超宽 → 折叠成三横杠，
+ * 点击后向上展开（Morphicons 把三横杠变形成向上箭头 + 面板上升）。
+ */
+const barOpen = ref(false)
+const barIcon = ref(Menu)
+const quickIcon = computed(() => quickOpen.value ? X : Plus)
+function toggleBar() {
+  barOpen.value = !barOpen.value
+  barIcon.value = barOpen.value ? ChevronUp : Menu
+}
+
+/** 模式面板：原大小按钮从模式键位置模糊分裂展开（stagger），收回时聚拢消失。 */
+const modePopEl = ref<HTMLElement | null>(null)
+watch(barOpen, (open) => {
+  const panel = modePopEl.value
+  if (!panel) return
+  const buttons = Array.from(panel.querySelectorAll<HTMLElement>('.pill'))
+  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  if (open) {
+    gsap.killTweensOf(buttons)
+    gsap.fromTo(buttons,
+      { opacity: 0, scale: 0.6, filter: 'blur(6px)', y: 10 },
+      {
+        opacity: 1, scale: 1, filter: 'blur(0px)', y: 0,
+        duration: 0.32, ease: 'power2.out', stagger: 0.045,
+      },
+    )
+  } else {
+    gsap.killTweensOf(buttons)
+    gsap.to(buttons, {
+      opacity: 0, scale: 0.6, filter: 'blur(6px)', y: 8,
+      duration: 0.2, ease: 'power2.in', stagger: 0.025,
+    })
+  }
+})
 const modeLabel = computed(() => PERMISSION_MODES.find(m => m.mode === config.permissionMode)?.label ?? '')
 const providerReady = computed(() => config.providers.some(provider => (
   provider.id === config.activeId
-  && (provider.models.length > 0 || Boolean(provider.model?.trim()))
+  && provider.models.length > 0
   && Boolean(provider.baseUrl)
 )))
 
@@ -77,9 +141,11 @@ async function submit() {
       return
     }
   }
+
   session.sendMessage(text.value, attachments.value)
   text.value = ''
   attachments.value = []
+
   await nextTick()
   autoGrow()
 }
@@ -102,7 +168,15 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit() }
 }
 
-function cycleMode() { session.setPermissionMode(config.cyclePermissionMode()) }
+const modeNotice = ref('')
+let modeNoticeTimer: ReturnType<typeof setTimeout> | null = null
+function flashModeNotice(text: string) {
+  modeNotice.value = text
+  if (modeNoticeTimer) clearTimeout(modeNoticeTimer)
+  modeNoticeTimer = setTimeout(() => { modeNotice.value = ''; modeNoticeTimer = null }, 2600)
+}
+
+  function cycleMode() { session.setPermissionMode(config.cyclePermissionMode()) }
 function cycleSessionMode() {
   const next = session.mode === 'agent' ? 'team' : session.mode === 'team' ? 'agent' : 'agent'
   session.setSessionMode(next)
@@ -235,7 +309,125 @@ function pickAt(item: AtItem) {
 }
 
 function toggleQuick() { quickOpen.value = !quickOpen.value }
-function toggleLifeStats() { lifeStatsOpen.value = !lifeStatsOpen.value }
+const controlMode = ref(false)
+const riskConfirm = ref(false)
+const controlThinking = ref('')
+const controlChatPage = ref(false)
+/** 控制模式的两个系统权限：无障碍（操控屏幕）+ 悬浮窗（桌面悬浮层）。 */
+const accessibilityReady = ref(false)
+const overlayReady = ref(false)
+const floatRunning = ref(false)
+let controlPageTimer: ReturnType<typeof setInterval> | null = null
+let controlChatTimer: ReturnType<typeof setTimeout> | null = null
+
+function nativeBridge(): any {
+  return (window as any).CoomiAndroid
+}
+
+/** 同步三个系统状态：无障碍开关、悬浮窗权限、悬浮层是否在跑。 */
+function refreshControlPermissions() {
+  const bridge = nativeBridge()
+  if (!bridge) return
+  try {
+    if (typeof bridge.isAccessibilityEnabled === 'function') accessibilityReady.value = !!bridge.isAccessibilityEnabled()
+    if (typeof bridge.isOverlayGranted === 'function') overlayReady.value = !!bridge.isOverlayGranted()
+    if (typeof bridge.isControlFloatRunning === 'function') floatRunning.value = !!bridge.isControlFloatRunning()
+  } catch { /* 桥不可用时保持原状态 */ }
+}
+
+/** 申请无障碍权限（系统设置页需用户手动开启，回到应用后轮询感知）。 */
+function requestAccessibility() {
+  const bridge = nativeBridge()
+  if (bridge && typeof bridge.requestAccessibilityPermission === 'function') {
+    bridge.requestAccessibilityPermission()
+  }
+}
+
+/** 申请悬浮窗权限。 */
+function requestOverlay() {
+  const bridge = nativeBridge()
+  if (bridge && typeof bridge.requestOverlayPermission === 'function') {
+    bridge.requestOverlayPermission()
+  }
+}
+
+/** 把当前动作与思考内容推到桌面悬浮层。 */
+function pushFloat(title: string, body: string) {
+  pushTrace(title, body)
+}
+
+function toggleControlMode() {
+  if (controlMode.value) { exitControlMode(); return }
+  // 风险提示用应用内浮层（WebView 中 window.confirm 会被吞）
+  riskConfirm.value = true
+}
+function confirmControlMode() {
+  riskConfirm.value = false
+  controlMode.value = true
+  controlThinking.value = ''
+  // 打开转发开关：之后引擎侧的思考 / 工具调用会自动同步到悬浮层。
+  setControlModeActive(true)
+  refreshControlPermissions()
+  // 无障碍是控制模式的主力：没有它就只能退回 Shizuku 的坐标点按。
+  if (!accessibilityReady.value) requestAccessibility()
+  if (!overlayReady.value) requestOverlay()
+  window.dispatchEvent(new CustomEvent('coomi:control-mode', { detail: { enabled: true } }))
+  // 待机检测：每 5s 尝试原生桥，检测进入微信/QQ 聊天页，同时刷新权限与悬浮层状态
+  controlPageTimer = setInterval(() => {
+    const bridge = nativeBridge()
+    refreshControlPermissions()
+    if (bridge && typeof bridge.controlForegroundApp === 'function') {
+      try {
+        const app = bridge.controlForegroundApp()
+        controlChatPage.value = /weixin|wechat|qq\.com|tencent|mobileqq/i.test(String(app || ''))
+      } catch { controlChatPage.value = false }
+    }
+  }, 5000)
+}
+function cancelControlMode() { riskConfirm.value = false }
+function exitControlMode() {
+  controlMode.value = false
+  controlChatPage.value = false
+  controlThinking.value = ''
+  setControlModeActive(false)
+  const bridge = nativeBridge()
+  if (bridge && typeof bridge.stopControlFloat === 'function') {
+    try { bridge.stopControlFloat() } catch { /* 忽略 */ }
+  }
+  floatRunning.value = false
+  if (controlPageTimer) { clearInterval(controlPageTimer); controlPageTimer = null }
+  if (controlChatTimer) { clearTimeout(controlChatTimer); controlChatTimer = null }
+  window.dispatchEvent(new CustomEvent('coomi:control-mode', { detail: { enabled: false } }))
+}
+/** 待机检测到聊天页 → 用户点「对话」：把要回复的内容注入输入框并聚焦。 */
+function startControlReply() {
+  controlChatPage.value = false
+  controlThinking.value = '检测到聊天页面，请在下方输入回复内容'
+  pushFloat('控制模式 · 已进入聊天页', '可以输入回复内容，点发送即可填入并送出')
+  nextTick(() => controlInput.value?.focus())
+}
+
+/**
+ * 控制模式：无障碍就绪后自动把桌面悬浮层拉起来。
+ * 悬浮层负责在用户切到微信/QQ 之后继续显示「正在调用哪个工具 / 思考到哪一步」，
+ * 所以它必须独立于应用界面存在。
+ */
+watch([accessibilityReady, overlayReady, controlMode], ([accessible, overlay, active]) => {
+  const bridge = nativeBridge()
+  if (!active) return
+  if (!accessible && !overlay) return
+  if (!bridge?.startControlFloat) return
+  try { bridge.startControlFloat() } catch { /* 忽略 */ }
+  pushFloat('控制模式已就绪', accessible ? '无障碍已开启，可以直接操作屏幕' : '悬浮窗已开启，屏幕操控仍需要无障碍')
+})
+
+/** 思考/动作变化时同步到悬浮层，让切到别的 App 后也能看到进度。 */
+watch(controlThinking, value => {
+  if (!controlMode.value) return
+  pushFloat('控制模式 · 执行中', value || '')
+})
+
+
 
 function importFiles() { quickOpen.value = false; window.CoomiAndroid?.importFiles?.() }
 function authorizeFolder() { quickOpen.value = false; window.CoomiAndroid?.authorizeFolder?.() }
@@ -251,10 +443,12 @@ function onFilesImported(event: Event) {
   transferText.value = paths.length ? `已导入 ${paths.length} 个文件` : '文件导入完成'
   transferProgress.value = 100
   if (detail.requestId) session.completeFileTransfer(detail.requestId, paths)
+
   else if (paths.length) attachments.value = normalizeAttachments([
     ...attachments.value.map(item => item.path),
     ...paths,
   ])
+
   setTimeout(() => { transferText.value = ''; transferProgress.value = 0 }, 2600)
 }
 function removeAttachment(path: string) {
@@ -355,6 +549,7 @@ watch(attachments, () => {
     <div v-if="transferText" class="transfer">
       <span>{{ transferText }}</span><progress :value="transferProgress" max="100" />
     </div>
+
     <div v-if="session.collaboration.active" class="collaboration-status">
       <CoomiIcon name="subtask" :size="14" />
       <span>协作第 {{ session.collaboration.cycle }} 轮 · {{ session.collaboration.phase === 'reviewer' ? '审查模型' : '改码模型' }}{{ session.collaboration.status === 'running' ? '处理中' : session.collaboration.status }}</span>
@@ -383,6 +578,7 @@ watch(attachments, () => {
           </span>
           <span class="effort-label">{{ item.label }}</span>
         </button>
+
       </div>
       <p class="qhead">指令</p>
       <div v-if="hasNative" class="file-actions">
@@ -397,9 +593,6 @@ watch(attachments, () => {
     </div>
 
     <div class="field" :class="{ busy: session.isBusy }">
-      <button v-if="session.mode === 'life'" class="life-orbit" aria-label="查看数字生命统计" title="查看生命统计" @click="toggleLifeStats">
-        <i class="orbit outer" /><i class="orbit inner" />
-      </button>
       <div v-if="lifeStatsOpen" class="life-stats-card">
         <header><span>生命状态</span><button aria-label="关闭" @click="lifeStatsOpen = false"><CoomiIcon name="close" :size="14" /></button></header>
         <div class="life-waveform" aria-label="数字生命动态状态波形">
@@ -415,6 +608,7 @@ watch(attachments, () => {
         </div>
         <div class="life-stats-grid"><span>当前模式<strong>数字生命</strong></span><span>推理档位<strong>{{ REASONING_EFFORTS.find(i => i.value === config.reasoningEffort)?.label }}</strong></span><span>会话状态<strong>{{ session.isBusy ? '运行中' : '待命' }}</strong></span><span>动态流<strong>已连接</strong></span></div>
       </div>
+
       <div class="composer-content">
         <AttachmentStrip v-if="attachments.length" class="composer-attachments" :items="attachments" removable @remove="removeAttachment" />
         <div class="input-clip">
@@ -432,6 +626,10 @@ watch(attachments, () => {
 
       <div class="bar">
         <div class="bar-left">
+          <button class="pill bar-toggle" :class="{ on: barOpen }" @click="toggleBar()" aria-label="更多模式" :aria-expanded="barOpen">
+            <CoomiIcon name="chevronUp" :size="14" />
+            <span>模式</span>
+          </button>
           <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode()">
             <CoomiIcon name="target" :size="14" />
             <span>计划</span>
@@ -451,6 +649,7 @@ watch(attachments, () => {
             <CoomiIcon name="plusCircle" :size="21" />
           </button>
           <button
+
             class="send"
             :class="{ jump: isJumpIn, stop: showStop }"
             :disabled="!canSend && !session.isBusy"
@@ -462,13 +661,120 @@ watch(attachments, () => {
             <CoomiIcon v-else name="arrowUp" :size="18" />
           </button>
         </div>
+
+                <Transition name="mode-pop">
+          <div v-if="barOpen" ref="modePopEl" class="mode-pop" role="group" aria-label="模式选项">
+            <button class="pill" :class="{ on: config.planMode }" @click="session.togglePlanMode()">
+              <CoomiIcon name="target" :size="14" />
+              <span>计划</span>
+            </button>
+            <button class="pill" :class="{ on: config.permissionMode === 'auto', 'warn-on': config.permissionMode === 'full' }" @click="cycleMode()">
+              <CoomiIcon name="shield" :size="14" />
+              <span>{{ modeLabel }}</span>
+            </button>
+            <button class="pill control-pill" :class="{ on: controlMode }" @click="toggleControlMode()">
+              <CoomiIcon name="cursor" :size="14" />
+              <span>控制</span>
+            </button>
+          </div>
+        </Transition>
       </div>
     </div>
+
+
+    <!-- 控制模式风险确认浮层 -->
+    <div v-if="riskConfirm" class="risk-mask" @click.self="cancelControlMode">
+      <div class="risk-dialog">
+        <p class="risk-title">控制模式</p>
+        <p class="risk-text">该功能风险极高，如出现问题软件作者不负责，且需要多模态模型与大量 token 消耗。确认后需要开启「无障碍」与「悬浮窗」权限：无障碍用于代替你点击、输入、发送，悬浮窗用于在你切换到别的 App 后继续显示执行进度（缩成小球，不挡屏幕）。</p>
+        <div class="risk-actions">
+          <button class="btn ghost" @click="cancelControlMode">取消</button>
+          <button class="btn danger" @click="confirmControlMode">确认进入</button>
+        </div>
+      </div>
+    </div>
+    <!-- 控制模式浮窗：权限状态 + 指令输入 -->
+    <div v-if="controlMode" class="control-float">
+      <div class="control-bar">
+        <span class="control-label">控制模式</span>
+        <button class="exit-control" @click="exitControlMode">退出</button>
+      </div>
+      <div class="ctrl-perms">
+        <button class="perm-chip" :class="{ ok: accessibilityReady }" @click="accessibilityReady ? undefined : requestAccessibility()">
+          {{ accessibilityReady ? '✓ 无障碍已开启' : '开启无障碍' }}
+        </button>
+        <button class="perm-chip" :class="{ ok: overlayReady }" @click="overlayReady ? undefined : requestOverlay()">
+          {{ overlayReady ? '✓ 悬浮窗已开启' : '开启悬浮窗' }}
+        </button>
+        <span v-if="floatRunning" class="perm-note">悬浮层已悬浮在桌面</span>
+      </div>
+      <textarea
+        ref="controlInput"
+        v-model="controlText"
+        class="control-input"
+        rows="2"
+        placeholder="输入指令或回复内容…（会自动填入当前聊天框并发送）"
+        @keydown.enter.prevent="sendControl"
+      />
+      <p v-if="controlThinking" class="control-thinking">{{ controlThinking }}</p>
+      <button v-if="controlChatPage" class="control-chat-btn" type="button" @click="startControlReply">对话</button>
+    </div>
+    <p v-if="modeNotice" class="mode-notice">{{ modeNotice }}</p>
   </div>
 </template>
 
 <style scoped>
+
 .composer { position: relative; flex-shrink: 0; padding: 6px 12px calc(var(--safe-bottom) + 10px); background: var(--bg); }
+
+.composer { position: relative; padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); }
+.control-float {
+  position: fixed; left: 10px; right: 10px; bottom: calc(var(--safe-bottom) + 78px); z-index: 80;
+  padding: 10px 12px; border: 1px solid var(--blue-border); border-radius: var(--r-card);
+  background: var(--bg); box-shadow: var(--shadow-2);
+  display: flex; flex-direction: column; gap: 8px;
+  animation: control-pop .2s cubic-bezier(.2,.9,.3,1.15) both;
+}
+@keyframes control-pop { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+.risk-mask { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 28px; }
+.risk-dialog { width: 100%; max-width: 320px; padding: 16px 15px; border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-2); display: flex; flex-direction: column; gap: 10px; }
+.risk-title { margin: 0; font-size: 15px; font-weight: 750; color: var(--danger); }
+.risk-text { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
+.risk-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.risk-actions .btn { min-height: 36px; padding: 0 14px; border-radius: 8px; font-size: 13px; }
+.risk-actions .btn.ghost { background: var(--fill); color: var(--text-2); }
+.risk-actions .btn.danger { background: var(--danger); color: #fff; }
+.mode-notice {
+  position: fixed; left: 50%; top: calc(var(--safe-top) + 10px); z-index: 95;
+  transform: translateX(-50%); max-width: 86vw; padding: 8px 14px;
+  border-radius: var(--r-pill); background: var(--orange-soft); color: var(--orange);
+  font-size: 12.5px; font-weight: 650; text-align: center;
+  box-shadow: var(--shadow-2); animation: control-pop .2s ease both;
+}
+.control-pill.on { background: var(--danger-soft); color: var(--danger); }
+.control-bar { display: flex; align-items: center; gap: 8px; }
+.control-bar .model-pick { margin-right: auto; }
+.ctrl-perms { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.perm-chip {
+  height: 30px; padding: 0 11px; border-radius: var(--r-pill);
+  border: 1px solid var(--orange-border, var(--border));
+  background: none; color: var(--orange, var(--text-2));
+  font-size: 12.5px; font-weight: 600;
+}
+.perm-chip.ok { border-color: var(--border); color: var(--ok); background: var(--fill); }
+.perm-note { font-size: 11.5px; color: var(--text-3); }
+.control-label { font-size: 12.5px; color: var(--text-2); font-weight: 650; }
+.exit-control { height: 30px; padding: 0 11px; border-radius: var(--r-pill); background: var(--fill); color: var(--text-2); font-size: 12.5px; }
+.control-input {
+  width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 16px; background: var(--fill); color: var(--text);
+  font: inherit; font-size: 15.5px; outline: none; resize: none;
+}
+.control-thinking { font-size: 12px; color: var(--blue); line-height: 1.5; }
+.control-chat-btn {
+  align-self: flex-start; height: 34px; padding: 0 16px; border-radius: var(--r-pill);
+  background: var(--blue); color: #fff; font-size: 13px; font-weight: 700;
+}
 .edit-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: 0 2px 8px; padding: 8px 14px;
@@ -481,11 +787,13 @@ watch(attachments, () => {
 .transfer { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 11.5px; color: var(--text-2); }
 .transfer span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfer progress { width: 76px; height: 4px; accent-color: var(--blue); }
+
 .collaboration-status {
   display:flex; align-items:center; gap:6px; margin:0 2px 8px; padding:7px 12px;
   border:1px solid color-mix(in srgb, var(--blue) 35%, var(--border)); border-radius:13px;
   background:var(--blue-soft); color:var(--blue); font-size:11.5px;
 }
+
 
 .field {
   container-type: inline-size;
@@ -538,13 +846,16 @@ watch(attachments, () => {
 :global(html[data-coomi-floating='true'] .composer .composer-content) { max-height: min(132px, 20vh); }
 .composer-attachments { padding: 5px 5px 2px 3px; }
 
+
 .input-clip { overflow: visible; }
+
 .input {
   display: block; width: 100%; overflow: hidden;
   padding: 9px 10px 5px 6px; border: 0; background: none; outline: none; resize: none;
   font: inherit; font-size: 16px; line-height: 1.5; color: var(--text);
 }
 .input::placeholder { color: var(--text-3); }
+
 
 /* 按输入框容器宽度统一缩放文字、图标、按钮和间距，小窗也保持完整单行。 */
 .bar { display: flex; flex-wrap: nowrap; align-items: center; gap: .4em; padding: 3px 0 0; font-size: clamp(8px, 3.6cqw, 13px); }
@@ -561,6 +872,7 @@ watch(attachments, () => {
 
 .act {
   display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px;
+
   border: 0; border-radius: 50%; background: none; color: var(--text-2);
   transition: background .15s, transform .07s;
 }
@@ -568,7 +880,9 @@ watch(attachments, () => {
 
 .send {
   display: grid; place-items: center; flex-shrink: 0;
+
   width: 38px; height: 38px;
+
   border: 0; border-radius: 50%;
   background: linear-gradient(135deg, var(--blue), color-mix(in srgb, var(--blue) 82%, var(--blue-press)));
   color: #fff;
@@ -667,7 +981,9 @@ watch(attachments, () => {
   88% { opacity:0; transform:translate3d(var(--drift-x),var(--particle-rise),0) scale(1.08); }
 }
 @keyframes life-wave-breathe { 0% { transform:translateX(-1.5px) scaleY(.9); opacity:.72; } 50% { transform:translateX(0) scaleY(1.04); opacity:1; } 100% { transform:translateX(1.5px) scaleY(.94); opacity:.8; } }
+
 @media (prefers-reduced-motion: reduce) { .wave { animation-duration:8s; } .effort-particle { animation:none; opacity:.24; } }
+
 .qhead { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-3); }
 .file-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
 .qchip.file { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); }

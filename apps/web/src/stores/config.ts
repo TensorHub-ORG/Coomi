@@ -199,6 +199,12 @@ export const useConfigStore = defineStore('config', () => {
   const savedPermission = localStorage.getItem('coomi.permissionMode') as PermissionMode | null
   const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
   const planMode = ref(false)
+  /** 发送液滴/按钮形变动效开关（Comax 引入；默认关，跟随系统 reduced-motion 时自动失效）。 */
+  const sendMorphAnimation = ref(localStorage.getItem('coomi.sendMorphAnimation') === '1')
+  function setSendMorphAnimation(value: boolean) {
+    sendMorphAnimation.value = value
+    try { localStorage.setItem('coomi.sendMorphAnimation', value ? '1' : '0') } catch { /* ignore */ }
+  }
   const themeMode = ref<ThemeMode>(readThemeMode())
   const savedEffort = localStorage.getItem('coomi.reasoningEffort') as ReasoningEffort | null
   const reasoningEffort = ref<ReasoningEffort>(REASONING_EFFORTS.some(item => item.value === savedEffort) ? savedEffort! : 'auto')
@@ -674,7 +680,7 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   return {
-    permissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, providers, activeId, loading, usingMock, lastError, subAgentSettings, collaborationSettings,
+    permissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, providers, activeId, loading, usingMock, lastError, subAgentSettings, collaborationSettings, sendMorphAnimation, setSendMorphAnimation,
     currentProviderId, currentModel, currentProvider, mergedProviders,
     fetchProviders, selectModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, togglePlanMode,
     toggleGlobalMemory, syncGlobalMemoryFromEngine, setDigitalLifeEnabled, syncDigitalLifeEnabled, fetchCustomPrompt, saveCustomPrompt,

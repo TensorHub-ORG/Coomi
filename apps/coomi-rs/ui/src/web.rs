@@ -2338,6 +2338,9 @@ async fn analyze_tool_failures(
         ],
         tools: Vec::new(),
         reasoning_effort: Some("low".to_owned()),
+                session_id: None,
+                search_enabled: false,
+                thinking_enabled: false,
     };
     let response = tokio::time::timeout(Duration::from_secs(180), provider.complete(request))
         .await
@@ -2449,6 +2452,9 @@ async fn story_generate_post(
         ],
         tools: Vec::new(),
         reasoning_effort: Some("low".to_owned()),
+                session_id: None,
+                search_enabled: false,
+                thinking_enabled: false,
     };
     let response = tokio::time::timeout(Duration::from_secs(300), provider.complete(request))
         .await
@@ -4341,6 +4347,9 @@ async fn distill_experience(
         ],
         tools: Vec::new(),
         reasoning_effort: Some("low".to_owned()),
+                session_id: None,
+                search_enabled: false,
+                thinking_enabled: false,
     };
     let response = tokio::time::timeout(Duration::from_secs(120), provider.complete(request))
         .await

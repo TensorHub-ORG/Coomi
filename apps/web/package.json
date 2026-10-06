@@ -11,7 +11,10 @@
     "test": "node --experimental-strip-types --test tests/marketSearch.test.ts tests/chatTimeline.test.ts tests/studio.test.ts tests/promptLibrary.test.ts tests/attachments.test.ts tests/quickCommands.test.ts tests/auxiliarySessions.test.mjs tests/promptsStore.test.mjs"
   },
   "dependencies": {
+    "gsap": "^3.13.0",
+    "lucide": "^1.48.0",
     "marked": "^12.0.2",
+    "morphicons": "^1.7.1",
     "pinia": "^2.1.7",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0",

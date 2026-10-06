@@ -136,6 +136,7 @@ pub struct CoreTools {
     memory: Option<Arc<MemoryManager>>,
     hooks: Option<Arc<HookRunner>>,
     parent_history: Vec<coomi_engine::ChatMessage>,
+    shell_only: bool,
 }
 
 impl CoreTools {
@@ -156,6 +157,7 @@ impl CoreTools {
             memory: None,
             hooks: None,
             parent_history: Vec::new(),
+            shell_only: false,
         }
     }
 
@@ -166,6 +168,11 @@ impl CoreTools {
     ) -> Self {
         self.agent_scheduler = Some(scheduler);
         self.parent_history = parent_history;
+        self
+    }
+
+    pub fn shell_only(mut self) -> Self {
+        self.shell_only = true;
         self
     }
 
@@ -232,6 +239,8 @@ impl CoreTools {
         self.policy = self.policy.clone().with_allowed_roots([
             home.join("runtime-v2").join("home"),
             home.join("runtime-v2").join("tmp"),
+            std::path::PathBuf::from("/storage/emulated/0"),
+            std::path::PathBuf::from("/sdcard"),
         ]);
         self.path_map = RuntimePathMap::new(self.cwd.clone())
             .with_runtime_root(home.join("runtime-v2"))
@@ -271,6 +280,14 @@ impl CoreTools {
 
     pub fn policy(&self) -> &SecurityPolicy {
         &self.policy
+    }
+
+    /// 供内置浏览器页直接调用 fetch 工具（只读，无需审批）。
+    pub async fn call_for_browser(&mut self, call: &ToolCall) -> ToolResult {
+        match Self::canonical_tool_name(call.name.as_str()) {
+            "fetch" => self.fetch_url(&call.arguments).await,
+            other => ToolResult::error(format!("browser only supports fetch, got {other}")),
+        }
     }
 
     async fn dispatch(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
@@ -313,6 +330,10 @@ impl CoreTools {
             "save_workflow" => self.save_workflow(&call.arguments),
             "delete_workflow" => self.delete_workflow(&call.arguments),
             "runtime_doctor" => self.runtime_doctor().await,
+            "local_model" => self.local_model(&call.arguments).await,
+            "local_ocr" => self.local_ocr(&call.arguments).await,
+            "local_tts" => self.local_tts(&call.arguments).await,
+            "ui_automation" => self.ui_automation(&call.arguments).await,
             "memory_list" => self.memory_list(),
             "memory_read" => self.memory_read(&call.arguments),
             "memory_search" => self.memory_search(&call.arguments),
@@ -1269,6 +1290,234 @@ impl CoreTools {
         }
     }
 
+    /// 本地模型推理（Operit 集成：本地 llama.cpp / MNN / onnx 模型）。
+    /// 优先调用 shell 里已安装的 llama.cpp/ollama；没有则返回可用性说明。
+    async fn local_model(&self, arguments: &Value) -> ToolResult {
+        let Some(prompt) = string_arg(arguments, "prompt").or_else(|| string_arg(arguments, "text")) else {
+            return ToolResult::error("missing string argument: prompt");
+        };
+        let model = string_arg(arguments, "model").unwrap_or("").to_owned();
+        // 探测 llama-cli / llama-server / ollama
+        let candidates = ["ollama", "llama-cli", "llama-server", "llama.cpp"];
+        let mut found = None;
+        for name in candidates {
+            if self.command_exists(name) { found = Some(name.to_string()); break; }
+        }
+        match found {
+            Some(tool) => {
+                // 有 ollama 就用本地 API，无则调用 llama-cli
+                if tool == "ollama" {
+                    // ollama run <model> <prompt>
+                    let model = if model.is_empty() { "llama3.2".to_string() } else { model };
+                    let output = self.run_simple_cmd(&format!("ollama run {} {}", model, Self::shell_escape(prompt)));
+                    ToolResult::success(format!("[local_model::ollama] {output}"))
+                } else {
+                    let model = if model.is_empty() { "model.gguf".to_string() } else { model };
+                    let output = self.run_simple_cmd(&format!("llama-cli -m {} -p {}", Self::shell_escape(&model), Self::shell_escape(prompt)));
+                    ToolResult::success(format!("[local_model::llama] {output}"))
+                }
+            }
+            None => ToolResult::success(
+                "本地模型工具可用性：本机未安装 ollama/llama-cli。可通过 Coomi 终端安装 ollama 后使用 local_model 推理。"
+            ),
+        }
+    }
+
+    /// 本地 OCR（Operit 集成：调用系统或 tesseract）。
+    async fn local_ocr(&self, arguments: &Value) -> ToolResult {
+        let Some(path) = string_arg(arguments, "path") else {
+            return ToolResult::error("missing string argument: path");
+        };
+        if !std::path::Path::new(path).is_file() {
+            return ToolResult::error(format!("file not found: {path}"));
+        }
+        if self.command_exists("tesseract") {
+            let output = self.run_simple_cmd(&format!("tesseract {} stdout -l chi_sim+eng", Self::shell_escape(path)));
+            ToolResult::success(output)
+        } else if self.command_exists("python3") {
+            let output = self.run_simple_cmd(&format!("python3 -c \"import pytesseract,sys;print(pytesseract.image_to_string(sys.argv[1]))\" {}", Self::shell_escape(path)));
+            ToolResult::success(output)
+        } else {
+            ToolResult::success("本地 OCR 不可用：未安装 tesseract 或 pytesseract。可在 Coomi 终端安装：apt install tesseract-ocr tesseract-ocr-chi-sim")
+        }
+    }
+
+    /// 本地 TTS（Operit 集成：调用系统 espeak / edge-tts）。
+    async fn local_tts(&self, arguments: &Value) -> ToolResult {
+        let Some(text) = string_arg(arguments, "text") else {
+            return ToolResult::error("missing string argument: text");
+        };
+        if self.command_exists("espeak") {
+            let output = self.run_simple_cmd(&format!("espeak {}", Self::shell_escape(text)));
+            ToolResult::success(format!("[local_tts::espeak] {output}"))
+        } else if self.command_exists("edge-tts") {
+            let output = self.run_simple_cmd(&format!("edge-tts --text {} --write-media /tmp/coomi-tts.mp3", Self::shell_escape(text)));
+            ToolResult::success(format!("[local_tts::edge-tts] 已生成 /tmp/coomi-tts.mp3\n{output}"))
+        } else {
+            ToolResult::success("本地 TTS 不可用：未安装 espeak/edge-tts。可在 Coomi 终端安装：apt install espeak-ng")
+        }
+    }
+
+    /// 控制模式的命令队列目录。
+    ///
+    /// Android 侧的无障碍服务在应用进程里轮询这个目录，执行完把结果写成 `<id>.result.json`。
+    /// 用文件而不是直接调 Java：引擎跑在独立进程，拿不到无障碍 API；而 WebView 的 JS 桥
+    /// 只有前台界面在的时候才存在 —— 控制模式恰恰是要在「用户已经切到别的 App」时工作。
+    fn control_queue_dir(&self) -> Option<PathBuf> {
+        let home = self.config_home.as_ref()?;
+        Some(home.join("control").join("queue"))
+    }
+
+    /// 通过无障碍服务执行一个控制命令，返回 (是否成功, 输出)。
+    fn run_control_command(&self, command: serde_json::Value, timeout: Duration) -> (bool, String) {
+        let Some(dir) = self.control_queue_dir() else {
+            return (false, "控制模式不可用：未找到 Coomi 配置目录".to_string());
+        };
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            return (false, format!("无法创建控制命令目录: {error}"));
+        }
+        // 时间戳前缀保证文件名可排序，无障碍服务会按顺序执行。
+        // 用 SystemTime 而不是 chrono：tools crate 在 Android target 下没有 chrono 依赖。
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or(0);
+        let id = format!(
+            "{stamp:013}-{}",
+            &uuid::Uuid::new_v4().to_string()[..8]
+        );
+        let command_path = dir.join(format!("{id}.cmd.json"));
+        let result_path = dir.join(format!("{id}.result.json"));
+        if let Err(error) = std::fs::write(&command_path, command.to_string()) {
+            return (false, format!("写入控制命令失败: {error}"));
+        }
+
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if let Ok(text) = std::fs::read_to_string(&result_path) {
+                let _ = std::fs::remove_file(&result_path);
+                return match serde_json::from_str::<serde_json::Value>(&text) {
+                    Ok(value) => (
+                        value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                        value
+                            .get("output")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                    ),
+                    Err(error) => (false, format!("解析控制结果失败: {error}")),
+                };
+            }
+            std::thread::sleep(Duration::from_millis(60));
+        }
+        let _ = std::fs::remove_file(&command_path);
+        (
+            false,
+            "控制模式无响应：请确认已开启无障碍权限，且控制模式悬浮层已经启动".to_string(),
+        )
+    }
+
+    /// UI 自动化 / 控制模式：优先走无障碍服务（免 adb、无 root），
+    /// 只有在无障碍不可用时才退回 `input` 命令。
+    async fn ui_automation(&self, arguments: &Value) -> ToolResult {
+        let Some(action) = string_arg(arguments, "action") else {
+            return ToolResult::error("missing string argument: action");
+        };
+        let x = arguments.get("x").and_then(Value::as_u64).unwrap_or(0);
+        let y = arguments.get("y").and_then(Value::as_u64).unwrap_or(0);
+        let text = string_arg(arguments, "text").unwrap_or("");
+
+        // ── 无障碍路径：能真正落到界面上，并且能拿到结果 ──
+        let accessibility_command = match action {
+            "tap" => Some(json!({ "action": "tap", "x": x, "y": y })),
+            "swipe" => Some(json!({
+                "action": "swipe",
+                "x1": x,
+                "y1": y,
+                "x2": arguments.get("x2").and_then(Value::as_u64).unwrap_or(x),
+                "y2": arguments.get("y2").and_then(Value::as_u64).unwrap_or(y),
+                "durationMs": arguments.get("durationMs").and_then(Value::as_u64).unwrap_or(300),
+            })),
+            "long_press" => Some(json!({
+                "action": "long_press",
+                "x": x,
+                "y": y,
+                "durationMs": arguments.get("durationMs").and_then(Value::as_u64).unwrap_or(800),
+            })),
+            "text" => Some(json!({ "action": "text", "text": text })),
+            "send" => Some(json!({ "action": "send" })),
+            "fill_and_send" => Some(json!({ "action": "fill_and_send", "text": text })),
+            "click_text" => Some(json!({ "action": "click_text", "text": text })),
+            "global" => Some(json!({
+                "action": "global",
+                "action_name": string_arg(arguments, "name").unwrap_or("back"),
+            })),
+            "foreground" => Some(json!({ "action": "foreground" })),
+            "read_screen" => Some(json!({ "action": "read_screen" })),
+            "input_text" => Some(json!({ "action": "input_text" })),
+            _ => None,
+        };
+        if let Some(command) = accessibility_command {
+            let needs_screen = matches!(action, "tap" | "swipe" | "long_press" | "text"
+                | "send" | "fill_and_send" | "click_text" | "global" | "foreground"
+                | "read_screen" | "input_text");
+            if self.control_queue_dir().is_some() {
+                let (ok, output) = self.run_control_command(command, Duration::from_secs(6));
+                if ok {
+                    return ToolResult::success(format!("[control::{action}] {output}"));
+                }
+                // 无障碍真的超时（服务没开 / 队列没消费）才退回 adb；
+                // 其它错误如实返回，避免在用户毫无感知的情况下反复用 adb 盲点。
+                if needs_screen && output.contains("无响应") {
+                    // 继续往下走 adb 回退
+                } else {
+                    return ToolResult::error(format!("[control::{action}] {output}"));
+                }
+            }
+        }
+
+        // ── 回退路径：原来的 adb input ──
+        let cmd = match action {
+            "tap" => format!("input tap {x} {y}"),
+            "swipe" => format!("input swipe {x} {y} {} {}", arguments.get("x2").and_then(Value::as_u64).unwrap_or(x), arguments.get("y2").and_then(Value::as_u64).unwrap_or(y)),
+            "text" => format!("input text {}", Self::shell_escape(text)),
+            "key" => format!("input keyevent {}", arguments.get("keycode").and_then(Value::as_u64).unwrap_or(4)),
+            "screenshot" => "screencap -p /sdcard/coomi-ui.png".to_string(),
+            other => return ToolResult::error(format!(
+                "unknown ui_automation action: {other}（无障碍服务也未响应，请确认控制模式已开启无障碍权限）"
+            )),
+        };
+        let output = self.run_simple_cmd(&cmd);
+        if output.contains("Permission denied") || output.contains("not found") || output.trim().is_empty() {
+            return ToolResult::error(format!(
+                "[ui_automation::{action}] 执行失败：{output}（请开启控制模式的无障碍权限）"
+            ));
+        }
+        ToolResult::success(format!("[ui_automation::{action}] {output}"))
+    }
+    fn command_exists(&self, name: &str) -> bool {
+        std::process::Command::new("which")
+            .arg(name)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn shell_escape(text: &str) -> String {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
+
+    fn run_simple_cmd(&self, cmd: &str) -> String {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|e| format!("error: {e}"))
+    }
+
     async fn runtime_doctor(&self) -> ToolResult {
         let runtime_home = self
             .path_map
@@ -2199,6 +2448,69 @@ impl ToolRuntime for CoreTools {
                 parameters: json!({"type": "object", "properties": {}, "additionalProperties": false}),
             },
             ToolSpec {
+                name: "local_model".into(),
+                description: "Run a local LLM inference (Operit-style built-in). Uses ollama or llama.cpp when installed; otherwise reports how to install. Arguments: prompt, optional model.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "model": {"type": "string"}
+                    },
+                    "required": ["prompt"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolSpec {
+                name: "local_ocr".into(),
+                description: "Optical character recognition on an image path (Operit-style built-in). Uses tesseract or pytesseract when installed.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolSpec {
+                name: "local_tts".into(),
+                description: "Text-to-speech synthesis (Operit-style built-in). Uses espeak or edge-tts when installed.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolSpec {
+                name: "ui_automation".into(),
+                description: "控制模式：直接操作手机屏幕（需要用户在 App 里开启控制模式的无障碍权限）。\
+                    action=read_screen 读取当前界面上的文字与可点击控件，用来判断下一步该做什么；\
+                    action=foreground 取前台应用包名；action=click_text 按文字点按钮；\
+                    action=tap/swipe/long_press 做坐标手势；action=text 填入当前输入框；\
+                    action=send 点发送；action=fill_and_send 填入并发送（聊天回复用这个）；\
+                    action=global 执行系统动作（name=back/home/recents/notifications）。\
+                    想操作某个 App 时先用 read_screen 看清界面再动手，不要盲点坐标。".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": [
+                            "read_screen", "foreground", "click_text",
+                            "tap", "swipe", "long_press", "text", "send", "fill_and_send",
+                            "global", "key", "screenshot", "input_text"
+                        ]},
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                        "x2": {"type": "integer"},
+                        "y2": {"type": "integer"},
+                        "text": {"type": "string"},
+                        "name": {"type": "string", "enum": ["back", "home", "recents", "notifications"]},
+                        "durationMs": {"type": "integer"},
+                        "keycode": {"type": "integer"}
+                    },
+                    "required": ["action"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolSpec {
                 name: "apply_patch".into(),
                 description: "Atomically apply a Coomi patch containing add, update, move, and delete file operations.".into(),
                 parameters: json!({
@@ -2560,6 +2872,9 @@ impl ToolRuntime for CoreTools {
                 },
             ]);
         }
+        if self.shell_only {
+            return specs.into_iter().filter(|spec| spec.name == "shell").collect();
+        }
         if let Some(runtime) = &self.mcp_runtime {
             specs.extend(runtime.specs());
         }
@@ -2571,6 +2886,9 @@ impl ToolRuntime for CoreTools {
     }
 
     async fn call(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
+        if self.shell_only && Self::canonical_tool_name(call.name.as_str()) != "shell" {
+            return ToolResult::error("极简模式只允许使用 shell 工具");
+        }
         let mut effective_call = call.clone();
         let mut additional_context = String::new();
         if let Some(hooks) = &self.hooks {

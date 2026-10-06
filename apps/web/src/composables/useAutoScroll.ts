@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 
 /**
  * 瀑布流跟随滚动。
@@ -24,7 +24,6 @@ export function useAutoScroll(target: Ref<HTMLElement | null>, shouldFollow: () 
   /** 我们自己最后一次把 scrollTop 写成了多少。 */
   let pinnedTop = -1
   let suppressUntil = 0
-  let boundTarget: HTMLElement | null = null
 
   function distanceFromBottom(el: HTMLElement): number {
     return el.scrollHeight - el.scrollTop - el.clientHeight
@@ -37,7 +36,7 @@ export function useAutoScroll(target: Ref<HTMLElement | null>, shouldFollow: () 
    * 误判成脱离跟随 —— 于是瀑布流卡在中间，剩下的字都在屏幕外面。
    */
   function onScroll() {
-    const el = boundTarget
+    const el = target.value
     if (!el) return
     // 空态：不参与「贴底/脱离/重新跟随」判定，用户自由滚动。
     if (!shouldFollow()) return
@@ -56,7 +55,7 @@ export function useAutoScroll(target: Ref<HTMLElement | null>, shouldFollow: () 
     if (raf) return
     raf = requestAnimationFrame(() => {
       raf = 0
-      const el = boundTarget
+      const el = target.value
       if (!el || !following.value) return
       if (!shouldFollow()) {
         // 空态：内容高度可能超过一屏，但用户应从顶部开始看，不能贴底。
@@ -72,32 +71,20 @@ export function useAutoScroll(target: Ref<HTMLElement | null>, shouldFollow: () 
   }
 
   function jumpToBottom() {
-    const el = boundTarget
+    const el = target.value
     if (!el) return
     following.value = true
     suppressUntil = performance.now() + SMOOTH_MS
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }
 
-  function bindTarget(el: HTMLElement | null) {
-    if (el === boundTarget) return
-    boundTarget?.removeEventListener('scroll', onScroll)
-    boundTarget = el
-    boundTarget?.addEventListener('scroll', onScroll, { passive: true })
-    pinnedTop = boundTarget?.scrollTop ?? -1
-  }
-
-  const stopTargetWatch = watch(target, bindTarget, { flush: 'post' })
-
   onMounted(() => {
-    bindTarget(target.value)
+    target.value?.addEventListener('scroll', onScroll, { passive: true })
     follow()
   })
 
   onBeforeUnmount(() => {
-    stopTargetWatch()
-    boundTarget?.removeEventListener('scroll', onScroll)
-    boundTarget = null
+    target.value?.removeEventListener('scroll', onScroll)
     if (raf) cancelAnimationFrame(raf)
   })
 

@@ -919,7 +919,7 @@ public final class TermuxConstants {
 
         /**
          * Java/namespace package of the app classes. The installed package name changed to
-         * "com.coomi.android", but the Java class tree and BuildConfig stay under
+         * "com.cubee.newapp4", but the Java class tree and BuildConfig stay under
          * "com.termux" (namespace is unchanged), so class-name constants must use this
          * prefix instead of {@link TermuxConstants#TERMUX_PACKAGE_NAME}.
          */

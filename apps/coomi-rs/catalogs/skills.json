@@ -2,14 +2,6 @@
   "version": 1,
   "entries": [
     {
-      "id": "skill-creator",
-      "name": "Skill Creator",
-      "description": "Create and update reusable Coomi Skills.",
-      "repository": "Coomi/bundled",
-      "ref": "1.4.5",
-      "subdir": "skill-creator"
-    },
-    {
       "id": "frontend-design",
       "name": "Frontend Design",
       "description": "Build production-quality, accessible frontend interfaces.",

@@ -122,15 +122,7 @@ public final class CoomiConfig {
                 provider.put("model", "default");
             }
             provider.put("api_key", apiKey.trim());
-            // An API-key-only update must not discard an existing custom
-            // endpoint. Defaults are used only when the provider has no
-            // previously saved Base URL at all.
-            String resolvedBaseUrl = TextUtils.isEmpty(baseUrl)
-                ? provider.optString("base_url", "")
-                : baseUrl.trim();
-            if (TextUtils.isEmpty(resolvedBaseUrl.trim())) {
-                resolvedBaseUrl = defaultBaseUrl(providerId);
-            }
+            String resolvedBaseUrl = TextUtils.isEmpty(baseUrl) ? defaultBaseUrl(providerId) : baseUrl.trim();
             if (TextUtils.isEmpty(resolvedBaseUrl)) {
                 // 自定义 provider 无默认 base_url 且未显式提供时拒绝保存（同 setProvider）
                 Logger.logError(LOG_TAG, "Cannot save api key for " + providerId + ": base_url is empty");
@@ -259,7 +251,7 @@ public final class CoomiConfig {
             case "gemini": return "https://generativelanguage.googleapis.com/v1beta";
             case "openai": return "https://api.openai.com/v1";
             case "deepseek": return "https://api.deepseek.com/v1";
-            case "zhipu": return "https://open.bigmodel.cn/api/coding/paas/v4";
+            case "zhipu": return "https://open.bigmodel.cn/api/paas/v4";
             case "minimax": return "https://api.minimaxi.com/v1";
             default: return "";
         }

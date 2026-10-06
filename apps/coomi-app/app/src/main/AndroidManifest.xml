@@ -194,6 +194,30 @@
                 android:value="Keep the Coomi engine alive" />
         </service>
 
+        <!-- 控制模式：桌面悬浮层（工具调用 / 思考过程 + 可拖动小球） -->
+        <service
+            android:name="app.coomi.CoomiFloatService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Show control-mode progress while the user operates other apps" />
+        </service>
+
+        <!-- 控制模式：屏幕操控后端（读控件 + 手势）。用户需在系统设置里手动开启。 -->
+        <service
+            android:name="app.coomi.CoomiAccessibilityService"
+            android:exported="true"
+            android:label="@string/coomi_accessibility_summary"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/coomi_accessibility_service" />
+        </service>
+
         <activity
             android:name=".app.activities.HelpActivity"
             android:exported="false"

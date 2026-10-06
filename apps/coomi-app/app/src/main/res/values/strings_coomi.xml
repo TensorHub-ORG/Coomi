@@ -3,8 +3,8 @@
 <resources>
 
     <!-- ===== 启动引导 ===== -->
-    <string name="coomi_brand">Coomi</string>
-    <string name="coomi_launcher_title">Coomi</string>
+    <string name="coomi_brand">Comax</string>
+    <string name="coomi_launcher_title">Comax</string>
     <string name="coomi_launcher_subtitle">手机上的自主编程 Agent</string>
     <string name="coomi_launcher_section_permission">开始之前</string>
     <string name="coomi_launcher_privacy">所有命令都在本机 Linux 环境内执行，权限仅用于保持引擎运行。</string>
@@ -107,6 +107,10 @@
     <string name="coomi_dash_section_runtime">运行时</string>
     <string name="coomi_dash_section_tools">工具</string>
     <string name="coomi_dash_open_chat">进入对话</string>
+    <string name="coomi_dash_ai_studio">AI 工作室</string>
+    <string name="coomi_dash_ai_studio_desc">配置多个智能体，协同讨论、派单和执行任务</string>
+    <string name="coomi_dash_collab">协同工作台</string>
+    <string name="coomi_dash_collab_desc">并行拆解任务，查看成员执行流与交付产物</string>
     <string name="coomi_dash_open_chat_desc">Coomi 的主界面</string>
     <string name="coomi_dash_ai_studio">AI 工作室</string>
     <string name="coomi_dash_ai_studio_desc">多智能体协作工作台（实验）</string>
@@ -167,6 +171,12 @@
     <string name="coomi_splash_feedback">一键反馈问题</string>
     <string name="coomi_dash_ux_program">用户体验改进计划</string>
     <string name="coomi_dash_ux_program_desc">生成并查看你的使用画像</string>
+    <string name="coomi_dash_donate">捐赠者计划</string>
+    <string name="coomi_dash_donate_desc">喜欢 Coomi 就给魔改作者买杯咖啡，或加 QQ 群 1108467806 反馈与交流</string>
+    <string name="coomi_dash_donate_title">支持 Coomi</string>
+    <string name="coomi_dash_donate_hint">微信扫一扫赞赏随意，你的支持是魔改继续下去的动力。</string>
+    <string name="coomi_dash_donate_qq">加入 QQ 交流群 1108467806</string>
+    <string name="coomi_dash_donate_close">关闭</string>
     <string name="coomi_feedback_title">反馈建议</string>
     <string name="coomi_feedback_intro">告诉我们哪里可以做得更好。问题反馈可附截图，便于快速定位。</string>
     <string name="coomi_feedback_type_label">反馈类型</string>

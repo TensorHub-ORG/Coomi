@@ -1,0 +1,10 @@
+/* DeepTrace 嵌入上下文菜单：数字与单位统一等宽，直接使用真实 WS 事件统计。 */
+.deeptrace-section{padding:0 0 12px;margin:0 0 12px;border-bottom:1px solid var(--border);font-family:var(--font)}
+.deeptrace-header{display:flex!important;align-items:center;gap:6px;margin-bottom:9px;color:var(--text-2);font-size:12px;font-weight:650}
+.deeptrace-dot{width:7px;height:7px;border-radius:50%;background:var(--blue);animation:deeptrace-live 1.4s ease-in-out infinite}
+.deeptrace-title{display:inline!important;font:650 12px/1.2 var(--font)}
+.deeptrace-metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.deeptrace-metric{display:flex!important;min-width:0;min-height:48px;flex-direction:column;align-items:center;justify-content:center;padding:6px 2px;border-radius:var(--r-sm);background:var(--fill)}
+.deeptrace-metric>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font:600 12px/1.25 var(--font-mono);font-variant-numeric:tabular-nums}
+.deeptrace-metric>label{display:block;margin-top:3px;color:var(--text-3);font:500 10px/1.2 var(--font)}
+@keyframes deeptrace-live{50%{opacity:.35;transform:scale(.86)}}
