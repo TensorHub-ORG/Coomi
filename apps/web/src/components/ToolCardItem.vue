@@ -1,11 +1,3 @@
-<script lang="ts">
-/**
- * 手动展开状态存放在 card.manualOpen（见 viewModel.ts）。
- * 注意：必须写进 card 这个响应式代理对象，computed 才会重算——
- * 任何非响应式容器（普通 Map/WeakMap）都会让点击后界面永远不更新。
- */
-</script>
-
 <script setup lang="ts">
 /**
  * 工具调用卡片。
@@ -14,19 +6,44 @@
  * 状态是有语义色的：运行中蓝 + 左侧流光，成功绿勾，失败红叉且输出染红，
  * 待授权橙（真正的确认交给底部 ApprovalSheet，卡片只说明原因），缓存命中灰闪电。
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ToolCard } from '@/stores/viewModel'
+import { useConfigStore } from '@/stores/config'
 import { asText, toolMeta, toolTarget } from '@/utils/toolMeta'
+import { gsap, prefersReducedMotion } from '@/composables/useGsap'
 import CoomiIcon from './CoomiIcon.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
 const props = defineProps<{ card: ToolCard }>()
+const config = useConfigStore()
 
 /** 大字段单独成块，不塞进参数表。 */
 const BIG = new Set(['content', 'old_string', 'new_string', 'prompt'])
 
+const manual = ref<boolean | null>(null)
+/** 收回动画未完成时保持元素可见（否则 v-show 会立即隐藏，动画看不到）。 */
+const collapsing = ref(false)
 const full = ref(false)
-const copied = ref(false)
+const bodyRef = ref<HTMLElement | null>(null)
+const rootEl = ref<HTMLElement | null>(null)
+
+/**
+ * 工具调用从左侧划入（新发起的调用）。
+ *
+ * 「由快到慢」= easeOut 曲线：开始时位移快，接近到位时慢下来，像抽屉被推了一下。
+ * 只在「新的调用刚插入」时动（status=starting/running），历史恢复的卡片不动，避免整体闪。
+ * 开关合并进水滴动画总开关：关水滴动画 = 工具卡也不做入场动画。
+ */
+onMounted(() => {
+  const el = rootEl.value
+  if (!el) return
+  if (props.card.status !== 'starting' && props.card.status !== 'running') return
+  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  gsap.fromTo(el,
+    { x: -24, opacity: 0 },
+    { x: 0, opacity: 1, duration: 0.42, ease: 'power3.out' },
+  )
+})
 
 // ── 图片瀑布流 + 全屏预览（点击放大 / 另存为）──
 const previewSrc = ref('')
@@ -194,14 +211,6 @@ const newStr = computed(() => asStr(props.card.arguments?.new_string))
 const isDiff = computed(() => Boolean(oldStr.value || newStr.value))
 const output = computed(() => props.card.resultPreview ?? '')
 
-// ── Agent 执行实时输出（批次三 #31）：增量流展示 + 自动滚到底 ──
-const liveEl = ref<HTMLElement | null>(null)
-const liveOutput = computed(() => props.card.liveOutput ?? '')
-watch(liveOutput, async () => {
-  await nextTick()
-  if (liveEl.value) liveEl.value.scrollTop = liveEl.value.scrollHeight
-})
-
 const diffLines = computed(() => {
   const out: { sign: '-' | '+'; text: string }[] = []
   if (oldStr.value) for (const t of oldStr.value.split('\n')) out.push({ sign: '-', text: t })
@@ -209,39 +218,61 @@ const diffLines = computed(() => {
   return out
 })
 
-const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(liveOutput.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
-const open = computed({
-  // 读写 card 对象上的响应式字段 manualOpen（viewModel.ts 定义）。
-  // card 来自 Pinia store，是响应式代理——写字段会触发依赖它的 computed 重算。
-  // （曾把状态存进 WeakMap：非响应式容器，写完界面永远不更新，点不开。）
-  get: () => props.card.manualOpen ?? props.card.expanded ?? false,
-  set: value => { props.card.manualOpen = value },
-})
+const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
+const open = computed(() => manual.value ?? props.card.expanded ?? false)
 const long = computed(() => output.value.length > 700 || output.value.split('\n').length > 14)
 
-function toggle() { if (hasBody.value) open.value = !open.value }
+function toggle() { if (hasBody.value) manual.value = !open.value }
 
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch {
-    // WebView 里 clipboard API 偶尔不可用，退回老办法
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    try { document.execCommand('copy') } catch { /* 放弃 */ }
-    document.body.removeChild(ta)
+/**
+ * 展开 / 收起用 GSAP 做一次高度补间。
+ *
+ * 只动 height 到 auto 并配合透明度：内容长度不可预知，纯 CSS transition 无法从 0
+ * 过渡到 auto，而这一步的瞬时重排只发生在用户点开的瞬间（不是每帧），代价可以接受。
+ * 关闭动画时直接切换显示，不做多余计算。
+ */
+watch(open, (value, previous) => {
+  const element = bodyRef.value
+  if (!element || previous === undefined) return
+  // 动画开关合并到水滴动画开关：关掉水滴动画的同时也关掉工具卡展开动画，
+  // 让用户在「要动效 / 不要动效」上只有一个总开关。
+  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  gsap.killTweensOf(element)
+  if (value) {
+    // v-show 刚把元素切到可见，此时布局未完成、scrollHeight 可能为 0。
+    // 先等一帧拿到真实内容高度，再从 0 展开 —— 否则会「卡一下直接展开」。
+    nextTick(() => requestAnimationFrame(() => {
+      const target = element.scrollHeight
+      gsap.fromTo(element, { height: 0, opacity: 0 }, {
+        height: target,
+        opacity: 1,
+        duration: 0.26,
+        ease: 'power2.out',
+        onComplete: () => { gsap.set(element, { clearProps: 'height' }) },
+      })
+    }))
+  } else {
+    collapsing.value = true
+    gsap.to(element, {
+      height: 0,
+      opacity: 0,
+      duration: 0.22,
+      ease: 'power2.in',
+      onComplete: () => {
+        gsap.set(element, { clearProps: 'height,opacity' })
+        collapsing.value = false
+      },
+    })
   }
-  copied.value = true
-  setTimeout(() => { copied.value = false }, 1400)
-}
+})
+
+onBeforeUnmount(() => {
+  if (bodyRef.value) gsap.killTweensOf(bodyRef.value)
+})
 </script>
 
 <template>
-  <div class="tool" :class="[st.cls, { open }]">
+  <div ref="rootEl" class="tool" :class="[st.cls, { open }]" :data-call-id="card.callId">
     <button class="head" :class="{ tapable: hasBody }" @click="toggle">
       <span class="tile" :class="st.cls">
         <CoomiIcon :name="meta.icon" :size="17" />
@@ -267,7 +298,7 @@ async function copy(text: string) {
       <span>{{ card.riskSummary || '需要你授权后才会执行' }}<template v-if="card.access"> · {{ card.access }}</template></span>
     </div>
 
-    <div v-if="open && hasBody" class="body">
+    <div v-show="(open || collapsing) && hasBody" ref="bodyRef" class="body">
       <!-- 图片瀑布流：工具产生的图片平铺展示，点击全屏预览 -->
       <div v-if="card.images && card.images.length" class="sec" :class="{ showimg: isShowImage }">
         <p class="slabel">图片</p>
@@ -311,26 +342,12 @@ async function copy(text: string) {
       </div>
 
       <div v-if="contentArg && !isDiff" class="sec">
-        <div class="sbar">
-          <p class="slabel">内容</p>
-          <button class="mini" @click.stop="copy(contentArg)">{{ copied ? '已复制' : '复制' }}</button>
-        </div>
+        <p class="slabel">内容</p>
         <pre class="mono">{{ contentArg }}</pre>
       </div>
 
-      <!-- Agent 执行实时输出：执行中增量滚动，done 后由 resultPreview 取代 -->
-      <div v-if="liveOutput" class="sec">
-        <div class="sbar">
-          <p class="slabel live-label">实时输出</p>
-        </div>
-        <pre ref="liveEl" class="mono live">{{ liveOutput }}</pre>
-      </div>
-
       <div v-if="output" class="sec">
-        <div class="sbar">
-          <p class="slabel">{{ card.isError ? '错误输出' : '输出' }}</p>
-          <button class="mini" @click.stop="copy(output)">{{ copied ? '已复制' : '复制' }}</button>
-        </div>
+        <p class="slabel">{{ card.isError ? '错误输出' : '输出' }}</p>
         <pre class="mono out" :class="{ err: card.isError, clip: long && !full }">{{ output }}</pre>
         <button v-if="long" class="more" @click.stop="full = !full">
           {{ full ? '收起' : '展开全部' }}
@@ -408,14 +425,16 @@ async function copy(text: string) {
   width: 6px; height: 6px; margin-top: -3px;
   border-radius: 50%;
   background: var(--blue);
+  /* 用 transform 跑位移：早前动画 left 会每帧触发重排，长列表里工具卡一跑就整屏闪。 */
   animation: coomi-dot-travel 1.15s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 @keyframes coomi-dot-travel {
-  0% { left: 8px; opacity: .25; }
+  0% { transform: translateX(0); opacity: .25; }
   20% { opacity: 1; }
-  50% { left: calc(100% - 16px); opacity: 1; }
+  50% { transform: translateX(6px); opacity: 1; }
   75% { opacity: .6; }
-  100% { left: 8px; opacity: .25; }
+  100% { transform: translateX(0); opacity: .25; }
 }
 
 .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -447,13 +466,7 @@ async function copy(text: string) {
 
 .body { border-top: 1px solid var(--border); padding: 4px 11px 11px; }
 .sec { margin-top: 9px; }
-.sbar { display: flex; align-items: center; justify-content: space-between; }
 .slabel { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-3); text-transform: uppercase; }
-.mini {
-  padding: 3px 9px; border: 0; border-radius: var(--r-sm);
-  background: none; font-size: 11.5px; font-weight: 600; color: var(--blue);
-}
-.mini:active { background: var(--blue-soft); }
 
 .args { margin-top: 5px; display: flex; flex-direction: column; gap: 4px; }
 .arg { display: flex; gap: 8px; font-size: 12px; line-height: 1.5; }
@@ -471,12 +484,6 @@ async function copy(text: string) {
   overflow-x: auto;
 }
 .out.err { background: var(--danger-soft); color: #9b3a2c; }
-.live {
-  max-height: 190px; overflow-y: auto;
-  border-left: 2px solid var(--blue);
-  scrollbar-width: thin;
-}
-.live-label { color: var(--blue); }
 .out.clip { max-height: 210px; overflow: hidden; mask-image: linear-gradient(180deg, #000 72%, transparent); }
 .more {
   width: 100%; margin-top: 6px; padding: 7px 0;

@@ -14,10 +14,6 @@ const MCP_CATALOG: &str = include_str!("../mcp.json");
 const SKILL_CATALOG: &str = include_str!("../skills.json");
 const CUSTOM_ITERATION_SKILL: &str = include_str!("../coomi-custom-iteration.md");
 const RUNTIME_ENVIRONMENT_SKILL: &str = include_str!("../runtime-environments.md");
-const SKILL_CREATOR_SKILL: &str = include_str!("../skill-creator.md");
-const UI_DESIGNER_SKILL: &str = include_str!("../ui-designer.md");
-const ENV_TEMPLATES_SKILL: &str = include_str!("../env-templates.md");
-const ENV_EXPERIENCE_SKILL: &str = include_str!("../env-experience.md");
 const COOMIDEV_ENV: &str = include_str!("../../../../tools/mobile-build/coomidev-env.sh");
 const COOMIDEV_DOCTOR: &str = include_str!("../../../../tools/mobile-build/coomidev-doctor.sh");
 const COOMIDEV_BUILD: &str = include_str!("../../../../tools/mobile-build/build-coomidev.sh");
@@ -143,85 +139,6 @@ impl CatalogInstaller {
     }
 
     pub fn install_skill(&self, id: &str) -> Result<PathBuf> {
-        if id.eq_ignore_ascii_case("skill-creator") {
-            let destination = self.home.join("skills").join("skill-creator");
-            fs::create_dir_all(&destination)?;
-            fs::write(destination.join("SKILL.md"), SKILL_CREATOR_SKILL)?;
-            save_skill_metadata(
-                &self.home,
-                &SkillEntry {
-                    id: "skill-creator".into(),
-                    name: "Skill Creator".into(),
-                    description: "Create and update reusable Coomi Skills.".into(),
-                    repository: "Coomi/bundled".into(),
-                    git_ref: "1.4.5".into(),
-                    subdir: "skill-creator".into(),
-                },
-                &destination,
-                "bundled",
-            )?;
-            return Ok(destination);
-        }
-        if id.eq_ignore_ascii_case("ui-designer") {
-            // 批次七 #1：UI 设计师为内置 Skill，随包分发、默认安装、可在管理页停用。
-            let destination = self.home.join("skills").join("ui-designer");
-            fs::create_dir_all(&destination)?;
-            fs::write(destination.join("SKILL.md"), UI_DESIGNER_SKILL)?;
-            save_skill_metadata(
-                &self.home,
-                &SkillEntry {
-                    id: "ui-designer".into(),
-                    name: "UI Designer".into(),
-                    description: "按 Coomi 前端设计语言设计或修改界面（配色、间距、组件与交互规范）。".into(),
-                    repository: "Coomi/bundled".into(),
-                    git_ref: "1.4.6".into(),
-                    subdir: "ui-designer".into(),
-                },
-                &destination,
-                "bundled",
-            )?;
-            return Ok(destination);
-        }
-        if id.eq_ignore_ascii_case("env-templates") {
-            // 批次八 3.3：环境初始化模板资产，固化 proot 兼容性 workaround。
-            let destination = self.home.join("skills").join("env-templates");
-            fs::create_dir_all(&destination)?;
-            fs::write(destination.join("SKILL.md"), ENV_TEMPLATES_SKILL)?;
-            save_skill_metadata(
-                &self.home,
-                &SkillEntry {
-                    id: "env-templates".into(),
-                    name: "Env Templates".into(),
-                    description: "python-web / node-web / android-build 三套环境初始化模板，内置 proot 兼容适配。".into(),
-                    repository: "Coomi/bundled".into(),
-                    git_ref: "1.4.6".into(),
-                    subdir: "env-templates".into(),
-                },
-                &destination,
-                "bundled",
-            )?;
-            return Ok(destination);
-        }
-        if id.eq_ignore_ascii_case("env-experience") {
-            // 内置经验 Skill：沉淀 guest 环境避坑经验，降低环境类报错率。
-            let destination = self.home.join("skills").join("env-experience");
-            fs::create_dir_all(&destination)?;
-            fs::write(destination.join("SKILL.md"), ENV_EXPERIENCE_SKILL)?;
-            save_skill_metadata(
-                &self.home,
-                &SkillEntry {
-                    id: "env-experience".into(),
-                    name: "Env Experience".into(),
-                    description: "Coomi guest 环境实战经验与避坑清单：缺命令/权限/超时/路径的规避与自纠流程。".into(),
-                    repository: "Coomi/bundled".into(),
-                    git_ref: "1.4.6".into(),
-                    subdir: "env-experience".into(),
-                },
-                &destination,
-                "bundled",
-            )?;
-            return Ok(destination);
-        }
         self.install_skill_inner(id, false)
     }
 
@@ -301,9 +218,6 @@ impl CatalogInstaller {
 
     /// 卸载 Skill：删除 skills/{id} 目录与 config/skills.json 中的条目。
     pub fn uninstall_skill(&self, id: &str) -> Result<PathBuf> {
-        if id.eq_ignore_ascii_case("skill-creator") {
-            anyhow::bail!("Skill `skill-creator` is built in and cannot be uninstalled");
-        }
         // 与安装一致：id 必须先在内置目录中解析出合法条目，杜绝路径穿越
         // （id=".."、"%2E%2E%2F" 等经 URL 解码后越界删除任意目录）。
         let catalog = builtin_skills()?;
@@ -330,6 +244,104 @@ impl CatalogInstaller {
             }
         }
         Ok(destination)
+    }
+
+    /// 从本地 zip 导入 Skill：解压后取含 SKILL.md 的目录（或整个 zip 根）复制到 skills/{id}，
+    /// 并写入 config/skills.json。支持 zip-slip 防护。id 由调用方提供（前端从文件名生成）。
+    pub fn import_skill_zip(&self, id: &str, zip_bytes: &[u8]) -> Result<PathBuf> {
+        anyhow::ensure!(!id.trim().is_empty(), "Skill id is required");
+        let safe_id = id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect::<String>();
+        let destination = self.home.join("skills").join(&safe_id);
+        if destination.exists() {
+            anyhow::bail!("Skill `{safe_id}` is already installed");
+        }
+        let cache = self.home.join("cache").join(format!("skill-import-{safe_id}"));
+        if cache.exists() { fs::remove_dir_all(&cache)?; }
+        fs::create_dir_all(&cache)?;
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
+            .context("Skill zip is not a valid zip")?;
+        for index in 0..archive.len() {
+            let mut file = archive.by_index(index).context("invalid zip entry")?;
+            let name = file.name().to_string();
+            let rest = name.trim_start_matches("./");
+            if rest.split('/').any(|seg| seg.is_empty() || seg == "..") { continue; }
+            let target = cache.join(rest);
+            if file.is_dir() {
+                fs::create_dir_all(&target)?;
+            } else {
+                if let Some(parent) = target.parent() { fs::create_dir_all(parent)?; }
+                let mut output = std::fs::File::create(&target)
+                    .with_context(|| format!("failed to write {}", target.display()))?;
+                std::io::copy(&mut file, &mut output)?;
+            }
+        }
+        // 若 zip 根只有一个目录且含 SKILL.md，则用该子目录；否则用整个解压根。
+        let source = find_skill_root(&cache)?;
+        if !source.join("SKILL.md").is_file() {
+            anyhow::bail!("导入的 Skill 包缺少 SKILL.md");
+        }
+        fs::create_dir_all(&destination)?;
+        if let Err(error) = copy_directory(&source, &destination) {
+            let _ = fs::remove_dir_all(&destination);
+            return Err(error);
+        }
+        let entry = SkillEntry {
+            id: safe_id.clone(),
+            name: safe_id.clone(),
+            description: String::new(),
+            repository: "local-import".into(),
+            git_ref: "local".into(),
+            subdir: String::new(),
+        };
+        save_skill_metadata(&self.home, &entry, &destination, "local")?;
+        let _ = fs::remove_dir_all(&cache);
+        Ok(destination)
+    }
+
+    /// 把本地已存在的 skill 目录（含 SKILL.md）注册到 skills.json（无网络、无压缩包）。
+    pub fn register_skill_directory(&self, id: &str, dir: &Path) -> Result<PathBuf> {
+        anyhow::ensure!(dir.join("SKILL.md").is_file(), "directory has no SKILL.md");
+        let destination = self.home.join("skills").join(id);
+        if destination.exists() {
+            anyhow::bail!("Skill `{id}` is already installed");
+        }
+        fs::create_dir_all(&destination)?;
+        copy_directory(dir, &destination)?;
+        let entry = SkillEntry {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            repository: "local-import".into(),
+            git_ref: "local".into(),
+            subdir: String::new(),
+        };
+        save_skill_metadata(&self.home, &entry, &destination, "local")?;
+        Ok(destination)
+    }
+
+    /// 直接写入/追加 MCP server 配置（自定义 MCP 导入）。
+    pub fn import_mcp_config(&self, name: &str, config: &serde_json::Value) -> Result<PathBuf> {
+        anyhow::ensure!(!name.trim().is_empty(), "MCP name is required");
+        anyhow::ensure!(config.is_object(), "MCP config must be an object");
+        let path = self.home.join("config").join("mcp_servers.json");
+        let mut document = if path.exists() {
+            serde_json::from_slice::<Value>(&fs::read(&path)?)
+                .with_context(|| format!("invalid MCP config {}", path.display()))?
+        } else {
+            json!({"servers": {}})
+        };
+        let servers = document
+            .get_mut("servers")
+            .and_then(Value::as_object_mut)
+            .context("mcp_servers.json has no servers object")?;
+        let mut server = config.clone();
+        if server.get("enabled").is_none() { server["enabled"] = json!(true); }
+        servers.insert(name.trim().to_owned(), server);
+        fs::write(&path, serde_json::to_vec_pretty(&document)?)?;
+        Ok(path)
     }
 
     fn install_skill_inner(&self, id: &str, replace: bool) -> Result<PathBuf> {
@@ -491,17 +503,10 @@ fn save_skill_metadata(
         .get_mut("skills")
         .and_then(Value::as_object_mut)
         .context("Skill config must contain an object named `skills`")?;
-    // Reinstalling a bundled Skill is idempotent. Preserve a user's manual
-    // disable choice instead of turning it back on during every engine start.
-    let enabled = skills
-        .get(&entry.id)
-        .and_then(|value| value.get("enabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
     skills.insert(
         entry.id.clone(),
         json!({
-            "enabled": enabled,
+            "enabled": true,
             "path": destination,
             "source": entry.id,
             "source_type": "catalog",
@@ -529,6 +534,17 @@ fn substitute(template: &str, values: &BTreeMap<String, String>) -> Result<Strin
         output.replace_range(start..end + 2, value);
     }
     Ok(output)
+}
+
+/// 找 zip 解压后实际含 SKILL.md 的根目录：若唯一子目录含 SKILL.md 则用该子目录，否则用根。
+fn find_skill_root(cache: &Path) -> Result<PathBuf> {
+    let entries = fs::read_dir(cache)?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    if entries.len() == 1 && entries[0].path().is_dir() && entries[0].path().join("SKILL.md").is_file() {
+        return Ok(entries[0].path());
+    }
+    Ok(cache.to_path_buf())
 }
 
 fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
@@ -586,29 +602,6 @@ mod tests {
             document.pointer("/servers/filesystem/enabled"),
             Some(&Value::Bool(true))
         );
-    }
-
-    #[test]
-    fn bundled_skill_reinstall_preserves_manual_disable() {
-        let home = tempfile::tempdir().expect("temporary home");
-        let installer = CatalogInstaller::new(home.path());
-        installer
-            .install_skill("skill-creator")
-            .expect("install bundled skill");
-
-        let config_path = home.path().join("config/skills.json");
-        let mut document: Value = serde_json::from_slice(&fs::read(&config_path).expect("read skill config"))
-            .expect("parse skill config");
-        document["skills"]["skill-creator"]["enabled"] = Value::Bool(false);
-        fs::write(&config_path, serde_json::to_vec_pretty(&document).expect("encode skill config"))
-            .expect("disable skill");
-
-        installer
-            .install_skill("skill-creator")
-            .expect("reinstall bundled skill");
-        let updated: Value = serde_json::from_slice(&fs::read(config_path).expect("read updated config"))
-            .expect("parse updated config");
-        assert_eq!(updated["skills"]["skill-creator"]["enabled"], Value::Bool(false));
     }
 
     #[test]

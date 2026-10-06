@@ -23,7 +23,6 @@ const TRANSCRIPT_PREFIX = 'coomi.transcript.'
 const KEEP_TRANSCRIPTS = 12
 
 export interface SessionMeta {
-  parentSessionId?: string
   id: string
   title: string
   createdAt: number
@@ -38,12 +37,13 @@ export interface SessionMeta {
   preview?: string
   /** 引擎侧模型名。 */
   model?: string
-  /** 引擎侧供应商 ID，与 model 一起组成会话级模型选择。 */
+  /** 本会话绑定的提供商与模型，避免切换其它会话时串模型。 */
   providerId?: string
+  modelLocked?: boolean
   /** 用户手动重命名过：true 时引擎推导的标题不再覆盖。 */
   renamed?: boolean
   /** Versioned conversation mode; older metadata defaults to agent. */
-  mode?: 'agent' | 'team' | 'life'
+  mode?: 'agent' | 'life'
 }
 
 export interface SessionGroup {
@@ -113,8 +113,6 @@ export const useSessionsStore = defineStore('sessions', () => {
   const runningIds = ref<Set<string>>(new Set())
   const tasks = ref<TaskInfo[]>([])
   const taskConcurrencyLimit = ref(5)
-  /** Foreground chats stay quiet; a turn running this long gets task status. */
-  const LONG_TASK_MS = 10_000
 
   async function refreshTasks() {
     try {
@@ -122,22 +120,9 @@ export const useSessionsStore = defineStore('sessions', () => {
       tasks.value = data.tasks ?? []
       taskConcurrencyLimit.value = data.concurrency_limit || 5
       runningIds.value = new Set(tasks.value.filter(task => task.running).map(task => task.session_id))
-      const activeSessionId = (window as Window & { __coomiActiveSessionId?: string }).__coomiActiveSessionId ?? ''
-      const runningTask = tasks.value.find(task => task.running)
-      const longTask = tasks.value.find(task => task.running
-        && task.started_at > 0
-        && Date.now() - task.started_at * 1000 >= LONG_TASK_MS)
-      const backgroundTask = tasks.value.find(task => task.running && task.session_id !== activeSessionId)
-        ?? longTask
-        ?? (document.visibilityState !== 'visible' ? runningTask : undefined)
-      const status = data.running_count > 0 ? `running:${data.running_count}` : 'done'
-      const sessionId = backgroundTask?.session_id ?? runningTask?.session_id ?? ''
-      const background = Boolean(backgroundTask)
-      if (window.CoomiAndroid?.updateTaskStatusDetails) {
-        window.CoomiAndroid.updateTaskStatusDetails(status, sessionId, background)
-      } else {
-        window.CoomiAndroid?.updateTaskStatus?.(status)
-      }
+      window.CoomiAndroid?.updateTaskStatus?.(
+        data.running_count > 0 ? `running:${data.running_count}` : 'done',
+      )
     } catch {
       /* Keep the last engine-authoritative snapshot while reconnecting. */
     }
@@ -216,7 +201,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const filtered = computed(() => {
     const q = query.value.trim().toLowerCase()
     // 全局常驻会话由侧边栏第一行专门渲染，不进分组/搜索。
-    const withoutGlobal = sorted.value.filter(m => m.id !== GLOBAL_SESSION_ID && !m.parentSessionId)
+    const withoutGlobal = sorted.value.filter(m => m.id !== GLOBAL_SESSION_ID)
     if (!q) return withoutGlobal
     // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
     // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文 + 技术符号 +.#），
@@ -267,6 +252,14 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   function find(id: string): SessionMeta | undefined {
     return metas.value.find(m => m.id === id)
+  }
+
+  function setModel(id: string, providerId: string, model: string) {
+    const meta = ensure(id)
+    meta.providerId = providerId
+    meta.model = model
+    meta.modelLocked = true
+    persistMeta()
   }
 
   /**
@@ -330,27 +323,17 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 排序时间 = 最后一轮 agent 的执行时间，由引擎在任务完成/中断时
    * 落盘到会话 updated_at，前端轮询合并——点击/打开会话不应改变排序。
    */
-  function touch(id: string, patch: Partial<Pick<SessionMeta, 'title' | 'turns' | 'parentSessionId' | 'mode'>> = {}) {
+  function touch(id: string, patch: Partial<Pick<SessionMeta, 'title' | 'turns'>> = {}) {
     const m = ensure(id)
     // Automatic titles may arrive again after reconnecting or syncing with the engine.
     // Once the user has renamed a session, that explicit title always wins.
-    // 常驻会话强制命名：自动标题（首条用户消息）不得覆盖。
-    if (patch.title && !m.renamed && id !== GLOBAL_SESSION_ID) m.title = patch.title
+    if (patch.title && !m.renamed) m.title = patch.title
     if (patch.turns != null) m.turns = patch.turns
-    if (patch.parentSessionId) m.parentSessionId = patch.parentSessionId
-    if (patch.mode) m.mode = patch.mode
     persistMeta()
   }
 
-  function setMode(id: string, mode: 'agent' | 'team' | 'life') {
+  function setMode(id: string, mode: 'agent' | 'life') {
     ensure(id).mode = mode
-    persistMeta()
-  }
-
-  function setModel(id: string, providerId: string, model: string) {
-    const meta = ensure(id)
-    meta.providerId = providerId
-    meta.model = model
     persistMeta()
   }
 
@@ -403,8 +386,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  function remove(id: string, syncEngine = true) {
-    if (childrenOf(id).length) return
+  function remove(id: string) {
     metas.value = metas.value.filter(m => m.id !== id)
     try {
       localStorage.removeItem(TRANSCRIPT_PREFIX + id)
@@ -413,7 +395,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
     persist()
     // 同步删除引擎磁盘上的会话记录（权威源），否则下次 syncFromEngine 时“复活”。
-    if (syncEngine) authedFetch(`/api/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
+    authedFetch(`/api/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
   }
 
   /** Migrate pre-Rust session ids while preserving the local transcript and metadata. */
@@ -472,24 +454,18 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  function clearTranscript(id: string) {
-    try { localStorage.removeItem(TRANSCRIPT_PREFIX + id) } catch { /* ignore */ }
-  }
-
-  async function clearAll() {
-    // Delete children before parents so the engine's relationship guard holds.
-    const deleting = [...metas.value].sort((a, b) => Number(Boolean(b.parentSessionId)) - Number(Boolean(a.parentSessionId)))
-    metas.value = []
-    persist()
-    for (const m of deleting) {
+  function clearAll() {
+    for (const m of metas.value) {
       try {
         localStorage.removeItem(TRANSCRIPT_PREFIX + m.id)
       } catch {
         /* ignore */
       }
       // 同步删除引擎磁盘记录，避免清空后从引擎列表“复活”。
-      await authedFetch(`/api/sessions/${m.id}`, { method: 'DELETE' }).catch(() => {})
+      authedFetch(`/api/sessions/${m.id}`, { method: 'DELETE' }).catch(() => {})
     }
+    metas.value = []
+    persist()
   }
 
   /**
@@ -505,7 +481,6 @@ export const useSessionsStore = defineStore('sessions', () => {
       const remote = (data.sessions ?? []) as Array<{
         id: string
         provider_id: string
-        parent_session_id?: string
         model: string
         cwd: string
         updated_at: string
@@ -515,7 +490,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         created_at: string
         title_manually_set: boolean
         pinned: boolean
-        mode?: 'agent' | 'team' | 'life'
+        mode?: 'agent' | 'life'
       }>
       const localById = new Map(metas.value.map(m => [m.id, m]))
       const legacyMigrations: Array<Promise<unknown>> = []
@@ -534,7 +509,6 @@ export const useSessionsStore = defineStore('sessions', () => {
         }
         return {
           id: r.id,
-          parentSessionId: r.parent_session_id || undefined,
           title: r.title_manually_set
             ? r.title
             : (legacyTitle || r.title || local?.title || (r.preview ? deriveTitle(r.preview) : '新对话')),
@@ -547,6 +521,7 @@ export const useSessionsStore = defineStore('sessions', () => {
           preview: r.preview || local?.preview,
           model: r.model || local?.model,
           providerId: r.provider_id || local?.providerId,
+          modelLocked: Boolean(local?.modelLocked || r.model),
           renamed: r.title_manually_set || Boolean(legacyTitle),
           mode: r.mode ?? local?.mode ?? 'agent',
         }
@@ -565,31 +540,12 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  function childrenOf(parentId: string) {
-    return sorted.value.filter(meta => meta.parentSessionId === parentId)
-  }
-
-  async function createAuxiliary(parentId: string): Promise<string> {
-    const child = await apiSend<{ id: string }>(`/api/sessions/${encodeURIComponent(parentId)}/children`, 'POST', {})
-    ensure(child.id)
-    touch(child.id, { parentSessionId: parentId, title: '辅助对话', mode: 'agent' })
-    await syncFromEngine()
-    return child.id
-  }
-
-  async function removeAuxiliary(id: string) {
-    if (!find(id)?.parentSessionId) throw new Error('不是辅助对话')
-    await apiSend(`/api/sessions/${encodeURIComponent(id)}`, 'DELETE')
-    remove(id, false)
-  }
-
   return {
-    childrenOf, createAuxiliary, removeAuxiliary,
     metas, query, sorted, filtered, groups, currentCwd, setCurrentCwd,
     tasks, runningIds, taskConcurrencyLimit, refreshTasks, cancelTask, taskAction, taskDetail,
     syncFromEngine,
     ensure, touch, setMode, setModel, rename, togglePin, remove, find, deriveTitle,
-    saveTranscript, loadTranscript, clearTranscript, migrateId, clearAll,
+    saveTranscript, loadTranscript, migrateId, clearAll,
     refreshRunning, isRunning,
   }
 })

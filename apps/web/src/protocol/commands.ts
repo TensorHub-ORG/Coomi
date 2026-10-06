@@ -1,9 +1,9 @@
 import type { AgentEvent } from './events'
 
-export type PermissionMode = 'ask' | 'auto' | 'full'
+export type PermissionMode = 'ask' | 'auto' | 'full' | 'minimal'
 export type ApprovalDecision = 'allow' | 'deny' | 'always'
 export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh'
-export type SessionMode = 'agent' | 'team' | 'life'
+export type SessionMode = 'agent' | 'life'
 
 export interface SendMessageCommand { command: 'send_message'; text: string }
 export interface CancelCommand { command: 'cancel' }
@@ -22,6 +22,7 @@ export interface RegenerateResponseCommand { command: 'regenerate_response'; msg
 export interface EditTurnCommand { command: 'edit_turn'; msg_id: string; text: string }
 export interface UndoTurnCommand { command: 'undo_turn'; msg_id: string }
 export interface SetReasoningEffortCommand { command: 'set_reasoning_effort'; effort: ReasoningEffort }
+export interface SetProductionModeCommand { command: 'set_production_mode'; mode?: 'normal' | 'overload' | 'berserk'; enabled?: boolean }
 export interface SetMaxToolRoundsCommand { command: 'set_max_tool_rounds'; rounds: number }
 export interface AckEventCommand { command: 'ack_event'; event_seq: number }
 /** 数字生命体：把队列里唯一的 pending 问候投递到当前会话（气泡）。 */
@@ -32,7 +33,7 @@ export type AgentCommand =
   | AnswerQuestionCommand | SetPermissionModeCommand | SetSessionModeCommand | EnterPlanModeCommand
   | ExitPlanModeCommand | SelectModelCommand | FileTransferResultCommand
   | SendGuideCommand | RetryTurnCommand | RegenerateResponseCommand | EditTurnCommand | UndoTurnCommand
-  | SetReasoningEffortCommand | SetMaxToolRoundsCommand | AckEventCommand
+  | SetReasoningEffortCommand | SetProductionModeCommand | SetMaxToolRoundsCommand | AckEventCommand
   | DeliverLifeCommand
 
 export const PROTOCOL_VERSION = 1

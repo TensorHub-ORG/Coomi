@@ -1,206 +1,66 @@
 <script setup lang="ts">
 /**
- * 空态首屏：品牌标记 + 模式分段控件 + 任务建议。
- * 三个模式不是装饰，各自映射到真实命令：
- *   快速 → set_permission_mode('auto')；计划 → enter_plan_mode；谨慎 → set_permission_mode('ask')。
+ * 新会话空态：只保留品牌标记与格言。模式选择和快捷能力在 Composer 中，
+ * 避免首屏堆满快捷问题；品牌动效在会话开始后由 ChatView 接管。
+ *
+ * 动效交给 GSAP：一次编排（标记落位 → 格言 → 副文案），再挂一个很轻的呼吸循环。
+ * 比两段独立的 CSS keyframes 更容易对齐节奏，也方便在 reduced-motion 下整体关掉。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
-import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
+import { gsap, useGsapScope } from '@/composables/useGsap'
 import CoomiIcon from './CoomiIcon.vue'
 import CoomiMark from './CoomiMark.vue'
-import {
-  QUICK_COMMAND_CHANGED_EVENT,
-  loadQuickCommandConfig,
-  type QuickCommand,
-} from '@/utils/quickCommands'
 
-const session = useSessionStore()
 const config = useConfigStore()
 const connection = useConnectionStore()
+const motto = computed(() => config.productionMode ? '慎终如始，则无败事' : '海内存知己，天涯若比邻')
 
-const MODES = [
-  { key: 'fast', label: '快速', icon: 'bolt', desc: '读写自动放行，破坏性操作仍会问你' },
-  { key: 'plan', label: '计划', icon: 'target', desc: '先给方案，你确认之后才动手' },
-  { key: 'careful', label: '谨慎', icon: 'shield', desc: '每一次写入都等你点头' },
-] as const
+const root = ref<HTMLElement | null>(null)
+useGsapScope(root, (_context, element) => {
+  gsap.timeline({ defaults: { ease: 'power2.out' } })
+    .from(element.querySelector('.brand-aura'), { opacity: 0, scale: 0.86, duration: 0.55 })
+    .from(element.querySelector('.motto'), { opacity: 0, y: 10, duration: 0.45 }, '-=0.2')
+    .from(element.querySelector('.sub'), { opacity: 0, y: 8, duration: 0.4 }, '-=0.3')
+    .from(element.querySelector('.demobar'), { opacity: 0, y: 8, duration: 0.35 }, '-=0.25')
 
-const suggestions = ref<QuickCommand[]>([])
-function refreshSuggestions() {
-  const value = loadQuickCommandConfig()
-  suggestions.value = (value.sets.find(set => set.id === value.activeSetId) ?? value.sets[0]).commands
-}
-function runSuggestion(command: QuickCommand) {
-  if (command.guide) session.sendGuide(command.guide)
-  else session.sendMessage(command.content)
-}
-onMounted(() => {
-  refreshSuggestions()
-  window.addEventListener(QUICK_COMMAND_CHANGED_EVENT, refreshSuggestions)
+  // 呼吸：只动 transform 与透明度，避免 box-shadow 每帧重绘（低端机上是明显的掉帧源）。
+  gsap.to(element.querySelector('.brand-aura'), {
+    y: -6,
+    duration: 2.4,
+    ease: 'sine.inOut',
+    repeat: -1,
+    yoyo: true,
+  })
+  gsap.to(element.querySelector('.logo'), {
+    opacity: 0.88,
+    duration: 2.4,
+    ease: 'sine.inOut',
+    repeat: -1,
+    yoyo: true,
+  })
 })
-onBeforeUnmount(() => window.removeEventListener(QUICK_COMMAND_CHANGED_EVENT, refreshSuggestions))
-
-const active = computed(() => (config.planMode ? 'plan' : config.permissionMode === 'ask' ? 'careful' : 'fast'))
-const hint = computed(() => MODES.find(m => m.key === active.value)?.desc ?? '')
-
-function pick(key: 'fast' | 'plan' | 'careful') {
-  if (key === 'plan') {
-    if (!config.planMode) session.togglePlanMode()
-    return
-  }
-  if (config.planMode) session.togglePlanMode()
-  session.setPermissionMode(key === 'fast' ? 'auto' : 'ask')
-}
 </script>
 
 <template>
-  <div class="empty">
-    <div class="hero">
-      <div class="mark-wrap">
-        <CoomiMark :size="46" class="logo" />
-        <span class="halo" aria-hidden="true" />
-      </div>
-      <h1>有什么可以帮你？</h1>
-      <p class="sub">我在你手机里的 Linux 环境真实执行命令、读写文件、跑脚本。</p>
-    </div>
-
+  <div ref="root" class="empty">
+    <div class="brand-aura"><CoomiMark :size="64" class="logo" /></div>
+    <p class="motto">{{ motto }}</p>
+    <p class="sub">准备好了，就告诉我想做什么</p>
     <p v-if="connection.demo" class="demobar">
       <CoomiIcon name="alert" :size="14" />
-      <span>演示模式：对话由脚本驱动，只用来预览界面，不会真的执行任何命令。</span>
+      <span>演示模式：对话由脚本驱动，只用来预览界面，不会真的执行命令。</span>
     </p>
-
-    <div class="seg" role="tablist">
-      <button
-        v-for="m in MODES"
-        :key="m.key"
-        class="sitem"
-        :class="{ on: active === m.key }"
-        role="tab"
-        :aria-selected="active === m.key"
-        @click="pick(m.key)"
-      >
-        <CoomiIcon :name="m.icon" :size="14" />
-        <span>{{ m.label }}</span>
-      </button>
-      <span class="seg-thumb" :class="'seg-' + active" aria-hidden="true" />
-    </div>
-    <p class="hint" :class="{ on: !!hint }">{{ hint || ' ' }}</p>
-
-    <div class="sugs">
-      <button
-        v-for="(s, i) in suggestions"
-        :key="s.id"
-        class="sug cascade"
-        :style="{ animationDelay: 50 * i + 'ms' }"
-        @click="runSuggestion(s)"
-      >
-        <span class="sicon"><CoomiIcon :name="s.icon" :size="16" /></span>
-        <span class="stext">{{ s.name }}</span>
-        <span class="sarrow"><CoomiIcon name="chevronRight" :size="12" /></span>
-      </button>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.empty {
-  margin: 0 auto; padding: clamp(42px, 8vh, 78px) 6px 10px;
-  display: flex; flex-direction: column; align-items: center;
-  text-align: center;
-  max-width: 460px;
-}
-.hero { display: flex; flex-direction: column; align-items: center; }
-.mark-wrap { position: relative; margin-bottom: 12px; }
-.logo { display: block; animation: coomi-breathe 3.4s ease-in-out infinite; }
-.halo {
-  position: absolute; inset: -14px; z-index: -1; border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--blue) 20%, transparent), transparent 68%);
-  animation: halo-pulse 3.4s ease-in-out infinite;
-}
-.halo::after {
-  content: ''; position: absolute; inset: 10px; border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--blue) 10%, transparent), transparent 64%);
-}
-@keyframes halo-pulse {
-  0%, 100% { opacity: .5; transform: scale(.96); }
-  50% { opacity: 1; transform: scale(1.07); }
-}
-@keyframes coomi-breathe {
-  0%, 100% { transform: scale(1); opacity: .92; }
-  50% { transform: scale(1.04); opacity: 1; }
-}
-h1 {
-  font-size: 24px; font-weight: 720; letter-spacing: -0.5px; color: var(--text);
-  line-height: 1.28;
-}
-.sub {
-  max-width: 320px; margin-top: 8px;
-  font-size: 14px; line-height: 1.65; color: var(--text-2);
-}
-.demobar {
-  display: flex; align-items: flex-start; gap: 7px;
-  max-width: 320px; margin-top: 14px; padding: 9px 13px;
-  border-radius: 12px; background: var(--orange-soft);
-  font-size: 12.5px; line-height: 1.55; color: var(--orange); text-align: left;
-}
-.demobar :deep(svg) { flex-shrink: 0; margin-top: 1px; color: var(--orange); }
-
-.seg {
-  position: relative;
-  display: flex; gap: 3px; margin-top: 16px; padding: 5px;
-  border-radius: var(--r-pill); background: var(--fill);
-}
-.sitem {
-  position: relative; z-index: 1;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 36px; min-width: 86px; padding: 0 14px;
-  border: 0; border-radius: var(--r-pill); background: none;
-  font-size: 13.5px; font-weight: 600; color: var(--text-3);
-  transition: color .18s ease;
-}
-.sitem.on { color: var(--blue); }
-.seg-thumb {
-  position: absolute; top: 5px; bottom: 5px; z-index: 0;
-  width: 86px;
-  border-radius: var(--r-pill);
-  background: var(--bg); box-shadow: 0 1px 4px rgba(23, 32, 54, 0.08), 0 3px 12px rgba(23, 32, 54, 0.07);
-  transition: transform 0.34s var(--spring), left 0.34s var(--spring);
-}
-.seg-thumb.seg-fast { left: 5px; transform: none; }
-.seg-thumb.seg-plan { left: 5px; transform: translateX(89px); }
-.seg-thumb.seg-careful { left: 5px; transform: translateX(178px); }
-.hint { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--text-3); transition: color .18s; }
-.hint.on { color: var(--text-2); }
-
-.sugs { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
-.sug {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 12px 11px 11px;
-  border: 1px solid var(--border); border-radius: 16px;
-  background: var(--bg);
-  box-shadow: var(--shadow-1);
-  text-align: left;
-  transition: transform 0.3s var(--spring), border-color .18s ease, box-shadow .18s ease;
-}
-.sug:active { transform: scale(0.96); background: var(--fill); border-color: var(--border-strong); }
-@media (hover: hover) and (pointer: fine) {
-  .sug:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border-strong); }
-}
-.sicon {
-  display: grid; place-items: center; flex-shrink: 0;
-  width: 37px; height: 37px; border-radius: 12px;
-  background: linear-gradient(135deg, var(--blue-soft), color-mix(in srgb, var(--blue-soft) 62%, var(--bg)));
-  color: var(--blue);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue-border) 55%, transparent);
-}
-.stext { flex: 1; min-width: 0; font-size: 14px; line-height: 1.45; color: var(--text); font-weight: 500; }
-.sarrow {
-  display: grid; place-items: center; flex-shrink: 0;
-  width: 26px; height: 26px; border-radius: 50%;
-  background: var(--fill); color: var(--text-3);
-  transition: background .16s, color .16s, transform .16s;
-}
-.sug:active .sarrow { background: var(--blue-soft); color: var(--blue); transform: translateX(2px); }
+.empty { margin:auto 0; padding:34px 4px 18px; display:flex; flex-direction:column; align-items:center; text-align:center; }
+.brand-aura { display:grid; place-items:center; padding:16px; border-radius:50%; will-change:transform; }
+.logo { display:block; }
+.motto { margin:12px 0 0; color:var(--text); font-size:17px; line-height:1.6; font-weight:750; letter-spacing:.04em; }
+.sub { margin-top:8px; color:var(--text-3); font-size:13px; }
+.demobar { display:flex; align-items:flex-start; gap:7px; max-width:320px; margin-top:18px; padding:9px 12px; border-radius:var(--r-md); background:var(--orange-soft); color:var(--orange); font-size:12.5px; line-height:1.55; text-align:left; }
+.demobar :deep(svg) { flex-shrink:0; margin-top:1px; }
 </style>
-

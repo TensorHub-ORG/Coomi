@@ -7,12 +7,13 @@ export interface UsageInfo {
   cache_data_available?: boolean
   turn_cache_hit_rate?: number | null
   turn_cache_data_available?: boolean
+  /** 本轮输出 token / 已耗时，用于状态栏实时速率（token/s）与延迟展示。 */
+  turn_output_tokens?: number
+  turn_elapsed_ms?: number
+  turn_rate_tps?: number
   context_ratio?: number
   context_used_tokens?: number
   context_window_tokens?: number
-  first_token_latency_ms?: number | null
-  output_tokens_per_second?: number | null
-  turn_total_tokens?: number
 }
 export interface ReasoningEffortStats {
   turns: number
@@ -26,8 +27,6 @@ export interface TextChunkEvent { event_type: 'text_chunk'; content: string }
 export interface ReasoningChunkEvent { event_type: 'reasoning_chunk'; content: string }
 export interface ToolStartEvent { event_type: 'tool_start'; call_id: string; tool_name: string; arguments: Record<string, unknown> }
 export interface ToolRunningEvent { event_type: 'tool_running'; call_id: string; tool_name: string }
-/** 工具执行中的增量输出（shell/local_shell 流式回传），对话页实时可见。 */
-export interface ToolOutputEvent { event_type: 'tool_output'; call_id: string; chunk: string }
 export interface ToolDoneEvent { event_type: 'tool_done'; call_id: string; tool_name: string; elapsed: number; result_preview: string; is_error: boolean; images?: string[] }
 export interface ToolCacheHitEvent { event_type: 'tool_cache_hit'; call_id: string; tool_name: string }
 export interface UsageUpdateEvent {
@@ -39,7 +38,7 @@ export interface UsageUpdateEvent {
 export interface ConnectionRetryEvent { event_type: 'connection_retry'; attempt: number; max_attempts: number; delay?: number; delay_ms?: number; message: string }
 export interface StreamResetEvent { event_type: 'stream_reset' }
 export interface CompressionEvent { event_type: 'compression'; before: number; after: number }
-export interface AgentErrorEvent { event_type: 'agent_error'; message: string; is_fatal: boolean }
+export interface AgentErrorEvent { event_type: 'agent_error'; message: string; is_fatal: boolean; captcha_required?: boolean }
 export interface ConfigurationRequiredEvent { event_type: 'configuration_required'; message: string; route: '/providers' }
 export interface RetryConfirmationEvent { event_type: 'retry_confirmation'; message: string }
 export interface AgentCancelledEvent { event_type: 'agent_cancelled' }
@@ -70,14 +69,9 @@ export interface LifeDeliveredEvent {
   trigger: string
   text: string
 }
-export interface CollaborationStartedEvent { event_type: 'collaboration_started'; cycles: number }
-export interface CollaborationPhaseEvent { event_type: 'collaboration_phase'; phase: 'coder' | 'reviewer'; cycle: number; status: string }
-export interface CollaborationReviewEvent { event_type: 'collaboration_review'; cycle: number; status: 'approved' | 'findings' | 'error'; content: string }
-export interface CollaborationFinishedEvent { event_type: 'collaboration_finished'; cycle?: number; status?: 'approved' | 'findings' | 'error'; summary?: string }
 
 export type AgentEvent = (
   | TextChunkEvent | ReasoningChunkEvent | ToolStartEvent | ToolRunningEvent
-  | ToolOutputEvent
   | ToolDoneEvent | ToolCacheHitEvent | UsageUpdateEvent | ConnectionRetryEvent | StreamResetEvent
   | CompressionEvent | AgentErrorEvent | ConfigurationRequiredEvent | AgentCancelledEvent | BgTaskDetachedEvent
   | BgTaskCompletedEvent | LoopStepStartEvent | LoopStepDoneEvent | LoopProgressEvent
@@ -87,7 +81,6 @@ export type AgentEvent = (
   | SessionStateEvent
   | SessionLoadedEvent
   | LifeDeliveredEvent
-  | CollaborationStartedEvent | CollaborationPhaseEvent | CollaborationReviewEvent | CollaborationFinishedEvent
 ) & { event_seq?: number }
 
 export type AgentEventType = AgentEvent['event_type']

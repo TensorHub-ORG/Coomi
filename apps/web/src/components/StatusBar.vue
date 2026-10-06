@@ -11,6 +11,20 @@ import CoomiIcon from './CoomiIcon.vue'
 const session = useSessionStore()
 const connection = useConnectionStore()
 
+/** 本轮输出速率（token/s），后端在 usage_update 里附带，输出过程中持续刷新。 */
+const turnRate = computed(() => {
+  const value = session.usage?.turnRateTps ?? 0
+  return value > 0 ? `${value.toFixed(1)} tok/s` : ''
+})
+
+/** 本轮已耗时（毫秒 → 秒/分）。中途显示的是实时经过时间，结束后显示本轮总耗时。 */
+const turnElapsed = computed(() => {
+  const ms = session.usage?.turnElapsedMs ?? 0
+  if (ms <= 0) return ''
+  if (ms < 10000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+})
+
 const THINKING_LABELS = [
   'Coomi 正在海底捞针',
   'Coomi 数羊把自己数晕了',
@@ -102,16 +116,14 @@ const runLabel = computed(() => {
         :class="{ 'thinking-shimmer': session.runState === 'thinking' }"
       >{{ runLabel }}</span>
       <span class="gap" />
+      <span v-if="turnRate" class="stat">{{ turnRate }}</span>
+      <span v-if="turnElapsed" class="stat">{{ turnElapsed }}</span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.sbar {
-  padding: 4px 18px 5px;
-  background: var(--bg);
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-}
+.sbar { padding: 2px 16px 4px; background: var(--bg); }
 .retry {
   display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
   font-size: 12px; color: var(--orange);
@@ -135,6 +147,7 @@ const runLabel = computed(() => {
   -webkit-text-fill-color: transparent;
   animation: coomi-shimmer 1.6s linear infinite;
 }
+.stat { color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dots { display: inline-flex; align-items: center; gap: 3px; }
 .dots i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--blue);

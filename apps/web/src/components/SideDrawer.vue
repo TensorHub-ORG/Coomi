@@ -23,11 +23,6 @@ const config = useConfigStore()
 const menuFor = ref<SessionMeta | null>(null)
 const renamingId = ref('')
 const renameText = ref('')
-// 批次四 #14：WebView 里 window.confirm 被静默吞掉（无 WebChromeClient），
-// 「清空会话数据」此前永远走不到请求——改为两次点击确认 + 行内失败提示。
-const clearArmed = ref<'context' | 'all' | null>(null)
-const clearError = ref('')
-let clearArmTimer: ReturnType<typeof setTimeout> | undefined
 
 const isEmpty = computed(() => sessions.groups.length === 0)
 
@@ -67,12 +62,7 @@ function startNew() {
   emit('close')
 }
 
-function closeMenu() {
-  menuFor.value = null
-  clearArmed.value = null
-  clearError.value = ''
-  if (clearArmTimer) clearTimeout(clearArmTimer)
-}
+function closeMenu() { menuFor.value = null }
 
 /** WebView 里 window.prompt 默认被吞掉，所以重命名走行内输入框。 */
 async function beginRename() {
@@ -98,41 +88,23 @@ async function doPin() {
   if (await sessions.togglePin(menuFor.value.id)) closeMenu()
 }
 
-async function doClear(mode: 'context' | 'all') {
-  if (!menuFor.value) return
-  if (clearArmed.value !== mode) {
-    clearArmed.value = mode
-    clearError.value = ''
-    if (clearArmTimer) clearTimeout(clearArmTimer)
-    clearArmTimer = setTimeout(() => { clearArmed.value = null }, 4000)
-    return
-  }
-  clearArmed.value = null
-  if (clearArmTimer) clearTimeout(clearArmTimer)
-  const id = menuFor.value.id
-  const result = await session.clearSessionData(id, mode)
-  if (result.ok) {
-    closeMenu()
-  } else {
-    clearError.value = result.error || '清空失败，请重试'
-  }
-}
-
 function doDelete() {
   if (!menuFor.value) return
   session.deleteSession(menuFor.value.id)
   closeMenu()
 }
 
-function go(path: string) { router.push(path); emit('close') }
+function go(path: string) {
+  // 先收起抽屉再跳路由：App.vue 是 out-in 过渡，如果先 push 再 close，
+  // 抽屉退场动画和页面切换动画同时跑，Settings 页面会先被旧页盖住一瞬，
+  // 看起来就像「点设置没反应」。
+  emit('close')
+  nextTick(() => router.push(path))
+}
 function openDashboard() {
   emit('close')
   if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
   else window.location.href = 'coomi://dashboard'
-}
-function openAuxiliary(parentId: string, sessionId: string) {
-  window.dispatchEvent(new CustomEvent('coomi:open-auxiliary', { detail: { parentId, sessionId } }))
-  emit('close')
 }
 </script>
 
@@ -155,6 +127,14 @@ function openAuxiliary(parentId: string, sessionId: string) {
         <span class="nicon"><CoomiIcon name="pencil" :size="17" /></span>
         <span>开启新对话</span>
       </button>
+      <div class="entry-grid" aria-label="工具入口">
+        <button class="entry" @click="go('/studio')"><CoomiIcon name="sparkle" :size="17" /><span>AI 工作台·预览</span></button>
+        <button class="entry" @click="go('/collab')"><CoomiIcon name="team" :size="17" /><span>协同工作台·预览</span></button>
+        <button class="entry" @click="go('/files')"><CoomiIcon name="folder" :size="17" /><span>文件</span></button>
+        <button class="entry" @click="go('/im')"><CoomiIcon name="chat" :size="17" /><span>群聊</span></button>
+        <button class="entry" @click="go('/catalog')"><CoomiIcon name="cube" :size="17" /><span>拓展</span></button>
+        <button class="entry" @click="go('/browser')"><CoomiIcon name="globe" :size="17" /><span>浏览器</span></button>
+      </div>
       <button class="taskrow" @click="go('/tasks')">
         <CoomiIcon name="subtask" :size="17" />
         <span>任务中心</span>
@@ -175,15 +155,13 @@ function openAuxiliary(parentId: string, sessionId: string) {
               <span v-if="session.lifeUnread.length" class="global-badge" aria-label="生命体未读消息">{{ session.lifeUnread.length }}</span>
               <span v-if="globalRunning" class="rspin" aria-label="后台运行中" />
             </p>
-            <button v-for="child in sessions.childrenOf(GLOBAL_SESSION_ID)" :key="child.id" class="aux-child" @click.stop="openAuxiliary(GLOBAL_SESSION_ID, child.id)">↳ {{ child.title }} <span v-if="sessions.isRunning(child.id)" class="rspin" aria-label="运行中" /></button>
           </div>
           <button class="rmore" aria-label="更多" @click.stop="menuFor = globalMeta">
             <CoomiIcon name="more" :size="17" />
           </button>
         </div>
         <p v-if="isEmpty" class="empty">
-          <CoomiIcon name="chat" :size="22" class="empty-ic" />
-          <span>还没有历史会话，随便说点什么，<br />标题会用你的第一句话。</span>
+          还没有历史会话。<br />随便说点什么，标题会用你的第一句话。
         </p>
         <template v-for="g in sessions.groups" :key="g.label">
           <p class="sec-label">{{ g.label }}</p>
@@ -212,7 +190,6 @@ function openAuxiliary(parentId: string, sessionId: string) {
                 </template>
                 <span v-if="sessions.isRunning(m.id)" class="rspin" aria-label="后台运行中" />
               </p>
-              <button v-for="child in sessions.childrenOf(m.id)" :key="child.id" class="aux-child" @click.stop="openAuxiliary(m.id, child.id)">↳ {{ child.title }} <span v-if="sessions.isRunning(child.id)" class="rspin" aria-label="运行中" /></button>
             </div>
             <button class="rmore" aria-label="更多" @click.stop="menuFor = m">
               <CoomiIcon name="more" :size="17" />
@@ -235,29 +212,18 @@ function openAuxiliary(parentId: string, sessionId: string) {
     <div v-if="menuFor" class="sheet-wrap" @click.self="closeMenu">
       <div class="sheet">
         <p class="sheet-title">{{ menuFor.title }}</p>
-          <template v-if="isGlobalMeta(menuFor)">
-            <button class="sheet-item danger" @click="doClear('context')">
-              <CoomiIcon name="refresh" :size="18" />
-              <span>{{ clearArmed === 'context' ? '再点一次确认：全新记忆开始' : '清空上下文（全新记忆开始）' }}</span>
-            </button>
-            <button class="sheet-item danger" @click="doClear('all')">
-              <CoomiIcon name="trash" :size="18" />
-              <span>{{ clearArmed === 'all' ? '再点一次确认：彻底全部清除' : '全部清除（含历史与记忆）' }}</span>
-            </button>
-            <p v-if="clearError" class="sheet-hint danger-text">清空失败：{{ clearError }}</p>
-            <p class="sheet-hint">全局常驻会话：可清空数据，不可删除、不可重命名</p>
-          </template>
-          <template v-else>
-            <button class="sheet-item" @click="beginRename">
-              <CoomiIcon name="pencil" :size="18" /><span>重命名</span>
-            </button>
+          <button class="sheet-item" @click="beginRename">
+            <CoomiIcon name="pencil" :size="18" /><span>重命名</span>
+          </button>
+          <template v-if="!isGlobalMeta(menuFor)">
             <button class="sheet-item" @click="doPin">
               <CoomiIcon name="pin" :size="18" /><span>{{ menuFor.pinned ? '取消置顶' : '置顶' }}</span>
             </button>
-            <button class="sheet-item danger" :disabled="sessions.childrenOf(menuFor.id).length > 0" @click="doDelete">
-              <CoomiIcon name="trash" :size="18" /><span>{{ sessions.childrenOf(menuFor.id).length ? '请先删除辅助对话' : '删除会话' }}</span>
+            <button class="sheet-item danger" @click="doDelete">
+              <CoomiIcon name="trash" :size="18" /><span>删除会话</span>
             </button>
           </template>
+          <p v-else class="sheet-hint">全局常驻会话：永远置顶，不可删除</p>
           <button class="sheet-cancel" @click="closeMenu">取消</button>
       </div>
     </div>
@@ -265,15 +231,12 @@ function openAuxiliary(parentId: string, sessionId: string) {
 </template>
 
 <style scoped>
-.aux-child { display: block; width: 100%; text-align: left; padding: 5px 4px 3px 12px; border: 0; background: transparent; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-.aux-children { width: 100%; padding-left: 18px; }
-
 .drawer-root { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
 .drawer-root.open { pointer-events: auto; }
 
 .scrim {
   position: absolute; inset: 0;
-  background: rgba(17, 22, 31, .28);
+  background: rgba(17, 22, 31, .34);
   opacity: 0; transition: opacity .28s ease;
 }
 .drawer-root.open .scrim { opacity: 1; }
@@ -290,17 +253,12 @@ function openAuxiliary(parentId: string, sessionId: string) {
 }
 .drawer-root.open .panel { transform: none; }
 
-.dhead { display: flex; align-items: center; gap: 6px; padding: 12px 10px 8px 12px; }
+.dhead { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; }
 .sfield {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
-  height: 40px; padding: 0 10px 0 12px;
-  border-radius: var(--r-pill);
-  background: var(--fill);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  color: var(--text-3);
-  transition: border-color .15s, background .15s;
+  flex: 1; display: flex; align-items: center; gap: 7px;
+  height: 38px; padding: 0 10px 0 11px;
+  border-radius: var(--r-pill); background: var(--fill); color: var(--text-3);
 }
-.sfield:focus-within { border-color: var(--blue-border); background: var(--bg); }
 .sfield input {
   flex: 1; min-width: 0; border: 0; background: none; outline: none;
   font: inherit; font-size: 14.5px; color: var(--text);
@@ -317,6 +275,17 @@ function openAuxiliary(parentId: string, sessionId: string) {
   font-size: 15.5px; font-weight: 600; color: var(--blue);
 }
 .newrow:active { background: var(--fill); }
+.entry-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px;
+  margin: 0 10px 6px;
+}
+.entry {
+  display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px;
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg); color: var(--text-2); text-align: left; font-size: 13px;
+}
+.entry span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry:active { background: var(--fill-press); color: var(--blue); }
 .taskrow {
   display: flex; align-items: center; gap: 10px;
   margin: 0 10px 5px; min-height: 40px; padding: 7px 10px;
@@ -329,24 +298,15 @@ function openAuxiliary(parentId: string, sessionId: string) {
   border-radius: 50%; background: var(--blue-soft);
 }
 
-.list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px 10px; -webkit-overflow-scrolling: touch; }
-.empty {
-  margin: 26px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px;
-  font-size: 13.5px; line-height: 1.8; color: var(--text-3); text-align: center;
-}
-.empty-ic { color: var(--text-3); opacity: .55; }
+.list { flex: 1; overflow-y: auto; padding: 2px 10px 10px; -webkit-overflow-scrolling: touch; }
+.empty { margin: 26px 12px; font-size: 13.5px; line-height: 1.8; color: var(--text-3); }
 
 .row {
-  position: relative;
   display: flex; align-items: center; gap: 4px;
-  padding: 7px 6px 7px 10px; border-radius: var(--r-md);
+  padding: 9px 6px 9px 10px; border-radius: var(--r-md);
 }
 .row:active { background: var(--fill); }
-.row.cur { background: var(--blue-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue-border) 45%, transparent); }
-.row.cur::before {
-  content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
-  border-radius: 3px; background: var(--blue);
-}
+.row.cur { background: var(--blue-soft); }
 .rmain { flex: 1; min-width: 0; }
 .rtitle {
   font-size: 14.8px; color: var(--text);
@@ -354,7 +314,7 @@ function openAuxiliary(parentId: string, sessionId: string) {
 }
 .row.cur .rtitle { color: var(--blue); font-weight: 600; }
 .rmeta {
-  display: flex; align-items: center; gap: 4px; margin-top: 2px;
+  display: flex; align-items: center; gap: 4px; margin-top: 3px;
   font-size: 11.5px; color: var(--text-3);
 }
 /* 会话在后台执行中的小圈（放在时间/轮数之后，与 meta 文字同高） */
@@ -380,7 +340,6 @@ function openAuxiliary(parentId: string, sessionId: string) {
   font-size: 10.5px; font-weight: 650; line-height: 1;
 }
 .sheet-hint { margin: 0; padding: 12px 14px; color: var(--text-3); font-size: 12px; }
-.danger-text { color: var(--danger, #b3261e); }
 .rmeta {
   display: flex; align-items: center; gap: 4px; margin-top: 3px;
   font-size: 11.5px; color: var(--text-3);

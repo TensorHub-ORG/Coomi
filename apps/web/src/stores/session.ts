@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, shallowRef, watch, inject, hasInjectionContext, type InjectionKey, type Ref } from 'vue'
+import { ref, computed, shallowRef, watch } from 'vue'
 import { createTransport, type Transport } from '@/bridge'
 import { authedFetch, apiGet } from '@/bridge/http'
 import { isDemoMode } from '@/bridge/demoMode'
@@ -8,26 +8,21 @@ import type { ReasoningEffortStats } from '@/protocol/events'
 import type { ReasoningEffort } from '@/protocol/commands'
 import type { InboundEnvelope } from '@/protocol/commands'
 import { nextId } from '@/bridge/envelope'
-import { useConnectionStore, useScopedConnectionStore } from './connection'
+import { useConnectionStore } from './connection'
 import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { isGlobalSession as isGlobalSessionId } from '@/bridge/life'
-import { reportErrorToNative, sendFeedbackViaBridge } from '@/bridge/feedback'
-import { speak } from '@/bridge/tts'
 import { router } from '@/router'
-import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
 import { pushStatus as pushControlStatus, pushTrace, setControlModeActive } from '@/bridge/controlFloat'
-import type { ChatAttachment } from '@/utils/attachments'
-import { buildAttachmentRequest, parseAttachmentRequest } from '@/utils/attachments'
+import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace, UserMessage } from './viewModel'
 
-function defineSessionStore(storeId: string, auxiliary = false) {
-return defineStore(storeId, () => {
-  const connection = auxiliary ? useScopedConnectionStore(storeId) : useConnectionStore()
+export const useSessionStore = defineStore('session', () => {
+  const connection = useConnectionStore()
   const config = useConfigStore()
   const sessions = useSessionsStore()
 
-  const sessionId = ref(auxiliary ? createSessionId() : readActiveSessionId())
-  const mode = ref<'agent' | 'team' | 'life'>(sessions.find(sessionId.value)?.mode ?? 'agent')
+  const sessionId = ref(readActiveSessionId())
+  const mode = ref<'agent' | 'life'>(sessions.find(sessionId.value)?.mode ?? 'agent')
   const timeline = ref<Timelineitem[]>(sessions.loadTranscript(sessionId.value))
   const runState = ref<RunState>('idle')
   const usage = ref<{
@@ -35,30 +30,31 @@ return defineStore(storeId, () => {
     contextUsed: number; contextWindow: number
     cachedInput: number; cacheHitRate: number | null; cacheDataAvailable: boolean
     turnCacheHitRate: number | null; turnCacheDataAvailable: boolean
+    /** 本轮即时速率与耗时（后端新增字段，用于顶部/状态栏的实时速率显示）。 */
+    turnRateTps: number
+    turnElapsedMs: number
+    turnOutputTokens: number
     reasoningEfforts: Partial<Record<ReasoningEffort, ReasoningEffortStats>>
     contextCategories: Partial<Record<'system_tools' | 'messages' | 'skills' | 'mcp_tools' | 'system_prompt' | 'other', number>>
-    firstTokenLatencyMs: number | null
-    outputTokensPerSecond: number | null
-    turnTotalTokens: number | null
   } | null>(null)
   const retryConfirmation = ref<string | null>(null)
   /** 当前会话的工作目录（会话标记路径，绑定为会话执行目录）。 */
   const cwd = ref('')
   const loop = ref<LoopProgress>({ active: false, currentStep: 0, totalSteps: 0, status: '' })
-  const collaboration = ref({ active: false, phase: '', cycle: 0, cycles: 0, status: '', review: '' })
   /** 生命体待投递问候（队列唯一 pending → 气泡/开场问候的数据源）。 */
   const lifeUnread = ref<LifeUnreadItem[]>([])
   const lifeUnreadName = ref('')
   const lifeDelivering = ref(false)
+  const lifeStatsOpen = ref(false)
   /** 本次打开会话是否已做过开场问候（避免轮询重复触发投递）。 */
   let lifeAutoSent = false
   /** 编辑覆盖状态：非空表示输入框正处于「编辑上一条消息」模式。 */
-  const pendingEdit = ref<{ mid: string; content: string; attachments: ChatAttachment[] } | null>(null)
+  const pendingEdit = ref<{ mid: string; content: string } | null>(null)
   /** 回撤确认弹窗状态：非空表示等待用户确认回撤该轮。 */
   const undoConfirm = ref<{ mid: string } | null>(null)
 
   let currentAssistant: AssistantMessage | null = null
-  let currentReasoning: ReasoningBlock | null = null
+
   /**
    * 控制模式悬浮层的思考缓冲。
    *
@@ -100,40 +96,18 @@ return defineStore(storeId, () => {
     }
     return parts.join(' · ')
   }
+
   let connectedSessionId = ''
+  /** 并行会话：每个已打开的会话各持一条 WS（后台任务不断连，切回即可看到结果）。 */
+  const transportPool = new Map<string, Transport>()
+  /** 池上限：防止长时间使用后连接无限增长（每个连接 + 引擎事件缓冲都占内存）。 */
+  const TRANSPORT_POOL_MAX = 5
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let turnToolTrace: ToolDiagnosticTrace[] = []
   let consecutiveToolFailures = 0
   let maxConsecutiveToolFailures = 0
   let failureNoticeCreated = false
-  /** 回合级异常信号：任一工具失败 / agent_error / 输出流停滞都会置位，turn_end 汇总成一张反馈卡。 */
-  let turnHadError = false
-  let lastTurnErrorDetail = ''
-  /** 用户主动停止本轮：turn_end 时跳过自动朗读（内容未定稿，不该读）。 */
-  let turnCancelled = false
-  /** 停滞检测：回合运行中超过 STALL_TIMEOUT_MS 无任何 WS 事件视为疑似停滞。 */
-  let stallWatchTimer: ReturnType<typeof setInterval> | null = null
-  let stallDetected = false
-  let lastEventAt = Date.now()
-  const STALL_TIMEOUT_MS = 90_000
   const transport = shallowRef<Transport | null>(null)
-
-  function armStallWatch() {
-    disarmStallWatch()
-    lastEventAt = Date.now()
-    stallWatchTimer = setInterval(() => {
-      if (runState.value === 'idle') { disarmStallWatch(); return }
-      if (Date.now() - lastEventAt < STALL_TIMEOUT_MS) return
-      if (!stallDetected) {
-        stallDetected = true
-        pushNotice('warn', `输出流已停滞 ${Math.round(STALL_TIMEOUT_MS / 1000)} 秒，本轮结束后可一键反馈`)
-      }
-      disarmStallWatch()
-    }, 15_000)
-  }
-  function disarmStallWatch() {
-    if (stallWatchTimer) { clearInterval(stallWatchTimer); stallWatchTimer = null }
-  }
 
   const isBusy = computed(() => runState.value !== 'idle')
   const pendingApproval = computed(() => timeline.value.find((t): t is ToolCard => t.kind === 'tool' && t.status === 'awaiting_approval'))
@@ -153,10 +127,7 @@ return defineStore(storeId, () => {
     return null
   })
 
-  if (!auxiliary) persistActiveSessionId(sessionId.value)
-  if (!auxiliary && typeof window !== 'undefined') {
-    ;(window as Window & { __coomiActiveSessionId?: string }).__coomiActiveSessionId = sessionId.value
-  }
+  persistActiveSessionId(sessionId.value)
 
   // Native task status is derived from /api/tasks in the sessions store. A
   // foreground idle session must not overwrite another session's running state.
@@ -170,10 +141,9 @@ return defineStore(storeId, () => {
     const trimmed = (GUIDE_TITLES[key] ?? 'Coomi 指南').trim()
     // 首条用户消息作为会话标题，抽屉里就不会全是「新对话」。
     const isFirst = !timeline.value.some(t => t.kind === 'user')
-    if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
+    if (isFirst) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
     timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: trimmed })
     runState.value = 'thinking'
-    armStallWatch()
     transport.value?.send({ command: 'send_guide', key })
     persistSoon()
   }
@@ -205,16 +175,35 @@ return defineStore(storeId, () => {
 
   /** 换 sessionId 后必须重连：WS 的路径里带着 session id。 */
   function connect(wsUrl?: string) {
-    // 已有连接且仍然存活（打开/连接中/重连等待中）就复用；死连接（重试耗尽停摆）必须重建，
-    // 否则退出聊天页再进来会一直卡在「已停止重连」，发消息也被静默丢弃。
-    if (transport.value && connectedSessionId === sessionId.value && transport.value.alive) return
+    // 并行会话：目标会话已有活跃连接则复用（不打断后台任务），否则新建。
+    // 这是并发与「切换不崩」的关键：绝不能 close 还在跑任务的旧连接。
     const targetSessionId = sessionId.value
-    const previous = transport.value
-    transport.value = null
-    connectedSessionId = ''
-    previous?.close()
+    const existing = transportPool.get(targetSessionId)
+    if (existing) {
+      transport.value = existing
+      connectedSessionId = targetSessionId
+      connection.setStatus({ state: 'open' })
+      existing.send({ command: 'set_permission_mode', mode: config.permissionMode })
+      existing.send({ command: 'set_session_mode', mode: mode.value })
+      const meta = sessions.find(targetSessionId)
+      const providerId = meta?.providerId ?? config.currentProviderId
+      const model = meta?.model ?? config.currentModel
+      if (providerId && model) existing.send({ command: 'select_model', provider_id: providerId, model })
+      existing.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
+      existing.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
+      return
+    }
     if (wsUrl) connection.setWsUrl(wsUrl)
+    // 池满：关闭最久未用的连接（Map 迭代顺序 = 插入顺序，第一个即最老）。
+    while (transportPool.size >= TRANSPORT_POOL_MAX) {
+      const oldest = transportPool.keys().next().value as string | undefined
+      if (!oldest || oldest === targetSessionId) break
+      const oldT = transportPool.get(oldest)
+      transportPool.delete(oldest)
+      oldT?.close?.()
+    }
     const t = createTransport(targetSessionId, wsUrl)
+    transportPool.set(targetSessionId, t)
     transport.value = t
     connectedSessionId = targetSessionId
     let lastEventSeq = 0
@@ -225,17 +214,18 @@ return defineStore(storeId, () => {
         t.send({ command: 'set_permission_mode', mode: config.permissionMode })
         t.send({ command: 'set_session_mode', mode: mode.value })
         const meta = sessions.find(targetSessionId)
-        const providerId = meta?.providerId || config.currentProviderId
-        const model = meta?.model || config.currentModel
+        const providerId = meta?.providerId ?? config.currentProviderId
+        const model = meta?.model ?? config.currentModel
         if (providerId && model) {
           t.send({ command: 'select_model', provider_id: providerId, model })
         }
-        if (!auxiliary) t.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
-        if (!auxiliary) t.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
+        t.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
+        t.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
       }
     })
     t.onMessage(env => {
-      if (transport.value !== t || sessionId.value !== targetSessionId) return
+      // 只过滤「前台会话」：后台会话的事件照常 ack（引擎继续跑），但不刷新前台 UI。
+      const isForeground = sessionId.value === targetSessionId
       if (env.type === 'event' && env.payload.event_seq) {
         const seq = env.payload.event_seq
         if (seq <= lastEventSeq) {
@@ -243,23 +233,30 @@ return defineStore(storeId, () => {
           return
         }
         lastEventSeq = seq
-        onInbound(env)
+        if (isForeground) onInbound(env)
         t.send({ command: 'ack_event', event_seq: seq })
         return
       }
-      onInbound(env)
+      if (isForeground) onInbound(env)
     })
     t.connect()
   }
 
-  function disconnect() { transport.value?.close(); transport.value = null; connectedSessionId = '' }
+  function disconnect() {
+    for (const t of transportPool.values()) t?.close?.()
+    transportPool.clear()
+    transport.value = null
+    connectedSessionId = ''
+  }
 
   /** Recreate the active socket so newly saved retry settings take effect immediately. */
   function reconnect() {
-    const previous = transport.value
+    const current = sessionId.value
+    const previous = transportPool.get(current)
+    transportPool.delete(current)
+    previous?.close()
     transport.value = null
     connectedSessionId = ''
-    previous?.close()
     connect(connection.wsUrl || undefined)
   }
 
@@ -269,15 +266,25 @@ return defineStore(storeId, () => {
   }
 
   function applyEvent(ev: AgentEvent) {
-    lastEventAt = Date.now()
     switch (ev.event_type) {
       // 兜底：turn_end 之后又开始吐字（引擎续了一轮），状态得跟着回到忙。
-      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; endReasoningStream(); appendAssistant(ev.content); pushControlStatus('正在输出'); break
-      case 'reasoning_chunk': if (runState.value === 'idle') runState.value = 'thinking'; appendReasoning(ev.content); pushControlStatus('正在思考'); queueFloatReasoning(ev.content); break
+      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; appendAssistant(ev.content); pushControlStatus('正在输出'); break
+      case 'reasoning_chunk':
+        if (runState.value === 'idle') runState.value = 'thinking'
+        appendReasoning(ev.content)
+        // 控制模式：思考片段同步到桌面悬浮层。用户此时多半已经切到目标 App，
+        // 悬浮层是他唯一能看到「它在想什么」的地方。
+        pushControlStatus('正在思考')
+        queueFloatReasoning(ev.content)
+        break
       case 'tool_start':
         connection.setRetry(null)
         endAssistantStream()
         timeline.value.push({ kind: 'tool', callId: ev.call_id, toolName: ev.tool_name, arguments: ev.arguments, status: 'starting', expanded: ev.tool_name === 'show_image' })
+        flushFloatReasoning()
+        pushControlStatus(`正在调用 ${ev.tool_name}`)
+        // summarizeArguments 返回的是结构化的摘要对象，转发给悬浮层要转成一行文字
+        pushTrace(`调用工具 ${ev.tool_name}`, describeFloatArguments(ev.arguments))
         turnToolTrace.push({
           callId: ev.call_id,
           sequence: turnToolTrace.length + 1,
@@ -288,26 +295,22 @@ return defineStore(storeId, () => {
         runState.value = 'executing'
         break
       case 'tool_running': patchTool(ev.call_id, c => c.status = 'running'); runState.value = 'executing'; break
-      case 'tool_output':
-        // Agent 执行实时流（批次三 #31）：shell/local_shell 增量输出追加到卡片。
-        patchTool(ev.call_id, c => {
-          if (c.expanded === undefined) c.expanded = true
-          // 上限 24KB：超长丢头部，保尾部（最新输出最有信息量）。
-          const merged = (c.liveOutput ?? '') + ev.chunk
-          c.liveOutput = merged.length > 24_000 ? '…（前段已截断）\n' + merged.slice(-24_000) : merged
-        })
-        runState.value = 'executing'
-        break
       case 'tool_done':
         patchTool(ev.call_id, c => {
           c.status = ev.is_error ? 'error' : 'success'
           c.elapsed = ev.elapsed
           c.resultPreview = ev.result_preview
           c.isError = ev.is_error
-          c.liveOutput = undefined
           // 工具产生的图片：瀑布流渲染（历史恢复时由 messages.images 补回）
           if (Array.isArray(ev.images) && ev.images.length > 0) c.images = ev.images
         })
+        // 控制模式：工具结果也送到悬浮层。用户切到目标 App 后，这是唯一能看到
+        // 「它刚才做的事成没成」的地方。
+        pushTrace(
+          `${ev.is_error ? '✕' : '✓'} ${ev.tool_name} · ${ev.elapsed.toFixed(1)}s`,
+          ev.result_preview,
+        )
+        pushControlStatus(ev.is_error ? '工具失败，正在调整' : '正在继续')
         // 工具跑完不等于一轮结束 —— 模型接着想下一步。回 idle 只认 turn_end /
         // 取消 / 致命错误，否则输入区会在循环中途闪回「下达任务」和发送箭头。
         runState.value = 'thinking'
@@ -321,8 +324,6 @@ return defineStore(storeId, () => {
               maxConsecutiveToolFailures = Math.max(maxConsecutiveToolFailures, consecutiveToolFailures)
               trace.category = classifyToolError(ev.result_preview)
               trace.errorSummary = sanitizeDiagnosticText(ev.result_preview)
-              turnHadError = true
-              lastTurnErrorDetail = trace.errorSummary
               if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
                 failureNoticeCreated = true
                 const noticeId = nextId()
@@ -356,7 +357,6 @@ return defineStore(storeId, () => {
         runState.value = 'awaiting_question'
         break
       case 'file_transfer_request':
-        if (auxiliary) auxiliaryTransfers.set(ev.request_id, paths => completeFileTransfer(ev.request_id, paths))
         if (ev.operation === 'import') {
           window.CoomiAndroid?.importFilesForRequest?.(ev.request_id)
         } else if (ev.path) {
@@ -381,30 +381,16 @@ return defineStore(storeId, () => {
           cacheDataAvailable: ev.usage.cache_data_available ?? previous?.cacheDataAvailable ?? false,
           turnCacheHitRate: ev.usage.turn_cache_hit_rate ?? previous?.turnCacheHitRate ?? null,
           turnCacheDataAvailable: ev.usage.turn_cache_data_available ?? previous?.turnCacheDataAvailable ?? false,
+          turnRateTps: ev.usage.turn_rate_tps ?? previous?.turnRateTps ?? 0,
+          turnElapsedMs: ev.usage.turn_elapsed_ms ?? previous?.turnElapsedMs ?? 0,
+          turnOutputTokens: ev.usage.turn_output_tokens ?? previous?.turnOutputTokens ?? 0,
           reasoningEfforts: ev.reasoning_efforts ?? previous?.reasoningEfforts ?? {},
           contextCategories: ev.context_categories ?? previous?.contextCategories ?? {},
-          // `null` is an intentional reset at the start of a new turn. Only
-          // retain the previous value when an older engine omitted the field.
-          firstTokenLatencyMs: ev.usage.first_token_latency_ms === undefined
-            ? previous?.firstTokenLatencyMs ?? null
-            : ev.usage.first_token_latency_ms,
-          outputTokensPerSecond: ev.usage.output_tokens_per_second === undefined
-            ? previous?.outputTokensPerSecond ?? null
-            : ev.usage.output_tokens_per_second,
-          turnTotalTokens: ev.usage.turn_total_tokens === undefined
-            ? previous?.turnTotalTokens ?? null
-            : ev.usage.turn_total_tokens,
         }
         break
       }
       case 'compression': pushNotice('info', `上下文已压缩 ${fmtTokens(ev.before)} → ${fmtTokens(ev.after)}`); break
-      case 'connection_retry':
-        connection.setRetry(`${ev.message}（${ev.attempt}/${ev.max_attempts}）`)
-        // 重试到上限仍连不上且用户可交互：交给原生弹「一键反馈」。
-        if (ev.attempt >= ev.max_attempts && !isBusy.value) {
-          reportErrorToNative('runtime_error', '网络连接失败', `${ev.message}（已重试 ${ev.attempt} 次）`)
-        }
-        break
+      case 'connection_retry': connection.setRetry(`${ev.message}（${ev.attempt}/${ev.max_attempts}）`); break
       case 'stream_reset':
         endAssistantStream()
         while (timeline.value.length > 0) {
@@ -417,24 +403,17 @@ return defineStore(storeId, () => {
         endAssistantStream()
         runState.value = 'idle'
         retryConfirmation.value = ev.message
-        disarmStallWatch()
         break
-      case 'agent_error':
-        endAssistantStream(); pushNotice('error', ev.message)
-        turnHadError = true
-        lastTurnErrorDetail = sanitizeDiagnosticText(ev.message)
-        disarmStallWatch()
-        if (ev.is_fatal) {
-          runState.value = 'idle'
-          pushFeedbackCard('runtime_error', `本轮执行异常终止：${ev.message.slice(0, 80)}`, lastTurnErrorDetail, false)
-          resetTurnFeedbackSignals()
-        }
+      case 'agent_error': {
+        endAssistantStream(); pushNotice('error', ev.message); if (ev.is_fatal) runState.value = 'idle'; persistSoon()
+        // 账号登录类 Provider（DeepSeek / 智谱 Coding Plan）已不在公开源码中提供入口
         if ((ev as any).captcha_required) {
-          pushNotice('warn', '该模型需要账号登录验证，请重新登录该账号')
+          pushNotice('warn', '该模型需要账号登录验证，请在本地版本中使用')
         }
-        persistSoon(); break
-      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); if (!auxiliary) void router.push(ev.route); break
-      case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); turnCancelled = true; pushNotice('warn', '已停止本轮执行'); disarmStallWatch(); break
+        break
+      }
+      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); void router.push(ev.route); break
+      case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); pushNotice('warn', '已停止本轮执行'); break
       case 'bg_task_detached': pushNotice('info', `↪ 已转入后台任务 #${ev.task_id}（${ev.tool_name}）`); break
       case 'bg_task_completed': pushNotice(ev.is_error ? 'error' : 'success', `${ev.is_error ? '✕' : '✓'} 后台任务 #${ev.task_id} ${ev.is_error ? '失败' : '完成'}`); break
       case 'loop_progress':
@@ -447,53 +426,16 @@ return defineStore(storeId, () => {
         // 气泡投递完成：把最后一条 assistant 标记为生命体气泡并复位投递态。
         lifeDelivering.value = false
         const last = timeline.value[timeline.value.length - 1]
-        if (last?.kind === 'assistant') {
-          last.life = true
-          // 回填投递触发类型（morning/egg/milestone_stage/everyday），供气泡卡片定制渲染。
-          if (ev.trigger) last.lifeTrigger = ev.trigger
-        }
+        if (last?.kind === 'assistant') last.life = true
         void refreshLifeUnread()
         break
       }
-      case 'collaboration_started':
-        collaboration.value = { active: true, phase: '', cycle: 0, cycles: ev.cycles, status: 'started', review: '' }
-        break
-      case 'collaboration_phase':
-        collaboration.value = { ...collaboration.value, active: true, phase: ev.phase, cycle: ev.cycle, status: ev.status }
-        break
-      case 'collaboration_review':
-        collaboration.value = { ...collaboration.value, active: true, phase: 'reviewer', cycle: ev.cycle, status: ev.status, review: ev.content }
-        break
-      case 'collaboration_finished':
-        collaboration.value = { ...collaboration.value, active: false, phase: 'reviewer', cycle: ev.cycle ?? collaboration.value.cycle, status: ev.status ?? collaboration.value.status, review: ev.summary ?? collaboration.value.review }
-        break
       case 'turn_end':
         endAssistantStream(); cancelRunningTools(); connection.setRetry(null); runState.value = 'idle'
-        disarmStallWatch()
-        // 收尾清理：去掉空白思考块（部分供应商会发空的 reasoning 分片）。
-        timeline.value = timeline.value.filter(item => !(item.kind === 'reasoning' && !item.content.trim()))
-        // 批次五 #7：任务结束后执行过程自动折叠——收起全部已展开的工具卡，
-        // 最终总结（最后一条助手消息）保持醒目；用户手动点开的（manual）不受影响。
-        timeline.value.forEach(item => {
-          if (item.kind === 'tool' && item.status !== 'awaiting_approval') item.expanded = false
-        })
         {
-          // 回合末统一反馈卡：本轮有任何异常（工具失败/agent_error/输出停滞）
-          // 就在瀑布流末尾放一张卡片，用户一键授权即自动采集上传。
           const failures = turnToolTrace.filter(item => item.status === 'error').length
-          if (turnHadError || stallDetected) {
-            const parts: string[] = []
-            if (failures > 0) parts.push(`${failures} 次工具调用失败`)
-            if (stallDetected) parts.push('输出流一度停滞')
-            const summary = `本轮出现${parts.join('、')}，遇到问题了吗？`
-            pushFeedbackCard(
-              failures > 0 ? 'tool_failure' : 'performance',
-              summary,
-              lastTurnErrorDetail,
-              failures > 0,
-            )
-          }
           if (maxConsecutiveToolFailures >= 3 && !failureNoticeCreated) {
+            const trace = turnToolTrace.map(item => ({ ...item, callId: undefined }))
             const noticeId = nextId()
             timeline.value.push({
               kind: 'notice', id: noticeId, tone: 'warn',
@@ -501,14 +443,11 @@ return defineStore(storeId, () => {
             })
           }
         }
-        resetTurnFeedbackSignals()
+        turnToolTrace = []
+        consecutiveToolFailures = 0
+        maxConsecutiveToolFailures = 0
+        failureNoticeCreated = false
         persistSoon()
-        // F8 语音陪伴：开启自动朗读时，回合正常结束后朗读最后一条助手消息
-        // （用户主动停止的不读，避免把未定稿内容念出来）。
-        if (!auxiliary && config.ttsAutoRead && !turnCancelled) {
-          const last = timeline.value[timeline.value.length - 1]
-          if (last?.kind === 'assistant' && last.content.trim()) speak(stripMarkdownForTts(last.content))
-        }
         break
       case 'session_state': {
         // 重连后引擎告知本会话是否仍在后台执行（切走会话后任务继续跑）。
@@ -531,11 +470,11 @@ return defineStore(storeId, () => {
           cacheDataAvailable: usage.value?.cacheDataAvailable ?? false,
           turnCacheHitRate: usage.value?.turnCacheHitRate ?? null,
           turnCacheDataAvailable: usage.value?.turnCacheDataAvailable ?? false,
+          turnRateTps: usage.value?.turnRateTps ?? 0,
+          turnElapsedMs: usage.value?.turnElapsedMs ?? 0,
+          turnOutputTokens: usage.value?.turnOutputTokens ?? 0,
           reasoningEfforts: usage.value?.reasoningEfforts ?? {},
           contextCategories: usage.value?.contextCategories ?? {},
-          firstTokenLatencyMs: usage.value?.firstTokenLatencyMs ?? null,
-          outputTokensPerSecond: usage.value?.outputTokensPerSecond ?? null,
-          turnTotalTokens: usage.value?.turnTotalTokens ?? null,
         }
         if (typeof ev.cwd === 'string' && ev.cwd) cwd.value = ev.cwd
         break
@@ -545,12 +484,14 @@ return defineStore(storeId, () => {
 
   function activateSession(id: string) {
     sessionId.value = id
-    if (!auxiliary && typeof window !== 'undefined') {
-      ;(window as Window & { __coomiActiveSessionId?: string }).__coomiActiveSessionId = id
-    }
     mode.value = resolveLifeMode(id)
-    collaboration.value = { active: false, phase: '', cycle: 0, cycles: 0, status: '', review: '' }
-    if (!auxiliary) persistActiveSessionId(id)
+    // 顶栏模型显示跟随会话：每个会话保存自己的模型（sessions.setModel 记录在 meta）。
+    // 这里只改「显示」，引擎侧真正的模型由 connect() 里按 meta 发的 select_model 生效。
+    const meta = sessions.find(id)
+    if (meta?.providerId && meta.model) {
+      config.syncDisplayModel(meta.providerId, meta.model)
+    }
+    persistActiveSessionId(id)
     lifeAutoSent = false
   }
 
@@ -558,9 +499,8 @@ return defineStore(storeId, () => {
    * 会话模式决议：生命体人格只属于「常驻会话」；「用于全局会话」开关开启后所有会话都带人格。
    * 历史会话即使曾被切成 life，关闭全局开关后也强制回到 agent（人格只活在它该在的地方）。
    */
-  function resolveLifeMode(id: string): 'agent' | 'team' | 'life' {
-    if (!auxiliary && config.digitalLifeEnabled && (isGlobalSessionId(id) || config.lifeGlobalMode)) return 'life'
-    return sessions.find(id)?.mode === 'team' ? 'team' : 'agent'
+  function resolveLifeMode(id: string): 'agent' | 'life' {
+    return config.digitalLifeEnabled && (isGlobalSessionId(id) || config.lifeGlobalMode) ? 'life' : 'agent'
   }
 
   const isGlobalSession = computed(() => isGlobalSessionId(sessionId.value))
@@ -568,7 +508,6 @@ return defineStore(storeId, () => {
   function retryInterruptedTurn() {
     retryConfirmation.value = null
     runState.value = 'thinking'
-    armStallWatch()
     transport.value?.send({ command: 'retry_turn' })
   }
 
@@ -577,6 +516,11 @@ return defineStore(storeId, () => {
   function setReasoningEffort(effort: ReasoningEffort) {
     config.setReasoningEffort(effort)
     transport.value?.send({ command: 'set_reasoning_effort', effort })
+  }
+
+  function setProductionMode(value: 'normal' | 'overload' | 'berserk') {
+    config.setProductionMode(value)
+    transport.value?.send({ command: 'set_production_mode', mode: value })
   }
 
   function setMaxToolRounds(rounds: number) {
@@ -598,17 +542,10 @@ return defineStore(storeId, () => {
     if (changed) persistSoon()
   }
 
-  function sendMessage(text: string, attachments: ChatAttachment[] = []) {
-    const displayText = text.trim()
-    if (!displayText && !attachments.length) return
-    const transportText = buildAttachmentRequest(displayText, attachments)
-    const visibleAttachments = attachments.map(item => ({ ...item }))
-    // 传输层已停摆时先重建连接，避免消息被静默丢弃（1006 重试耗尽后不自动恢复的历史问题）。
-    if (transport.value && !transport.value.alive) {
-      transport.value = null
-      connectedSessionId = ''
-      connect(connection.wsUrl || undefined)
-    }
+  function sendMessage(text: string, displayText?: string, morph = false, attachments?: string[]): string | null {
+    const trimmed = text.trim()
+    const visible = displayText?.trim() || trimmed
+    if (!trimmed) return null
     // 编辑覆盖模式：截断目标轮次（与引擎 edit_turn 行为一致），以新文本重新执行。
     const edit = pendingEdit.value
     if (edit) {
@@ -621,33 +558,39 @@ return defineStore(storeId, () => {
         }
       }
       if (cutAt >= 0) timeline.value.splice(cutAt)
-      timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: displayText, attachments: visibleAttachments })
-      turnToolTrace = []
-      turnCancelled = false
+      const id = nextId()
+      timeline.value.push({ kind: 'user', id, mid: '', content: visible, attachments, morphing: morph })
       runState.value = 'thinking'
-      armStallWatch()
-      transport.value?.send({ command: 'edit_turn', msg_id: edit.mid, text: transportText })
+      transport.value?.send({ command: 'edit_turn', msg_id: edit.mid, text: trimmed })
       persistSoon()
-      return
+      return id
     }
     // 首条用户消息作为会话标题，抽屉里就不会全是「新对话」。
     const isFirst = !timeline.value.some(t => t.kind === 'user')
-    const titleSeed = displayText || visibleAttachments.map(item => item.name).join('、')
-    if (isFirst && !isGlobalSessionId(sessionId.value)) sessions.touch(sessionId.value, { title: sessions.deriveTitle(titleSeed) })
+    if (isFirst) sessions.touch(sessionId.value, { title: sessions.deriveTitle(visible) })
     if (isBusy.value) {
-      timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: displayText, attachments: visibleAttachments })
-      turnCancelled = false
-      transport.value?.send({ command: 'jump_in', text: transportText })
+      const id = nextId()
+      timeline.value.push({ kind: 'user', id, mid: '', content: visible, attachments, morphing: morph })
+      transport.value?.send({ command: 'jump_in', text: trimmed })
       persistSoon()
-      return
+      return id
     }
     turnToolTrace = []
-    turnCancelled = false
-    timeline.value.push({ kind: 'user', id: nextId(), mid: '', content: displayText, attachments: visibleAttachments })
+    const id = nextId()
+    timeline.value.push({ kind: 'user', id, mid: '', content: visible, attachments, morphing: morph })
     runState.value = 'thinking'
-    armStallWatch()
-    transport.value?.send({ command: 'send_message', text: transportText })
+    // 直接发送；如遇 3007 需验证码，引擎发 captcha_required 事件，前端跳转验证页处理
+    transport.value?.send({ command: 'send_message', text: trimmed })
     persistSoon()
+    return id
+  }
+
+  function completeSendMorph(id: string) {
+    const message = timeline.value.find((item): item is UserMessage => item.kind === 'user' && item.id === id)
+    if (!message || !message.morphing) return
+    message.morphing = false
+    message.morphArrived = true
+    setTimeout(() => { message.morphArrived = false }, 1100)
   }
 
   function cancel() { transport.value?.send({ command: 'cancel' }) }
@@ -661,17 +604,17 @@ return defineStore(storeId, () => {
     transport.value?.send({ command: 'answer_question', call_id: callId, answers })
     if (runState.value === 'awaiting_question') runState.value = 'thinking'
   }
-  function setPermissionMode(mode: 'ask' | 'auto' | 'full') { config.setPermissionMode(mode); transport.value?.send({ command: 'set_permission_mode', mode }) }
+  function setPermissionMode(mode: 'ask' | 'auto' | 'full' | 'minimal') { config.setPermissionMode(mode); transport.value?.send({ command: 'set_permission_mode', mode }) }
   function togglePlanMode() { const entering = !config.planMode; config.togglePlanMode(); transport.value?.send({ command: entering ? 'enter_plan_mode' : 'exit_plan_mode' }) }
   async function selectModel(providerId: string, model: string) {
-    if (!auxiliary && !(await config.validateAndSelectModel(providerId, model))) {
+    if (!(await config.validateAndSelectModel(providerId, model))) {
       pushNotice('error', config.lastError || '模型凭据验证失败，未切换模型')
       return
     }
     transport.value?.send({ command: 'select_model', provider_id: providerId, model })
     sessions.setModel(sessionId.value, providerId, model)
   }
-  function setSessionMode(value: 'agent' | 'team' | 'life') {
+  function setSessionMode(value: 'agent' | 'life') {
     if (isBusy.value || mode.value === value) return
     mode.value = value
     sessions.setMode(sessionId.value, value)
@@ -748,11 +691,19 @@ return defineStore(storeId, () => {
       mode.value = resolveLifeMode(id)
       sessions.setMode(id, mode.value)
       const messages = (session.messages ?? []) as ChatMessageJson[]
-      if (messages.length === 0) return false
+      if (messages.length === 0 && !((session.archive ?? []) as ChatMessageJson[]).length) return false
       if (messages.some(m => m.compaction_summary)) {
-        // 上下文已压缩：引擎只剩摘要 + 截断的部分历史。前端从未收到压缩版，
-        // 本机 localStorage 缓存仍是完整时间线 —— 优先用它恢复展示，
-        // 并把压缩摘要折叠成一条提示附在末尾。
+        // 上下文已压缩：引擎磁盘 archive 保留压缩前完整历史（新增字段），
+        // 其次本机 localStorage 缓存，两者都拿不到才退回摘要。
+        const archive = (session.archive ?? []) as ChatMessageJson[]
+        if (archive.length > 0) {
+          const detail = messages.find(m => m.compaction_summary)?.content ?? ''
+          timeline.value = [
+            ...messagesToTimeline(archive),
+            { kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 完整历史已保留）', detail },
+          ]
+          return true
+        }
         const cached = sessions.loadTranscript(id)
         if (cached && cached.length > 0) {
           const detail = messages.find(m => m.compaction_summary)?.content ?? ''
@@ -782,8 +733,7 @@ return defineStore(storeId, () => {
         continue
       }
       if (m.role === 'user') {
-        const restored = parseAttachmentRequest(m.content)
-        items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: restored.text, attachments: restored.attachments })
+        items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: m.content })
       } else if (m.role === 'assistant') {
         if (m.content) items.push({ kind: 'assistant', id: nextId(), mid: m.id ?? '', content: m.content, streaming: false, life: m.life_proactive === true })
         for (const tc of m.tool_calls ?? []) {
@@ -839,7 +789,8 @@ return defineStore(storeId, () => {
     loop.value = { active: false, currentStep: 0, totalSteps: 0, status: '' }
     pendingEdit.value = null
     undoConfirm.value = null
-    runState.value = 'syncing'
+      // 切换会话立即回到空闲态，避免把旧会话的「正在对话」带到新会话顶部显示。
+      runState.value = 'idle'
     const targetId = isUuid(id) ? id : sessions.migrateId(id, createSessionId())
     activateSession(targetId)
     const restoredFromEngine = await restoreFromEngine(targetId)
@@ -857,10 +808,6 @@ return defineStore(storeId, () => {
   }
 
   function deleteSession(id: string) {
-    if (sessions.childrenOf(id).length) {
-      pushNotice('warn', '请先删除该会话下的辅助对话')
-      return
-    }
     // 先停掉待落盘的持久化定时器：被删会话不应再写回（否则会“复活”成空标题的新会话）。
     if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
     if (id === sessionId.value) {
@@ -873,39 +820,6 @@ return defineStore(storeId, () => {
     }
     sessions.remove(id)
     try { localStorage.removeItem(`coomi.draft.${id}`) } catch { /* ignore */ }
-  }
-
-  async function clearSessionData(id: string, mode: 'context' | 'all' = 'context'): Promise<{ ok: boolean; error?: string }> {
-    // 注意：这里绝不能再弹 window.confirm——WebView 无 WebChromeClient 会静默吞掉，
-    // 永远返回 false（「清空失败」的历史根因）。确认交互统一在 SideDrawer 两次点击完成。
-    try {
-      const response = await authedFetch(`/api/sessions/${encodeURIComponent(id)}/clear`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
-      })
-      if (!response.ok) {
-        let message = `HTTP ${response.status}`
-        try {
-          const data = await response.json()
-          if (data?.message) message = data.message
-        } catch { /* 无错误体就用状态码 */ }
-        return { ok: false, error: message }
-      }
-      sessions.clearTranscript(id)
-      sessions.touch(id, { turns: 0 })
-      if (id === sessionId.value) {
-        endAssistantStream()
-        timeline.value = []
-        usage.value = null
-        loop.value = { active: false, currentStep: 0, totalSteps: 0, status: '' }
-        runState.value = 'idle'
-        reconnect()
-      }
-      return { ok: true }
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
   }
 
   /** 更新当前会话的工作目录（会话标记路径）。成功后引擎后续 turn 都在该目录执行。 */
@@ -929,11 +843,11 @@ return defineStore(storeId, () => {
 
   /** 编辑单条消息正文（改文本），成功后从引擎重新拉取时间线。 */
   /** 进入编辑模式：把旧文本回填到输入框，发送时覆盖该轮重新执行。 */
-  function startEditMessage(mid: string, content: string, attachments: ChatAttachment[] = []) {
+  function startEditMessage(mid: string, content: string) {
     if (isBusy.value) return
-    pendingEdit.value = { mid, content, attachments: attachments.map(item => ({ ...item })) }
+    pendingEdit.value = { mid, content }
     window.dispatchEvent(new CustomEvent('coomi:prefill-draft', {
-      detail: { sessionId: sessionId.value, text: content, attachments },
+      detail: { sessionId: sessionId.value, text: content },
     }))
   }
 
@@ -982,22 +896,6 @@ return defineStore(storeId, () => {
     persistSoon()
   }
 
-  /** 去掉 markdown 标记，得到适合朗读的纯文本（与气泡内朗读保持一致）。 */
-  function stripMarkdownForTts(text: string): string {
-    return text
-      .replace(/```[\s\S]*?```/g, '代码块')
-      .replace(/`([^`]*)`/g, '$1')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/^#{1,6}\s+/gm, '')
-      .replace(/^>\s?/gm, '')
-      .replace(/[*_~]+/g, '')
-      .replace(/^\s*[-+*]\s+/gm, '')
-      .replace(/^\s*\d+\.\s+/gm, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-  }
-
   function appendAssistant(content: string) {
     if (!currentAssistant) {
       timeline.value.push({ kind: 'assistant', id: nextId(), mid: '', content: '', streaming: true })
@@ -1007,41 +905,11 @@ return defineStore(storeId, () => {
     }
     currentAssistant.content += content
   }
-  function endReasoningStream() {
-    // 显式收尾可避免依赖分片间隔猜测状态；只触碰当前块，避免每个文本
-    // 分片都扫描整条历史记录而重新触发大量响应式读取。
-    if (currentReasoning) currentReasoning.streaming = false
-    currentReasoning = null
-  }
-  function endAssistantStream() {
-    if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null }
-    endReasoningStream()
-  }
+  function endAssistantStream() { if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null } }
   function appendReasoning(content: string) {
-    if (currentReasoning) {
-      currentReasoning.content += content
-      return
-    }
-    // 就近合并：从末尾向前找最近的思考块；途中允许跳过工具/问题/通知卡和
-    // 还没产出文字的助手消息 —— 部分供应商（如 deepseek）的 reasoning 与
-    // text 交错发送，否则思考过程会被拆成多条碎片。
-    const items = timeline.value
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i]
-      if (item.kind === 'reasoning') {
-        const reasoning = item as ReasoningBlock
-        reasoning.streaming = true
-        currentReasoning = reasoning
-        reasoning.content += content
-        return
-      }
-      if (item.kind === 'assistant' && item.content.trim() !== '') break
-      if (item.kind === 'user' || item.kind === 'question') break
-    }
-    // 没有可合并目标时，纯空白的思考分片不值得新建一个「0 字」块。
-    if (!content.trim()) return
-    timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false, streaming: true })
-    currentReasoning = timeline.value[timeline.value.length - 1] as ReasoningBlock
+    const last = timeline.value[timeline.value.length - 1]
+    if (last && last.kind === 'reasoning') { (last as ReasoningBlock).content += content }
+    else { timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false }) }
   }
   function patchTool(callId: string, fn: (c: ToolCard) => void): boolean {
     for (let i = timeline.value.length - 1; i >= 0; i--) { const t = timeline.value[i]; if (t.kind === 'tool' && t.callId === callId) { fn(t); return true } }
@@ -1052,173 +920,10 @@ return defineStore(storeId, () => {
   }
   function pushNotice(tone: 'info' | 'warn' | 'error' | 'success', text: string) { timeline.value.push({ kind: 'notice', id: nextId(), tone, text }) }
 
-  /** 在瀑布流末尾放一张统一反馈卡（每回合至多一张，由 turn_end / 致命错误触发）。 */
-  function pushFeedbackCard(
-    channel: 'tool_failure' | 'runtime_error' | 'performance',
-    summary: string,
-    detail: string,
-    needsAnalysis: boolean,
-  ) {
-    timeline.value.push({
-      kind: 'notice', id: nextId(), tone: 'warn',
-      text: summary,
-      detail: detail || undefined,
-      feedback: {
-        channel,
-        summary,
-        needsAnalysis,
-        toolTrace: turnToolTrace.map(({ callId: _callId, ...item }) => item),
-        hasConversation: timeline.value.some(t => t.kind === 'user' || (t.kind === 'assistant' && t.content)),
-      },
-      analysisStatus: 'consent', feedbackEligible: true, expanded: false,
-      failureCount: turnToolTrace.filter(item => item.status === 'error').length,
-    })
-  }
+  function toggleLifeStats() { lifeStatsOpen.value = !lifeStatsOpen.value }
 
-  /** 回合结束后清空异常信号（反馈卡已携带轨迹快照）。 */
-  function resetTurnFeedbackSignals() {
-    turnToolTrace = []
-    consecutiveToolFailures = 0
-    maxConsecutiveToolFailures = 0
-    turnHadError = false
-    lastTurnErrorDetail = ''
-    stallDetected = false
-    disarmStallWatch()
-  }
-
-  function updateAnalysisNotice(id: string, patch: Partial<Extract<Timelineitem, { kind: 'notice' }>>) {
-    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === id)
-    if (notice?.kind === 'notice') Object.assign(notice, patch)
-  }
-
-  /**
-   * 反馈第一步（consent → analyzing → ready/failed）：
-   * 有工具失败轨迹时调用引擎做一次轻量溯源分析；纯运行时错误跳过分析直接 ready。
-   */
-  async function prepareTurnFeedback(noticeId: string): Promise<boolean> {
-    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === noticeId)
-    if (notice?.kind !== 'notice' || !notice.feedback) return false
-    if (!['consent', 'failed'].includes(notice.analysisStatus ?? '')) return false
-    const feedback = notice.feedback
-    if (!feedback.needsAnalysis || feedback.toolTrace.length === 0) {
-      updateAnalysisNotice(noticeId, { analysisStatus: 'ready' })
-      return true
-    }
-    updateAnalysisNotice(noticeId, {
-      analysisStatus: 'analyzing', feedbackEligible: false, detail: undefined,
-    })
-    persistSoon()
-    try {
-      const response = await authedFetch('/api/tool-failure-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider_id: config.currentProviderId,
-          trace: feedback.toolTrace,
-          conversation_excerpt: buildConversationExcerpt(),
-        }),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = await response.json()
-      const analysis = typeof data.analysis === 'string' ? data.analysis.trim() : ''
-      if (!analysis) throw new Error('empty analysis')
-      updateAnalysisNotice(noticeId, {
-        analysisStatus: 'ready', feedbackEligible: false,
-        analysisText: analysis,
-      })
-      persistSoon()
-      return true
-    } catch (error) {
-      updateAnalysisNotice(noticeId, {
-        analysisStatus: 'failed', feedbackEligible: true, detail: undefined,
-        analysisText: error instanceof Error ? error.message : String(error),
-      })
-      persistSoon()
-      return false
-    }
-  }
-
-  /** 反馈第二步（ready → 上传）：组装 v2 payload，经原生桥上传（含脱敏终检与 Outbox 兜底）。 */
-  async function sendTurnFeedback(noticeId: string): Promise<{ ok: boolean; reason: string; queued: boolean }> {
-    const notice = timeline.value.find(item => item.kind === 'notice' && item.id === noticeId)
-    if (notice?.kind !== 'notice' || !notice.feedback) return { ok: false, reason: 'gone', queued: false }
-    const feedback = notice.feedback
-    const payload = {
-      channel: feedback.channel,
-      error: { title: feedback.summary, message: feedback.summary, detail: notice.detail ?? '' },
-      context: {
-        conversation_excerpt: buildConversationExcerpt(),
-        tool_trace: feedback.toolTrace,
-      },
-      analysis: notice.analysisText ?? null,
-      session: {
-        session_id: sessionId.value,
-        provider: config.currentProviderId,
-        model: config.currentModel,
-        permission_mode: config.permissionMode,
-      },
-      time: new Date().toISOString(),
-    }
-    const result = await sendFeedbackViaBridge(payload)
-    return { ok: result.ok, reason: result.error ?? '', queued: result.status === 'queued' }
-  }
-
-  /** 反馈第三步：回写卡片状态（不改动摘要文本，状态提示由卡片自身渲染，避免重复）。 */
-  function finishTurnFeedback(noticeId: string, ok: boolean, reason = '', queued = false) {
-    updateAnalysisNotice(noticeId, ok ? {
-      analysisStatus: 'complete', feedbackEligible: false,
-      statusNote: queued ? '反馈已加入队列，联网后自动发送' : undefined,
-    } : {
-      analysisStatus: 'ready', feedbackEligible: true,
-      statusNote: reason ? `上传失败：${reason}` : undefined,
-    })
-    persistSoon()
-  }
-
-  /** 最近数轮对话摘要（仅密钥/联系方式打码，保留原文场景，供反馈溯源；上限 ~8000 字符）。 */
-  function buildConversationExcerpt(): Array<{ role: 'user' | 'assistant'; text: string }> {
-    const excerpt: Array<{ role: 'user' | 'assistant'; text: string }> = []
-    let total = 0
-    for (let i = timeline.value.length - 1; i >= 0 && total < 8000; i--) {
-      const item = timeline.value[i]
-      if (item.kind !== 'user' && item.kind !== 'assistant') continue
-      const content = item.content.trim()
-      if (!content) continue
-      const text = maskSecrets(content.slice(0, 2000))
-      excerpt.unshift({ role: item.kind === 'user' ? 'user' : 'assistant', text })
-      total += text.length
-    }
-    return excerpt
-  }
-
-  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, collaboration, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, clearSessionData, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide, pushNotice, prepareTurnFeedback, sendTurnFeedback, finishTurnFeedback }
+  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeStatsOpen, toggleLifeStats, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, completeSendMorph, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setProductionMode, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide }
 })
-}
-
-const useMainSessionStore = defineSessionStore('session')
-export type SessionStore = ReturnType<typeof useMainSessionStore>
-export const SessionScope: InjectionKey<Ref<SessionStore | null>> = Symbol('session-scope')
-export function useSessionStore(): SessionStore {
-  const scoped = hasInjectionContext() ? inject(SessionScope, null) : null
-  return scoped?.value ?? useMainSessionStore()
-}
-const auxiliaryStores = new Map<string, ReturnType<typeof defineSessionStore>>()
-const auxiliaryTransfers = new Map<string, (paths: string[]) => void>()
-export function completePendingFileTransfer(requestId: string, paths: string[]): boolean {
-  const complete = auxiliaryTransfers.get(requestId)
-  if (!complete) return false
-  auxiliaryTransfers.delete(requestId)
-  complete(paths)
-  return true
-}
-export function useAuxiliarySessionStore(id: string): SessionStore {
-  let definition = auxiliaryStores.get(id)
-  if (!definition) {
-    definition = defineSessionStore(`auxiliary:${id}`, true)
-    auxiliaryStores.set(id, definition)
-  }
-  return definition()
-}
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }
 
@@ -1235,19 +940,6 @@ function sanitizeToolName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 80) || 'unknown_tool'
 }
 
-/**
- * 密钥/联系方式打码（唯一保留的脱敏项）：只处理密码、API Key、Bearer 令牌、
- * 邮箱与手机号。路径、命令、URL、参数值一律保留原文，保证反馈可溯源。
- */
-function maskSecrets(text: string): string {
-  return text
-    .replace(/\b(?:sk|rk|pk)-[a-zA-Z0-9._-]{8,}\b/g, 'sk-***')
-    .replace(/\bBearer\s+[a-zA-Z0-9._~+/=-]{8,}/gi, 'Bearer ***')
-    .replace(/((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential)s?\s*[:=]\s*)(["']?)[^\s"',}&]+\2/gi, '$1***')
-    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '***@***')
-    .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '1**********')
-}
-
 function classifyToolError(message: string): string {
   const text = message.toLowerCase()
   if (/permission|denied|allowed area/.test(text)) return 'permission_or_sandbox'
@@ -1258,13 +950,9 @@ function classifyToolError(message: string): string {
   return 'execution_error'
 }
 
-/**
- * 工具参数脱敏（放松版）：保留真实字符串（路径/命令/URL 原文，仅打码密钥与长文本截断），
- * 结构上限不变（深度 4、数组 12、对象 30），保证反馈能还原真实任务场景。
- */
 function summarizeArguments(value: unknown, key = '', depth = 0): unknown {
   if (depth > 4) return '[max_depth]'
-  if (value === null) return null
+  if (value === null) return '[null]'
   if (Array.isArray(value)) return value.slice(0, 12).map(item => summarizeArguments(item, key, depth + 1))
   if (typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 30).map(([childKey, child]) => [
@@ -1272,20 +960,44 @@ function summarizeArguments(value: unknown, key = '', depth = 0): unknown {
       summarizeArguments(child, childKey, depth + 1),
     ]))
   }
-  if (typeof value === 'boolean' || typeof value === 'number') return value
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return '[number]'
   if (typeof value !== 'string') return `[${typeof value}]`
+  const text = value.trim()
   const lowerKey = key.toLowerCase()
   if (/key|token|secret|password|authorization|credential/.test(lowerKey)) return '[redacted_secret]'
-  // 保留原文：仅密钥形态打码 + 超长截断（保留头尾）。
-  const text = value.trim()
-  const masked = maskSecrets(text)
-  if (masked.length <= 600) return masked
-  return masked.slice(0, 400) + `…（截断，全长 ${masked.length} 字符）…` + masked.slice(-120)
+  if (/path|file|dir|cwd|destination|source/.test(lowerKey) || /^(?:\/|[a-z]:\\)/i.test(text)) {
+    const extension = text.match(/\.([a-zA-Z0-9]{1,8})$/)?.[1]?.toLowerCase()
+    return `[${/^(?:\/|[a-z]:\\)/i.test(text) ? 'absolute' : 'relative'}_path${extension ? ` ext=.${extension}` : ''}]`
+  }
+  if (/command|cmd|script/.test(lowerKey) || /[\s;&|><]/.test(text)) {
+    const tokens = text.split(/\s+/).filter(Boolean)
+    const executable = tokens[0]?.split(/[\\/]/).pop()?.replace(/[^a-zA-Z0-9_.+-]/g, '') || 'unknown'
+    const flags = tokens.slice(1).filter(token => /^--?[a-zA-Z0-9_-]+$/.test(token)).slice(0, 12)
+    return { kind: 'command_shape', executable, flags, token_count: tokens.length, has_shell_operators: /[;&|><]/.test(text) }
+  }
+  if (/^https?:\/\//i.test(text)) return '[url_redacted]'
+  if (/^[a-zA-Z][a-zA-Z0-9_.:-]{0,31}$/.test(text)) return text
+  return `[string length=${text.length}]`
 }
 
-/** 错误摘要打码：仅密钥与联系方式，长度上限 1200。 */
 function sanitizeDiagnosticText(message: string): string {
-  return maskSecrets(String(message ?? '')).slice(0, 1200)
+  return message
+    .slice(0, 1200)
+    .replace(/\b(?:sk-|Bearer\s+)[a-zA-Z0-9._-]{8,}\b/gi, '[redacted_secret]')
+    .replace(/https?:\/\/[^\s"']+/gi, '[redacted_url]')
+    .replace(/(?:[a-zA-Z]:\\|\/data\/|\/storage\/|\/sdcard\/|\/home\/)[^\s"']+/g, '[redacted_path]')
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[redacted_email]')
+    .replace(/\b[0-9a-f]{24,}\b/gi, '[redacted_identifier]')
+    .replace(/(["'])(?:(?!\1).){41,}\1/g, '[redacted_text]')
+}
+
+function buildLocalEvidence(items: ToolDiagnosticTrace[]): string {
+  return [
+    '【程序采集的脱敏证据】',
+    '不含用户消息、原始参数值、文件内容、真实路径、URL、密钥或模型隐藏思维。',
+    ...items.map(item => `#${item.sequence} ${item.tool} | ${item.status}${item.category ? ` | ${item.category}` : ''}${item.elapsedMs !== undefined ? ` | ${item.elapsedMs}ms` : ''}\n参数结构: ${JSON.stringify(item.argumentShape)}${item.errorSummary ? `\n错误摘要: ${item.errorSummary}` : ''}`),
+  ].join('\n')
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -1297,8 +1009,6 @@ function isUuid(value: string): boolean {
 
 function readActiveSessionId(): string {
   try {
-    const requested = new URLSearchParams(window.location.search).get('session_id') ?? ''
-    if (isUuid(requested)) return requested
     const saved = localStorage.getItem(ACTIVE_SESSION_KEY) ?? ''
     if (isUuid(saved)) return saved
   } catch {

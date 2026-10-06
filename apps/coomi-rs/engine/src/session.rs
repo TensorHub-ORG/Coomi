@@ -26,16 +26,12 @@ static SESSION_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 pub enum SessionMode {
     #[default]
     Agent,
-    Team,
     Life,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Session {
     pub id: Uuid,
-    /// Independent auxiliary conversation; only this parent transcript may be read.
-    #[serde(default)]
-    pub parent_session_id: Option<Uuid>,
     pub provider_id: String,
     pub model: String,
     pub cwd: PathBuf,
@@ -67,6 +63,9 @@ pub struct Session {
     pub loop_state: Option<LoopState>,
     #[serde(default)]
     pub hooks_started: bool,
+    /// 压缩前的完整历史存档：压缩发生时备份，压缩后仍可从磁盘恢复完整展示。
+    #[serde(default)]
+    pub archive: Vec<ChatMessage>,
 }
 
 impl Session {
@@ -74,7 +73,6 @@ impl Session {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
-            parent_session_id: None,
             provider_id: provider_id.into(),
             model: model.into(),
             cwd,
@@ -91,25 +89,13 @@ impl Session {
             plan: None,
             loop_state: None,
             hooks_started: false,
+            archive: Vec::new(),
         }
     }
 
     pub fn switch_model(&mut self, provider_id: impl Into<String>, model: impl Into<String>) {
         self.provider_id = provider_id.into();
         self.model = model.into();
-        self.touch();
-    }
-
-    /// Remove conversation/runtime data while retaining the session identity
-    /// and user-facing metadata (title, pin, model and mode).
-    pub fn clear_data(&mut self) {
-        self.messages.clear();
-        self.usage = TokenUsage::default();
-        self.context = ContextState::default();
-        self.plan = None;
-        self.loop_state = None;
-        self.hooks_started = false;
-        self.summary.clear();
         self.touch();
     }
 
@@ -195,11 +181,6 @@ pub struct SessionSummary {
     pub summary: String,
 }
 
-/// 全局常驻会话 id（与 ui 侧 life::GLOBAL_SESSION_ID 一致）。
-/// 标题强制为「常驻会话」，任何自动命名/保存路径都不得覆盖。
-pub const GLOBAL_SESSION_ID: &str = "50a1b732-5f3e-4b7d-8c2a-b9f4e6d1a001";
-pub const GLOBAL_SESSION_TITLE: &str = "常驻会话";
-
 pub struct SessionStore {
     directory: PathBuf,
 }
@@ -212,25 +193,10 @@ impl SessionStore {
     }
 
     pub fn save(&self, session: &Session) -> Result<()> {
-        self.save_inner(session, false)
-    }
-
-    /// Save a task checkpoint while preserving metadata changed by the user
-    /// after the in-memory turn was started (title, pin, provider, model).
-    pub fn save_checkpoint(&self, session: &Session) -> Result<()> {
-        self.save_inner(session, true)
-    }
-
-    fn save_inner(&self, session: &Session, preserve_model: bool) -> Result<()> {
         let _guard = SESSION_WRITE_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // 常驻会话强制命名：自动命名（首条用户输入）不得覆盖。
-        let mut session = std::clone::Clone::clone(session);
-        if session.id.to_string() == GLOBAL_SESSION_ID {
-            session.title = GLOBAL_SESSION_TITLE.to_owned();
-        }
         fs::create_dir_all(&self.directory).with_context(|| {
             format!(
                 "failed to create session directory {}",
@@ -254,24 +220,10 @@ impl SessionStore {
             && let Ok(existing) = serde_json::from_slice::<Session>(&bytes)
         {
             if existing.title_manually_set {
-                if persisted.id.to_string() == GLOBAL_SESSION_ID {
-                    // 常驻会话强制命名：历史上被改过的名字也不恢复。
-                    persisted.title = GLOBAL_SESSION_TITLE.to_owned();
-                } else {
-                    persisted.title = existing.title;
-                    persisted.title_manually_set = true;
-                }
+                persisted.title = existing.title;
+                persisted.title_manually_set = true;
             }
             persisted.pinned = existing.pinned;
-            // Model selection can change while an older in-memory turn is
-            // still checkpointing. Keep the newest per-session selection from
-            // disk instead of letting that stale turn roll it back.
-            if preserve_model && !existing.provider_id.trim().is_empty() {
-                persisted.provider_id = existing.provider_id;
-            }
-            if preserve_model && !existing.model.trim().is_empty() {
-                persisted.model = existing.model;
-            }
         }
         let bytes = serde_json::to_vec_pretty(&persisted)?;
         // 原子写：先写临时文件再 rename，避免崩溃/断电留下截断的 JSON，
@@ -307,13 +259,6 @@ impl SessionStore {
         Ok(true)
     }
 
-    pub fn clear_data(&self, id: Uuid) -> Result<Session> {
-        let mut session = self.load(id)?;
-        session.clear_data();
-        self.save(&session)?;
-        Ok(session)
-    }
-
     pub fn update_metadata(
         &self,
         id: Uuid,
@@ -329,9 +274,6 @@ impl SessionStore {
             .with_context(|| format!("failed to read session {}", path.display()))?;
         let mut session: Session = serde_json::from_slice(&bytes)
             .with_context(|| format!("invalid session file {}", path.display()))?;
-        if session.id.to_string() == GLOBAL_SESSION_ID && title.is_some() {
-            anyhow::bail!("常驻会话不可重命名");
-        }
         if let Some(title) = title {
             session.title = title.to_owned();
             session.title_manually_set = true;
@@ -567,28 +509,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auxiliary_parent_survives_reload_checkpoint_and_clear() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SessionStore::new(home.path());
-        let parent = Session::new("provider", "main-model", home.path().to_path_buf());
-        store.save(&parent).unwrap();
-        let mut child = Session::new("provider", "child-model", home.path().to_path_buf());
-        child.parent_session_id = Some(parent.id);
-        child.messages.push(ChatMessage::user("independent task"));
-        store.save(&child).unwrap();
-        let mut restored = store.load(child.id).unwrap();
-        assert_eq!(restored.parent_session_id, Some(parent.id));
-        restored.clear_data();
-        store.save_checkpoint(&restored).unwrap();
-        assert_eq!(store.load(child.id).unwrap().parent_session_id, Some(parent.id));
-        assert_eq!(store.load(parent.id).unwrap().model, "main-model");
-        assert!(store.load(parent.id).unwrap().messages.is_empty());
-        let mut old = serde_json::to_value(parent).unwrap();
-        old.as_object_mut().unwrap().remove("parent_session_id");
-        assert!(serde_json::from_value::<Session>(old).unwrap().parent_session_id.is_none());
-    }
-
-    #[test]
     fn saves_lists_and_loads_sessions() {
         let home = tempfile::tempdir().expect("temporary home");
         let store = SessionStore::new(home.path());
@@ -625,15 +545,10 @@ mod tests {
         store
             .update_metadata(stale.id, Some("用户标题"), Some(true))
             .expect("persist metadata");
-        let mut selected = store.load(stale.id).expect("load selected session");
-        selected.switch_model("new-provider", "new-model");
-        store.save(&selected).expect("persist session model");
         stale
             .messages
             .push(ChatMessage::assistant("done", Vec::new()));
-        store
-            .save_checkpoint(&stale)
-            .expect("save stale checkpoint");
+        store.save(&stale).expect("save stale checkpoint");
 
         let loaded = SessionStore::new(home.path())
             .load(stale.id)
@@ -641,8 +556,6 @@ mod tests {
         assert_eq!(loaded.title, "用户标题");
         assert!(loaded.title_manually_set);
         assert!(loaded.pinned);
-        assert_eq!(loaded.provider_id, "new-provider");
-        assert_eq!(loaded.model, "new-model");
         assert_eq!(loaded.messages.len(), 2);
         let listed = store.list(None).expect("list sessions");
         assert!(listed[0].pinned);

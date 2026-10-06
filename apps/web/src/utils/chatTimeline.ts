@@ -11,70 +11,67 @@ function itemId(item: Timelineitem): string {
 }
 
 /**
- * block 引用稳定化缓存。
+ * 时间线分块，并保证「结构没变就复用同一个对象」。
  *
- * DynamicScrollerItem 的 size-dependencies 里放的是 block / item / cards 引用,
- * 而 buildTimelineBlocks 会被高频调用（流式期间每个事件都可能重算时间线）。
- * 若每次都返回全新对象，虚拟列表会把「所有 item」都当成内容变了，
- * 全列表重新测量尺寸 → 流式回复时整个界面抖动/闪烁。
- *
- * timeline 里的 item 对象是稳定引用（store 原地 mutate，不替换对象），
- * 因此按引用缓存 block 即可：对象被真正替换 / 组内增删时自然拿到新 block，
- * 其余 item 保持旧引用，虚拟列表只重测真正变高的那一条。
+ * 为什么必须复用：ChatView 把这些块喂给 DynamicScroller，而
+ * DynamicScrollerItem 会对 size-dependencies 的每一项挂一个浅 watcher
+ * （vue-virtual-scroller `this.$watch(() => sizeDependencies[k], onDataUpdate)`）。
+ * 只要元素引用变了就会重新量尺寸并触发整条虚拟列表重排 —— 从前每来一个 token
+ * 都重建全部块对象，于是「一输出文字/一调工具」整个列表闪一下。
+ * 现在只有真正新增或替换的块才会换对象，稳定块原样复用。
  */
-const oneBlockCache = new WeakMap<Timelineitem, TimelineBlockItem>()
+type OneBlock = { t: 'one'; key: string; item: Timelineitem }
+type ToolsBlock = { t: 'tools'; key: string; cards: ToolCard[] }
 
-interface ToolsBlockCacheEntry {
-  block: TimelineBlockItem
-  cards: ToolCard[]
-}
-const toolsBlockCache = new Map<string, ToolsBlockCacheEntry>()
-/** 防御性上限：时间线本身受 MAX_TRANSCRIPT_ITEMS 约束，这里防异常输入撑爆内存。 */
-const TOOLS_CACHE_MAX = 512
-
-function cachedOneBlock(item: Timelineitem): TimelineBlockItem {
-  let block = oneBlockCache.get(item)
-  if (!block) {
-    block = { t: 'one', key: `${item.kind}:${itemId(item)}`, item }
-    oneBlockCache.set(item, block)
-  }
-  return block
-}
-
-function sameCards(a: ToolCard[], b: ToolCard[]): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-  return true
-}
-
-function cachedToolsBlock(key: string, cards: ToolCard[]): TimelineBlockItem {
-  const cached = toolsBlockCache.get(key)
-  if (cached && sameCards(cached.cards, cards)) return cached.block
-  const block: TimelineBlockItem = { t: 'tools', key, cards }
-  if (toolsBlockCache.size >= TOOLS_CACHE_MAX) toolsBlockCache.clear()
-  toolsBlockCache.set(key, { block, cards })
-  return block
-}
+const oneCache = new Map<string, OneBlock>()
+const toolsCache = new Map<string, { block: ToolsBlock; members: readonly ToolCard[] }>()
+let lastBlocks: TimelineBlockItem[] = []
 
 export function buildTimelineBlocks(items: readonly Timelineitem[]): TimelineBlockItem[] {
   const blocks: TimelineBlockItem[] = []
-  let groupKey = ''
-  let groupCards: ToolCard[] = []
-  const flushGroup = () => {
-    if (groupCards.length) blocks.push(cachedToolsBlock(groupKey, groupCards))
-    groupKey = ''
-    groupCards = []
-  }
-  for (const item of items) {
+  const seenOne = new Set<string>()
+  const seenTools = new Set<string>()
+
+  let index = 0
+  while (index < items.length) {
+    const item = items[index]
     if (item.kind === 'tool') {
-      if (!groupCards.length) groupKey = `g:${item.callId}`
-      groupCards.push(item)
+      // 连续的工具调用合并成一组；组内的卡片对象本身是稳定的（store 原地改属性）。
+      const members: ToolCard[] = []
+      while (index < items.length && items[index].kind === 'tool') {
+        members.push(items[index] as ToolCard)
+        index += 1
+      }
+      const key = `g:${members[0].callId}`
+      const cached = toolsCache.get(key)
+      const reused =
+        cached &&
+        cached.members.length === members.length &&
+        members.every((card, i) => card === cached.members[i])
+      const block = reused ? cached.block : { t: 'tools' as const, key, cards: members.slice() }
+      if (!reused) toolsCache.set(key, { block, members: members.slice() })
+      seenTools.add(key)
+      blocks.push(block)
       continue
     }
-    flushGroup()
-    blocks.push(cachedOneBlock(item))
+    const key = `${item.kind}:${itemId(item)}`
+    const cached = oneCache.get(key)
+    const block = cached && cached.item === item ? cached : { t: 'one' as const, key, item }
+    if (!cached || cached.item !== item) oneCache.set(key, block)
+    seenOne.add(key)
+    blocks.push(block)
+    index += 1
   }
-  flushGroup()
+
+  // 清理本次没出现的键，避免长时间会话把缓存越堆越大。
+  for (const key of oneCache.keys()) if (!seenOne.has(key)) oneCache.delete(key)
+  for (const key of toolsCache.keys()) if (!seenTools.has(key)) toolsCache.delete(key)
+
+  // 结构完全没变时返回同一个数组：DynamicScroller 的 items watcher 也就不会跑。
+  if (blocks.length === lastBlocks.length && blocks.every((block, i) => block === lastBlocks[i])) {
+    return lastBlocks
+  }
+  lastBlocks = blocks
   return blocks
 }
 
@@ -83,23 +80,23 @@ export function transcriptTail(
   limit = MAX_TRANSCRIPT_ITEMS,
 ): Timelineitem[] {
   if (!Number.isInteger(limit) || limit <= 0) return []
-  return items.slice(-limit)
+  return items.slice(-limit).map(item => {
+    if (item.kind !== 'user') return item
+    return item.attachments?.length
+      ? { kind: item.kind, id: item.id, mid: item.mid, content: item.content, attachments: item.attachments }
+      : { kind: item.kind, id: item.id, mid: item.mid, content: item.content }
+  })
 }
+
 
 export function parseTranscript(raw: string | null): Timelineitem[] {
   if (!raw) return []
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return (parsed as Timelineitem[]).map(item => {
-      if (item.kind === 'reasoning') {
-        return { ...item, expanded: Boolean(item.expanded), streaming: false }
-      }
-      if (item.kind === 'notice' && item.feedback) {
-        return { ...item, expanded: Boolean(item.expanded) }
-      }
-      return item
-    })
+    return (parsed as Timelineitem[]).map(item => item.kind === 'user'
+      ? { ...item, morphing: false, morphArrived: false }
+      : item)
   } catch {
     return []
   }

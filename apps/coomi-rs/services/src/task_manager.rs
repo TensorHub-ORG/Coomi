@@ -61,9 +61,7 @@ impl TaskStatus {
         use TaskStatus as S;
         matches!(
             (self, next),
-            // Queued → Interrupted：进程可能死在“已入队、未开跑”之间，重启恢复
-            // 必须能把这类僵尸记录转成 Interrupted，否则引擎每次启动都恢复失败。
-            (S::Queued, S::WaitingLock | S::Running | S::Cancelled | S::Interrupted)
+            (S::Queued, S::WaitingLock | S::Running | S::Cancelled)
                 | (
                     S::WaitingLock,
                     S::Running | S::PausePending | S::Cancelled | S::Interrupted | S::Conflict
@@ -400,45 +398,6 @@ impl TaskManager {
             .collect::<Vec<_>>();
         records.sort_by_key(|record| std::cmp::Reverse(record.updated_at_ms));
         records
-    }
-
-    /// 批次二 #22：僵尸记录对账。非终态、无存活执行体（不在 live_ids 中）、
-    /// 超过 max_age_ms 未更新的记录就地转 Interrupted，返回被回收的记录。
-    /// Paused 是用户主动保留的状态，不参与回收（可随时手动恢复或强制结束）。
-    pub fn reap_stale(
-        &self,
-        live_ids: &std::collections::HashSet<String>,
-        max_age_ms: u64,
-        reason: &str,
-    ) -> Vec<TaskRecord> {
-        let now = now_ms();
-        let stale: Vec<TaskRecord> = {
-            let records = self
-                .records
-                .lock()
-                .unwrap_or_else(|value| value.into_inner());
-            records
-                .values()
-                .filter(|record| {
-                    !record.status.is_terminal()
-                        && !matches!(record.status, TaskStatus::Paused)
-                        && !live_ids.contains(&record.id)
-                        && now.saturating_sub(record.updated_at_ms) > max_age_ms
-                })
-                .cloned()
-                .collect()
-        };
-        let mut reaped = Vec::new();
-        for record in stale {
-            if self
-                .transition(&record.id, TaskStatus::Interrupted, Some(reason))
-                .is_ok()
-                && let Some(record) = self.get(&record.id)
-            {
-                reaped.push(record);
-            }
-        }
-        reaped
     }
 
     pub fn get(&self, id: &str) -> Option<TaskRecord> {
@@ -780,8 +739,7 @@ impl TaskManager {
             .filter(|record| {
                 matches!(
                     record.status,
-                    TaskStatus::Queued
-                        | TaskStatus::Running
+                    TaskStatus::Running
                         | TaskStatus::WaitingLock
                         | TaskStatus::PausePending
                         | TaskStatus::AwaitingApproval
@@ -791,15 +749,11 @@ impl TaskManager {
             .map(|record| record.id.clone())
             .collect::<Vec<_>>();
         for id in ids {
-            // 单条恢复失败绝不能让引擎起不来：1.4.7 曾因这里 `?` 上抛导致
-            // “启动即退出”，Android 监控再自动拉起，形成重启风暴。
-            if let Err(error) = self.transition(
+            self.transition(
                 &id,
                 TaskStatus::Interrupted,
                 Some("engine restarted; explicit retry is required"),
-            ) {
-                eprintln!("[task-manager] recover interrupted {id}: {error:#}");
-            }
+            )?;
         }
         Ok(())
     }
@@ -957,26 +911,6 @@ mod tests {
             .expect("restart task");
         drop(manager);
         let reopened = TaskManager::open(home.path()).expect("reopen manager");
-        assert_eq!(
-            reopened.get(&record.id).expect("restored task").status,
-            TaskStatus::Interrupted
-        );
-    }
-
-    // 回归（1.4.7 重启风暴）：进程死在“已入队、未开跑”时磁盘留下 Queued 记录
-    // （create 即持久化），重启恢复必须能把它转为 Interrupted，而不是让引擎
-    // 启动直接失败。
-    #[test]
-    fn reopen_recovers_persisted_queued_task() {
-        let home = tempfile::tempdir().expect("temporary home");
-        let manager = TaskManager::open(home.path()).expect("open manager");
-        let record = manager
-            .create("session", "agent", TaskPriority::Normal, Vec::new())
-            .expect("create task");
-        assert_eq!(record.status, TaskStatus::Queued);
-        drop(manager);
-
-        let reopened = TaskManager::open(home.path()).expect("reopen must not fail");
         assert_eq!(
             reopened.get(&record.id).expect("restored task").status,
             TaskStatus::Interrupted

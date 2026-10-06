@@ -20,6 +20,7 @@ interface ProviderDraft {
   id: string
   name: string
   apiKey: string
+  apiKeys: string[]
   models: string[]
   modelContextWindows: Record<string, number>
   baseUrl: string
@@ -45,6 +46,17 @@ const saving = ref(false)
 const activating = ref(false)
 const discovering = ref(false)
 const showingKey = ref(false)
+const apiKeysText = ref('')
+function applyApiKeysTextInput() {
+  apiKeysText.value = (draft.value?.apiKeys ?? []).join('\n')
+}
+function applyApiKeysText() {
+  if (!draft.value) return
+  draft.value.apiKeys = apiKeysText.value
+    .split(/[\n,，]+/)
+    .map(k => k.trim())
+    .filter(Boolean)
+}
 const showPicker = ref(false)
 const candidates = ref<string[]>([])
 const manualModel = ref('')
@@ -106,6 +118,7 @@ function emptyDraft(id = '', name = ''): ProviderDraft {
     id,
     name: name || preset?.name || '',
     apiKey: '',
+    apiKeys: [],
     models: [],
     modelContextWindows: {},
     baseUrl: preset?.baseUrl || '',
@@ -122,6 +135,7 @@ function draftFromProvider(value: ProviderConfig | null): ProviderDraft {
     id: value.id,
     name: value.name,
     apiKey: '',
+    apiKeys: [],
     models: [...value.models],
     modelContextWindows: { ...(value.modelContextWindows ?? {}) },
     baseUrl: value.baseUrl || '',
@@ -360,6 +374,7 @@ function providerInput(value: ProviderDraft): ProviderInput {
     id: value.id.trim(),
     name: value.name.trim(),
     apiKey: value.apiKey.trim(),
+    apiKeys: value.apiKeys ?? [],
     models: [...value.models],
     modelContextWindows: { ...value.modelContextWindows },
     baseUrl: value.baseUrl.trim(),
@@ -376,6 +391,7 @@ function providerInput(value: ProviderDraft): ProviderInput {
 
 async function saveProvider(successMessage: string, returnToList = false) {
   if (!draft.value || !canSave.value) return false
+  applyApiKeysText()
   const value = draft.value
   value.models = normalizeModels(value.models)
   const startedAt = Date.now()
@@ -458,13 +474,21 @@ async function discover(skipSave = false) {
   if (!skipSave && !(await saveProvider('配置已保存'))) return
   discovering.value = true
   error.value = ''
-  const models = await config.discoverModels(draft.value.id)
+  const discovered = await config.discoverModels(draft.value.id)
   discovering.value = false
-  if (models === null) {
+  if (discovered === null) {
     error.value = config.lastError || '模型获取失败'
     return
   }
-  candidates.value = Array.from(new Set(models.map(model => model.trim()).filter(Boolean)))
+  candidates.value = Array.from(new Set(discovered.models.map(model => model.trim()).filter(Boolean)))
+  // 在线获取到的上下文窗口直接带进草稿，选中的模型后续会用它做默认窗口。
+  if (discovered.contextWindows && Object.keys(discovered.contextWindows).length) {
+    const windows = { ...draft.value.modelContextWindows }
+    for (const [model, window] of Object.entries(discovered.contextWindows)) {
+      windows[model] = window
+    }
+    draft.value.modelContextWindows = windows
+  }
   showPicker.value = true
 }
 
@@ -558,10 +582,6 @@ function openModelConfig() {
 
       <p v-if="message" class="notice ok">{{ message }}</p>
       <p v-if="error" class="notice err">{{ error }}</p>
-      <p v-if="providerId === 'zhipu'" class="provider-warning">
-        <CoomiIcon name="alert" :size="15" />
-        <span><strong>智谱 Coding Plan 使用提醒</strong>请填写智谱官方 API Key 或 Coding Key。账号套餐与 Coding Plan 可能限定支持的客户端和用途，超出范围可能触发限流或账号异常，请以智谱当前规则为准。</span>
-      </p>
 
       <div v-if="!isNew && provider" class="activate-area">
         <button
@@ -591,6 +611,10 @@ function openModelConfig() {
             <input v-model="draft.apiKey" class="input" :type="showingKey ? 'text' : 'password'" :placeholder="isNew ? '输入 API Key' : '留空以保留原 Key'" autocomplete="off" autocapitalize="off" />
             <button type="button" aria-label="查看 API Key" @click="revealKey"><CoomiIcon :name="showingKey ? 'eye' : 'eye'" :size="17" /></button>
           </span>
+        </label>
+        <label class="field">
+          <span>多 Key 轮换（每行一个，逗号分隔也可）</span>
+          <textarea v-model="apiKeysText" class="input" rows="3" placeholder="sk-xxx1&#10;sk-xxx2&#10;sk-xxx3" autocomplete="off" autocapitalize="off" />
         </label>
         <label class="field">
           <span>API Base URL</span>
@@ -753,10 +777,6 @@ function openModelConfig() {
 .notice { margin: 0 0 10px; padding: 9px 11px; border-radius: var(--r-md); font-size: 12.5px; line-height: 1.55; }
 .notice.ok { color: var(--ok); background: var(--ok-soft); }
 .notice.err { color: var(--danger); background: var(--danger-soft); }
-.provider-warning { display:flex; align-items:flex-start; gap:8px; margin:0 0 11px; padding:10px 11px; border:1px solid color-mix(in srgb,var(--orange) 28%,var(--border)); border-radius:var(--r-md); background:color-mix(in srgb,var(--orange-soft) 54%,var(--bg)); color:var(--text-2); font-size:11.8px; line-height:1.55; }
-.provider-warning :deep(svg) { flex-shrink:0; margin-top:2px; color:var(--orange); }
-.provider-warning span { display:flex; flex-direction:column; gap:2px; }
-.provider-warning strong { color:var(--text); font-size:12.3px; }
 .activate-area { margin-bottom: 12px; }
 .activate-btn { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; }
 .activate-btn.is-current { border: 1px solid var(--ok); background: var(--ok-soft); color: var(--ok); opacity: 1; }

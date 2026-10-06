@@ -690,6 +690,8 @@ impl Agent {
         let before_tokens = session.context.estimated_active_tokens;
         observer.on_event(&AgentEvent::CompactionStarted { automatic });
         let capabilities = provider.capabilities();
+        // 压缩前备份完整历史：压缩后磁盘仍保留可恢复的完整会话记录。
+        session.archive = session.messages.clone();
         let mut normalized = normalize_history(&session.messages);
         // Compaction endpoints are commonly text-only even when normal chat supports
         // vision. Keep the textual tool result while never replaying image payloads.
@@ -703,9 +705,6 @@ impl Agent {
                 sanitize_json_encoded_data(&mut call.arguments);
             }
         }
-        // 摘要输入（normalized）会被 trim 掐头或截断；压缩后的正式历史
-        // 必须从这份未裁剪的脱敏副本取材，避免截断标记泄漏进后续上下文。
-        let sanitized_source = normalized.clone();
         let compaction_limit = capabilities
             .context_window
             .saturating_sub(capabilities.max_output_tokens)
@@ -740,33 +739,20 @@ impl Agent {
             compact_input.push(ChatMessage::system(self.system_prompt.clone()));
             compact_input.extend(normalized.clone());
             compact_input.push(ChatMessage::user(SUMMARIZATION_PROMPT));
-            let request = ModelRequest {
-                model: provider.model().to_string(),
-                messages: compact_input,
-                tools: Vec::new(),
-                reasoning_effort: None,
-                session_id: Some(session.id.to_string()),
-                search_enabled: false,
-                thinking_enabled: true,
-            };
-            // 内置策略：摘要调用失败或返回空内容时重试一次（上游瞬时错误常见），再失败才报压缩失败。
-            let response = match provider.complete(request.clone()).await {
-                Ok(response) if !response.content.trim().is_empty() => response,
-                _ => {
-                    let retried = provider
-                        .complete(request)
-                        .await
-                        .map_err(AgentError::Compaction)?;
-                    if retried.content.trim().is_empty() {
-                        return Err(AgentError::Compaction(anyhow::anyhow!(
-                            "compaction summary was empty"
-                        )));
-                    }
-                    retried
-                }
-            };
+            let response = provider
+                .complete(ModelRequest {
+                    model: provider.model().to_string(),
+                    messages: compact_input,
+                    tools: Vec::new(),
+                    reasoning_effort: None,
+                    session_id: Some(session.id.to_string()),
+                    search_enabled: false,
+                    thinking_enabled: true,
+                })
+                .await
+                .map_err(AgentError::Compaction)?;
             (
-                compacted_history(&sanitized_source, response.content.trim()),
+                compacted_history(&normalized, response.content.trim()),
                 response.usage,
             )
         };
@@ -1347,14 +1333,9 @@ mod tests {
             .expect("manual compaction");
         assert_eq!(*provider.calls.lock().expect("lock calls"), 1);
         assert_eq!(session.context.compaction_count, 1);
-        // 压缩后结构：摘要在前，最近用户指令收尾（最后一条是用户消息而非摘要）
-        assert!(session.messages.first().is_some_and(|message| {
+        assert!(session.messages.last().is_some_and(|message| {
             message.compaction_summary && message.content.contains("summary")
         }));
-        assert_eq!(
-            session.messages.last().map(|message| message.content.as_str()),
-            Some("keep this context")
-        );
     }
 
     #[test]

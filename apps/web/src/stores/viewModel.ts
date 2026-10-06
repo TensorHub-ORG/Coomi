@@ -1,5 +1,4 @@
 import type { ToolAccess, UserQuestion } from '@/protocol/events'
-import type { ChatAttachment } from '@/utils/attachments'
 
 export type ToolCardStatus = 'starting' | 'running' | 'success' | 'error' | 'awaiting_approval' | 'cache_hit' | 'cancelled'
 
@@ -15,54 +14,26 @@ export interface ToolCard {
   access?: ToolAccess
   riskSummary?: string
   expanded?: boolean
-  /** 用户手动展开/收起（优先于 expanded）。挂在卡片对象上随 store 持久，
-   *  组件被虚拟列表回收重建后状态不丢；必须是响应式字段，禁止存非响应式 Map。 */
-  manualOpen?: boolean
   /** 工具产生的图片（data URL），瀑布流渲染用。 */
   images?: string[]
-  /** 执行中的实时输出流（shell/local_shell 增量回传），done 后清空并入 resultPreview。 */
-  liveOutput?: string
   /** show_image 历史恢复但图片数据不可用（如已被上下文压缩清理）。 */
   imageMissing?: boolean
 }
 
-export interface AssistantMessage {
-  kind: 'assistant'
-  id: string
-  mid: string
-  content: string
-  streaming: boolean
-  life?: boolean
-  /** 生命体主动消息的投递触发类型（morning/egg/milestone_stage/everyday），由 life_delivered 事件回填，气泡据此定制卡片渲染。 */
-  lifeTrigger?: string
+export interface AssistantMessage { kind: 'assistant'; id: string; mid: string; content: string; streaming: boolean; life?: boolean }
+export interface UserMessage {
+  kind: 'user'; id: string; mid: string; content: string
+  /** 文件附件独立于消息正文渲染。 */
+  attachments?: string[]
+  /** 仅用于本次渲染的发送液滴状态，不写入引擎协议。 */
+  morphing?: boolean
+  morphArrived?: boolean
 }
-export interface UserMessage { kind: 'user'; id: string; mid: string; content: string; attachments?: ChatAttachment[] }
-export interface ReasoningBlock {
-  kind: 'reasoning'
-  id: string
-  content: string
-  expanded: boolean
-  /** 由流事件生命周期显式维护。旧缓存没有该字段时按已结束处理。 */
-  streaming?: boolean
-}
+export interface ReasoningBlock { kind: 'reasoning'; id: string; content: string; expanded: boolean }
 
 export interface QuestionCard {
   kind: 'question'; callId: string; questions: UserQuestion[]
   answered: boolean; answers?: Record<string, string>
-}
-
-/** 回合反馈卡片携带的数据（v2 schema 的 web 侧部分，native 上传前会补齐环境/日志并终检脱敏）。 */
-export interface FeedbackPayloadData {
-  /** 反馈通道：工具失败 / 运行时错误 / 性能（停滞等）。 */
-  channel: 'tool_failure' | 'runtime_error' | 'performance'
-  /** 一行摘要（卡片标题）。 */
-  summary: string
-  /** 是否调用模型做溯源分析（有工具失败轨迹时才需要）。 */
-  needsAnalysis: boolean
-  /** 完整工具轨迹（仅密钥类值打码，保留真实路径/命令/参数）。 */
-  toolTrace: ToolDiagnosticTrace[]
-  /** 是否可附带最近对话（用户在设置中开启且时间线里有对话）。 */
-  hasConversation: boolean
 }
 
 export interface NoticeItem {
@@ -71,17 +42,10 @@ export interface NoticeItem {
   tone: 'info' | 'warn' | 'error' | 'success'
   text: string
   detail?: string
-  /** 非空表示这是一张反馈卡片，由 FeedbackCard.vue 渲染（统一布局）。 */
-  feedback?: FeedbackPayloadData
   feedbackEligible?: boolean
   analysisStatus?: 'consent' | 'analyzing' | 'ready' | 'uploading' | 'complete' | 'failed'
-  /** 溯源分析结论（needsAnalysis 完成后回填，卡片可展开查看）。 */
-  analysisText?: string
-  /** 上传结果独立提示（完成态展示，避免与卡片摘要重复）。 */
-  statusNote?: string
+  analysisTrace?: ToolDiagnosticTrace[]
   failureCount?: number
-  /** 反馈卡展开状态随时间线持久化，避免虚拟列表回收后被重置。 */
-  expanded?: boolean
 }
 
 export interface ToolDiagnosticTrace {

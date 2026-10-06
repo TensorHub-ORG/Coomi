@@ -84,9 +84,7 @@ mod tests {
         let dir=tempfile::tempdir().unwrap(); let store=StudioStore::new(dir.path());
         let member=StudioMember{id:"host".into(),name:"主持".into(),avatar:String::new(),provider_id:"p".into(),model:"m".into(),role:String::new(),system_prompt:String::new(),tool_permission:ToolPermission::default(),status:Default::default()};
         let member2=StudioMember{id:"helper".into(),name:"协作".into(),avatar:String::new(),provider_id:"p".into(),model:"m".into(),role:String::new(),system_prompt:String::new(),tool_permission:ToolPermission::default(),status:Default::default()};
-        // 工作目录必须是绝对路径：用临时目录拼出跨平台（Windows/Unix）均成立的绝对路径。
-        let workspace = dir.path().join("workspace");
-        let studio=Studio::new("项目".into(),workspace.display().to_string(),vec![member, member2],"host".into());
+        let studio=Studio::new("项目".into(),"/workspace".into(),vec![member, member2],"host".into());
         let saved=store.save(studio).unwrap(); assert_eq!(store.load(&saved.id).unwrap().name,"项目");
         let msg=StudioMessage::new("user".into(),"用户".into(),"开始".into(),vec![]); store.append_message(&saved.id,&msg).unwrap(); assert_eq!(store.messages(&saved.id).unwrap().len(),1);
     }

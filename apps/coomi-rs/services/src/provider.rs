@@ -1,7 +1,5 @@
-use crate::EndpointResolver;
 use crate::ProviderConfig;
 use crate::ProviderKind;
-use crate::ProviderProtocol;
 use crate::RemoteCompactionMode;
 use anyhow::Context;
 use anyhow::Result;
@@ -61,9 +59,6 @@ impl HttpModelProvider {
     }
 
     async fn openai_compatible(&self, request: ModelRequest) -> Result<ModelResponse> {
-        if self.config.base_url.contains("chat.deepseek.com") {
-            return self.deepseek_account(request, None).await;
-        }
         let endpoint = endpoint(&self.config.base_url, "chat/completions");
         let mut body = json!({
             "model": request.model,
@@ -101,14 +96,7 @@ impl HttpModelProvider {
             request.reasoning_effort.as_deref(),
             Some(false),
         );
-        let response = self
-            .send_with_reasoning_fallback(
-                &endpoint,
-                &body,
-                Some(responses_body_legacy(&body)),
-                request.session_id.as_deref(),
-            )
-            .await?;
+        let response = self.send_with_reasoning_fallback(&endpoint, &body, request.session_id.as_deref()).await?;
         let value = checked_json(response, "response_body").await?;
         let message = value
             .pointer("/choices/0/message")
@@ -129,9 +117,6 @@ impl HttpModelProvider {
         request: ModelRequest,
         observer: &dyn ModelStreamObserver,
     ) -> Result<ModelResponse> {
-        if self.config.base_url.contains("chat.deepseek.com") {
-            return self.deepseek_account(request, Some(observer)).await;
-        }
         let endpoint = endpoint(&self.config.base_url, "chat/completions");
         let mut body = json!({
             "model": request.model,
@@ -169,9 +154,7 @@ impl HttpModelProvider {
             request.reasoning_effort.as_deref(),
             Some(false),
         );
-        let response = self
-            .send_with_reasoning_fallback(&endpoint, &body, None, request.session_id.as_deref())
-            .await?;
+        let response = self.send_with_reasoning_fallback(&endpoint, &body, request.session_id.as_deref()).await?;
         let status = response.status();
         if !status.is_success() {
             return checked_json(response, "response_body")
@@ -225,22 +208,33 @@ impl HttpModelProvider {
             }
         }
         let session = create_session(&self.client, &self.current_api_key()).await?;
-        let thinking = request.model.contains("reasoner")
-            || request.reasoning_effort.as_deref().is_some_and(|v| v != "low");
+        let thinking = if self.config.kind == ProviderKind::DeepseekAccount {
+            self.config.deepseek_thinking_enabled
+        } else {
+            request.thinking_enabled
+        };
+        let search = if self.config.kind == ProviderKind::DeepseekAccount {
+            self.config.deepseek_search_enabled
+        } else {
+            request.search_enabled
+        };
+        // 会话模型类型以创建会话的响应为准（新版是 `default`），拿不到时再回退到
+        // 调用方请求的模型名（chat_completion 内部会归一化）。
+        let session_model_type = if session.model_type.trim().is_empty() {
+            request.model.clone()
+        } else {
+            session.model_type.clone()
+        };
         let response = chat_completion(
             &self.client,
             &self.current_api_key(),
-            session.chat_session_id,
-            &request.model,
+            &session.chat_session_id,
+            &session_model_type,
             &prompt,
             thinking,
+            search,
         )
         .await?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("DeepSeek 对话失败 HTTP {status}: {body}");
-        }
         let mut stream = response.bytes_stream();
         let mut pending = String::new();
         let mut content = String::new();
@@ -254,18 +248,15 @@ impl HttpModelProvider {
                 let data = data.trim();
                 if data.is_empty() || data == "[DONE]" { continue; }
                 let Ok(value) = serde_json::from_str::<Value>(data) else { continue; };
-                let delta = value.get("text_delta")
-                    .or_else(|| value.pointer("/choices/0/delta/content"))
-                    .or_else(|| value.get("content"))
-                    .and_then(Value::as_str)
+                let delta = nested_string(&value, &["text_delta", "content_delta", "text", "content"])
+                    .or_else(|| value.pointer("/choices/0/delta/content").and_then(Value::as_str))
                     .unwrap_or("");
                 if !delta.is_empty() {
                     content.push_str(delta);
                     if let Some(obs) = observer { obs.on_text_delta(delta); }
                 }
-                let think = value.get("reasoning_delta")
-                    .or_else(|| value.pointer("/choices/0/delta/reasoning_content"))
-                    .and_then(Value::as_str)
+                let think = nested_string(&value, &["reasoning_delta", "thinking_delta", "think_delta"])
+                    .or_else(|| value.pointer("/choices/0/delta/reasoning_content").and_then(Value::as_str))
                     .unwrap_or("");
                 if !think.is_empty() {
                     reasoning.push_str(think);
@@ -273,21 +264,29 @@ impl HttpModelProvider {
                 }
             }
         }
-        if content.is_empty() {
-            if !reasoning.is_empty() {
-                return Ok(ModelResponse {
-                    content: reasoning,
-                    tool_calls: Vec::new(),
-                    invalid_tool_calls: Vec::new(),
-                    usage: TokenUsage::default(),
-                    streamed: observer.is_some(),
-                });
+        // WebView/代理有时不会在最后一个 SSE 帧补换行，补处理残留帧。
+        if let Some(data) = pending.trim().strip_prefix("data:") {
+            if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
+                if let Some(delta) = nested_string(&value, &["text_delta", "content_delta", "text", "content"]) {
+                    content.push_str(delta);
+                    if let Some(obs) = observer { obs.on_text_delta(delta); }
+                }
+                if let Some(delta) = nested_string(&value, &["reasoning_delta", "thinking_delta", "think_delta"]) {
+                    reasoning.push_str(delta);
+                    if let Some(obs) = observer { obs.on_reasoning_delta(delta); }
+                }
             }
+        }
+        if content.is_empty() {
             anyhow::bail!("DeepSeek 响应没有文本内容");
         }
+        // DeepSeek 账号协议没有 OpenAI tool_calls 字段。Agent 提示词要求模型用
+        // JSON 描述工具调用，因此在协议边界把它还原成标准 ToolCall，后续仍走
+        // Coomi 原有的权限、工具执行和事件动画链。
+        let tool_calls = parse_deepseek_tool_call(&content).into_iter().collect();
         Ok(ModelResponse {
             content,
-            tool_calls: Vec::new(),
+            tool_calls,
             invalid_tool_calls: Vec::new(),
             usage: TokenUsage::default(),
             streamed: observer.is_some(),
@@ -298,10 +297,10 @@ impl HttpModelProvider {
         &self,
         request: CompactionRequest,
     ) -> Result<CompactionResponse> {
-        let endpoint = responses_compact_endpoint(&self.config.base_url);
+        let endpoint = endpoint(&self.config.base_url, "responses/compact");
         let body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages, self.config.capabilities.supports_vision, true)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "instructions": request.system_prompt
         });
         let value = checked_json(
@@ -377,7 +376,7 @@ impl HttpModelProvider {
         &self,
         request: CompactionRequest,
     ) -> Result<CompactionResponse> {
-        let endpoint = responses_endpoint(&self.config.base_url);
+        let endpoint = endpoint(&self.config.base_url, "responses");
         let body = remote_compaction_v2_body(
             &request,
             self.config.capabilities.supports_web_search,
@@ -408,10 +407,10 @@ impl HttpModelProvider {
     }
 
     async fn openai_responses(&self, request: ModelRequest) -> Result<ModelResponse> {
-        let endpoint = responses_endpoint(&self.config.base_url);
+        let endpoint = endpoint(&self.config.base_url, "responses");
         let mut body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages, self.config.capabilities.supports_vision, true)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "stream": false
         });
         let request_tools = if self.config.capabilities.supports_native_tools {
@@ -434,14 +433,7 @@ impl HttpModelProvider {
             request.reasoning_effort.as_deref(),
             Some(true),
         );
-        let response = self
-            .send_with_reasoning_fallback(
-                &endpoint,
-                &body,
-                Some(responses_body_legacy(&body)),
-                request.session_id.as_deref(),
-            )
-            .await?;
+        let response = self.send_with_reasoning_fallback(&endpoint, &body, request.session_id.as_deref()).await?;
         let value = checked_json(response, "response_body").await?;
         let mut content = String::new();
         let mut tool_calls = Vec::new();
@@ -489,10 +481,10 @@ impl HttpModelProvider {
         request: ModelRequest,
         observer: &dyn ModelStreamObserver,
     ) -> Result<ModelResponse> {
-        let endpoint = responses_endpoint(&self.config.base_url);
+        let endpoint = endpoint(&self.config.base_url, "responses");
         let mut body = json!({
             "model": request.model,
-            "input": responses_input(&request.messages, self.config.capabilities.supports_vision, true)?,
+            "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "stream": true
         });
         let request_tools = if self.config.capabilities.supports_native_tools {
@@ -515,14 +507,7 @@ impl HttpModelProvider {
             request.reasoning_effort.as_deref(),
             Some(true),
         );
-        let response = self
-            .send_with_reasoning_fallback(
-                &endpoint,
-                &body,
-                Some(responses_body_legacy(&body)),
-                request.session_id.as_deref(),
-            )
-            .await?;
+        let response = self.send_with_reasoning_fallback(&endpoint, &body, request.session_id.as_deref()).await?;
         let status = response.status();
         if !status.is_success() {
             return checked_json(response, "response_body")
@@ -846,7 +831,6 @@ impl HttpModelProvider {
         &self,
         endpoint: &str,
         body: &Value,
-        extra_fallback: Option<Value>,
         session_id: Option<&str>,
     ) -> Result<Response> {
         let response = self
@@ -923,24 +907,6 @@ impl HttpModelProvider {
             },
             &mut steps,
         );
-        // #8：gpt-5 系模型拒绝 temperature，且该错误是持久 400——加入阶梯兜底。
-        push_step(
-            {
-                let mut value = body.clone();
-                remove_reasoning_fields(&mut value);
-                remove_json_field(&mut value, "top_k");
-                remove_json_field(&mut value, "parallel_tool_calls");
-                remove_optional_capability_fields(&mut value);
-                remove_json_field(&mut value, "temperature");
-                value
-            },
-            &mut steps,
-        );
-        // 兼容阶梯末位：严格 serde 代理（agnes/OpenCode 等网关）拒绝 Responses
-        // 全形状（type/id/input_text 等）时，退回旧简写形状重试。
-        if let Some(legacy) = extra_fallback {
-            push_step(legacy, &mut steps);
-        }
 
         for fallback in &steps {
             let retry = self
@@ -1246,7 +1212,7 @@ impl ModelProvider for HttpModelProvider {
             ProviderKind::OpenAiResponses => self.openai_responses(request).await,
             ProviderKind::AnthropicMessages => self.anthropic_messages(request).await,
             ProviderKind::GeminiNative => self.gemini_native(request).await,
-            ProviderKind::DeepSeekAccount => self.deepseek_account(request, None).await,
+            ProviderKind::DeepseekAccount => self.deepseek_account(request, None).await,
         }
     }
 
@@ -1260,12 +1226,9 @@ impl ModelProvider for HttpModelProvider {
                 self.openai_compatible_stream(request, observer).await
             }
             ProviderKind::OpenAiResponses => self.openai_responses_stream(request, observer).await,
-            ProviderKind::DeepSeekAccount => self.deepseek_account(request, Some(observer)).await,
+            ProviderKind::DeepseekAccount => self.deepseek_account(request, Some(observer)).await,
             ProviderKind::AnthropicMessages | ProviderKind::GeminiNative => {
                 self.complete(request).await
-            }
-            ProviderKind::DeepSeekAccount => {
-                self.deepseek_account(request, Some(observer)).await
             }
         }
     }
@@ -1557,10 +1520,6 @@ impl CompactionStreamState {
 struct ResponsesStreamState {
     content: String,
     tools: BTreeMap<String, PartialToolCall>,
-    /// item_id（fc_…）→ call_id（call_…）别名：output_item.added 两个都带，
-    /// 而 function_call_arguments.delta 只带 item_id——不归一会让同一工具调用
-    /// 分裂成两条（call_id 条目有名无参、item_id 条目有参无名）。（#8）
-    item_aliases: BTreeMap<String, String>,
     usage: TokenUsage,
 }
 
@@ -1588,12 +1547,6 @@ impl ResponsesStreamState {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_owned();
-                    if let Some(item_id) = item.get("id").and_then(Value::as_str)
-                        && item_id != id
-                        && !id.is_empty()
-                    {
-                        self.item_aliases.insert(item_id.to_owned(), id.clone());
-                    }
                     let target = self.tools.entry(id.clone()).or_default();
                     target.id = id;
                     if let Some(name) = item.get("name").and_then(Value::as_str) {
@@ -1605,13 +1558,12 @@ impl ResponsesStreamState {
                 }
             }
             Some("response.function_call_arguments.delta") => {
-                let raw = value
+                let id = value
                     .get("call_id")
                     .or_else(|| value.get("item_id"))
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                let id = self.item_aliases.get(&raw).cloned().unwrap_or(raw);
                 if let Some(delta) = value.get("delta").and_then(Value::as_str) {
                     self.tools.entry(id).or_default().arguments.push_str(delta);
                 }
@@ -1675,53 +1627,6 @@ fn endpoint(base_url: &str, suffix: &str) -> String {
     } else {
         format!("{base_url}/{suffix}")
     }
-}
-
-/// #8：Responses 端点统一走 EndpointResolver——base_url 不带版本段时自动补
-/// `v1`（如 https://api.openai.com → /v1/responses），与能力探测路径一致。
-/// 之前的 endpoint() 直接拼 `/responses`，造成"检测通过、对话 404"。
-fn responses_endpoint(base_url: &str) -> String {
-    EndpointResolver::new(base_url, ProviderProtocol::OpenAiResponses).inference("")
-}
-
-/// 兼容降级：把 Responses 全形状请求体退回旧简写形状
-/// （message 去 type/id、content 压回字符串；function_call(_output) 去 id）。
-/// 供严格 serde 代理（agnes/OpenCode 等网关）400 时作为最后阶梯重试。
-fn responses_body_legacy(body: &Value) -> Value {
-    let mut legacy = body.clone();
-    if let Some(items) = legacy.get_mut("input").and_then(Value::as_array_mut) {
-        let simplified: Vec<Value> = items
-            .iter()
-            .map(|item| {
-                let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
-                match kind {
-                    "message" => {
-                        let role = item.get("role").cloned().unwrap_or_else(|| json!("user"));
-                        let text = item
-                            .pointer("/content/0/text")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_owned();
-                        json!({ "role": role, "content": text })
-                    }
-                    "function_call" | "function_call_output" => {
-                        let mut object = item.clone();
-                        if let Some(map) = object.as_object_mut() {
-                            map.remove("id");
-                        }
-                        object
-                    }
-                    _ => item.clone(),
-                }
-            })
-            .collect();
-        legacy["input"] = Value::Array(simplified);
-    }
-    legacy
-}
-
-fn responses_compact_endpoint(base_url: &str) -> String {
-    format!("{}/compact", responses_endpoint(base_url))
 }
 
 async fn checked_json(response: Response, phase: &'static str) -> Result<Value> {
@@ -1836,26 +1741,12 @@ fn safe_http_error_detail(status: u16, body: &str) -> String {
             })
             .map(ToOwned::to_owned)
     });
-    // 报错细化（批次八收尾）：保留上游 error.message 原文（脱敏后）——它才是
-    // 判断欠费/限流/参数错误的真实依据，只有短码用户没法归因。
-    let upstream_message = serde_json::from_str::<Value>(body).ok().and_then(|value| {
-        value
-            .pointer("/error/message")
-            .or_else(|| value.pointer("/message"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(redact_upstream_message)
-    });
-    let has_upstream = upstream_message.is_some();
-    let base = match (code, upstream_message) {
-        (Some(code), Some(message)) => format!("{summary} (code={code}) {message}"),
-        (Some(code), None) => format!("{summary} (code={code})"),
-        (None, Some(message)) => format!("{summary}: {message}"),
-        (None, None) => summary.to_owned(),
+    let base = match code {
+        Some(code) => format!("{summary} (code={code})"),
+        None => summary.to_owned(),
     };
     // 400/405 时附带响应体摘要，便于定位 ZCode/智谱等代理的具体拒绝原因。
-    if !has_upstream && (status == 400 || status == 405) {
+    if status == 400 || status == 405 {
         let detail = body.trim();
         let truncated: String = if detail.len() > 220 {
             detail.chars().take(220).collect()
@@ -1867,32 +1758,6 @@ fn safe_http_error_detail(status: u16, body: &str) -> String {
         }
     }
     base
-}
-
-/// 上游错误消息脱敏：截断到 400 字符；sk- 开头的密钥、含 token=/key= 的参数
-/// 整词替换为占位符，其余保留（用户需要看到欠费/限流的真实描述）。
-fn redact_upstream_message(message: &str) -> String {
-    let truncated: String = message.chars().take(400).collect();
-    let mut output = String::with_capacity(truncated.len());
-    for (index, word) in truncated
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ';' | '"' | '(' | ')'))
-        .enumerate()
-    {
-        if index > 0 {
-            output.push(' ');
-        }
-        let lower = word.to_ascii_lowercase();
-        if (lower.starts_with("sk-") && word.len() > 6)
-            || lower.contains("token=")
-            || lower.contains("key=")
-            || lower.contains("apikey=")
-        {
-            output.push_str("[已脱敏]");
-        } else {
-            output.push_str(word);
-        }
-    }
-    output
 }
 
 fn stream_event_error(phase: &'static str, value: &Value) -> anyhow::Error {
@@ -1999,7 +1864,7 @@ fn openai_messages(messages: &[ChatMessage], supports_vision: bool) -> Result<Ve
     Ok(output)
 }
 
-fn responses_input(messages: &[ChatMessage], supports_vision: bool, strict: bool) -> Result<Vec<Value>> {
+fn responses_input(messages: &[ChatMessage], supports_vision: bool) -> Result<Vec<Value>> {
     let mut input = Vec::new();
     for message in messages {
         if !message.provider_items.is_empty() {
@@ -2007,73 +1872,44 @@ fn responses_input(messages: &[ChatMessage], supports_vision: bool, strict: bool
             continue;
         }
         match message.role {
-            Role::System | Role::User => {
-                if strict {
-                    input.push(json!({
-                        "type": "message",
-                        "role": role_name(message.role),
-                        "content": [{ "type": "input_text", "text": message.content }]
-                    }));
-                } else {
-                    input.push(json!({
-                        "role": role_name(message.role),
-                        "content": message.content
-                    }));
-                }
-            },
+            Role::System | Role::User => input.push(json!({
+                "role": role_name(message.role),
+                "content": message.content
+            })),
             Role::Assistant => {
                 if !message.content.is_empty() {
-                    if strict {
-                        input.push(json!({
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [{ "type": "output_text", "text": message.content }]
-                        }));
-                    } else {
-                        input.push(json!({"role": "assistant", "content": message.content}));
-                    }
+                    input.push(json!({"role": "assistant", "content": message.content}));
                 }
                 for call in &message.tool_calls {
-                    let mut call_item = json!({
+                    input.push(json!({
                         "type": "function_call",
                         "call_id": call.id,
                         "name": call.name,
                         "arguments": serde_json::to_string(&call.arguments)?
-                    });
-                    if strict {
-                        call_item["id"] = json!(call.id);
-                    }
-                    input.push(call_item);
+                    }));
                 }
             }
             Role::Tool => {
                 let output = if message.images.is_empty() || !supports_vision {
                     Value::String(message.content.clone())
                 } else {
-                    // #8：Responses API 的 function_call_output 内容项类型是
-                    // output_text/output_image（input_* 只用于 user 消息），
-                    // 用错会被 400 拒绝。
                     let mut items = vec![json!({
-                        "type": "output_text",
+                        "type": "input_text",
                         "text": message.content
                     })];
                     items.extend(message.images.iter().map(|image| {
                         json!({
-                            "type": "output_image",
+                            "type": "input_image",
                             "image_url": image.data_url()
                         })
                     }));
                     Value::Array(items)
                 };
-                let mut output_item = json!({
+                input.push(json!({
                     "type": "function_call_output",
                     "call_id": message.tool_call_id.as_deref().context("tool message has no call id")?,
                     "output": output
-                });
-                if strict {
-                    output_item["id"] = json!(message.tool_call_id.as_deref().context("tool message has no call id")?);
-                }
-                input.push(output_item);
+                }));
             }
         }
     }
@@ -2086,7 +1922,7 @@ fn remote_compaction_v2_body(
     parallel_tool_calls: bool,
     supports_vision: bool,
 ) -> Result<Value> {
-    let mut input = responses_input(&request.messages, supports_vision, true)?;
+    let mut input = responses_input(&request.messages, supports_vision)?;
     input.push(json!({"type": "compaction_trigger"}));
     let mut body = json!({
         "model": request.model,
@@ -2481,70 +2317,6 @@ fn nested_u64(value: Option<&Value>, key: &str) -> u64 {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn opencode_routed_requests_round_trip_tools_over_local_http() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        for (base, model, suffix, auth, field, reply) in [
-            ("https://opencode.ai/zen/v1", "gpt-5.5", "responses", "authorization: bearer test-key", "input",
-                json!({"output":[{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{\"path\":\"README.md\"}"}]})),
-            ("https://opencode.ai/zen/go/v1", "minimax-m2.5", "messages", "x-api-key: test-key", "messages",
-                json!({"content":[{"type":"tool_use","id":"call-1","name":"read_file","input":{"path":"README.md"}}]})),
-            ("https://opencode.ai/zen/v1", "gemini-3.1-pro", "models/gemini-3.1-pro:generateContent", "x-goog-api-key: test-key", "contents",
-                json!({"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"README.md"}}}]}}]})),
-            ("https://opencode.ai/zen/go/v1", "kimi-k2.6", "chat/completions", "authorization: bearer test-key", "messages",
-                json!({"choices":[{"message":{"content":"","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}]}}]})),
-        ] {
-            let temp = tempfile::tempdir().expect("temporary directory");
-            let path = temp.path().join("providers.json");
-            crate::ProviderDocument {
-                active: "opencode".into(), extra: BTreeMap::new(),
-                providers: BTreeMap::from([("opencode".into(), crate::ProviderSettings {
-                    base_url: base.into(), model: model.into(), api_key: "test-key".into(),
-                    ..crate::ProviderSettings::default()
-                })]),
-            }.save(&path).expect("fixture");
-            let mut config = crate::ProviderRegistry::load(&path).expect("registry").resolve(None).expect("route");
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("local server");
-            config.base_url = format!("http://{}/v1", listener.local_addr().expect("address"));
-            let server = tokio::spawn(async move {
-                let (mut socket, _) = listener.accept().await.expect("accept");
-                let mut bytes = Vec::new();
-                let (headers, body) = loop {
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.expect("request bytes");
-                    assert!(count > 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                    if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-                        let headers = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
-                        let length = headers.lines().find_map(|line| line.strip_prefix("content-length: "))
-                            .expect("content length").parse::<usize>().expect("length");
-                        if bytes.len() >= end + 4 + length {
-                            break (headers, serde_json::from_slice::<Value>(&bytes[end + 4..end + 4 + length]).expect("request JSON"));
-                        }
-                    }
-                };
-                let reply = reply.to_string();
-                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
-                socket.write_all(response.as_bytes()).await.expect("response");
-                (headers, body)
-            });
-            let provider = HttpModelProvider::new(config).expect("provider");
-            let result = tokio::time::timeout(Duration::from_secs(5), provider.complete(ModelRequest {
-                model: model.into(), messages: vec![ChatMessage::user("Read README.md")],
-                tools: vec![coomi_engine::ToolSpec { name: "read_file".into(), description: "Read a file".into(), parameters: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}) }],
-                reasoning_effort: None,
-            })).await.expect("request deadline").expect("completion");
-            let (headers, body) = server.await.expect("server result");
-            assert!(headers.starts_with(&format!("post /v1/{} ", suffix.to_ascii_lowercase())), "{headers}");
-            assert!(headers.contains(auth), "expected {auth}");
-            assert!(body[field].is_array(), "{body}");
-            assert!(body["tools"].is_array(), "{body}");
-            assert_eq!(result.tool_calls.len(), 1, "{model}");
-            assert_eq!(result.tool_calls[0].name, "read_file");
-            assert_eq!(result.tool_calls[0].arguments, json!({"path":"README.md"}));
-        }
-    }
-
     struct IgnoreStream;
 
     impl ModelStreamObserver for IgnoreStream {
@@ -2821,7 +2593,7 @@ mod tests {
             "type": "compaction",
             "encrypted_content": "opaque"
         });
-        let input = responses_input(&[ChatMessage::provider_item(item.clone())], true, true)
+        let input = responses_input(&[ChatMessage::provider_item(item.clone())], true)
             .expect("responses input");
         assert_eq!(input, vec![item]);
         assert!(
@@ -2876,8 +2648,8 @@ mod tests {
         });
         let history = vec![ChatMessage::assistant("", vec![call]), output];
 
-        let responses = responses_input(&history, true, true).expect("Responses history");
-        assert_eq!(responses[1]["output"][1]["type"], "output_image");
+        let responses = responses_input(&history, true).expect("Responses history");
+        assert_eq!(responses[1]["output"][1]["type"], "input_image");
         assert_eq!(
             responses[1]["output"][1]["image_url"],
             "data:image/png;base64,BASE64"
@@ -2921,7 +2693,7 @@ mod tests {
         });
         let history = vec![ChatMessage::assistant("", vec![call]), output];
 
-        let responses = responses_input(&history, false, true).expect("Responses history");
+        let responses = responses_input(&history, false).expect("Responses history");
         assert_eq!(responses[1]["output"], "success: image loaded");
 
         let chat = openai_messages(&history, false).expect("Chat history");

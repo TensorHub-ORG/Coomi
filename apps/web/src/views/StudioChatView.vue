@@ -1,552 +1,99 @@
 <script setup lang="ts">
-/**
- * AI 工作室聊天页。
- * 视觉结构 = 群聊消息流 + 顶部半屏工具瀑布流（可展开收起，标注执行成员）：
- * - 成员回复先出现「三点动画 + 单行实时流」气泡，完成后落成正式 Markdown 气泡。
- * - 工具调用一律进顶部工具面板，不混入聊天流。
- * - 长按任意成员头像可直接 @ 该成员。
- */
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { useStudioStore, type StudioMessage } from '@/stores/studio'
 import StudioMemberStrip from '@/components/StudioMemberStrip.vue'
 import StudioWorkBoard from '@/components/StudioWorkBoard.vue'
-import Identicon from '@/components/Identicon.vue'
 import { goBack } from '@/bridge/navigation'
-import { renderMarkdown } from '@/utils/markdown'
 
-const route = useRoute()
-const router = useRouter()
-const studio = useStudioStore()
+const route = useRoute(); const router = useRouter(); const studio = useStudioStore()
 const studioId = computed(() => route.params.id as string)
-
-const input = ref('')
-const scroller = ref<HTMLElement | null>(null)
-const showAtPicker = ref(false)
-const showWorkBoard = ref(false)
-// 并发运行计数：剧场开演后仍可插话（第二个 sendMessage 流），首个流结束时
-// 不能把 sending 置回 false，因此由计数派生。
-const activeRunCount = ref(0)
-const sending = computed(() => activeRunCount.value > 0)
-const pendingUser = ref<StudioMessage | null>(null)
-const streamContentByMember = ref<Record<string, string>>({})
-const streamNotices = ref<string[]>([])
-const importedFiles = ref<string[]>([])
-const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
-
-/** 角色剧场：面板开关、话题、参演角色与运行状态。 */
-const theaterOpen = ref(false)
-const theaterTopic = ref('')
-const selectedActors = ref<string[]>([])
-const theaterRunning = ref(false)
-const theaterError = ref('')
-
-/** 顶部工具面板：默认收起，有待确认操作时强制展开。 */
-const toolsOpen = ref(false)
-const toolsTouched = ref(false)
-const runningTools = computed(() => studio.toolCards.filter(card => card.status === 'running' || card.status === 'approval'))
-const approvalPending = computed(() => studio.toolCards.some(card => card.status === 'approval'))
-watch(approvalPending, (pending) => { if (pending) toolsOpen.value = true })
-watch(() => studio.toolCards.length, () => {
-  if (!toolsTouched.value && runningTools.value.length > 0) toolsOpen.value = true
-  nextTick(() => { toolBox.value?.scrollTo({ top: toolBox.value.scrollHeight }) })
-})
-const toolBox = ref<HTMLElement | null>(null)
-
+const input = ref(''); const scroller = ref<HTMLElement | null>(null)
+const showAtPicker = ref(false); const showWorkBoard = ref(false); const sending = ref(false)
+const pendingUser = ref<StudioMessage | null>(null); const importedFiles = ref<string[]>([])
+const activeMember = ref(''); const streams = reactive<Record<string, string>>({}); const reasoning = reactive<Record<string, string>>({})
+const expandedReasoning = reactive<Record<string, boolean>>({}); const expandedTools = reactive<Record<string, boolean>>({})
+const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null); const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
 const atTargets = computed(() => studio.members.map(m => ({ value: m.id, label: m.name })))
+const activeMemberInfo = computed(() => studio.members.find(m => m.id === activeMember.value))
 
-onMounted(async () => {
-  await studio.fetchStudio(studioId.value)
-  await studio.fetchMessages()
-  await studio.fetchWorkItems()
-  scrollToBottom()
-  window.addEventListener('coomi:files-imported', onFilesImported)
-})
-
-onBeforeUnmount(() => {
-  studio.reset()
-  window.removeEventListener('coomi:files-imported', onFilesImported)
-})
-
-watch(() => studio.messages.length, () => { scrollToBottom() })
-watch(streamContentByMember, () => { scrollToBottom() }, { deep: true })
-
-function scrollToBottom() {
-  nextTick(() => {
-    if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
-  })
-}
-
-/** 消息 Markdown 渲染（与主会话同一管线：净化 + 代码复制装饰）。 */
-const rendered = computed(() => {
-  const map = new Map<string, string>()
-  for (const msg of studio.messages) map.set(msg.id, renderMarkdown(msg.content))
-  return map
-})
-function html(msg: StudioMessage): string {
-  return rendered.value.get(msg.id) ?? ''
-}
-/** 代码块复制按钮的事件委托（v-html 内容不带 Vue 绑定）。 */
-function onContentClick(event: MouseEvent) {
-  const target = event.target as HTMLElement | null
-  const button = target?.closest('button[data-copy-code]') as HTMLElement | null
-  if (!button) return
-  const code = button.parentElement?.querySelector('pre')?.textContent ?? ''
-  void navigator.clipboard?.writeText(code)
-  button.textContent = '已复制'
-  setTimeout(() => { button.textContent = '复制' }, 1200)
-}
-
-/** 流式实时流只取最新一行，单行省略展示。每个成员独立保留，避免切换成员时覆盖内容。 */
-const activeMemberIds = computed(() => {
-  const ids = Object.keys(streamContentByMember.value)
-  // SSE 状态事件可能被旧版 WebView 丢弃；发送期间至少展示一个执行气泡
-  //（剧场模式优先展示第一位参演角色，其余情况展示主持人）。
-  if (ids.length > 0) return ids
-  if (sending.value) {
-    if (theaterOpen.value && selectedActors.value.length > 0) return [selectedActors.value[0]]
-    if (studio.host?.id) return [studio.host.id]
-  }
-  return []
-})
-const memberActive = computed(() => activeMemberIds.value.length > 0)
-const showPendingUser = computed(() => {
-  const pending = pendingUser.value
-  if (!pending) return false
-
-  // The Rust endpoint persists the user's message before opening the stream.
-  // Hide the optimistic bubble as soon as that durable copy is visible.
-  const prompt = pending.content.split('\n📎 ')[0]
-  return !studio.messages.some(message =>
-    message.senderId === 'user' &&
-    message.timestamp >= pending.timestamp &&
-    message.content.startsWith(prompt),
-  )
-})
-function streamTicker(memberId: string): string {
-  const lines = (streamContentByMember.value[memberId] ?? '').split('\n').filter(line => line.trim())
-  return lines[lines.length - 1] ?? ''
-}
-function streamingName(memberId: string): string {
-  return studio.members.find(m => m.id === memberId)?.name || 'AI'
-}
-
-function insertAt(id: string) {
-  const m = studio.members.find(x => x.id === id)
-  if (m) insertAtByName(m.name)
-  showAtPicker.value = false
-}
-function insertAtByName(name: string) {
-  input.value = input.value ? input.value.replace(/\s+$/, '') + ` @${name} ` : `@${name} `
-}
-
-/** 长按头像 @ 成员。 */
-let pressTimer: ReturnType<typeof setTimeout> | null = null
-function onAvatarDown(name: string) {
-  pressTimer = setTimeout(() => {
-    pressTimer = null
-    insertAtByName(name)
-    if (navigator.vibrate) navigator.vibrate(10)
-  }, 450)
-}
-function onAvatarUp() {
-  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
-}
-
-function importFiles() {
-  showAtPicker.value = false
-  window.CoomiAndroid?.importFiles?.()
-}
-
-function onFilesImported(event: Event) {
-  const detail = (event as CustomEvent<{ paths?: string[] }>).detail ?? {}
-  const paths = detail.paths ?? []
-  if (paths.length) importedFiles.value = Array.from(new Set([...importedFiles.value, ...paths]))
-}
-
-function removeImportedFile(path: string) {
-  importedFiles.value = importedFiles.value.filter(item => item !== path)
-}
-
-/** 流式事件统一处理：普通消息与剧场对谈共用（成员状态、增量、工具卡片、落库消息）。 */
-function handleStreamEvent(event: Record<string, any>) {
-  if (event.event_type === 'studio_user_message') return
-  if (event.event_type === 'studio_member_status') {
-    const memberId = String(event.member_id ?? '')
-    if (!memberId) return
-    const status = String(event.status)
-    studio.onMemberStatus(memberId, status as never)
-    if (['thinking', 'executing'].includes(status)) {
-      if (!(memberId in streamContentByMember.value)) streamContentByMember.value[memberId] = ''
-    } else if (['done', 'failed'].includes(status)) {
-      delete streamContentByMember.value[memberId]
-    }
-  } else if (event.event_type === 'studio_text_delta') {
-    const memberId = String(event.member_id ?? '')
-    if (!memberId) return
-    streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
-  } else if (event.event_type === 'studio_reasoning_delta') {
-    const memberId = String(event.member_id ?? '')
-    if (!memberId) return
-    streamContentByMember.value[memberId] = (streamContentByMember.value[memberId] ?? '') + String(event.content ?? '')
-  } else if (event.event_type === 'studio_stream_reset') {
-    const memberId = String(event.member_id ?? '')
-    if (memberId) streamContentByMember.value[memberId] = ''
-  } else if (['studio_tool_start', 'studio_tool_done', 'studio_tool_approval'].includes(String(event.event_type))) {
-    studio.onToolEvent(event)
-  } else if (event.event_type === 'studio_error') {
-    streamNotices.value.push(String(event.message ?? '成员执行出错'))
-  } else if (event.event_type === 'studio_message') {
-    const memberId = String(event.message?.senderId ?? '')
-    if (memberId) delete streamContentByMember.value[memberId]
-  }
-}
-
-/** 统一发送入口：计入并发计数，只有最后一个流结束时才清理流式状态。 */
-async function dispatch(displayText: string, requestText: string) {
-  activeRunCount.value += 1
-  streamNotices.value = []
-  pendingUser.value = {
-    id: `pending-${Date.now()}`, senderId: 'user', senderName: '我', content: displayText,
-    mentions: [], timestamp: Date.now(), type: 'text',
-  }
-  scrollToBottom()
-  try {
-    await studio.sendMessage(requestText, handleStreamEvent)
-  } finally {
-    pendingUser.value = null
-    activeRunCount.value = Math.max(0, activeRunCount.value - 1)
-    if (activeRunCount.value === 0) streamContentByMember.value = {}
-    await studio.fetchMessages()
-  }
-}
-
+onMounted(async () => { await studio.fetchStudio(studioId.value); await studio.fetchMessages(); await studio.fetchWorkItems(); scrollToBottom(); window.addEventListener('coomi:files-imported', onFilesImported) })
+onBeforeUnmount(() => { studio.reset(); window.removeEventListener('coomi:files-imported', onFilesImported); if (longPressTimer.value) clearTimeout(longPressTimer.value) })
+watch(() => studio.messages.length, scrollToBottom); watch(streams, scrollToBottom, { deep: true }); watch(reasoning, scrollToBottom, { deep: true })
+function scrollToBottom() { nextTick(() => { if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight }) }
+function memberName(id: string) { return studio.members.find(m => m.id === id)?.name || '成员' }
+function insertAt(id: string) { const m = studio.members.find(x => x.id === id); if (!m) return; input.value += `@${m.name} `; showAtPicker.value = false }
+function startLongPress(id: string) { if (longPressTimer.value) clearTimeout(longPressTimer.value); longPressTimer.value = setTimeout(() => insertAt(id), 520) }
+function endLongPress() { if (longPressTimer.value) { clearTimeout(longPressTimer.value); longPressTimer.value = null } }
+function importFiles() { showAtPicker.value = false; window.CoomiAndroid?.importFiles?.() }
+function onFilesImported(event: Event) { const paths = (event as CustomEvent<{ paths?: string[] }>).detail?.paths ?? []; if (paths.length) importedFiles.value = Array.from(new Set([...importedFiles.value, ...paths])) }
+function removeImportedFile(path: string) { importedFiles.value = importedFiles.value.filter(item => item !== path) }
+function clearStream(id: string) { delete streams[id]; delete reasoning[id] }
 async function send() {
-  const text = input.value.trim()
-  // 剧场模式开启时允许插话：即使已有流在跑（sending）也放行普通消息，
-  // 该消息会作为用户消息写入会话并路由给主持人回应，角色们照常继续。
-  if (!text || (sending.value && !theaterOpen.value)) return
-  const fileNames = importedFiles.value.map(path => path.split('/').pop() || '文件')
-  const displayText = [text, ...fileNames.map(n => `📎 ${n}`)].filter(Boolean).join('\n')
-  const fileInstruction = importedFiles.value.length ? `请读取这些已导入文件：\n${importedFiles.value.join('\n')}` : ''
-  const requestText = [text, fileInstruction].filter(Boolean).join('\n\n')
-  input.value = ''
-  importedFiles.value = []
-  toolsTouched.value = false
-  await dispatch(displayText, requestText)
+  const text = input.value.trim(); if ((!text && !importedFiles.value.length) || sending.value) return
+  sending.value = true; const files = importedFiles.value.slice(); const fileNames = files.map(p => p.split('/').pop() || '文件')
+  pendingUser.value = { id:`pending-${Date.now()}`, senderId:'user', senderName:'我', content:[text, ...fileNames.map(n => `📎 ${n}`)].filter(Boolean).join('\n'), mentions:[], timestamp:Date.now(), type:'text' }
+  const requestText = [text, files.length ? `请读取这些已导入文件：\n${files.join('\n')}` : ''].filter(Boolean).join('\n\n'); input.value=''; importedFiles.value=[]; scrollToBottom()
+  try { await studio.sendMessage(requestText, event => {
+    const type = String(event.event_type ?? ''), id = String(event.member_id ?? '')
+    if (type === 'studio_member_status') { studio.onMemberStatus(id, event.status as any); if (['thinking','executing'].includes(String(event.status))) activeMember.value=id; else if (activeMember.value===id && ['done','failed'].includes(String(event.status))) activeMember.value='' }
+    else if (type === 'studio_text_delta') { activeMember.value=id; streams[id]=(streams[id]||'')+String(event.content??'') }
+    else if (type === 'studio_reasoning_delta') { activeMember.value=id; reasoning[id]=(reasoning[id]||'')+String(event.content??'') }
+    else if (type === 'studio_stream_reset') clearStream(id)
+    else if (['studio_tool_start','studio_tool_done','studio_tool_approval'].includes(type)) studio.onToolEvent(event)
+    else if (type === 'studio_message') { clearStream(id); activeMember.value='' }
+    else if (type === 'studio_error') studio.error=String(event.message??'工作室运行失败')
+  }) } finally { pendingUser.value=null; Object.keys(streams).forEach(clearStream); activeMember.value=''; await studio.fetchMessages(); sending.value=false }
 }
-
-function toggleTheater() {
-  theaterOpen.value = !theaterOpen.value
-  if (!theaterOpen.value) theaterError.value = ''
-}
-
-function toggleActor(id: string) {
-  const index = selectedActors.value.indexOf(id)
-  if (index >= 0) selectedActors.value.splice(index, 1)
-  else if (selectedActors.value.length < 3) selectedActors.value.push(id)
-}
-
-/**
- * 开演：按现有 studio.sendMessage 协议发送一条编排指令消息。
- * 指令里带 @角色名，Rust 侧 route_message 会把所选角色都加入发言队列；
- * 成员系统提示词要求「需要其他成员参与时 @ 它」，回复中的 @ 会触发对方
- * 继续发言，从而形成轮流对谈（编排指令级实现，无需改动协议）。
- */
-async function startTheater() {
-  const topic = theaterTopic.value.trim()
-  if (!topic) { theaterError.value = '请输入话题'; return }
-  const actorIds = selectedActors.value
-  if (actorIds.length < 2 || actorIds.length > 3) { theaterError.value = '请选择 2-3 位角色'; return }
-  if (sending.value) { theaterError.value = '当前有对话进行中，请稍候再开演'; return }
-  const names = actorIds
-    .map(id => studio.members.find(m => m.id === id)?.name ?? '')
-    .filter(Boolean)
-  if (names.length < 2) { theaterError.value = '所选角色不存在，请重新选择'; return }
-  const instruction = `请${names.map(n => `@${n}`).join('、')}围绕「${topic}」即兴对话，按「${names.join('：…\n')}：…」交替发言，每人至少 2 轮，先${names[0]}开始。`
-  theaterRunning.value = true
-  theaterError.value = ''
-  await dispatch(instruction, instruction)
-  theaterRunning.value = false
-}
-
-function fmtTime(ts: number) {
-  return new Date(ts).toLocaleTimeString()
-}
+function fmtTime(ts: number) { return new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) }
+function statusText(status: string) { return ({ approval:'等待确认', running:'执行中', success:'已完成', error:'失败' } as Record<string,string>)[status] || '准备中' }
 </script>
 
 <template>
   <div class="page">
-    <PageHead :title="studio.currentStudio?.name ?? '工作室'" @back="goBack(router, '/studio')">
-      <template #right>
-        <button class="icon-btn" :class="{ on: theaterOpen }" aria-label="角色剧场" @click="toggleTheater"><CoomiIcon name="play" :size="18" /></button>
-        <button class="icon-btn" aria-label="工单看板" @click="showWorkBoard = true"><CoomiIcon name="todo" :size="18" /></button>
-        <button class="icon-btn" aria-label="编辑" @click="router.push(`/studio/${studioId}/edit`)"><CoomiIcon name="pencil" :size="18" /></button>
-      </template>
+    <PageHead :title="studio.currentStudio?.name ?? '工作室'" @back="goBack(router, 'dashboard')">
+      <template #right><button class="icon-btn" aria-label="工单看板" @click="showWorkBoard=true"><CoomiIcon name="todo" :size="18" /></button><button class="icon-btn" aria-label="编辑" @click="router.push(`/studio/${studioId}/edit`)"><CoomiIcon name="pencil" :size="18" /></button></template>
     </PageHead>
-
-    <StudioMemberStrip />
-
-    <div v-if="theaterOpen && !theaterRunning" class="theater-hint">角色剧场已开启：输入话题、选择 2-3 位角色后点「开演」，角色们即兴对谈；对谈中你随时可以插话。</div>
-
-    <!-- ── 顶部半屏工具瀑布流（可展开/收起） ── -->
-    <div class="tool-panel">
-      <button class="tool-head" @click="toolsOpen = !toolsOpen; toolsTouched = true">
-        <CoomiIcon name="wrench" :size="14" />
-        <span class="tool-title">工具调用</span>
-        <span v-if="runningTools.length" class="tool-run">{{ runningTools.length }} 个执行中</span>
-        <span v-else-if="studio.toolCards.length" class="tool-done">共 {{ studio.toolCards.length }} 次</span>
-        <CoomiIcon name="chevronDown" :size="14" class="tool-chev" :class="{ open: toolsOpen }" />
-      </button>
-      <div v-show="toolsOpen" ref="toolBox" class="tool-body">
-        <p v-if="!studio.toolCards.length" class="tool-empty">本轮尚无工具调用</p>
-        <article v-for="tool in studio.toolCards" :key="tool.callId" class="tool-card" :class="tool.status">
-          <div class="tool-head-row">
-            <Identicon :seed="tool.memberId + tool.memberName" :size="20" />
-            <span class="tool-who">{{ tool.memberName }}</span>
-            <span class="tool-name">{{ tool.toolName }}</span>
-            <em class="tool-state" :class="tool.status">
-              {{ tool.status === 'approval' ? '等待确认' : tool.status === 'running' ? '执行中' : tool.status === 'success' ? '完成' : '失败' }}
-            </em>
-          </div>
-          <p v-if="tool.riskSummary" class="tool-risk">{{ tool.riskSummary }}</p>
-          <pre v-if="tool.resultPreview" class="tool-out">{{ tool.resultPreview }}</pre>
-          <div v-if="tool.status === 'approval'" class="tool-actions">
-            <button @click="studio.approveTool(tool.callId, 'deny')">拒绝</button>
-            <button @click="studio.approveTool(tool.callId, 'allow')">允许一次</button>
-            <button class="primary" @click="studio.approveTool(tool.callId, 'always')">始终允许</button>
-          </div>
-        </article>
-      </div>
-    </div>
-
+    <StudioMemberStrip @mention="insertAt" />
     <main ref="scroller" class="stream">
-      <div v-for="(note, index) in streamNotices" :key="'err-' + index" class="notice err">{{ note }}</div>
-      <p v-if="studio.messages.length === 0 && !pendingUser && !memberActive" class="empty">开始对话吧，长按成员头像或输入 @成员 直接指派任务。</p>
-      <div v-for="msg in studio.messages" :key="msg.id" class="msg" :class="{ me: msg.senderId === 'user' }">
-        <div
-          v-if="msg.senderId !== 'user'"
-          class="avatar"
-          @touchstart.prevent="onAvatarDown(msg.senderName)"
-          @touchend="onAvatarUp"
-          @touchcancel="onAvatarUp"
-          @contextmenu.prevent
-        >
-          <Identicon :seed="msg.senderId + msg.senderName" :size="32" />
-        </div>
-        <div v-else class="avatar"><Identicon seed="user" :size="32" /></div>
-        <div class="bubble">
-          <div class="meta"><b>{{ msg.senderName }}</b><span>{{ fmtTime(msg.timestamp) }}</span></div>
-          <!-- eslint-disable-next-line vue/no-v-html —— renderMarkdown 已净化 -->
-          <div class="content md" v-html="html(msg)" @click="onContentClick" />
-        </div>
+      <div class="intro" v-if="studio.messages.length===0 && !pendingUser && !Object.keys(streams).length"><div class="intro-mark"><CoomiIcon name="sparkle" :size="25" /></div><b>一起完成一件事</b><span>输入任务，或长按成员头像直接 @ 他。</span></div>
+      <div v-if="studio.error" class="notice err"><CoomiIcon name="alert" :size="14" />{{ studio.error }}</div>
+      <div v-for="msg in studio.messages" :key="msg.id" class="msg" :class="{ me:msg.senderId==='user' }">
+        <button class="avatar" :class="{ clickable:msg.senderId!=='user' }" @pointerdown="msg.senderId!=='user' && startLongPress(msg.senderId)" @pointerup="endLongPress" @pointercancel="endLongPress" @pointerleave="endLongPress" @contextmenu.prevent="msg.senderId!=='user' && insertAt(msg.senderId)">{{ msg.senderName?.[0] || '我' }}</button>
+        <div class="bubble"><div class="meta"><b>{{ msg.senderName }}</b><span>{{ fmtTime(msg.timestamp) }}</span></div><div class="content">{{ msg.content }}</div></div>
       </div>
-      <div v-if="showPendingUser" class="msg me pending-msg">
-        <div class="avatar"><Identicon seed="user" :size="32" /></div>
-        <div class="bubble">
-          <div class="meta"><b>我</b><span>{{ fmtTime(pendingUser?.timestamp ?? 0) }}</span></div>
-          <div class="content">{{ pendingUser?.content ?? '' }}</div>
-        </div>
-      </div>
-      <!-- 成员执行中：三点动画 + 单行实时流气泡。每位成员一条稳定气泡。 -->
-      <div v-for="memberId in activeMemberIds" :key="'streaming-' + memberId" class="msg streaming-msg">
-        <div
-          class="avatar"
-          @touchstart.prevent="onAvatarDown(streamingName(memberId))"
-          @touchend="onAvatarUp"
-          @touchcancel="onAvatarUp"
-          @contextmenu.prevent
-        >
-          <Identicon :seed="memberId || 'ai'" :size="32" />
-        </div>
-        <div class="stream-col">
-          <div class="typing" aria-label="成员执行中"><i /><i /><i /></div>
-          <div v-if="streamContentByMember[memberId]" class="bubble ticker-bubble">
-            <div class="meta"><b>{{ streamingName(memberId) }}</b><span>正在回复</span></div>
-            <div class="ticker">{{ streamTicker(memberId) }}<i class="stream-cursor" aria-hidden="true" /></div>
+      <div v-if="pendingUser" class="msg me"><div class="avatar">我</div><div class="bubble pending"><div class="meta"><b>我</b><span>发送中</span></div><div class="content">{{ pendingUser.content }}</div></div></div>
+      <template v-for="m in studio.members" :key="`live-${m.id}`">
+        <div v-if="reasoning[m.id] || streams[m.id]" class="msg live-msg">
+          <button class="avatar live" @pointerdown="startLongPress(m.id)" @pointerup="endLongPress" @pointercancel="endLongPress" @pointerleave="endLongPress" @contextmenu.prevent="insertAt(m.id)">{{ m.name[0] }}</button>
+          <div class="live-body"><div class="meta"><b>{{ m.name }}</b><span class="live-label"><i />{{ streams[m.id] ? '正在回复' : '正在思考' }}</span></div>
+            <div v-if="reasoning[m.id]" class="reasoning"><button @click="expandedReasoning[m.id]=!expandedReasoning[m.id]"><CoomiIcon name="sparkle" :size="14" class="spark" :class="{ spinning:!expandedReasoning[m.id] }" /><span>{{ expandedReasoning[m.id] ? '思考过程' : (reasoning[m.id].split('\n').filter(Boolean).slice(-1)[0] || '正在思考…') }}</span><small v-if="expandedReasoning[m.id]">{{ reasoning[m.id].replace(/\s/g,'').length }} 字</small><CoomiIcon name="chevronRight" :size="13" :class="{ rotated:expandedReasoning[m.id] }" /></button><div v-if="expandedReasoning[m.id]" class="reasoning-detail">{{ reasoning[m.id] }}</div></div>
+            <div v-if="streams[m.id]" class="content live-content">{{ streams[m.id] }}<i class="cursor" /></div>
           </div>
         </div>
-      </div>
+      </template>
+      <article v-for="tool in studio.toolCards" :key="tool.callId" class="tool-card" :class="tool.status">
+        <button class="tool-head" @click="expandedTools[tool.callId]=!expandedTools[tool.callId]"><span class="tool-icon"><CoomiIcon :name="tool.status==='success'?'check':tool.status==='error'?'close':tool.status==='approval'?'shield':'wrench'" :size="16" /></span><span class="tool-title"><b>{{ tool.memberName }}</b><span>{{ tool.toolName }}</span></span><em>{{ statusText(tool.status) }}</em><CoomiIcon name="chevronRight" :size="13" :class="{ rotated:expandedTools[tool.callId] }" /></button>
+        <div class="tool-progress" v-if="tool.status==='running'" />
+        <div v-if="tool.status==='approval'" class="risk"><CoomiIcon name="alert" :size="14" />{{ tool.riskSummary || '需要授权后执行' }}</div>
+        <div v-if="expandedTools[tool.callId]" class="tool-detail"><pre v-if="tool.arguments">{{ JSON.stringify(tool.arguments,null,2) }}</pre><pre v-if="tool.resultPreview">{{ tool.resultPreview }}</pre><div v-if="tool.status==='approval'" class="tool-actions"><button @click="studio.approveTool(tool.callId,'deny')">拒绝</button><button @click="studio.approveTool(tool.callId,'allow')">允许一次</button><button class="primary" @click="studio.approveTool(tool.callId,'always')">始终允许</button></div></div>
+      </article>
     </main>
-
-    <div class="composer">
-      <div v-if="theaterOpen" class="theater-panel">
-        <div class="theater-head">
-          <b>角色剧场</b>
-          <span class="theater-sub">角色互相对话，你随时插嘴</span>
-          <button type="button" class="theater-close" aria-label="关闭剧场模式" @click="toggleTheater"><CoomiIcon name="close" :size="14" /></button>
-        </div>
-        <label class="theater-field"><span>话题</span><input v-model="theaterTopic" placeholder="例如：周末去哪里玩" /></label>
-        <div class="theater-field">
-          <span>角色（2-3 位）</span>
-          <div class="actor-chips">
-            <button v-for="m in studio.members" :key="m.id" type="button" class="actor-chip" :class="{ on: selectedActors.includes(m.id) }" @click="toggleActor(m.id)">
-              {{ m.name }}<em v-if="m.role === 'actor'">演员</em>
-            </button>
-          </div>
-        </div>
-        <div class="theater-foot">
-          <span v-if="theaterError" class="theater-err">{{ theaterError }}</span>
-          <span v-else-if="theaterRunning" class="theater-run">对谈进行中…</span>
-          <button v-if="theaterRunning" type="button" class="theater-btn stop" @click="studio.stopRun()"><CoomiIcon name="stop" :size="13" />停止</button>
-          <button v-else type="button" class="theater-btn go" :disabled="!theaterTopic.trim() || selectedActors.length < 2" @click="startTheater"><CoomiIcon name="play" :size="13" />开演</button>
-        </div>
-      </div>
-      <div v-if="importedFiles.length" class="attachments">
-        <span v-for="path in importedFiles" :key="path" class="attachment">
-          <CoomiIcon name="fileRead" :size="14" />
-          <span>{{ path.split('/').pop() || '文件' }}</span>
-          <button type="button" aria-label="移除文件" @click="removeImportedFile(path)"><CoomiIcon name="close" :size="12" /></button>
-        </span>
-      </div>
-      <div class="input-row">
-        <button class="at-btn" aria-label="提及成员" @click="showAtPicker = !showAtPicker"><CoomiIcon name="at" :size="18" /></button>
-        <button v-if="hasNative" class="file-btn" aria-label="导入文件" @click="importFiles"><CoomiIcon name="fileRead" :size="18" /></button>
-        <input v-model="input" :placeholder="theaterOpen ? '输入消息即可插话，@成员 直接指派…' : '输入消息，@成员 直接指派…'" @keyup.enter="send" />
-        <button v-if="sending && !theaterOpen" class="send-btn stop" aria-label="停止" @click="studio.stopRun()"><CoomiIcon name="stop" :size="15" /></button>
-        <button v-else class="send-btn" :disabled="!input.trim() && !importedFiles.length" @click="send"><CoomiIcon name="arrowRight" :size="16" /></button>
-      </div>
-    </div>
-
-    <div v-if="showAtPicker" class="at-picker">
-      <div class="at-grip" />
-      <button v-for="t in atTargets" :key="t.value" class="at-item" @click="insertAt(t.value)">{{ t.label }}</button>
-    </div>
-
-    <StudioWorkBoard v-if="showWorkBoard" @close="showWorkBoard = false" />
+    <div class="composer"><div v-if="importedFiles.length" class="attachments"><span v-for="path in importedFiles" :key="path" class="attachment"><CoomiIcon name="fileRead" :size="14" /><span>{{ path.split('/').pop() }}</span><button aria-label="移除文件" @click="removeImportedFile(path)"><CoomiIcon name="close" :size="12" /></button></span></div><div class="input-row"><button class="round-tool" aria-label="提及成员" @click="showAtPicker=!showAtPicker"><CoomiIcon name="at" :size="18" /></button><button v-if="hasNative" class="round-tool" aria-label="导入文件" @click="importFiles"><CoomiIcon name="fileRead" :size="18" /></button><input v-model="input" placeholder="告诉工作室要做什么…" @keyup.enter="send" /><button v-if="sending" class="send-btn stop" aria-label="停止" @click="studio.stopRun()"><CoomiIcon name="stop" :size="15" /></button><button v-else class="send-btn" :disabled="!input.trim()&&!importedFiles.length" aria-label="发送" @click="send"><CoomiIcon name="arrowRight" :size="16" /></button></div></div>
+    <div v-if="showAtPicker" class="at-picker"><div class="at-grip" /><p>选择成员，或长按头像快速 @</p><button v-for="t in atTargets" :key="t.value" class="at-item" @click="insertAt(t.value)"><span class="mini-avatar">{{ t.label[0] }}</span><span>{{ t.label }}</span><CoomiIcon name="chevronRight" :size="13" /></button></div>
+    <StudioWorkBoard v-if="showWorkBoard" @close="showWorkBoard=false" />
   </div>
 </template>
 
 <style scoped>
-.page { display: flex; flex-direction: column; height: 100%; background: var(--page); position: relative; }
-.icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; background: none; color: var(--text-2); }
-.icon-btn.on { color: var(--blue); background: var(--blue-soft); border-radius: 10px; }
-
-/* ── 角色剧场 ── */
-.theater-hint { flex-shrink: 0; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--blue-soft); color: var(--blue); font-size: 11.5px; line-height: 1.5; }
-.theater-panel { padding: 9px 10px; margin-bottom: 8px; border: 1px solid var(--blue-border); border-radius: 12px; background: var(--bg-elev); }
-.theater-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
-.theater-head b { font-size: 13px; color: var(--text); }
-.theater-sub { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-3); }
-.theater-close { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 50%; background: none; color: var(--text-3); }
-.theater-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
-.theater-field > span { font-size: 11px; color: var(--text-3); }
-.theater-field input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--fill); color: var(--text); font-size: 12.5px; }
-.actor-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.actor-chip { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--bg); color: var(--text-2); font-size: 12px; }
-.actor-chip em { font-style: normal; font-size: 9.5px; padding: 1px 5px; border-radius: var(--r-pill); background: var(--fill-strong); color: var(--text-3); }
-.actor-chip.on { border-color: var(--blue-border); background: var(--blue-soft); color: var(--blue); }
-.actor-chip.on em { background: color-mix(in srgb, var(--blue) 14%, transparent); color: var(--blue); }
-.theater-foot { display: flex; align-items: center; gap: 8px; min-height: 30px; }
-.theater-err { flex: 1; font-size: 11.5px; color: var(--danger); }
-.theater-run { flex: 1; font-size: 11.5px; color: var(--orange); }
-.theater-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 76px; height: 30px; border: 0; border-radius: 8px; font-size: 12.5px; font-weight: 600; }
-.theater-btn.go { background: var(--blue); color: #fff; }
-.theater-btn.go:disabled { opacity: .45; }
-.theater-btn.stop { background: var(--fill-strong); color: var(--text-2); }
-
-/* ── 顶部工具面板（半屏、可展开收起） ── */
-.tool-panel {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-.tool-head {
-  width: 100%; display: flex; align-items: center; gap: 7px;
-  padding: 8px 12px; border: 0; background: none;
-  color: var(--text-2); font-size: 12.5px; font-weight: 650; cursor: pointer;
-}
-.tool-title { color: var(--text-2); }
-.tool-run { color: var(--orange); font-size: 11.5px; }
-.tool-done { color: var(--text-3); font-size: 11.5px; }
-.tool-chev { margin-left: auto; color: var(--text-3); transition: transform .18s; }
-.tool-chev.open { transform: rotate(180deg); }
-.tool-body {
-  max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px;
-  border-top: 1px solid var(--border);
-}
-.tool-empty { text-align: center; color: var(--text-3); font-size: 12px; padding: 12px 0; }
-.tool-card { padding: 9px 11px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-elev); }
-.tool-card.approval { border-color: var(--blue-border); background: var(--blue-soft); }
-.tool-card.error { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
-.tool-head-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.tool-who { font-size: 11.5px; font-weight: 700; color: var(--text); flex-shrink: 0; }
-.tool-name { font-size: 11.5px; color: var(--text-2); font-family: var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-state { margin-left: auto; font-size: 10px; font-style: normal; color: var(--text-3); flex-shrink: 0; }
-.tool-state.running { color: var(--orange); }
-.tool-state.success { color: var(--ok); }
-.tool-state.error { color: var(--danger); }
-.tool-state.approval { color: var(--blue); }
-.tool-risk { margin-top: 6px; font-size: 11px; color: var(--text-3); }
-.tool-out { margin-top: 6px; max-height: 88px; overflow-y: auto; font-size: 10.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
-.tool-actions { display: flex; gap: 6px; margin-top: 8px; }
-.tool-actions button { flex: 1; min-height: 30px; border-radius: 8px; background: var(--bg); color: var(--text-2); font-size: 11px; }
-.tool-actions .primary { background: var(--blue); color: #fff; }
-
-/* ── 消息流 ── */
-.stream { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; }
-.empty { text-align: center; padding: 30px 16px; font-size: 13px; color: var(--text-3); }
-.notice { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; }
-.notice.err { background: color-mix(in srgb, var(--orange) 16%, var(--bg)); color: var(--orange); }
-.msg { display: flex; gap: 8px; margin-bottom: 12px; }
-.msg.me { flex-direction: row-reverse; }
-.avatar {
-  width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0; cursor: pointer;
-  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-}
-.avatar :deep(svg) { width: 100%; height: 100%; }
-.bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; background: var(--bg-elev); border: 1px solid var(--border); min-width: 0; }
-.msg.me .bubble { background: var(--blue-soft); }
-.meta { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
-.meta b { font-size: 12px; color: var(--text); }
-.meta span { font-size: 10px; color: var(--text-3); }
-.content { font-size: 13px; color: var(--text); overflow-wrap: break-word; min-width: 0; }
-.content :deep(p) { margin: 0 0 6px; line-height: 1.65; }
-.content :deep(p:last-child) { margin-bottom: 0; }
-.content :deep(h1), .content :deep(h2), .content :deep(h3) { font-size: 13.5px; margin: 8px 0 5px; }
-.content :deep(ul), .content :deep(ol) { margin: 4px 0 6px; padding-left: 18px; }
-.content :deep(li) { margin: 2px 0; line-height: 1.6; }
-.content :deep(code) { font-family: var(--font-mono); font-size: 11.5px; background: var(--fill); border-radius: 4px; padding: 1px 4px; }
-.content :deep(pre) { margin: 6px 0; padding: 8px 10px; background: var(--code-bg, var(--fill)); border-radius: 8px; overflow-x: auto; font-size: 11px; line-height: 1.55; }
-.content :deep(blockquote) { margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--border-strong, var(--border)); color: var(--text-2); }
-.content :deep(table) { border-collapse: collapse; font-size: 11.5px; margin: 6px 0; }
-.content :deep(th), .content :deep(td) { border: 1px solid var(--border); padding: 3px 7px; }
-.content :deep(.code-wrap) { position: relative; }
-.content :deep(.code-copy) { position: absolute; top: 5px; right: 5px; border: 0; border-radius: 6px; background: rgba(127, 137, 160, .2); color: inherit; font-size: 10px; padding: 2px 7px; cursor: pointer; }
-
-/* ── 流式：三点动画 + 单行实时流 ── */
-.stream-col { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 78%; min-width: 0; }
-.typing { display: inline-flex; align-items: center; gap: 4px; padding: 9px 13px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; }
-.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); animation: studio-typing 1.2s ease-in-out infinite; }
-.typing i:nth-child(2) { animation-delay: .18s; }
-.typing i:nth-child(3) { animation-delay: .36s; }
-@keyframes studio-typing { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
-.ticker-bubble { max-width: 100%; }
-.ticker {
-  display: block; font-size: 12.5px; color: var(--text-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.stream-cursor { display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -.15em; border-radius: 1px; background: var(--blue); animation: studio-cursor .85s steps(1) infinite; }
-@keyframes studio-cursor { 50% { opacity: 0; } }
-
-/* ── 输入区 ── */
-.composer { padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); border-top: 1px solid var(--border); }
-.attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 6px; }
-.attachment { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 28px; padding: 0 7px 0 9px; border: 1px solid var(--blue-border); border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-size: 12px; }
-.attachment > span { min-width: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachment button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; }
-.attachment button:active { background: color-mix(in srgb, var(--blue) 12%, transparent); }
-.input-row { display: flex; align-items: center; gap: 6px; }
-.at-btn, .file-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; background: none; color: var(--text-3); flex-shrink: 0; }
-.input-row input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 18px; background: var(--fill); color: var(--text); font-size: 13px; }
-.send-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--blue); color: #fff; flex-shrink: 0; }
-.send-btn:disabled { opacity: .4; }
-.send-btn.stop { background: var(--text); }
-.at-picker { position: absolute; left: 0; right: 0; bottom: 56px; z-index: 50; background: var(--bg); border: 1px solid var(--border); border-radius: 12px 12px 0 0; padding: 8px; max-height: 200px; overflow-y: auto; }
-.at-grip { width: 38px; height: 4px; margin: 4px auto 10px; border-radius: 2px; background: var(--border-strong); }
-.at-item { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; background: none; font-size: 13px; color: var(--text); border-radius: 6px; }
-.at-item:active { background: var(--fill); }
+.page{display:flex;flex-direction:column;height:100%;background:var(--page);position:relative}.icon-btn{display:grid;place-items:center;width:38px;height:38px;border:0;background:transparent;color:var(--text-2)}
+.stream{flex:1;min-height:0;overflow-y:auto;padding:14px 14px 20px}.intro{display:flex;align-items:center;flex-direction:column;gap:7px;padding:42px 16px 30px;color:var(--text-3);text-align:center}.intro-mark{display:grid;place-items:center;width:54px;height:54px;margin-bottom:4px;border-radius:18px;background:var(--blue-soft);color:var(--blue)}.intro b{font-size:15px;color:var(--text)}.intro span{font-size:12px}.notice{display:flex;align-items:center;gap:7px;margin-bottom:12px;padding:10px 12px;border-radius:11px;background:var(--danger-soft);color:var(--danger);font-size:12px}
+.msg{display:flex;gap:9px;margin-bottom:16px;align-items:flex-start}.msg.me{flex-direction:row-reverse}.avatar{display:grid;place-items:center;width:34px;height:34px;flex:none;padding:0;border:0;border-radius:12px;background:var(--blue-soft);color:var(--blue);font-size:12px;font-weight:700}.avatar.clickable{cursor:pointer;-webkit-touch-callout:none}.avatar.live{box-shadow:0 0 0 4px var(--blue-soft);animation:avatar-pulse 1.5s ease-in-out infinite}.bubble{max-width:78%;padding:10px 12px;border:1px solid var(--border);border-radius:6px 15px 15px 15px;background:var(--bg-elev);box-shadow:var(--shadow-1)}.msg.me .bubble{border-color:var(--blue-border);border-radius:15px 6px 15px 15px;background:var(--blue-soft)}.bubble.pending{opacity:.72}.meta{display:flex;align-items:baseline;gap:7px;margin-bottom:4px}.meta b{font-size:12px;color:var(--text)}.meta span{font-size:10px;color:var(--text-3)}.content{font-size:13px;line-height:1.65;color:var(--text);white-space:pre-wrap;word-break:break-word}.live-msg{margin-bottom:18px}.live-body{min-width:0;max-width:82%;flex:1}.live-label{display:inline-flex;align-items:center;gap:4px;color:var(--blue)}.live-label i{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink .9s infinite}.live-content{padding:2px 0}.cursor{display:inline-block;width:2px;height:1em;margin-left:3px;vertical-align:-.15em;background:var(--blue);animation:blink .8s steps(1) infinite}
+.reasoning{margin:0 0 7px}.reasoning button{display:flex;align-items:center;gap:7px;width:100%;min-height:29px;padding:2px 0;border:0;background:none;text-align:left;color:var(--text-3);font-size:12px}.reasoning button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reasoning button small{margin-left:auto;color:var(--text-3)}.spark{color:var(--blue);flex:none}.spark.spinning{animation:spin-soft 1.5s linear infinite}.rotated{transform:rotate(90deg)}.reasoning-detail{margin:3px 0 7px 6px;padding:8px 11px;border-left:2px solid var(--blue-border);border-radius:0 8px 8px 0;background:var(--fill);color:var(--text-2);font-size:12px;line-height:1.65;white-space:pre-wrap}
+.tool-card{position:relative;margin:3px 0 15px 43px;overflow:hidden;border:1px solid var(--border);border-radius:13px;background:var(--bg-elev);box-shadow:var(--shadow-1)}.tool-card.approval{border-color:var(--orange-border);background:var(--orange-soft)}.tool-card.success{border-color:color-mix(in srgb,var(--ok) 35%,var(--border))}.tool-head{display:flex;align-items:center;gap:8px;width:100%;min-height:45px;padding:7px 10px;border:0;background:none;text-align:left;color:var(--text)}.tool-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:var(--fill);color:var(--blue)}.success .tool-icon{color:var(--ok);background:var(--ok-soft)}.approval .tool-icon{color:var(--orange);background:rgba(255,255,255,.35)}.tool-title{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.tool-title b{font-size:11px}.tool-title span{font-size:12px;color:var(--text-2)}.tool-head em{font-size:10px;font-style:normal;color:var(--text-3)}.risk{display:flex;gap:6px;padding:0 11px 9px;color:var(--orange);font-size:11px}.tool-progress{height:2px;background:linear-gradient(90deg,transparent,var(--blue),transparent);animation:slide 1.15s infinite}.tool-detail{padding:0 10px 10px}.tool-detail pre{max-height:180px;margin:0 0 8px;overflow:auto;padding:9px;border-radius:8px;background:var(--code-bg);color:var(--code-text);font:11px/1.5 var(--font-mono);white-space:pre-wrap;word-break:break-word}.tool-actions{display:flex;gap:6px}.tool-actions button{flex:1;min-height:32px;border:0;border-radius:8px;background:var(--bg);color:var(--text-2);font-size:11px}.tool-actions .primary{background:var(--blue);color:#fff}
+.composer{padding:8px 11px calc(var(--safe-bottom) + 10px);border-top:1px solid var(--border);background:var(--bg)}.attachments{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:7px}.attachment{display:flex;align-items:center;gap:5px;max-width:100%;height:29px;padding:0 7px 0 9px;border:1px solid var(--blue-border);border-radius:9px;background:var(--blue-soft);color:var(--blue);font-size:11px}.attachment span{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attachment button{display:grid;place-items:center;width:20px;height:20px;border:0;background:none;color:inherit}.input-row{display:flex;align-items:center;gap:5px}.round-tool{display:grid;place-items:center;width:35px;height:35px;border:0;background:none;color:var(--text-3)}.input-row input{flex:1;min-width:0;height:38px;padding:0 13px;border:1px solid var(--border);border-radius:19px;background:var(--fill);color:var(--text);font-size:13px;outline:none}.input-row input:focus{border-color:var(--blue-border);box-shadow:0 0 0 3px var(--blue-soft)}.send-btn{display:grid;place-items:center;width:38px;height:38px;border:0;border-radius:50%;background:var(--blue);color:#fff}.send-btn:disabled{opacity:.4}.send-btn.stop{background:var(--text)}.at-picker{position:absolute;left:10px;right:10px;bottom:67px;z-index:60;padding:9px;border:1px solid var(--border);border-radius:16px;background:var(--bg);box-shadow:var(--shadow-2)}.at-grip{width:35px;height:4px;margin:1px auto 8px;border-radius:2px;background:var(--border-strong)}.at-picker p{margin:2px 8px 7px;color:var(--text-3);font-size:11px}.at-item{display:flex;align-items:center;gap:9px;width:100%;min-height:42px;padding:5px 8px;border:0;border-radius:9px;background:none;color:var(--text);text-align:left}.at-item:active{background:var(--fill)}.at-item>svg{margin-left:auto;color:var(--text-3)}.mini-avatar{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:var(--blue-soft);color:var(--blue);font-size:11px;font-weight:700}
+@keyframes blink{50%{opacity:.2}}@keyframes spin-soft{to{transform:rotate(360deg)}}@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}@keyframes avatar-pulse{50%{box-shadow:0 0 0 7px transparent}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>

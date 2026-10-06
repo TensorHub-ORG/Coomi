@@ -3,23 +3,8 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import { router } from './router'
 import { installSystemBackHandler } from './bridge/navigation'
-import { installJsErrorReport } from './bridge/jsErrorReport'
 import { readThemeMode, applyTheme, type ThemeMode } from './stores/config'
-import { normalizeDisplayScale } from './utils/displayScale'
 import './styles/global.css'
-
-const DISPLAY_SCALE_KEY = 'coomi.appearance.displayScale'
-
-function applyDisplayScale(value: unknown) {
-  const scale = normalizeDisplayScale(value)
-  const body = document.body
-  body.style.zoom = String(scale)
-  body.style.width = `${100 / scale}%`
-  body.style.height = `${100 / scale}%`
-  document.documentElement.style.setProperty('--coomi-display-viewport-height', `${100 / scale}dvh`)
-  document.documentElement.dataset.displayScale = String(Math.round(scale * 100))
-  try { localStorage.setItem(DISPLAY_SCALE_KEY, String(scale)) } catch { /* private storage */ }
-}
 
 const CUSTOM_PROPERTIES = [
   '--page', '--bg', '--bg-card', '--bg-elevated', '--fill', '--bg-input', '--code-bg',
@@ -120,17 +105,12 @@ function applyAppearance(config: AppearanceConfig) {
       ? `url('/__coomi_appearance/chat-background?v=${config.revision ?? 0}')`
       : 'none',
   )
-  const savedScale = (() => {
-    try { return localStorage.getItem(DISPLAY_SCALE_KEY) } catch { return null }
-  })()
-  applyDisplayScale(config.displayScale ?? savedScale ?? 1)
   window.dispatchEvent(new CustomEvent('coomi:appearance-changed', {
-    detail: { customEnabled: customAppearanceEnabled, displayScale: normalizeDisplayScale(config.displayScale ?? savedScale ?? 1) },
+    detail: { customEnabled: customAppearanceEnabled },
   }))
 }
 
 window.__coomiApplyAppearance = applyAppearance
-window.__coomiApplyDisplayScale = applyDisplayScale
 
 /**
  * 主题初始化：
@@ -163,8 +143,6 @@ function initTheme() {
   else mq.addListener(onChange)
 }
 
-try { applyDisplayScale(localStorage.getItem(DISPLAY_SCALE_KEY) ?? 1) } catch { applyDisplayScale(1) }
 initTheme()
 installSystemBackHandler(router)
-installJsErrorReport()
 createApp(App).use(createPinia()).use(router).mount('#app')

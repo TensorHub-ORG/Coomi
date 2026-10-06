@@ -1,21 +1,24 @@
 <script setup lang="ts">
-/** Sanitized markdown is patched in place every 60ms to preserve streaming DOM. */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+/**
+ * 消息气泡。
+ *
+ * 助手消息按段落切块渲染 —— 这是「瀑布流」的关键：
+ * 已经写完的段落是稳定 DOM，只有最后一块随 token 重绘，
+ * 新段落出现时自己做一次 8px 上浮。整条消息整体重排会闪，切块之后不会。
+ * marked 的调用同时被 60ms 节流，流式期间不会一秒解析几十次 markdown。
+ */
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { AssistantMessage, UserMessage } from '@/stores/viewModel'
 import { useSessionStore } from '@/stores/session'
 import { renderMarkdown } from '@/utils/markdown'
-import { speak, stopSpeaking } from '@/bridge/tts'
-import { apiSend } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
-import StableMarkdown from './StableMarkdown.vue'
-import AttachmentStrip from './AttachmentStrip.vue'
 
 const props = defineProps<{ msg: AssistantMessage | UserMessage }>()
 const session = useSessionStore()
 
 const RATE = 60
-const html = ref('')
+const blocks = ref<string[]>([])
 const copied = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 let last = 0
@@ -24,43 +27,23 @@ const isUser = computed(() => props.msg.kind === 'user')
 const isAssistant = computed(() => props.msg.kind === 'assistant')
 /** 生命体主动消息（气泡/开场问候）：带生命体标记的渲染样式。 */
 const isLife = computed(() => isAssistant.value && (props.msg as AssistantMessage).life === true)
-/** 生命体主动消息的投递触发类型（life_delivered 事件回填）。 */
-const lifeTrigger = computed(() => (props.msg as AssistantMessage).lifeTrigger)
-const isMorning = computed(() => lifeTrigger.value === 'morning')
-const isEgg = computed(() => lifeTrigger.value === 'egg')
-/** 早安播报 / 每日彩蛋：带小标题的卡片形态（其余 life 消息保持现状）。 */
-const isLifeCard = computed(() => isLife.value && (isMorning.value || isEgg.value))
 /** 只有最新一条用户消息可编辑重发。 */
 const isLastUser = computed(() => isUser.value && session.lastUserMessage === props.msg)
 /** 只有最新一条助手消息可回撤。 */
 const isLastAssistant = computed(() => isAssistant.value && session.lastAssistantMessage === props.msg)
 const streaming = computed(() => props.msg.kind === 'assistant' && props.msg.streaming)
 const src = computed(() => props.msg.content)
-const userAttachments = computed(() => props.msg.kind === 'user' ? props.msg.attachments ?? [] : [])
 
 /** 编辑：把该消息文本回填到输入框，发送时覆盖该轮重新执行。 */
 function editUserMessage() {
   const mid = (props.msg as { mid?: string }).mid ?? ''
-  session.startEditMessage(mid, props.msg.content, props.msg.kind === 'user' ? props.msg.attachments : [])
+  session.startEditMessage(mid, props.msg.content)
 }
 
 /** 回撤：先弹确认，清空该轮执行（含工具过程），回到这轮开始之前。 */
 function undoAssistant() {
   const mid = (props.msg as { mid?: string }).mid ?? ''
   session.requestUndo(mid)
-}
-
-/** 引用追问：把本条回复（截断到 400 字）转为引用块，追加进输入框供继续提问。
- *  Composer 监听 `coomi:quote-message` 事件完成追加。 */
-function quoteMessage() {
-  const raw = props.msg.content
-  const quoted = (raw.length > 400 ? raw.slice(0, 400) + '…' : raw)
-    .split('\n')
-    .map(line => `> ${line}`)
-    .join('\n')
-  window.dispatchEvent(new CustomEvent('coomi:quote-message', {
-    detail: { sessionId: session.sessionId, text: `${quoted}\n\n` },
-  }))
 }
 
 /**
@@ -99,32 +82,33 @@ const filePaths = computed(() => {
   return out
 })
 
-function rebuild() {
-  html.value = renderMarkdown(src.value)
+/** 按空行切块，但围栏代码块整体保留。 */
+function splitBlocks(text: string): string[] {
+  const out: string[] = []
+  let buf: string[] = []
+  let fence: string | null = null
+  const flush = () => {
+    const t = buf.join('\n').trim()
+    if (t) out.push(t)
+    buf = []
+  }
+  for (const line of text.split('\n')) {
+    const m = /^\s*(```+|~~~+)/.exec(line)
+    if (fence) {
+      buf.push(line)
+      if (m && line.trim().startsWith(fence)) { fence = null; flush() }
+      continue
+    }
+    if (m) { flush(); fence = m[1]; buf.push(line); continue }
+    if (line.trim() === '') { flush(); continue }
+    buf.push(line)
+  }
+  flush()
+  return out
 }
 
-/** 批次五 #6：代码块「复制」按钮的事件委托（v-html 内容不带 Vue 绑定）。 */
-async function onBlockClick(event: Event) {
-  const target = event.target as HTMLElement
-  const button = target.closest('button[data-copy-code]')
-  if (!button) return
-  const pre = button.closest('.code-wrap')?.querySelector('pre')
-  if (!pre) return
-  const text = pre.textContent ?? ''
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    try { document.execCommand('copy') } catch { /* 放弃 */ }
-    document.body.removeChild(ta)
-  }
-  button.textContent = '已复制'
-  setTimeout(() => { button.textContent = '复制' }, 1400)
+function rebuild() {
+  blocks.value = splitBlocks(src.value).map(renderMarkdown)
 }
 
 function schedule() {
@@ -140,14 +124,7 @@ function schedule() {
   timer = setTimeout(() => { timer = null; last = Date.now(); rebuild() }, wait)
 }
 
-// Recycled components must not display the previous message until a timer fires.
-watch(() => props.msg.id, () => {
-  if (timer) { clearTimeout(timer); timer = null }
-  copied.value = false
-  last = Date.now()
-  rebuild()
-}, { immediate: true })
-watch(src, schedule)
+watch(src, schedule, { immediate: true })
 watch(streaming, schedule)
 onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 
@@ -156,62 +133,15 @@ async function copyAll() {
   copied.value = true
   setTimeout(() => { copied.value = false }, 1400)
 }
-
-/** 简单去掉 markdown 符号，得到适合朗读的纯文本。 */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')              // 代码块整体略过
-    .replace(/`([^`]*)`/g, '$1')                  // 行内代码取文字
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')     // 图片取 alt
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')      // 链接取文案
-    .replace(/^#{1,6}\s+/gm, '')                  // 标题符号
-    .replace(/[*_~>|]/g, '')                      // 强调/引用/表格符号
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** F8 语音陪伴：朗读整条消息（流式中不提供，内容还没定稿）；
- *  朗读中再次点击 = 停止（原生侧 QUEUE_FLUSH 打断）。 */
-const speaking = ref(false)
-function readAloud() {
-  if (speaking.value) {
-    stopSpeaking()
-    speaking.value = false
-    return
-  }
-  if (speak(stripMarkdown(props.msg.content))) speaking.value = true
-}
-/** 原生朗读完成/出错时复位朗读状态（所有存活气泡统一复位）。 */
-function onTtsDone() { speaking.value = false }
-onMounted(() => window.addEventListener('coomi:tts-done', onTtsDone))
-onBeforeUnmount(() => window.removeEventListener('coomi:tts-done', onTtsDone))
-
-const saving = ref(false)
-const savedText = ref('')
-
-/** 收藏进记忆：把整条消息写入 memory.jsonl（供「最近记忆」展示）。 */
-async function saveToMemory() {
-  if (saving.value) return
-  saving.value = true
-  savedText.value = ''
-  try {
-    await apiSend<{ ok: boolean }>('/api/life/memory', 'POST', { text: props.msg.content })
-    session.pushNotice('success', '已收藏进记忆')
-    savedText.value = '已收藏'
-    setTimeout(() => { savedText.value = '' }, 1400)
-  } catch (reason) {
-    session.pushNotice('error', `收藏失败：${reason instanceof Error ? reason.message : String(reason)}`)
-  } finally {
-    saving.value = false
-  }
-}
 </script>
 
 <template>
-  <div v-if="isUser" class="row user">
+  <div v-if="isUser" class="row user" :class="{ 'morph-pending': (msg as UserMessage).morphing, 'morph-arrived': (msg as UserMessage).morphArrived }" :data-message-id="msg.id">
     <div class="wrap user-wrap">
-      <AttachmentStrip v-if="userAttachments.length" class="message-attachments" :items="userAttachments" />
-      <div v-if="msg.content" class="bubble">{{ msg.content }}</div>
+      <div class="bubble cascade">{{ msg.content }}</div>
+      <div v-if="(msg as UserMessage).attachments?.length" class="file-chips">
+        <span v-for="file in (msg as UserMessage).attachments" :key="file" class="file-chip"><CoomiIcon name="fileRead" :size="14" /><span>{{ file }}</span></span>
+      </div>
       <div class="acts user-acts">
         <button class="act" @click="copyAll">
           <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
@@ -225,60 +155,18 @@ async function saveToMemory() {
     </div>
   </div>
 
-  <div v-else class="assistant" :class="{ life: isLife }">
-    <!-- 早安播报 / 每日彩蛋：顶部小标题 + 正文的卡片形态，右上角朗读。 -->
-    <div v-if="isLifeCard" class="life-card" :class="lifeTrigger">
-      <div class="life-card-head">
-        <span class="life-card-title">
-          <CoomiIcon :name="isMorning ? 'sun' : 'sparkle'" :size="14" />
-          <span>{{ isMorning ? '早安播报' : '每日彩蛋' }}</span>
-        </span>
-        <button v-if="!streaming" class="act speak-act" @click="readAloud">
-          <CoomiIcon :name="speaking ? 'stop' : 'play'" :size="13" />
-          <span>{{ speaking ? '停止' : '朗读' }}</span>
-        </button>
-      </div>
-      <StableMarkdown class="md blk card-blk" :html="html" @click="onBlockClick" />
-      <FileInline v-if="filePaths.length" :paths="filePaths" />
-      <span v-if="streaming" class="stream-caret" />
-      <div v-if="isEgg" class="life-card-foot">
-        <button class="act save-act" :disabled="saving" @click="saveToMemory">
-          <CoomiIcon name="memory" :size="13" />
-          <span>{{ saving ? '收藏中…' : savedText || '收藏进记忆' }}</span>
-        </button>
-      </div>
-    </div>
-
-    <template v-else>
-      <div v-if="isLife" class="life-head">
-        <div class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
-        <button v-if="!streaming" class="act speak-act" @click="readAloud">
-          <CoomiIcon :name="speaking ? 'stop' : 'play'" :size="13" />
-          <span>{{ speaking ? '停止' : '朗读' }}</span>
-        </button>
-      </div>
-      <StableMarkdown class="md blk" :html="html" @click="onBlockClick" />
-      <FileInline v-if="filePaths.length" :paths="filePaths" />
-      <span v-if="streaming" class="stream-caret" />
-    </template>
-
-    <div class="acts">
+  <div v-else class="assistant response-card" :class="{ life: isLife, streaming }">
+    <div v-if="streaming" class="output-glow"><i /></div>
+    <div v-if="isLife" class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
+    <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" />
+    <FileInline v-if="filePaths.length" :paths="filePaths" />
+    <span v-if="streaming" class="stream-caret" />
+    <div v-if="!streaming" class="acts">
       <button class="act" @click="copyAll">
         <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />
         <span>{{ copied ? '已复制' : '复制' }}</span>
       </button>
-      <!-- F8 语音陪伴：普通助手消息也可朗读/停止。 -->
-      <button v-if="!streaming" class="act" @click="readAloud">
-        <CoomiIcon :name="speaking ? 'stop' : 'play'" :size="15" />
-        <span>{{ speaking ? '停止' : '朗读' }}</span>
-      </button>
-      <!-- 引用追问：把本条回复追加为输入框引用，基于它继续提问。 -->
-      <button v-if="!streaming" class="act" @click="quoteMessage">
-        <CoomiIcon name="chat" :size="15" />
-        <span>追问</span>
-      </button>
-      <!-- 回撤会清空整轮执行：只在输出完成后提供，流式中不出现。 -->
-      <button v-if="isLastAssistant && !streaming" class="act" @click="undoAssistant">
+      <button v-if="isLastAssistant" class="act" @click="undoAssistant">
         <CoomiIcon name="arrowLeft" :size="15" />
         <span>回撤</span>
       </button>
@@ -289,28 +177,46 @@ async function saveToMemory() {
 <style scoped>
 .row { display: flex; }
 .row.user { justify-content: flex-end; }
+.row.user.morph-pending { visibility: hidden; }
+.row.user.morph-arrived .bubble { animation: send-drop-settle .3s cubic-bezier(.2,.78,.22,1.24) both; }
+  .row.user.morph-arrived .bubble::after {
+  content: ''; position: absolute; pointer-events: none; inset: -3px;
+  border-radius: 21px 21px 9px 21px;
+  background: conic-gradient(from 0deg,
+    transparent 0deg, transparent 200deg,
+    rgba(255,255,255,.95) 232deg,
+    color-mix(in srgb, var(--blue) 70%, #fff) 252deg,
+    transparent 292deg, transparent 360deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+  animation: send-orbit .7s linear both;
+}
+.row.user.morph-arrived .acts .act { animation: send-action-drop .38s cubic-bezier(.18,.82,.24,1.34) both; }
+.row.user.morph-arrived .acts .act:nth-child(2) { animation-delay: .07s; }
+@keyframes send-drop-settle { 0% { transform:scale(.82,.62); opacity:.2 } 68% { transform:scale(1.035,.97) } 100% { transform:none; opacity:1 } }
+@keyframes send-orbit { 0% { opacity:0; transform:rotate(0deg) scale(1) } 12% { opacity:1 } 86% { opacity:1 } 100% { opacity:0; transform:rotate(360deg) scale(1) } }
+@keyframes send-action-drop { 0% { opacity:0; transform:translateX(18px) scale(.45); border-radius:50% } 70% { opacity:1; transform:translateX(-2px) scale(1.06) } 100% { opacity:1; transform:none } }
 .bubble {
+  position: relative;
   max-width: 100%;
   padding: 10px 15px;
-  border-radius: 20px 20px 7px 20px;
+  border-radius: 19px 19px 7px 19px;
   background: var(--blue); color: #fff;
   font-size: 15.5px; line-height: 1.55; word-break: break-word;
   white-space: pre-wrap; text-align: left;
-  box-shadow: 0 1px 2px rgba(23, 32, 54, 0.06), 0 3px 10px color-mix(in srgb, var(--blue) 16%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .row.user.morph-arrived .bubble, .row.user.morph-arrived .acts .act { animation: none; }
+  .row.user.morph-arrived .bubble::after { display: none; }
 }
 
 .assistant { max-width: 100%; color: var(--text); }
+.response-card { position:relative;overflow:hidden;min-width:0;padding:12px 13px;border:1px solid var(--border);border-radius:var(--r-card);background:var(--bg);box-shadow:var(--shadow-1); }
+.response-card.streaming { border-color:color-mix(in srgb,var(--blue) 32%,var(--border)); }
+.output-glow { position:absolute;top:0;left:0;right:0;height:2px;overflow:hidden; }
+.output-glow i { display:block;width:45%;height:100%;background:linear-gradient(90deg,transparent,var(--blue),transparent);animation:output-travel 1.25s ease-in-out infinite; }
+@keyframes output-travel { from{transform:translateX(-110%)} to{transform:translateX(330%)} }
 .blk + .blk { margin-top: 10px; }
-
-/* 批次五 #6：代码块复制按钮（v-html 内容需 :deep 穿透） */
-.blk :deep(.code-wrap) { position: relative; }
-.blk :deep(.code-copy) {
-  position: absolute; top: 6px; right: 6px; z-index: 1;
-  padding: 3px 10px; border: 0; border-radius: var(--r-sm, 6px);
-  background: var(--fill-strong, rgba(127,127,127,.18));
-  color: var(--text-2); font-size: 11px; font-weight: 600;
-}
-.blk :deep(.code-copy):active { background: var(--blue-soft); color: var(--blue); }
 
 /* 生命体主动消息：左侧渐变边条 + 柔和底色，弱化“这是一条系统消息”的距离感。 */
 .assistant.life { padding: 2px 0 4px; }
@@ -330,75 +236,17 @@ async function saveToMemory() {
 .assistant.life .blk + .blk { margin-top: 8px; }
 
 .user-wrap { display: flex; flex-direction: column; align-items: flex-end; max-width: 84%; }
-.message-attachments { justify-content: flex-end; margin-bottom: 7px; }
 .user-acts { justify-content: flex-end; }
-/* 操作区跟随消息表面，不叠加主题填充色；只有交互时显示轻反馈。 */
-.acts {
-  display: inline-flex; align-items: center; gap: 3px;
-  margin-top: 8px; padding: 0;
-  background: transparent;
-}
+.file-chips { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-top:6px; max-width:100%; }
+.file-chip { display:inline-flex; align-items:center; gap:5px; max-width:100%; padding:5px 8px; border:1px solid var(--blue-border); border-radius:9px; background:var(--blue-soft); color:var(--blue); font-size:11.5px; }
+.file-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acts { display: flex; gap: 4px; margin-top: 8px; }
 .act {
   display: inline-flex; align-items: center; gap: 5px;
-  height: 28px; padding: 0 9px;
+  height: 30px; padding: 0 10px;
   border: 0; border-radius: var(--r-pill); background: none;
   font-size: 12.5px; color: var(--text-3);
-  transition: background .15s, color .15s;
 }
-.act:active { background: color-mix(in srgb, var(--blue-soft) 64%, transparent); color: var(--blue); }
-.act:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 42%, transparent); outline-offset: 1px; }
-@media (hover:hover) { .act:hover { color: var(--text-2); background: color-mix(in srgb, var(--fill) 54%, transparent); } }
-
-/* ── 生命体消息头部：tag 居左 + 朗读居右 ── */
-.life-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-bottom: 6px;
-}
-.life-head .life-tag { margin: 0; }
-
-/* F8 语音陪伴：右上角小「朗读」按钮（复用 act 基础样式，仅缩小强化）。 */
-.speak-act {
-  height: 26px; padding: 0 8px;
-  background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg));
-  color: var(--accent); font-size: 11.5px; font-weight: 650;
-}
-.speak-act:active { background: var(--accent-soft); color: var(--accent); }
-
-/* ── 早安播报 / 每日彩蛋卡片：顶部小标题 + 渐变高亮，移动端友好 ── */
-.life-card {
-  overflow: hidden;
-  padding: 10px 13px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
-  border-radius: 14px;
-  background: linear-gradient(150deg, color-mix(in srgb, var(--accent-soft) 55%, var(--bg)), var(--bg) 58%);
-}
-.life-card-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin: -10px -13px 2px; padding: 7px 9px 7px 12px;
-  background: color-mix(in srgb, var(--accent-soft) 78%, var(--bg));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-}
-.life-card-title {
-  display: inline-flex; align-items: center; gap: 5px;
-  color: var(--accent); font-size: 12.5px; font-weight: 700;
-}
-/* 卡片内正文：去掉单条 life 消息的左边条/底色，交给卡片统一承载。 */
-.assistant.life .life-card .card-blk {
-  padding: 0; border-left: 0; border-radius: 0; background: transparent;
-}
-.life-card .card-blk + .card-blk { margin-top: 8px; }
-.life-card .stream-caret { margin-top: 6px; }
-.life-card-foot {
-  display: flex; justify-content: flex-end; margin-top: 5px;
-}
-/* 每日彩蛋右下角「收藏进记忆」：accent 描边胶囊，触屏友好。 */
-.save-act {
-  height: 28px; padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg));
-  color: var(--accent); font-size: 12px; font-weight: 650;
-}
-.save-act:active { background: var(--accent-soft); color: var(--accent); }
-.save-act:disabled { opacity: .55; }
+.act:active { background: var(--fill); color: var(--blue); }
 </style>
 

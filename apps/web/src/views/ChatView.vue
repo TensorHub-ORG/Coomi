@@ -11,6 +11,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { useConfigStore } from '@/stores/config'
@@ -21,8 +22,8 @@ import type { ToolCard } from '@/stores/viewModel'
 import { buildTimelineBlocks, type TimelineBlockItem } from '@/utils/chatTimeline'
 import type { ApprovalDecision } from '@/protocol/commands'
 import TopBar from '@/components/TopBar.vue'
-import UxProgramBar from '@/components/UxProgramBar.vue'
 import SideDrawer from '@/components/SideDrawer.vue'
+import ArtifactMindMap from '@/components/ArtifactMindMap.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import Composer from '@/components/Composer.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -31,163 +32,29 @@ import LoopProgressBar from '@/components/LoopProgressBar.vue'
 import ApprovalSheet from '@/components/ApprovalSheet.vue'
 import QuestionSheet from '@/components/QuestionSheet.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
+import SendMorphOverlay from '@/components/SendMorphOverlay.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
-const props = defineProps<{ floating?: boolean }>()
-
+const router = useRouter()
 const session = useSessionStore()
 const sessions = useSessionsStore()
 const config = useConfigStore()
 
 const scroller = ref<HTMLElement | null>(null)
 const virtualScroller = ref<InstanceType<typeof DynamicScroller> | null>(null)
-/** 空状态使用 main，时间线挂载后切换到 DynamicScroller 自己的滚动容器。 */
-const scrollHost = ref<HTMLElement | null>(null)
 const content = ref<HTMLElement | null>(null)
 const drawerOpen = ref(false)
+/** 产物思维导图抽屉：从右边缘左滑打开，与左侧会话抽屉互斥。 */
+const mindMapOpen = ref(false)
+let mindMapTouchStartX = 0
+let mindMapTouchStartY = 0
+let mindMapTouching = false
 /** 全局轮询「后台运行中」状态的定时器（会话列表转圈的数据源）。 */
 let runningPoll: ReturnType<typeof setInterval> | null = null
-const openSessionFromNative = (event: Event) => {
-  const id = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
-  if (id) void session.openSession(id)
-}
 
-// 空态（无消息）时禁止贴底：首屏 logo / 标题必须从顶部开始看，
-// 否则 follow() 会把滚动条滚到 scrollHeight，整个空态被裁掉一半。
-const { following, follow, jumpToBottom } = useAutoScroll(scrollHost, () => session.timeline.length > 0)
-
-function syncScrollHost() {
-  const virtualEl = virtualScroller.value?.$el as HTMLElement | undefined
-  scrollHost.value = session.timeline.length > 0 && virtualEl instanceof HTMLElement
-    ? virtualEl
-    : scroller.value
-}
+const { following, follow, jumpToBottom } = useAutoScroll(scroller)
 
 const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline))
-
-// ── 入场动画去重 ──
-// rise-in 绑定在虚拟列表 item 的内层节点上：DynamicScroller 重排/回收时 unmount
-// 再 remount，动画（fill: both）会重新播放 —— 已经静止的内容再次"淡入上浮"，
-// 流式输出时表现为整个界面闪烁。因此只有「首次出现的新块」播动画，
-// 窗口期（0.32s 动画 + 最大 6×40ms 步进）过后标记失效，重建不再重放。
-const freshBlockKeys = ref(new Set<string>())
-const seenBlockKeys = new Set<string>()
-let freshSweeper: ReturnType<typeof setTimeout> | null = null
-
-watch(() => session.sessionId, () => {
-  // 切换会话：现有时间线整体视为「已见」，打开历史会话不播全屏入场动画。
-  seenBlockKeys.clear()
-  for (const b of blocks.value) seenBlockKeys.add(b.key)
-  freshBlockKeys.value = new Set()
-})
-
-watch(blocks, list => {
-  let changed = false
-  const next = new Set(freshBlockKeys.value)
-  const listed = new Set(list.map(b => b.key))
-  for (const b of list) {
-    if (!seenBlockKeys.has(b.key)) {
-      seenBlockKeys.add(b.key)
-      // assistant 行会在首批流式增量到达时被虚拟列表重测并可能重建。
-      // 若仍处于新块动画窗口，重建会再次播放 rise-in，形成可见闪烁。
-      // 回复内容本身已通过增量渲染自然出现，因此只给用户消息和工具卡入场动效。
-      if (b.t !== 'one' || !['assistant', 'reasoning'].includes(b.item.kind)) {
-        next.add(b.key)
-        changed = true
-      }
-    }
-  }
-  for (const k of next) if (!listed.has(k)) { next.delete(k); changed = true }
-  if (changed) freshBlockKeys.value = next
-  if (next.size && !freshSweeper) {
-    freshSweeper = setTimeout(() => {
-      freshSweeper = null
-      if (freshBlockKeys.value.size) freshBlockKeys.value = new Set()
-    }, 600)
-  }
-}, { flush: 'post' })
-
-onBeforeUnmount(() => { if (freshSweeper) { clearTimeout(freshSweeper); freshSweeper = null } })
-
-// ── 会话内搜索：关键词匹配时间线消息，跳转并高亮 ──
-const searchOpen = ref(false)
-const searchQuery = ref('')
-const searchResults = ref<number[]>([])
-const searchIndex = ref(0)
-const highlightIndex = ref<number | null>(null)
-const searchInput = ref<HTMLInputElement | null>(null)
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-let hlTimer: ReturnType<typeof setTimeout> | null = null
-
-/** 提取单个时间线块的搜索文本（消息内容或工具卡摘要）。 */
-function blockText(block: TimelineBlockItem): string {
-  if (block.t === 'one') {
-    const item = block.item as { content?: string }
-    return item.content ?? ''
-  }
-  return block.cards.map(card => (card as { summary?: string }).summary ?? '').join('\n')
-}
-
-function runSearch() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
-    const q = searchQuery.value.trim().toLowerCase()
-    if (!q) { searchResults.value = []; searchIndex.value = 0; return }
-    const hits: number[] = []
-    blocks.value.forEach((b, i) => { if (blockText(b).toLowerCase().includes(q)) hits.push(i) })
-    searchResults.value = hits
-    searchIndex.value = 0
-    if (hits.length) jumpToResult(0)
-  }, 200)
-}
-
-function jumpToResult(offset: number) {
-  const n = searchResults.value.length
-  if (!n) return
-  searchIndex.value = (searchIndex.value + offset + n) % n
-  const idx = searchResults.value[searchIndex.value]
-  highlightIndex.value = idx
-  // vue-virtual-scroller 类型未公开 scrollToItem 实例方法，运行时存在，做类型收窄。
-  const vs = virtualScroller.value as unknown as { scrollToItem: (index: number) => void } | null
-  vs?.scrollToItem(idx)
-  if (hlTimer) clearTimeout(hlTimer)
-  hlTimer = setTimeout(() => { if (highlightIndex.value === idx) highlightIndex.value = null }, 1800)
-}
-
-function openSearch() {
-  searchOpen.value = true
-  searchQuery.value = ''
-  searchResults.value = []
-  searchIndex.value = 0
-  void nextTick(() => searchInput.value?.focus())
-}
-
-function onSearchShortcut(event: KeyboardEvent) {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && blocks.value.length) {
-    event.preventDefault()
-    openSearch()
-  }
-}
-
-function closeSearch() {
-  searchOpen.value = false
-  searchQuery.value = ''
-  searchResults.value = []
-  searchIndex.value = 0
-  highlightIndex.value = null
-}
-
-/** 生命体未读问候的触发类型 → 药丸标题（morning/egg 直接展示类型文案）。 */
-const LIFE_TRIGGER_LABELS: Record<string, string> = {
-  morning: '早安播报',
-  egg: '每日彩蛋',
-  milestone_stage: '里程碑时刻',
-  everyday: '日常问候',
-}
-const lifePillTitle = computed(() => {
-  const label = LIFE_TRIGGER_LABELS[session.lifeUnread[0]?.trigger ?? '']
-  return label || `${session.lifeUnreadName || '数字生命体'} 想对你说`
-})
 
 function syncDigitalLifeMode() {
   config.syncDigitalLifeEnabled()
@@ -198,8 +65,6 @@ let ro: ResizeObserver | null = null
 
 onMounted(() => {
   session.connect()
-  window.addEventListener('keydown', onSearchShortcut)
-  window.addEventListener('coomi:open-session', openSessionFromNative)
   window.addEventListener('coomi:flush-persistence', session.flushPersistence)
   // 记录引擎当前工作目录，会话列表据此把不同项目的会话隔离开。
   void apiGet<{ cwd?: string }>('/api/runtime/health')
@@ -217,32 +82,29 @@ onMounted(() => {
   void sessions.refreshRunning()
   runningPoll = setInterval(() => { sessions.refreshRunning(); void session.refreshLifeUnread(); session.autoDeliverLifeIfReady() }, 2000)
   void session.refreshLifeUnread()
-  // 高度只要变就重新贴底（内部有 rAF 合并，不怕高频触发）。
-  // 注意：不再观察 .vue-recycle-scroller__item-wrapper —— 流式期间 wrapper
-  // 高度每 60ms 变一次，观察它会让 follow() 与虚拟滚动的位置修正互相拉扯；
-  // item 级高度变化已由 DynamicScrollerItem 的 emit-resize 覆盖。
+  // 高度只要变就重新贴底（内部有 rAF 合并，不怕高频触发）
   if (typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => follow())
     if (content.value) ro.observe(content.value)
     if (scroller.value) ro.observe(scroller.value)
-    syncScrollHost()
   }
-  nextTick(() => { syncScrollHost(); follow() })
+  nextTick(follow)
   // 演示模式自动播一轮，省得进来还要先打字才能看见瀑布流。
   if (shouldAutoplay() && session.timeline.length === 0) {
     setTimeout(() => { if (session.timeline.length === 0) session.sendMessage(DEMO_PROMPT) }, 700)
   }
+  window.addEventListener('touchstart', onMindMapTouchStart, { passive: true })
+  window.addEventListener('touchmove', onMindMapTouchMove, { passive: true })
+  window.addEventListener('touchend', onMindMapTouchEnd)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('coomi:open-session', openSessionFromNative)
   window.removeEventListener('coomi:flush-persistence', session.flushPersistence)
   window.removeEventListener('focus', syncDigitalLifeMode)
-  closeDrawer()
-  window.removeEventListener('keydown', onSearchShortcut)
-  if (searchTimer) clearTimeout(searchTimer)
-  if (hlTimer) clearTimeout(hlTimer)
   session.flushPersistence()
+  window.removeEventListener('touchstart', onMindMapTouchStart)
+  window.removeEventListener('touchmove', onMindMapTouchMove)
+  window.removeEventListener('touchend', onMindMapTouchEnd)
   if (runningPoll) { clearInterval(runningPoll); runningPoll = null }
   ro?.disconnect(); ro = null
 })
@@ -269,12 +131,12 @@ if (isUnattended()) {
   })
 }
 
-// ResizeObserver 不可用时的兜底：至少条目增减能跟上；同时更新空态/虚拟列表滚动宿主。
-watch(() => session.timeline.length, () => nextTick(() => { syncScrollHost(); follow() }), { flush: 'post' })
-watch(scrollHost, host => {
-  if (!ro || !host || host === scroller.value) return
-  ro.observe(host)
-}, { flush: 'post' })
+// ResizeObserver 不可用时的兜底：至少条目增减能跟上。
+watch(() => session.timeline.length, () => nextTick(follow))
+// 流式输出时气泡高度持续变化，但 DynamicScroller 内部容器不是 ResizeObserver 观察对象：
+// usage_update（输出 token 增长时持续推送）是可靠的「内容在变」信号，据此贴底。
+watch(() => session.usage?.output, () => follow(), { deep: false })
+watch(() => session.usage?.turnOutputTokens, () => follow(), { deep: false })
 watch([() => config.digitalLifeEnabled, () => config.lifeGlobalMode, () => session.isBusy], ([, , busy]) => {
   if (!busy) session.syncLifeMode()
 })
@@ -283,7 +145,27 @@ function onDecide(callId: string, decision: ApprovalDecision) { session.approve(
 function onAnswer(callId: string, answers: Record<string, string>) { session.answerQuestion(callId, answers) }
 function openDrawer() { drawerOpen.value = true; registerOverlay('side-drawer', closeDrawer) }
 function closeDrawer() { drawerOpen.value = false; unregisterOverlay('side-drawer') }
+function openMindMap() { mindMapOpen.value = true; registerOverlay('artifact-mindmap', closeMindMap) }
+function closeMindMap() { mindMapOpen.value = false; unregisterOverlay('artifact-mindmap') }
 
+/** 从右边缘左滑打开产物思维导图 */
+function onMindMapTouchStart(e: TouchEvent) {
+  if (e.touches.length !== 1 || mindMapOpen.value) return
+  mindMapTouchStartX = e.touches[0].clientX
+  mindMapTouchStartY = e.touches[0].clientY
+  mindMapTouching = true
+}
+function onMindMapTouchMove(e: TouchEvent) {
+  if (!mindMapTouching) return
+  const dx = e.touches[0].clientX - mindMapTouchStartX
+  const dy = e.touches[0].clientY - mindMapTouchStartY
+  if (Math.abs(dx) < Math.abs(dy)) return
+  if (dx < -60 && mindMapTouchStartX > window.innerWidth - 40) {
+    openMindMap()
+    mindMapTouching = false
+  }
+}
+function onMindMapTouchEnd() { mindMapTouching = false }
 
 watch(() => session.pendingApproval?.callId, (id, previous) => {
   if (previous) unregisterOverlay(`approval:${previous}`)
@@ -296,29 +178,9 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 </script>
 
 <template>
-  <div class="chat">
+  <div class="chat" :class="{ 'minimal-ui': config.minimalUi }">
     <div class="shell" :class="{ pushed: drawerOpen }">
-      <TopBar :floating="props.floating" @menu="openDrawer" />
-      <UxProgramBar />
-
-      <div v-if="searchOpen" class="search-bar">
-        <CoomiIcon name="search" :size="15" />
-        <input
-          ref="searchInput"
-          v-model="searchQuery"
-          placeholder="搜索当前会话…"
-          autocomplete="off" autocapitalize="off" spellcheck="false"
-          @input="runSearch"
-          @keydown.enter.prevent="jumpToResult(1)"
-          @keydown.up.prevent="jumpToResult(-1)"
-          @keydown.down.prevent="jumpToResult(1)"
-          @keydown.esc="closeSearch"
-        />
-        <span class="search-count">{{ searchResults.length ? `${searchIndex + 1}/${searchResults.length}` : (searchQuery.trim() ? '无匹配' : '') }}</span>
-        <button class="search-nav" aria-label="上一个" @click="jumpToResult(-1)"><CoomiIcon name="arrowUp" :size="14" /></button>
-        <button class="search-nav" aria-label="下一个" @click="jumpToResult(1)"><CoomiIcon name="arrowDown" :size="14" /></button>
-        <button class="search-close" aria-label="关闭搜索" @click="closeSearch"><CoomiIcon name="close" :size="14" /></button>
-      </div>
+      <TopBar :menu-open="drawerOpen" @menu="openDrawer" />
 
       <main ref="scroller" class="stream">
         <div v-if="session.timeline.length === 0" ref="content" class="inner empty-inner">
@@ -332,24 +194,17 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
           :min-item-size="48"
           :buffer="640"
           class="virtual-stream"
+          page-mode
         >
           <template #default="{ item, index, active }">
             <DynamicScrollerItem
               :item="item"
               :active="active"
-              :size-dependencies="[item, item.t === 'one' ? item.item : item.cards]"
+              :size-dependencies="item.t === 'one' ? [item.item] : [item.cards]"
               :data-index="index"
               class="virtual-item"
-              :class="{ 'search-hit': highlightIndex === index, 'no-anim': !freshBlockKeys.has(item.key) }"
-              emit-resize
-              @resize="follow"
             >
-              <!-- 入场动画放内层：外层节点由虚拟滚动管理 transform，动画会覆盖定位。
-                   no-anim 加在外层：窗口期过后整个块（含内层 cascade）禁用动画，
-                   虚拟列表回收重建时不再重放（动画重放 = 流式期间整页闪烁）。 -->
-              <div class="rise-in" :style="{ '--i': Math.min(index, 6) }">
-                <TimelineBlock :block="item" />
-              </div>
+              <TimelineBlock :block="item" />
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
@@ -384,7 +239,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
           @click="session.deliverLife()"
         >
           <CoomiIcon name="lifeRings" :size="15" />
-          <span class="life-pill-label">{{ lifePillTitle }}</span>
+          <span class="life-pill-label">{{ session.lifeUnreadName || '数字生命体' }} 想对你说</span>
           <span class="life-pill-preview">{{ session.lifeUnread[0].text }}</span>
         </button>
       </Transition>
@@ -393,6 +248,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
     </div>
 
     <SideDrawer :open="drawerOpen" @close="closeDrawer" />
+    <ArtifactMindMap :open="mindMapOpen" @close="closeMindMap" />
+    <SendMorphOverlay />
 
     <ApprovalSheet
       v-if="session.pendingApproval"
@@ -409,7 +266,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 
 <style scoped>
 .chat {
-  position: relative;
   height: 100%;
   min-height: 0;
   background-color: transparent;
@@ -419,15 +275,10 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   background-position: center;
   background-size: cover;
 }
-/* 环境光：顶部一层极淡的品牌色径向光晕，给白色界面一点"呼吸感"；
-   覆盖在自定义聊天背景之上、主内容之下，所有主题都安全。 */
-.chat::before {
-  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  background: radial-gradient(130% 52% at 50% -6%, color-mix(in srgb, var(--blue) 7%, transparent), transparent 62%);
-}
+
 
 .shell {
-  position: relative; z-index: 1;
+  position: relative;
   display: flex; flex-direction: column; height: 100%; min-height: 0;
   background: transparent;
   transform-origin: left center;
@@ -454,53 +305,18 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   width: 100%; min-width: 0; min-height: 100%; padding: 10px 12px 18px; overflow-x: hidden;
 }
 .empty-inner { min-height: 100%; }
-.virtual-stream {
-  width: 100%; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box;
-  padding: 10px 12px 18px; overflow-y: auto; overflow-x: hidden;
-  -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
-}
+.virtual-stream { width: 100%; min-width: 0; padding: 10px 12px 18px; overflow: visible; }
 .virtual-item { width: 100%; min-width: 0; padding-bottom: 12px; }
-/* 虚拟列表回收重建时不重放入场动画（动画重放 = 流式期间整页闪烁）：
-   no-anim 落在 item 外层，同时压掉内层的 rise-in 与各子组件的 cascade。 */
-.virtual-item.no-anim .rise-in { animation: none; }
-.virtual-item.no-anim :deep(.cascade) { animation: none; }
 
 .to-bottom {
   position: absolute; left: 50%; bottom: 116px; z-index: 8;
   display: grid; place-items: center;
-  width: 40px; height: 40px; margin-left: -20px;
+  width: 38px; height: 38px; margin-left: -19px;
   border: 1px solid var(--border); border-radius: 50%;
   background: var(--bg); color: var(--text-2);
   box-shadow: var(--shadow-2);
-  transition: transform .12s ease, background .15s;
 }
-.to-bottom:active { background: var(--fill); transform: scale(.94); }
-.search-bar {
-  position: absolute; z-index: 9; top: 54px; left: 10px; right: 10px;
-  display: flex; align-items: center; gap: 7px;
-  padding: 8px 10px;
-  border: 1px solid var(--border); border-radius: 15px;
-  background: var(--bg); box-shadow: var(--shadow-2);
-  animation: coomi-cascade .16s ease both;
-}
-.search-bar input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text); font-size: 14px; }
-.search-bar input::placeholder { color: var(--text-3); }
-.search-count { flex-shrink: 0; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.search-nav, .search-close {
-  display: grid; place-items: center; flex-shrink: 0;
-  width: 26px; height: 26px; border: 0; border-radius: 50%;
-  background: var(--fill); color: var(--text-2);
-}
-.search-nav:active, .search-close:active { background: var(--fill-press); }
-.virtual-item.search-hit { animation: search-flash 1.8s ease; }
-@keyframes search-flash {
-  0%, 55% {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 60%, transparent);
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--blue) 7%, transparent);
-  }
-  100% { box-shadow: none; }
-}
+.to-bottom:active { background: var(--fill); }
 .pop-enter-active, .pop-leave-active { transition: opacity .18s ease, transform .18s ease; }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(8px) scale(.9); }
 

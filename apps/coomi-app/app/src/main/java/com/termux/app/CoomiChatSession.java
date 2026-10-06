@@ -48,6 +48,7 @@ import app.coomi.CoomiSetupActivity;
 import app.coomi.CoomiTheme;
 import app.coomi.CoomiAccessibilityService;
 import app.coomi.CoomiFloatService;
+import app.coomi.CoomiPowService;
 import app.coomi.ShizukuAccessController;
 import com.termux.R;
 import com.termux.shared.logger.Logger;
@@ -338,6 +339,12 @@ public final class CoomiChatSession extends ContextWrapper {
         showLoading(getString(R.string.coomi_starting));
         if (CoomiDemo.isEnabled()) { startDemo(); return; }
         if (mBoundRequested) return;
+        // Comax DeepSeek 验证码登录需要官方 PoW 求解器常驻（与引擎同目录文件队列，读 COOMI_HOME）。
+        try {
+            CoomiPowService.start(this);
+        } catch (Throwable ignored) {
+            // PoW 服务不可用不影响其它功能，验证码登录会退回明确报错。
+        }
         startService(new Intent(this, CoomiEngineMonitor.class));
         Intent intent = new Intent(this, CoomiService.class);
         startService(intent);
@@ -843,6 +850,10 @@ public final class CoomiChatSession extends ContextWrapper {
         @JavascriptInterface
         public int getAppVersionCode() {
             return app.coomi.UpdateChecker.currentVersionCode(CoomiChatSession.this);
+        }
+        @JavascriptInterface
+        public String getAppVersionName() {
+            return BuildConfig.VERSION_NAME;
         }
 
         /** 从 web 检查更新页发起下载并安装（复用更新源的签名校验流程）。 */

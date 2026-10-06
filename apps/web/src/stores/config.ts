@@ -31,14 +31,6 @@ export interface ModelParameters {
 export interface CapabilityOverride { text?: boolean; vision?: boolean; image_generation?: boolean; reasoning?: boolean }
 export interface SubAgentConfig { id: string; providerId: string; model: string; description?: string }
 export interface SubAgentSettings { agents: SubAgentConfig[]; fallbackId?: string; maxAgents: number }
-export interface CollaborationSettings {
-  coderSelector: string
-  reviewerSelector: string
-  coderPrompt: string
-  reviewerPrompt: string
-  maxCycles: number
-  reviewTests: boolean
-}
 
 export type ProviderProtocol = 'openai_compatible' | 'openai_responses' | 'anthropic_messages' | 'gemini_native'
 export type ProviderStatus = 'unconfigured' | 'configured' | 'current'
@@ -68,28 +60,26 @@ export interface ProviderPreset {
 
 export const BUILTIN_PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', protocol: 'openai_compatible' },
-  { id: 'zhipu', name: '智谱', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', protocol: 'openai_compatible' },
+  { id: 'zhipu', name: '智谱', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', protocol: 'openai_compatible' },
   { id: 'minimax', name: 'MiniMax', baseUrl: 'https://api.minimaxi.com/v1', protocol: 'openai_compatible' },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', protocol: 'openai_responses' },
   { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', protocol: 'anthropic_messages' },
   { id: 'google', name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', protocol: 'gemini_native' },
-  { id: 'opencode', name: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/v1', protocol: 'openai_compatible' },
-  { id: 'opencode-go', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', protocol: 'openai_compatible' },
+  { id: 'opencode', name: 'OpenCode', baseUrl: 'https://opencode.ai/zen/go/v1', protocol: 'openai_compatible' },
 ]
 
 export interface ProviderInput {
-  id: string; name: string; apiKey: string; models: string[]
+  id: string; name: string; apiKey: string; apiKeys?: string[]; models: string[]
   baseUrl?: string; type?: string; toolProtocol?: string; contextWindow?: number
   modelContextWindows?: Record<string, number>
   fastModel?: string | null; activate?: boolean; supportsWebSearch?: boolean; supportsVision?: boolean
   modelDescriptions?: Record<string, string>; modelParameters?: Record<string, ModelParameters>
   capabilityOverrides?: Record<string, CapabilityOverride>
+  headers?: Record<string, string>
 }
 
 export function providerStatus(provider: ProviderConfig, activeId: string): ProviderStatus {
-  // A manually entered model is valid even when the provider catalog could
-  // not be fetched (for example Volcengine Ark's intermittent `/models`).
-  const configured = Boolean(provider.hasKey && (provider.models.length > 0 || provider.model?.trim()))
+  const configured = Boolean(provider.hasKey && provider.models.length > 0)
   if (configured && provider.id === activeId) return 'current'
   return configured ? 'configured' : 'unconfigured'
 }
@@ -133,6 +123,7 @@ export const PERMISSION_MODES: { mode: PermissionMode; label: string; desc: stri
   { mode: 'ask', label: '询问', desc: '每个写入/破坏性操作前都确认' },
   { mode: 'auto', label: '自动', desc: '读写自动放行，仅破坏性需确认' },
   { mode: 'full', label: '放行', desc: '全部自动执行（仅信任场景）' },
+  { mode: 'minimal', label: '极简', desc: '只提供 shell 工具，适合纯命令行任务' },
 ]
 
 export type ThemeMode = 'system' | 'light' | 'dark' | 'book' | 'orange' | 'ink' | 'abyss' | 'ember' | 'celadon' | 'linen'
@@ -184,39 +175,26 @@ const MOCK_PROVIDERS: ProviderConfig[] = [
   { id: 'anthropic', name: 'Anthropic', apiKeyMasked: '****9f3c', hasKey: true, models: ['claude-sonnet-4', 'claude-opus-4'] },
 ]
 
-/**
- * 模型名展示净化：剔除私有区/零宽/变体选择等「豆腐块」字符。
- * 仅影响显示；API 调用仍使用未净化的原始模型 ID。
- * 典型场景：从网页文档复制模型名时带进了图标字体字符（如 deepseek-□4-flash）。
- */
-export function displayModelName(name: string): string {
-  if (!name) return name
-  const cleaned = name.replace(/[-​-‏‪-‮⁠-⁤︀-️￰-￿]/g, '')
-  return cleaned || name
-}
-
 export const useConfigStore = defineStore('config', () => {
   const savedPermission = localStorage.getItem('coomi.permissionMode') as PermissionMode | null
-  const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
+  const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
   const planMode = ref(false)
-  /** 发送液滴/按钮形变动效开关（Comax 引入；默认关，跟随系统 reduced-motion 时自动失效）。 */
-  const sendMorphAnimation = ref(localStorage.getItem('coomi.sendMorphAnimation') === '1')
-  function setSendMorphAnimation(value: boolean) {
-    sendMorphAnimation.value = value
-    try { localStorage.setItem('coomi.sendMorphAnimation', value ? '1' : '0') } catch { /* ignore */ }
-  }
+  const savedProduction = (localStorage.getItem('coomi.productionMode') || 'normal') as 'normal' | 'overload' | 'berserk'
+  const productionMode = ref<'normal' | 'overload' | 'berserk'>(['normal','overload','berserk'].includes(savedProduction) ? savedProduction : 'normal')
+  const savedDefaultMode = localStorage.getItem('coomi.defaultPermissionMode') as PermissionMode | null
+  const defaultPermissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedDefaultMode ?? '') ? savedDefaultMode! : permissionMode.value)
+  const sendMorphAnimation = ref(localStorage.getItem('coomi.sendMorphAnimation') !== '0')
+  /** 极简界面模式：工具调用折叠成一小块方框（点开才看详情），文字缩小。 */
+  const minimalUi = ref(localStorage.getItem('coomi.minimalUi') === '1')
   const themeMode = ref<ThemeMode>(readThemeMode())
   const savedEffort = localStorage.getItem('coomi.reasoningEffort') as ReasoningEffort | null
   const reasoningEffort = ref<ReasoningEffort>(REASONING_EFFORTS.some(item => item.value === savedEffort) ? savedEffort! : 'auto')
   const savedRounds = Number(localStorage.getItem('coomi.maxToolRounds'))
   const maxToolRounds = ref([192, 256, 512].includes(savedRounds) ? savedRounds : 192)
   const subAgentSettings = ref<SubAgentSettings>({ agents: [], maxAgents: 20 })
-  const collaborationSettings = ref<CollaborationSettings>({
-    coderSelector: '', reviewerSelector: '', coderPrompt: '', reviewerPrompt: '', maxCycles: 2, reviewTests: true,
-  })
   const connectionSettings = ref<ConnectionSettings>({
     providerRetryCount: readStoredInt('coomi.providerRetryCount', 0, 10, DEFAULT_CONNECTION_SETTINGS.providerRetryCount),
-    wsRetryCount: readStoredInt('coomi.wsRetryCount', 0, 30, DEFAULT_CONNECTION_SETTINGS.wsRetryCount),
+    wsRetryCount: readStoredInt('coomi.wsRetryCount', 0, 100, DEFAULT_CONNECTION_SETTINGS.wsRetryCount),
     reconnectInitialDelayMs: readStoredInt('coomi.reconnectInitialDelayMs', 500, 60_000, DEFAULT_CONNECTION_SETTINGS.reconnectInitialDelayMs),
     reconnectMaxDelayMs: readStoredInt('coomi.reconnectMaxDelayMs', 1_000, 120_000, DEFAULT_CONNECTION_SETTINGS.reconnectMaxDelayMs),
     maxConcurrentTasks: readStoredInt('coomi.maxConcurrentTasks', 1, 20, DEFAULT_CONNECTION_SETTINGS.maxConcurrentTasks),
@@ -272,6 +250,11 @@ export const useConfigStore = defineStore('config', () => {
     localStorage.setItem('coomi.providerId', providerId)
     localStorage.setItem('coomi.model', model)
   }
+  /** 只同步顶栏的模型显示，不写 localStorage（切换会话时用，避免污染全局默认选择）。 */
+  function syncDisplayModel(providerId: string, model: string) {
+    currentProviderId.value = providerId
+    currentModel.value = model
+  }
   function setPermissionMode(mode: PermissionMode) {
     permissionMode.value = mode
     localStorage.setItem('coomi.permissionMode', mode)
@@ -313,7 +296,7 @@ export const useConfigStore = defineStore('config', () => {
       maxConcurrentTasks: Math.trunc(value.maxConcurrentTasks),
     }
     if (normalized.providerRetryCount < 0 || normalized.providerRetryCount > 10
-      || normalized.wsRetryCount < 0 || normalized.wsRetryCount > 30
+      || normalized.wsRetryCount < 0 || normalized.wsRetryCount > 100
       || normalized.reconnectInitialDelayMs < 500 || normalized.reconnectInitialDelayMs > 60_000
       || normalized.reconnectMaxDelayMs < 1_000 || normalized.reconnectMaxDelayMs > 120_000
       || normalized.maxConcurrentTasks < 1 || normalized.maxConcurrentTasks > 20
@@ -344,10 +327,34 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
   function cyclePermissionMode(): PermissionMode {
-    const order: PermissionMode[] = ['ask', 'auto', 'full']
+    const order: PermissionMode[] = ['ask', 'auto', 'full', 'minimal']
     const idx = order.indexOf(permissionMode.value)
     permissionMode.value = order[(idx + 1) % order.length]
     return permissionMode.value
+  }
+  function setProductionMode(value: 'normal' | 'overload' | 'berserk') {
+    productionMode.value = value
+    localStorage.setItem('coomi.productionMode', value)
+    void apiSend('/api/settings/production-mode', 'POST', { mode: value }).catch(() => undefined)
+  }
+  const berserkModel = ref(localStorage.getItem('coomi.berserkModel') ?? '')
+  function setBerserkModel(model: string) {
+    berserkModel.value = model
+    localStorage.setItem('coomi.berserkModel', model)
+    void apiSend('/api/settings/berserk-model', 'POST', { model }).catch(() => undefined)
+  }
+  function setDefaultPermissionMode(mode: PermissionMode) {
+    defaultPermissionMode.value = mode
+    localStorage.setItem('coomi.defaultPermissionMode', mode)
+    setPermissionMode(mode)
+  }
+  function setSendMorphAnimation(value: boolean) {
+    sendMorphAnimation.value = value
+    localStorage.setItem('coomi.sendMorphAnimation', value ? '1' : '0')
+  }
+  function setMinimalUi(value: boolean) {
+    minimalUi.value = value
+    localStorage.setItem('coomi.minimalUi', value ? '1' : '0')
   }
   function togglePlanMode() { planMode.value = !planMode.value }
 
@@ -412,39 +419,6 @@ export const useConfigStore = defineStore('config', () => {
       return false
     }
   }
-
-  async function fetchCollaborationSettings(): Promise<boolean> {
-    if (usingMock.value) return true
-    try {
-      const data = await apiGet<CollaborationSettings>('/api/settings/collaboration')
-      collaborationSettings.value = { ...collaborationSettings.value, ...data }
-      return true
-    } catch (e) {
-      lastError.value = String(e)
-      return false
-    }
-  }
-
-  async function saveCollaborationSettings(value: CollaborationSettings): Promise<boolean> {
-    const normalized = {
-      ...value,
-      coderSelector: value.coderSelector.trim(),
-      reviewerSelector: value.reviewerSelector.trim(),
-      maxCycles: Math.max(1, Math.min(3, Math.trunc(value.maxCycles))),
-    }
-    if (usingMock.value) {
-      collaborationSettings.value = normalized
-      return true
-    }
-    try {
-      const saved = await apiSend<CollaborationSettings>('/api/settings/collaboration', 'PUT', normalized)
-      collaborationSettings.value = { ...collaborationSettings.value, ...saved }
-      return true
-    } catch (e) {
-      lastError.value = String(e)
-      return false
-    }
-  }
   async function validateAndSelectModel(providerId: string, model: string): Promise<boolean> {
     try {
       await apiSend(`/api/providers/${encodeURIComponent(providerId)}/select-model`, 'POST', { model })
@@ -490,22 +464,6 @@ export const useConfigStore = defineStore('config', () => {
       localStorage.setItem('coomi.globalMemory', previous ? '1' : '0')
       throw new Error('同步引擎失败，开关已还原')
     }
-  }
-
-  /**
-   * F8 语音陪伴：AI 回复完成后自动朗读（默认关）；语速 0.5–2.0（1.0 正常）。
-   * 纯前端偏好 + 原生 TTS 桥（CoomiAndroid.speak/setTtsRate）联动。
-   */
-  const ttsAutoRead = ref(localStorage.getItem('coomi.ttsAutoRead') === '1')
-  const ttsRate = ref(readStoredRate())
-  function setTtsAutoRead(enabled: boolean) {
-    ttsAutoRead.value = enabled
-    localStorage.setItem('coomi.ttsAutoRead', enabled ? '1' : '0')
-  }
-  function setTtsRate(rate: number) {
-    const clamped = Math.min(2, Math.max(0.5, rate))
-    ttsRate.value = clamped
-    localStorage.setItem('coomi.ttsRate', String(clamped))
   }
 
   /**
@@ -575,6 +533,7 @@ export const useConfigStore = defineStore('config', () => {
         id: input.id,
         name: input.name,
         apiKey: input.apiKey,
+        apiKeys: input.apiKeys ?? [],
         models: input.models,
         model: input.models[0],
         baseUrl: input.baseUrl,
@@ -588,6 +547,7 @@ export const useConfigStore = defineStore('config', () => {
         modelDescriptions: input.modelDescriptions,
         modelParameters: input.modelParameters,
         capabilityOverrides: input.capabilityOverrides,
+        headers: input.headers,
         activate: input.activate,
       })
       await fetchProviders()
@@ -663,16 +623,19 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  async function discoverModels(id: string, persist = false): Promise<string[] | null> {
-    if (usingMock.value) return providers.value.find(provider => provider.id === id)?.models ?? []
+  async function discoverModels(id: string, persist = false): Promise<{ models: string[]; contextWindows: Record<string, number> } | null> {
+    if (usingMock.value) {
+      const provider = providers.value.find(provider => provider.id === id)
+      return { models: provider?.models ?? [], contextWindows: provider?.modelContextWindows ?? {} }
+    }
     try {
-      const result = await apiSend<{ models: string[] }>(
+      const result = await apiSend<{ models: string[]; contextWindows?: Record<string, number> }>(
         `/api/providers/${encodeURIComponent(id)}/discover-models`,
         'POST',
         { persist },
       )
       if (persist) await fetchProviders()
-      return result.models
+      return { models: result.models ?? [], contextWindows: result.contextWindows ?? {} }
     } catch (e) {
       lastError.value = String(e)
       return null
@@ -680,21 +643,15 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   return {
-    permissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, providers, activeId, loading, usingMock, lastError, subAgentSettings, collaborationSettings, sendMorphAnimation, setSendMorphAnimation,
+    permissionMode, defaultPermissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, productionMode, setProductionMode, berserkModel, setBerserkModel, sendMorphAnimation, setSendMorphAnimation, minimalUi, setMinimalUi, providers, activeId, loading, usingMock, lastError, subAgentSettings,
     currentProviderId, currentModel, currentProvider, mergedProviders,
-    fetchProviders, selectModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, togglePlanMode,
+    fetchProviders, selectModel, syncDisplayModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, setDefaultPermissionMode, togglePlanMode,
     toggleGlobalMemory, syncGlobalMemoryFromEngine, setDigitalLifeEnabled, syncDigitalLifeEnabled, fetchCustomPrompt, saveCustomPrompt,
-    ttsAutoRead, ttsRate, setTtsAutoRead, setTtsRate,
-    upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels, fetchSubAgentSettings, saveSubAgentSettings, fetchCollaborationSettings, saveCollaborationSettings,
+    upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels, fetchSubAgentSettings, saveSubAgentSettings,
   }
 })
 
 function readStoredInt(key: string, min: number, max: number, fallback: number): number {
   const value = Number(localStorage.getItem(key))
   return Number.isInteger(value) && value >= min && value <= max ? value : fallback
-}
-
-function readStoredRate(): number {
-  const value = Number(localStorage.getItem('coomi.ttsRate'))
-  return Number.isFinite(value) && value >= 0.5 && value <= 2 ? value : 1
 }

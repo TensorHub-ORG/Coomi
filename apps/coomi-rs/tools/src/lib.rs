@@ -1,6 +1,4 @@
 mod agents;
-mod env_facts;
-mod git_tool;
 mod patch;
 mod processes;
 
@@ -47,78 +45,14 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::agents::snapshots_json;
 pub use crate::agents::{AgentScheduler, ConfiguredSubAgent};
-pub use crate::env_facts::{environment_facts_block, environment_marker};
 pub use crate::processes::{ProcessManager, terminate_all_managed};
-
-/// Agent 工具执行过程的增量输出回调（批次三 #31）：参数为 call_id 与本次新增文本。
-/// web 层把它接到 WebSocket 的 `tool_output` 事件上，对话页实时可见。
-pub type ToolProgressSink = Arc<dyn Fn(&str, String) + Send + Sync>;
-
-/// 一次工具调用的进度上下文：call_id + 发射回调，传给会话式进程管理器。
-pub struct ToolProgressContext {
-    pub call_id: String,
-    pub sink: ToolProgressSink,
-}
 
 const DEFAULT_MAX_OUTPUT: usize = 48_000;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
-
-/// 尽力清理整个进程组（含 shell 派生的后台子进程），避免超时后残留引发连环超时。
-fn kill_process_group(pgid: Option<u32>) {
-    #[cfg(unix)]
-    if let Some(pgid) = pgid {
-        let _ = std::process::Command::new("kill")
-            .arg("-9")
-            .arg(format!("-{pgid}"))
-            .status();
-    }
-    #[cfg(not(unix))]
-    let _ = pgid;
-}
-
-/// shell 退出码 → 一条可行动的自纠建议（批次八 1.3：一条错误 = 一个建议）。
-pub(crate) fn shell_failure_hint(code: i32, output: &str) -> String {
-    match code {
-        127 => match missing_command_from(output) {
-            Some(command) => format!(
-                "自纠提示：环境缺少命令 `{command}`（exit 127）。可先 `apt install -y {command}` 安装（guest 已预配国内镜像源）；无对应包或不适用的，改用已预装工具。"
-            ),
-            None => "自纠提示：exit 127 表示命令在环境中不存在。可 `apt install -y <包名>` 安装后重试，或改用已预装工具。".into(),
-        },
-        126 => "自纠提示：exit 126 表示命令存在但不可执行——检查执行权限（chmod +x），或确认二进制架构与 guest（glibc/ARM64）匹配；不要在 guest 内运行 Android/Bionic 二进制。".into(),
-        _ if output.to_lowercase().contains("externally-managed-environment") => {
-            "自纠提示：Ubuntu 24.04 禁止直接向系统 Python 安装包（PEP 668）。改用虚拟环境：`python3 -m venv .venv && . .venv/bin/activate && pip install <包>`；或安装 apt 包（python3-xxx）。".into()
-        }
-        _ if output.to_lowercase().contains("permission denied") => {
-            "自纠提示：Permission denied——优先使用 /workspace、/home/coomi、/tmp；脚本类文件可先 `chmod +x`。注意 guest 内是 root 视角，仍遇拒绝通常是宿主 SELinux/挂载权限限制，换到上述可写目录重试。".into()
-        }
-        _ => String::new(),
-    }
-}
-
-/// 从 "sh: 1: foo: not found" / "bash: foo: command not found" 类输出中提取缺失命令名。
-fn missing_command_from(output: &str) -> Option<String> {
-    for line in output.lines() {
-        let line = line.trim();
-        for marker in [": not found", ": command not found"] {
-            if let Some(index) = line.find(marker) {
-                let token = line[..index]
-                    .rsplit([' ', ':'])
-                    .next()?
-                    .trim_matches('\'');
-                if !token.is_empty() && !token.contains(' ') && token.len() <= 64 {
-                    return Some(token.to_owned());
-                }
-            }
-        }
-    }
-    None
-}
 
 pub struct CoreTools {
     cwd: PathBuf,
@@ -128,7 +62,6 @@ pub struct CoreTools {
     config_home: Option<PathBuf>,
     max_output: usize,
     processes: Arc<ProcessManager>,
-    progress_sink: Option<ToolProgressSink>,
     plan: Arc<Mutex<Option<PlanState>>>,
     loop_state: Arc<Mutex<Option<LoopState>>>,
     agent_scheduler: Option<Arc<AgentScheduler>>,
@@ -149,7 +82,6 @@ impl CoreTools {
             config_home: None,
             max_output: DEFAULT_MAX_OUTPUT,
             processes: Arc::new(ProcessManager::default()),
-            progress_sink: None,
             plan: Arc::new(Mutex::new(None)),
             loop_state: Arc::new(Mutex::new(None)),
             agent_scheduler: None,
@@ -200,41 +132,8 @@ impl CoreTools {
         self
     }
 
-    /// 注入增量输出回调（对话页实时展示 Agent 执行）。
-    pub fn with_progress_sink(mut self, sink: ToolProgressSink) -> Self {
-        self.progress_sink = Some(sink);
-        self
-    }
-
-    fn emit_progress(&self, call_id: &str, chunk: &[u8]) {
-        if let Some(sink) = &self.progress_sink {
-            let text = String::from_utf8_lossy(chunk).into_owned();
-            sink(call_id, text);
-        }
-    }
-
-    /// shell/local_shell 结果尾部追加单行环境标记（批次八 1.2），模型轮轮可感知当前环境。
-    async fn append_env_marker(&self, result: &mut ToolResult) {
-        if let Some(home) = &self.config_home {
-            let marker = crate::env_facts::environment_marker(home, &self.cwd).await;
-            if !result.output.contains(&marker) {
-                result.output.push('\n');
-                result.output.push_str(&marker);
-            }
-        }
-    }
-
     pub fn with_config_home(mut self, home: PathBuf) -> Self {
         let _ = CatalogInstaller::new(&home).install_runtime_environment_skill();
-        // Bundled skill-creator is always present and enabled on first use;
-        // its enabled flag remains user-controlled in config/skills.json.
-        let _ = CatalogInstaller::new(&home).install_skill("skill-creator");
-        // 批次七 #1：UI 设计师内置 Skill 默认安装（用户可停用）。
-        let _ = CatalogInstaller::new(&home).install_skill("ui-designer");
-        // 批次八 3.3：环境初始化模板 Skill 默认安装。
-        let _ = CatalogInstaller::new(&home).install_skill("env-templates");
-        // 内置经验 Skill 默认安装：降低环境类报错率。
-        let _ = CatalogInstaller::new(&home).install_skill("env-experience");
         let legacy = LegacyTermuxBackend::from_coomi_home(&home);
         self.policy = self.policy.clone().with_allowed_roots([
             home.join("runtime-v2").join("home"),
@@ -297,16 +196,8 @@ impl CoreTools {
             "edit_file" => self.edit_file(&call.arguments).await,
             "list_dir" => self.list_dir(&call.arguments),
             "grep_files" | "search" => self.search(&call.arguments).await,
-            "local_shell" => {
-                let mut result = self.local_shell(call, approval).await;
-                self.append_env_marker(&mut result).await;
-                result
-            }
-            "shell" => {
-                let mut result = self.shell(call, approval).await;
-                self.append_env_marker(&mut result).await;
-                result
-            }
+            "local_shell" => self.local_shell(call, approval).await,
+            "shell" => self.shell(call, approval).await,
             "apply_patch" => self.apply_patch(call, approval).await,
             "web_search" => self.web_search(&call.arguments).await,
             "fetch" => self.fetch_url(&call.arguments).await,
@@ -344,17 +235,6 @@ impl CoreTools {
             "install_skill" => self.install_skill(call, approval).await,
             "uninstall_mcp" => self.uninstall_mcp(call, approval).await,
             "uninstall_skill" => self.uninstall_skill(call, approval).await,
-            "git_status" | "git_diff" | "git_branches" | "git_log" | "git_stage"
-            | "git_commit" | "git_snapshot" | "git_restore" | "git_stash" => {
-                git_tool::run_git_tool(
-                    &self.cwd,
-                    self.config_home.as_deref(),
-                    &call.name,
-                    &call.arguments,
-                    Some(approval),
-                )
-                .await
-            }
             _ => {
                 if let Some(runtime) = &self.mcp_runtime
                     && let Some(result) = runtime.call(&call.name, call.arguments.clone()).await
@@ -638,13 +518,7 @@ impl CoreTools {
                 }
             }
         }
-        let progress = self.progress_sink.as_ref().map(|sink| ToolProgressContext {
-            call_id: call.id.clone(),
-            sink: Arc::clone(sink),
-        });
-        self.processes
-            .execute(&self.cwd, &call.arguments, progress.as_ref())
-            .await
+        self.processes.execute(&self.cwd, &call.arguments).await
     }
 
     async fn apply_patch(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
@@ -2064,14 +1938,11 @@ impl CoreTools {
                     }
                 };
             }
-            let hint = nearest_fragment_hint(&content, old_string)
-                .map(|hint| format!("\n{hint}"))
-                .unwrap_or_default();
-            return ToolResult::error(format!(
+            return ToolResult::error(
                 "old_string was not found. 文件可能已变化：请先 use read_file 读取当前内容，\
                  复制与文件完全一致的片段（包含换行与缩进）后再调用 edit_file；\
-                 若只需行级修改请改用 apply_patch{hint}"
-            ));
+                 若只需行级修改请改用 apply_patch",
+            );
         }
         let replace_all = arguments
             .get("replace_all")
@@ -2176,104 +2047,25 @@ impl CoreTools {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(unix)]
-        process.process_group(0);
-        let mut child = match process.spawn() {
-            Ok(child) => child,
-            Err(error) => return ToolResult::error(format!("failed to start shell: {error}")),
+        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), process.output())
+            .await
+        {
+            Ok(Ok(output)) => output,
+            Ok(Err(error)) => return ToolResult::error(format!("failed to start shell: {error}")),
+            Err(_) => return ToolResult::error(format!("shell timed out after {timeout_ms} ms")),
         };
-        #[cfg(unix)]
-        let pgid = child.id();
-        #[cfg(not(unix))]
-        let pgid: Option<u32> = None;
-
-        // 流式执行（批次三 #31）：边跑边把增量输出推给对话页；超时返回已有部分
-        // 输出并清理进程组（批次八 1.4：不静默误杀、不留残留）。
-        let mut stdout = child.stdout.take();
-        let mut stderr = child.stderr.take();
-        let mut out_buf: Vec<u8> = Vec::new();
-        let mut err_buf: Vec<u8> = Vec::new();
-        let mut out_done = false;
-        let mut err_done = false;
-        let mut timed_out = false;
-        let mut out_chunk = [0_u8; 8192];
-        let mut err_chunk = [0_u8; 8192];
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
-        let status: Option<std::process::ExitStatus> = loop {
-            if out_done && err_done {
-                break child.wait().await.ok();
-            }
-            tokio::select! {
-                biased;
-                read = async {
-                    match stdout.as_mut() {
-                        Some(stream) => Some(stream.read(&mut out_chunk).await),
-                        None => None,
-                    }
-                }, if !out_done => {
-                    match read {
-                        None | Some(Ok(0)) | Some(Err(_)) => out_done = true,
-                        Some(Ok(size)) => {
-                            out_buf.extend_from_slice(&out_chunk[..size]);
-                            self.emit_progress(&call.id, &out_chunk[..size]);
-                        }
-                    }
-                }
-                read = async {
-                    match stderr.as_mut() {
-                        Some(stream) => Some(stream.read(&mut err_chunk).await),
-                        None => None,
-                    }
-                }, if !err_done => {
-                    match read {
-                        None | Some(Ok(0)) | Some(Err(_)) => err_done = true,
-                        Some(Ok(size)) => {
-                            err_buf.extend_from_slice(&err_chunk[..size]);
-                            self.emit_progress(&call.id, &err_chunk[..size]);
-                        }
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    if tokio::time::Instant::now() >= deadline {
-                        timed_out = true;
-                        kill_process_group(pgid);
-                        let _ = child.kill().await;
-                        break child.wait().await.ok();
-                    }
-                }
-            }
-        };
-
-        let stdout = String::from_utf8_lossy(&out_buf);
-        let stderr = String::from_utf8_lossy(&err_buf);
-        let mut rendered = match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
-            (true, true) => String::new(),
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let rendered = match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+            (true, true) => format!("exit code: {}", output.status),
             (false, true) => stdout.into_owned(),
             (true, false) => stderr.into_owned(),
             (false, false) => format!("{stdout}\n[stderr]\n{stderr}"),
         };
-        if timed_out {
-            if !rendered.is_empty() {
-                rendered = format!("超时前已产生的输出：\n{rendered}");
-            }
-            return ToolResult::error(self.truncate(format!(
-                "shell timed out after {timeout_ms} ms（进程组已清理，无残留）。\n{rendered}\n提示：长任务（构建/安装/下载）请改用 local_shell：exec 启动（yield_time_ms 0）后先做其他事，再 wait 收增量输出。"
-            )));
-        }
-        if status.as_ref().is_some_and(|status| status.success()) {
-            if rendered.is_empty() {
-                rendered = "exit code: 0".into();
-            }
-            return ToolResult::success(self.truncate(rendered));
-        }
-        let code = status.as_ref().and_then(|status| status.code()).unwrap_or(-1);
-        let hint = shell_failure_hint(code, &rendered);
-        if hint.is_empty() {
-            ToolResult::error(self.truncate(format!("exit code: {code}\n{rendered}")))
+        if output.status.success() {
+            ToolResult::success(self.truncate(rendered))
         } else {
-            ToolResult::error(self.truncate(format!(
-                "exit code: {code}\n{rendered}\n{hint}"
-            )))
+            ToolResult::error(self.truncate(format!("exit code: {}\n{rendered}", output.status)))
         }
     }
 
@@ -2390,7 +2182,7 @@ impl ToolRuntime for CoreTools {
                     "type": "object",
                     "properties": {
                         "command": {"type": "string"},
-                        "environment": {"type": "string", "enum": ["auto", "proot"], "description": "Agent 执行环境统一为 proot Debian guest；auto 即该环境"},
+                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot"]},
                         "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 300000}
                     },
                     "required": ["command"],
@@ -2432,7 +2224,7 @@ impl ToolRuntime for CoreTools {
                     "properties": {
                         "action": {"type": "string", "enum": ["exec", "write", "wait", "terminate"]},
                         "command": {"type": "string"},
-                        "environment": {"type": "string", "enum": ["auto", "proot"], "description": "Agent 执行环境统一为 proot Debian guest；auto 即该环境"},
+                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot"]},
                         "session_id": {"type": "string"},
                         "input": {"type": "string"},
                         "close_stdin": {"type": "boolean"},
@@ -2881,7 +2673,6 @@ impl ToolRuntime for CoreTools {
         if self.memory.is_some() {
             specs.extend(memory_specs());
         }
-        specs.extend(git_tool::git_tool_specs());
         specs
     }
 
@@ -3026,151 +2817,46 @@ fn string_arg<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
-/// 空白归一化（供编辑匹配使用）：
-/// - 删除 `\r`（CRLF 兼容）与行尾空白（换行前及 EOF 前的空格/tab 串）；
-/// - 行首缩进逐字符保留（第一期刻意不做缩进容错，避免静默错位修改）；
-/// - 行内连续空白折叠为单个空格（空格/tab 等价）。
-/// 返回归一化文本与"归一化位置 → 原文字节位置"映射；折叠 run 映射到 run 末字节。
-fn normalize_with_map(input: &str) -> (String, Vec<usize>) {
-    let bytes = input.as_bytes();
-    let mut norm = Vec::with_capacity(bytes.len());
-    let mut map = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    let mut at_line_start = true;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'\r' {
-            i += 1;
-            continue;
-        }
-        if b == b' ' || b == b'\t' {
-            let mut j = i;
-            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
-                j += 1;
-            }
-            let trailing = j >= bytes.len() || bytes[j] == b'\n';
-            if trailing {
-                i = j;
-                continue;
-            }
-            if at_line_start {
-                for k in i..j {
-                    norm.push(bytes[k]);
-                    map.push(k);
-                }
-            } else {
-                norm.push(b' ');
-                map.push(j - 1);
-            }
-            i = j;
-            at_line_start = false;
-            continue;
-        }
-        at_line_start = b == b'\n';
-        norm.push(b);
-        map.push(i);
-        i += 1;
-    }
-    (String::from_utf8_lossy(&norm).into_owned(), map)
-}
-
-/// 单行/整段文本的空白归一化（无位置映射），供 apply_patch 行比较等场景复用。
-pub(crate) fn normalize_ws_text(input: &str) -> String {
-    normalize_with_map(input).0
-}
-
-/// edit_file 的规范化匹配：按 `normalize_with_map` 归一化后查找 needle，
+/// edit_file 的规范化匹配：把 `\r` 与行尾空白折叠后再找 needle，
 /// 命中后返回原文件中对应的字节区间。找不到返回 None。
 fn fuzzy_normalized_range(haystack: &str, needle: &str) -> Option<(usize, usize)> {
-    let (norm_content, content_map) = normalize_with_map(haystack);
-    let (norm_needle, _) = normalize_with_map(needle);
+    fn normalize(input: &str) -> (String, Vec<usize>) {
+        let bytes = input.as_bytes();
+        let mut norm = Vec::with_capacity(bytes.len());
+        let mut map = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'\r' {
+                i += 1;
+                continue;
+            }
+            if b == b' ' || b == b'\t' {
+                let mut j = i;
+                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b'\n' {
+                    i = j;
+                    continue;
+                }
+            }
+            norm.push(b);
+            map.push(i);
+            i += 1;
+        }
+        (String::from_utf8_lossy(&norm).into_owned(), map)
+    }
+    let (norm_content, content_map) = normalize(haystack);
+    let (norm_needle, _) = normalize(needle);
     if norm_needle.is_empty() {
         return None;
     }
     let found = norm_content.find(&norm_needle)?;
-    let mut from = *content_map.get(found)?;
+    let from = *content_map.get(found)?;
     let last = found + norm_needle.len() - 1;
     let to = content_map.get(last).map(|value| *value + 1)?;
-    // 匹配起点落在被折叠的行内空白 run 上时，把起点扩展到完整 run 边界，
-    // 否则替换后会残留半截空白。行首缩进（run 左侧是换行或文本开头）不扩展。
-    if norm_needle.as_bytes()[0] == b' ' && from > 0 {
-        let bytes = haystack.as_bytes();
-        if matches!(bytes[from - 1], b' ' | b'\t' | b'\r') {
-            let mut start = from - 1;
-            while start > 0 && matches!(bytes[start - 1], b' ' | b'\t' | b'\r') {
-                start -= 1;
-            }
-            let leading = start == 0 || bytes[start - 1] == b'\n';
-            if !leading {
-                from = start;
-            }
-        }
-    }
     Some((from, to))
-}
-
-const NEAREST_HINT_MIN_SIMILARITY: f64 = 0.5;
-const NEAREST_HINT_MAX_LINES: usize = 20_000;
-const NEAREST_HINT_MIN_ANCHOR_CHARS: usize = 4;
-
-fn bigram_counts(value: &str) -> std::collections::HashMap<[char; 2], usize> {
-    let chars: Vec<char> = value.chars().collect();
-    let mut counts = std::collections::HashMap::new();
-    for pair in chars.windows(2) {
-        *counts.entry([pair[0], pair[1]]).or_insert(0usize) += 1;
-    }
-    counts
-}
-
-fn dice_similarity(a: &str, b: &str) -> f64 {
-    if a.chars().count() < 2 || b.chars().count() < 2 {
-        return if a == b { 1.0 } else { 0.0 };
-    }
-    let left = bigram_counts(a);
-    let right = bigram_counts(b);
-    let intersection: usize = left
-        .iter()
-        .map(|(gram, count)| (*count).min(right.get(gram).copied().unwrap_or(0)))
-        .sum();
-    let total: usize = left.values().sum::<usize>() + right.values().sum::<usize>();
-    if total == 0 {
-        0.0
-    } else {
-        2.0 * intersection as f64 / total as f64
-    }
-}
-
-/// 编辑匹配彻底失败时，用 old_string 首个非空行在文件中找最相似的行，
-/// 生成一条可操作的提示（行号 + 内容 + 相似度），帮助模型一次修正而不是盲目重试。
-fn nearest_fragment_hint(content: &str, old_string: &str) -> Option<String> {
-    let anchor = old_string
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())?;
-    if anchor.chars().count() < NEAREST_HINT_MIN_ANCHOR_CHARS {
-        return None;
-    }
-    let anchor_normalized = normalize_ws_text(anchor);
-    let mut best: Option<(usize, f64, &str)> = None;
-    for (index, line) in content.lines().enumerate().take(NEAREST_HINT_MAX_LINES) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let similarity = dice_similarity(&anchor_normalized, &normalize_ws_text(trimmed));
-        if best.is_none_or(|(_, best_score, _)| similarity > best_score) {
-            best = Some((index + 1, similarity, trimmed));
-        }
-    }
-    let (line_number, similarity, line) = best?;
-    if similarity < NEAREST_HINT_MIN_SIMILARITY {
-        return None;
-    }
-    let display: String = line.chars().take(120).collect();
-    Some(format!(
-        "最接近的候选在第 {line_number} 行：`{display}`（相似度 {:.0}%），请核对该处的空白/缩进差异",
-        similarity * 100.0
-    ))
 }
 
 fn string_namespace(value: &str) -> Option<PathNamespace> {
@@ -3877,65 +3563,5 @@ mod tests {
             let ip: std::net::IpAddr = value.parse().expect("valid IP");
             assert!(!ip_is_blocked(&ip), "{value} must be allowed");
         }
-    }
-    #[test]
-    fn fuzzy_matches_collapsed_internal_whitespace_runs() {
-        // 行内连续空格折叠：old_string 用单空格，文件里是多空格
-        let content = "function call(  a, b ) {\n    return a + b;\n}";
-        let needle = "function call( a, b ) {";
-        let (from, to) = fuzzy_normalized_range(content, needle).expect("must match");
-        assert_eq!(&content[from..to], "function call(  a, b ) {");
-        // tab 与空格等价
-        let content_tab = "if\t(x) {\n}";
-        let (from, to) = fuzzy_normalized_range(content_tab, "if (x) {").expect("tab as space");
-        assert_eq!(&content_tab[from..to], "if\t(x) {");
-    }
-
-    #[test]
-    fn fuzzy_does_not_forgive_leading_indent() {
-        // 第一期刻意不容忍行首缩进差异：跨行 old_string 的续行缩进不一致时必须失败
-        let content = "fn main() {\n    if a > 0 {\n        println!(\"pos\");\n    }\n}\n";
-        let needle = "if a > 0 {\n    println!(\"pos\");\n}";
-        assert!(fuzzy_normalized_range(content, needle).is_none());
-    }
-
-    #[test]
-    fn fuzzy_still_handles_crlf_and_trailing_whitespace() {
-        // CRLF 兼容与行尾空白折叠各自成立
-        let content_lf = "first line \nsecond\n";
-        let (from, to) = fuzzy_normalized_range(content_lf, "first line\nsecond").expect("lf match");
-        assert_eq!(&content_lf[from..to], "first line \nsecond");
-        let content_crlf = "first line\r\nsecond\r\n";
-        let (from, to) =
-            fuzzy_normalized_range(content_crlf, "first line\nsecond").expect("crlf match");
-        assert_eq!(&content_crlf[from..to], "first line\r\nsecond");
-    }
-
-    #[test]
-    fn fuzzy_replacement_spans_the_full_collapsed_run() {
-        // 匹配起点落在被折叠的多空格 run 上时，替换区间必须覆盖整个 run
-        let content = "total     = 10;\n";
-        let needle = " = 10;";
-        let (from, to) = fuzzy_normalized_range(content, needle).expect("match");
-        let replaced = format!("{}NEW{}", &content[..from], &content[to..]);
-        assert_eq!(replaced, "totalNEW\n");
-    }
-
-    #[test]
-    fn nearest_fragment_hint_reports_best_line() {
-        let content = "fn alpha(x: i32) -> i32 {\n    x + 1\n}\n\nfn beta(y: i32) -> i32 {\n    y * 2\n}\n";
-        let hint = nearest_fragment_hint(content, "fn beta(z: i32) -> i32 {")
-            .expect("hint for near-miss anchor");
-        assert!(hint.contains("第 5 行"), "hint should point at line 5, got: {hint}");
-        assert!(hint.contains("fn beta"), "hint should quote the candidate line");
-        // 差异过大时不给误导性提示
-        assert!(nearest_fragment_hint(content, "totally unrelated content here").is_none());
-    }
-
-    #[test]
-    fn normalize_ws_text_matches_fuzzy_semantics() {
-        assert_eq!(normalize_ws_text("a  \t b  "), "a b");
-        assert_eq!(normalize_ws_text("  indented"), "  indented");
-        assert_eq!(normalize_ws_text("crlf\r\n"), "crlf\n");
     }
 }

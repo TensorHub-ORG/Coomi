@@ -14,8 +14,8 @@ pub enum ProviderKind {
     OpenAiResponses,
     AnthropicMessages,
     GeminiNative,
-    /// DeepSeek 账号登录（官方 chat.deepseek.com 私有协议，非 OpenAI 兼容）。
-    DeepSeekAccount,
+    /// DeepSeek 账号登录使用 chat.deepseek.com 私有协议，不是 OpenAI 兼容接口。
+    DeepseekAccount,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -27,35 +27,6 @@ pub enum RemoteCompactionMode {
 }
 
 impl ProviderKind {
-    /// OpenCode is a multi-protocol gateway. Its Go and Zen catalogs do not
-    /// always use the same protocol for the same model (notably MiniMax).
-    /// Only route the official endpoints; custom gateways keep their settings.
-    pub fn for_opencode(base_url: &str, model: &str) -> Option<Self> {
-        let url = reqwest::Url::parse(base_url.trim()).ok()?;
-        if url.host_str()? != "opencode.ai" {
-            return None;
-        }
-        let path = url.path().trim_end_matches('/');
-        let go = match path {
-            "/zen/go/v1" => true,
-            "/zen/v1" => false,
-            _ => return None,
-        };
-        let model = model.trim().to_ascii_lowercase();
-        Some(if model.starts_with("gpt-") || model.starts_with("grok-") || model.starts_with("muse-spark-") {
-            Self::OpenAiResponses
-        } else if model.starts_with("claude-")
-            || model.starts_with("qwen3.")
-            || (go && model.starts_with("minimax-"))
-        {
-            Self::AnthropicMessages
-        } else if model.starts_with("gemini-") {
-            Self::GeminiNative
-        } else {
-            Self::OpenAiCompatible
-        })
-    }
-
     fn from_config(provider_type: &str, tool_protocol: Option<&str>) -> Result<Self> {
         let value = tool_protocol
             .filter(|value| !value.trim().is_empty())
@@ -70,9 +41,7 @@ impl ProviderKind {
             "openai_responses" | "responses" => Ok(Self::OpenAiResponses),
             "anthropic" | "anthropic_messages" => Ok(Self::AnthropicMessages),
             "gemini" | "gemini_native" => Ok(Self::GeminiNative),
-            "deepseek_account" | "deep_seek_account" | "deepseek_account_login" | "deepseek_login" => {
-                Ok(Self::DeepSeekAccount)
-            }
+            "deepseek_account" | "deepseek_login" => Ok(Self::DeepseekAccount),
             other => anyhow::bail!("unsupported provider protocol: {other}"),
         }
     }
@@ -221,11 +190,18 @@ impl ProviderRegistry {
             if provider.base_url.trim().is_empty() {
                 anyhow::bail!("provider `{id}` has no base_url");
             }
-            let kind = ProviderKind::from_config(
-                &provider.provider_type,
-                provider.tool_protocol.as_deref(),
-            )?;
-            let kind = ProviderKind::for_opencode(&provider.base_url, &provider.model).unwrap_or(kind);
+            // 兼容旧版生成的 deepseek-login 配置。旧配置把账号协议写成
+            // openai_compatible，导致激活/切模型时误请求不存在的 /models。
+            let legacy_deepseek_account = id == "deepseek-login"
+                || provider.base_url.trim_end_matches('/') == "https://chat.deepseek.com";
+            let kind = if legacy_deepseek_account {
+                ProviderKind::DeepseekAccount
+            } else {
+                ProviderKind::from_config(
+                    &provider.provider_type,
+                    provider.tool_protocol.as_deref(),
+                )?
+            };
             let display = if provider.display.trim().is_empty() {
                 id.clone()
             } else {
@@ -275,8 +251,7 @@ impl ProviderRegistry {
                 max_output_tokens: provider.max_output_tokens.unwrap_or(8_192),
                 supports_remote_compaction: provider
                     .supports_remote_compaction
-                    .unwrap_or(kind == ProviderKind::OpenAiResponses
-                        && ProviderKind::for_opencode(&provider.base_url, &provider.model).is_none()),
+                    .unwrap_or(kind == ProviderKind::OpenAiResponses),
                 supports_vision: manual_vision,
                 supports_native_tools: provider.supports_native_tools,
                 supports_web_search: provider.supports_web_search,
@@ -450,11 +425,6 @@ impl ProviderRegistry {
 }
 
 fn apply_model_context_window(provider: &mut ProviderConfig) {
-    if let Some(kind) = ProviderKind::for_opencode(&provider.base_url, &provider.model) {
-        provider.kind = kind;
-        // OpenCode documents inference routes, but no Responses compact API.
-        provider.capabilities.supports_remote_compaction = false;
-    }
     if let Some(window) = provider.model_context_windows.get(&provider.model) {
         provider.capabilities.context_window = *window;
     }
@@ -538,7 +508,7 @@ impl Default for ProviderSettings {
 }
 
 /// DeepSeek 账号专用 Provider 配置构造函数。
-/// 固定 base_url 为 `https://chat.deepseek.com`，协议 deepseek_account（私有协议），
+/// 固定 base_url 为 `https://chat.deepseek.com`，协议 openai_compatible，
 /// 模型列表为 `["deepseek-chat", "deepseek-reasoner"]`，上下文窗口 128k。
 pub fn deepseek_account_settings(api_key: &str, model: &str) -> ProviderSettings {
     let mut settings = ProviderSettings {
@@ -566,63 +536,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opencode_registry_routes_models_by_product_and_preserves_custom_gateways() {
-        for (base, model, expected) in [
-            ("https://opencode.ai/zen/v1", "gpt-5.5", ProviderKind::OpenAiResponses),
-            ("https://opencode.ai/zen/v1", "claude-sonnet-4-6", ProviderKind::AnthropicMessages),
-            ("https://opencode.ai/zen/v1", "gemini-3.1-pro", ProviderKind::GeminiNative),
-            ("https://opencode.ai/zen/v1", "minimax-m2.5", ProviderKind::OpenAiCompatible),
-            ("https://opencode.ai/zen/go/v1", "minimax-m2.5", ProviderKind::AnthropicMessages),
-            ("https://opencode.ai/zen/go/v1", "grok-4.6", ProviderKind::OpenAiResponses),
-            ("https://opencode.ai/zen/go/v1", "qwen3.7-plus", ProviderKind::AnthropicMessages),
-            ("https://opencode.ai/zen/go/v1", "kimi-k2.6", ProviderKind::OpenAiCompatible),
-            ("https://opencode.ai.example/zen/v1", "gpt-5.5", ProviderKind::OpenAiCompatible),
-        ] {
-            let directory = tempfile::tempdir().expect("temporary directory");
-            let path = directory.path().join("providers.json");
-            let mut provider = ProviderSettings {
-                base_url: base.into(), model: model.into(), api_key: "test-key".into(),
-                ..ProviderSettings::default()
-            };
-            provider.fast_model = Some("glm-5".into());
-            ProviderDocument { active: "opencode".into(), providers: BTreeMap::from([("opencode".into(), provider)]), extra: BTreeMap::new() }
-                .save(&path).expect("save fixture");
-            let registry = ProviderRegistry::load(&path).expect("registry");
-            let primary = registry.resolve(None).expect("primary");
-            assert_eq!(primary.kind, expected, "{base} {model}");
-            assert_eq!(primary.base_url, base, "must not switch billing product");
-            assert_eq!(registry.resolve(Some("opencode:glm-5")).expect("switch model").kind, ProviderKind::OpenAiCompatible);
-            assert_eq!(registry.resolve(Some(&format!("opencode:{model}"))).expect("switch back").kind, expected);
-        }
-    }
-
-    #[test]
     fn deepseek_account_provider_has_fixed_models() {
         let settings = deepseek_account_settings("test-token", "deepseek-chat");
         assert_eq!(settings.base_url, "https://chat.deepseek.com");
         assert_eq!(settings.model, "deepseek-chat");
+        let models = settings.extra.get("models").and_then(Value::as_array).unwrap();
+        assert!(models.iter().any(|value| value.as_str() == Some("deepseek-chat")));
+        assert!(models.iter().any(|value| value.as_str() == Some("deepseek-reasoner")));
         assert_eq!(settings.context_window, Some(128_000));
         assert_eq!(settings.provider_type, "deepseek_account");
-        assert_eq!(
-            settings.tool_protocol,
-            Some("deepseek_account".to_string())
-        );
+        assert_eq!(settings.tool_protocol, Some("deepseek_account".to_string()));
         assert!(!settings.api_key.is_empty());
-        let models = settings
-            .extra
-            .get("models")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        assert!(models.contains(&"deepseek-chat".to_string()));
-        assert!(models.contains(&"deepseek-reasoner".to_string()));
+    }
+
+    #[test]
+    fn legacy_deepseek_login_provider_uses_private_protocol() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("providers.json");
+        fs::write(
+            &path,
+            r#"{
+                "active": "deepseek-login",
+                "providers": {
+                    "deepseek-login": {
+                        "type": "openai_compatible",
+                        "tool_protocol": "openai_compatible",
+                        "display": "DeepSeek 账号",
+                        "api_key": "token",
+                        "base_url": "https://chat.deepseek.com",
+                        "model": "deepseek-chat",
+                        "models": ["deepseek-chat", "deepseek-reasoner"]
+                    }
+                }
+            }"#,
+        ).expect("write provider fixture");
+        let registry = ProviderRegistry::load(&path).expect("provider registry");
+        assert_eq!(registry.resolve(None).unwrap().kind, ProviderKind::DeepseekAccount);
         assert_eq!(
-            ProviderKind::from_config(&settings.provider_type, settings.tool_protocol.as_deref())
-                .expect("deepseek_account parses"),
-            ProviderKind::DeepSeekAccount
+            registry.resolve(Some("deepseek-login:deepseek-reasoner")).unwrap().kind,
+            ProviderKind::DeepseekAccount,
         );
     }
 

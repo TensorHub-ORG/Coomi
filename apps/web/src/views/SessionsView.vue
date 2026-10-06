@@ -5,7 +5,7 @@
  * 列表来自引擎磁盘会话（/api/sessions 为权威源），本地 localStorage 保存标题/置顶等
  * 元数据与最近对话正文；删除会话会同时删除引擎磁盘记录与本地记录。
  */
-import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore, formatSessionTime, type SessionMeta } from '@/stores/sessions'
@@ -180,20 +180,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('coomi:files-imported', onFilesImported)
 })
-async function openAuxiliary(parentId: string, sessionId: string) {
-  await router.push('/')
-  await nextTick()
-  window.dispatchEvent(new CustomEvent('coomi:open-auxiliary', { detail: { parentId, sessionId } }))
-}
 </script>
 <template>
   <div class="page">
     <PageHead title="会话历史" @back="router.push('/')">
       <template #right>
-        <button class="tm" aria-label="对话时光机" @click="router.push('/life/timemachine')">
-          <CoomiIcon name="clock" :size="14" />
-          <span>对话时光机</span>
-        </button>
         <button class="icon-btn" aria-label="导入" @click="importFiles" :disabled="importLoading">
           <CoomiIcon name="import" />
         </button>
@@ -239,9 +230,6 @@ async function openAuxiliary(parentId: string, sessionId: string) {
                   <span v-if="sessions.isRunning(m.id)" class="rspin" aria-label="后台运行中" />
                 </span>
               </button>
-              <div v-if="sessions.childrenOf(m.id).length" class="aux-children">
-                <button v-for="child in sessions.childrenOf(m.id)" :key="child.id" class="aux-child" @click="openAuxiliary(m.id, child.id)">↳ {{ child.title }} <span v-if="sessions.isRunning(child.id)" class="rspin" aria-label="运行中" /></button>
-              </div>
               <button class="more" aria-label="更多" @click="menuFor = m"><CoomiIcon name="more" :size="18" /></button>
             </div>
           </div>
@@ -290,8 +278,8 @@ async function openAuxiliary(parentId: string, sessionId: string) {
         <button class="sact" @click="doPin">
           <CoomiIcon name="pin" :size="17" /><span>{{ menuFor.pinned ? '取消置顶' : '置顶' }}</span>
         </button>
-        <button class="sact danger" :disabled="sessions.childrenOf(menuFor.id).length > 0" @click="askDelete = menuFor; menuFor = null">
-          <CoomiIcon name="trash" :size="17" /><span>{{ sessions.childrenOf(menuFor.id).length ? '请先删除辅助对话' : '删除会话' }}</span>
+        <button class="sact danger" @click="askDelete = menuFor; menuFor = null">
+          <CoomiIcon name="trash" :size="17" /><span>删除会话</span>
         </button>
         <button class="sact plain" @click="menuFor = null"><span>取消</span></button>
       </div>
@@ -324,19 +312,8 @@ async function openAuxiliary(parentId: string, sessionId: string) {
   </div>
 </template>
 <style scoped>
-.aux-child { display: block; width: 100%; text-align: left; padding: 7px 4px 4px 12px; border: 0; background: transparent; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-.row:has(.aux-children) { flex-wrap: wrap; }
-.aux-children { order: 3; width: 100%; padding-left: 18px; }
-
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .icon-btn.blue { color: var(--blue); }
-.tm {
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 30px; padding: 0 11px; margin-right: 2px;
-  border-radius: var(--r-pill); background: var(--fill-strong);
-  color: var(--text-2); font-size: 12px; font-weight: 550; white-space: nowrap;
-}
-.tm:active { background: var(--fill-press); }
 
 .searchrow { flex-shrink: 0; padding: 10px 12px 4px; background: var(--page); }
 .search {

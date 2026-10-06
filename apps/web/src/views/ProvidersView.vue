@@ -4,11 +4,11 @@ import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import ThemeSelect from '@/components/ThemeSelect.vue'
-import { useConfigStore, type CollaborationSettings, type ProviderConfig, type ProviderStatus, type SubAgentConfig } from '@/stores/config'
+import { useConfigStore, type ProviderConfig, type ProviderStatus, type SubAgentConfig } from '@/stores/config'
 
 const router = useRouter()
 const config = useConfigStore()
-const tab = ref<'providers' | 'subagents' | 'collaboration'>('providers')
+const tab = ref<'providers' | 'subagents'>('providers')
 const subAgents = ref<SubAgentConfig[]>([])
 const fallbackId = ref<string>()
 const subAgentLimit = ref(20)
@@ -16,31 +16,17 @@ const savedSnapshot = ref('')
 const savingSubAgents = ref(false)
 const subAgentMessage = ref('')
 const subAgentError = ref('')
-const collaborationForm = ref<CollaborationSettings>({ ...config.collaborationSettings })
-const collaborationSnapshot = ref('')
-const savingCollaboration = ref(false)
-const collaborationMessage = ref('')
-const collaborationError = ref('')
 
 const providers = computed(() => config.mergedProviders)
-const regularProviders = computed(() => providers.value.filter(provider => provider.id !== 'zhipu'))
 const configuredProviders = computed(() => config.providers.filter(provider => provider.hasKey && provider.models.length > 0))
 const configuredProviderOptions = computed(() => configuredProviders.value.map(provider => ({ value: provider.id, label: provider.name, note: provider.id })))
 const subAgentDirty = computed(() => JSON.stringify({ agents: subAgents.value, fallbackId: fallbackId.value, maxAgents: subAgentLimit.value }) !== savedSnapshot.value)
-const collaborationDirty = computed(() => JSON.stringify(collaborationForm.value) !== collaborationSnapshot.value)
 
 onMounted(async () => {
   await config.fetchProviders()
   await config.fetchSubAgentSettings()
-  await config.fetchCollaborationSettings()
   loadSubAgents()
-  loadCollaboration()
 })
-
-function loadCollaboration() {
-  collaborationForm.value = { ...config.collaborationSettings }
-  collaborationSnapshot.value = JSON.stringify(collaborationForm.value)
-}
 
 function loadSubAgents() {
   subAgents.value = config.subAgentSettings.agents.map(agent => ({ ...agent }))
@@ -128,34 +114,6 @@ async function saveSubAgents() {
   subAgentMessage.value = '子代理配置已保存'
 }
 
-async function saveCollaboration() {
-  collaborationError.value = ''
-  collaborationMessage.value = ''
-  if (!collaborationForm.value.coderSelector || !collaborationForm.value.reviewerSelector) {
-    collaborationError.value = '请选择改码模型和审查模型'
-    return
-  }
-  savingCollaboration.value = true
-  const ok = await config.saveCollaborationSettings({ ...collaborationForm.value })
-  savingCollaboration.value = false
-  if (!ok) {
-    collaborationError.value = config.lastError || '保存失败'
-    return
-  }
-  loadCollaboration()
-  collaborationMessage.value = '协同审查配置已保存'
-}
-
-function selectorParts(selector: string) {
-  const [providerId = '', ...model] = selector.split(':')
-  return { providerId, model: model.join(':') }
-}
-function selectorOptions() {
-  return configuredProviders.value.flatMap(provider => provider.models.map(model => ({
-    value: `${provider.id}:${model}`, label: `${provider.name} / ${model}`,
-  })))
-}
-
 function statusLabel(status?: ProviderStatus): string {
   if (status === 'current') return '当前'
   if (status === 'configured') return '已配置'
@@ -190,7 +148,6 @@ function backToDashboard() {
       <div class="tabs" role="tablist">
         <button :class="{ on: tab === 'providers' }" @click="tab = 'providers'">主模型</button>
         <button :class="{ on: tab === 'subagents' }" @click="tab = 'subagents'">子代理 <span>{{ subAgents.length }}/{{ subAgentLimit }}</span></button>
-        <button :class="{ on: tab === 'collaboration' }" @click="tab = 'collaboration'">协同审查</button>
       </div>
       <p v-if="config.usingMock" class="banner">
         <CoomiIcon name="alert" :size="15" />
@@ -199,24 +156,8 @@ function backToDashboard() {
       <p v-if="config.loading" class="hint">加载中...</p>
 
       <div v-if="tab === 'providers'" class="group">
-        <button class="provider-row deepseek-entry" @click="router.push('/deepseek-login')">
-          <span class="tile blue"><CoomiIcon name="sparkle" :size="18" /></span>
-          <span class="row-text">
-            <span class="name">DeepSeek 账号登录</span>
-            <span class="meta">实验性 · 官网账号额度 · 存在风控风险</span>
-          </span>
-          <CoomiIcon name="chevronRight" :size="16" class="arrow" />
-        </button>
-        <button class="provider-row" @click="router.push('/providers/zhipu')">
-          <span class="tile"><CoomiIcon name="key" :size="18" /></span>
-          <span class="row-text">
-            <span class="name">智谱账号 / API Key</span>
-            <span class="meta">官方 API / Coding Key · 账号套餐受使用范围限制</span>
-          </span>
-          <CoomiIcon name="chevronRight" :size="16" class="arrow" />
-        </button>
         <button
-          v-for="provider in regularProviders"
+          v-for="provider in providers"
           :key="provider.id"
           class="provider-row"
           @click="openProvider(provider)"
@@ -266,25 +207,6 @@ function backToDashboard() {
         </div>
         <button v-if="configuredProviders.length && subAgents.length < subAgentLimit" class="add-agent" type="button" @click="addSubAgent"><CoomiIcon name="plus" :size="16" />添加子代理</button>
         <button class="save-agent" type="button" :disabled="savingSubAgents || !subAgentDirty" @click="saveSubAgents">{{ savingSubAgents ? '保存中...' : '保存子代理配置' }}</button>
-      </section>
-      <section v-if="tab === 'collaboration'" class="subagent-panel collaboration-panel">
-        <p class="subagent-note">改码模型负责执行任务，审查模型只读检查当前 diff；发现问题时会自动进入下一轮修复。</p>
-        <p v-if="collaborationMessage" class="notice ok">{{ collaborationMessage }}</p>
-        <p v-if="collaborationError" class="notice err">{{ collaborationError }}</p>
-        <div v-if="configuredProviders.length === 0" class="empty-state">
-          <CoomiIcon name="key" :size="22" />
-          <b>还没有可用的提供商</b>
-          <span>请先在“主模型”中配置 API Key 并添加模型。</span>
-        </div>
-        <div v-else class="collaboration-form">
-          <label><span>改码模型</span><ThemeSelect v-model="collaborationForm.coderSelector" :options="selectorOptions()" title="选择改码模型" aria-label="改码模型" /></label>
-          <label><span>审查模型（只读）</span><ThemeSelect v-model="collaborationForm.reviewerSelector" :options="selectorOptions()" title="选择审查模型" aria-label="审查模型" /></label>
-          <label><span>最大协作轮数：{{ collaborationForm.maxCycles }}</span><input v-model.number="collaborationForm.maxCycles" type="range" min="1" max="3" step="1" /></label>
-          <label class="check-line"><input v-model="collaborationForm.reviewTests" type="checkbox" /><span>审查测试证据和相关测试缺口</span></label>
-          <label><span>改码模型提示词</span><textarea v-model="collaborationForm.coderPrompt" rows="5" maxlength="12000" /></label>
-          <label><span>审查模型提示词</span><textarea v-model="collaborationForm.reviewerPrompt" rows="5" maxlength="12000" /></label>
-          <button class="save-agent" type="button" :disabled="savingCollaboration || !collaborationDirty" @click="saveCollaboration">{{ savingCollaboration ? '保存中...' : '保存协作配置' }}</button>
-        </div>
       </section>
     </main>
   </div>
@@ -356,11 +278,4 @@ function backToDashboard() {
 .add-agent { border:1px solid var(--border); background:var(--bg); color:var(--blue); }
 .save-agent { background:var(--blue); color:#fff; }
 .save-agent:disabled { background:var(--fill-strong); color:var(--text-3); }
-.collaboration-form { display:flex; flex-direction:column; gap:12px; }
-.collaboration-form label { display:flex; flex-direction:column; gap:5px; color:var(--text-3); font-size:11px; }
-.collaboration-form .select-trigger, .collaboration-form textarea { width:100%; min-height:38px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--fill); color:var(--text); font:inherit; font-size:12px; }
-.collaboration-form textarea { resize:vertical; line-height:1.5; }
-.collaboration-form input[type="range"] { width:100%; accent-color:var(--blue); }
-.check-line { flex-direction:row !important; align-items:center; gap:7px !important; color:var(--text-2) !important; font-size:12px !important; }
-.check-line input { width:16px; height:16px; accent-color:var(--blue); }
 </style>

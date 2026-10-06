@@ -1,18 +1,10 @@
 /// <reference types="vite/client" />
 
-interface WindowEventMap {
-  'coomi:floating-state': CustomEvent<boolean>
-}
-
 interface Window {
   __coomiHandleSystemBack?: () => boolean
   __coomiApplyAppearance?: (config: AppearanceConfig) => void
-  __coomiApplyDisplayScale?: (scale: number) => void
-  __coomiFloating?: boolean
   CoomiAndroid?: {
     openDashboard(): void
-    closeHostActivity?(): void
-    openFloatingWindow?(): void
     importFiles?(): void
     importFilesForRequest?(requestId: string): void
     authorizeFolder?(): void
@@ -23,38 +15,24 @@ interface Window {
     saveImageData?(dataUrl: string, fileName: string): void
     /** 通知原生层任务运行状态（更新通知栏：执行中 / 已完成）。 */
     updateTaskStatus?(status: string): void
-    /** 1.4.5 后台任务通知协议，携带会话定位信息。 */
-    updateTaskStatusDetails?(status: string, sessionId: string, background: boolean): void
     /** 获取设备与 App 诊断信息（报错反馈使用，不含对话内容）。 */
     getDiagnostics?(): string
     /** 原生上报报错反馈（绕过 WebView CORS）：json 为反馈体，callbackId 用于异步回调。 */
     sendFeedback?(json: string, callbackId: string): void
     getThemeMode?(): string
     setThemeMode?(mode: string): void
-    setDisplayScale?(scale: number): void
-    getQuickCommands?(): string
-    setQuickCommands?(json: string): boolean
     getDigitalLifeEnabled?(): boolean
     setDigitalLifeEnabled?(enabled: boolean): void
-    /** 任务完成通知开关（原生侧 SharedPreferences，默认开）。 */
-    getTaskNotifyEnabled?(): boolean
-    setTaskNotifyEnabled?(enabled: boolean): void
     getAppearanceConfig?(): string
     /** 当前安装的 versionCode（检查更新页对比用）。 */
     getAppVersionCode?(): number
-    /** 当前安装的 versionName（检查更新页展示用）。 */
-    getAppVersionName?(): string
     /** 下载并安装更新 APK（url 为 APK 直链，version 用于文件名/提示）。 */
     installApk?(url: string, version: string): void
-    /** 测试通道更新红点开关（默认关）。 */
+    /** 双通道更新：读取本地版本名（展示用，原生缺失时降级为 build 码）。 */
+    getAppVersionName?(): string
+    /** 测试通道红点开关读取/写入（仅 Coomi 本线原生提供）。 */
     getTestUpdateDotEnabled?(): boolean
     setTestUpdateDotEnabled?(enabled: boolean): void
-    /** F8 语音陪伴 TTS 朗读（text 为纯文本；无桥时前端静默降级，仅留日志）。 */
-    speak?(text: string): void
-    /** F8 语音陪伴：停止当前朗读。 */
-    ttsStop?(): void
-    /** F8 语音陪伴：设置语速（0.5–2.0，1.0 为正常；缺省 1.0）。 */
-    setTtsRate?(rate: number): void
   }
 }
 
@@ -64,7 +42,6 @@ interface AppearanceConfig {
   chatBackground?: boolean
   chatMask?: number
   revision?: number
-  displayScale?: number
 }
 
 declare module '*.vue' {
