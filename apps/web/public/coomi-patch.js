@@ -178,15 +178,15 @@
     obs.observe(target, { childList: true, subtree: true });
   }
   
+  const seenTextNodes = new WeakSet();
   function applyStreamAnim(el) {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
     const nodes = [];
     let n;
     while (n = walker.nextNode()) {
-      if (n.textContent.trim() && !n.dataset.streamAnim) nodes.push(n);
+      if (n.textContent.trim() && !seenTextNodes.has(n)) { seenTextNodes.add(n); nodes.push(n); }
     }
     nodes.forEach(tn => {
-      tn.dataset.streamAnim = "1";
       const text = tn.textContent, parent = tn.parentNode;
       const parts = text.split(/(\s+)/);
       const frag = document.createDocumentFragment();
