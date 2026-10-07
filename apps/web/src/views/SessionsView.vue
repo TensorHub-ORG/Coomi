@@ -7,6 +7,7 @@
  */
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { goBack } from '@/bridge/navigation'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore, formatSessionTime, type SessionMeta } from '@/stores/sessions'
 import { authedFetch } from '@/bridge/http'
@@ -183,7 +184,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="page">
-    <PageHead title="会话历史" @back="router.push('/')">
+    <PageHead title="会话历史" @back="goBack(router, 'dashboard')">
       <template #right>
         <button class="icon-btn" aria-label="导入" @click="importFiles" :disabled="importLoading">
           <CoomiIcon name="import" />

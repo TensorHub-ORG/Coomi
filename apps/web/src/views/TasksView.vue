@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { goBack } from '@/bridge/navigation'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import TaskDetailPanel from '@/components/TaskDetailPanel.vue'
@@ -73,7 +74,7 @@ onBeforeUnmount(() => { if (poll) clearInterval(poll) })
 
 <template>
   <div class="page" :class="{ embedded: props.embedded }">
-    <PageHead v-if="!props.embedded" title="任务中心" @back="router.push('/')" />
+    <PageHead v-if="!props.embedded" title="任务中心" @back="goBack(router, 'dashboard')" />
     <main class="body">
       <div class="summary">
         <span><strong>{{ active.length }}</strong> 个任务运行中</span>

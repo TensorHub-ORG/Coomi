@@ -5,6 +5,7 @@
  */
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { goBack } from '@/bridge/navigation'
 import { useConfigStore, DEFAULT_CONNECTION_SETTINGS, PERMISSION_MODES, REASONING_EFFORTS, type ConnectionSettings } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
@@ -22,6 +23,7 @@ const connection = useConnectionStore()
 
 const connectionDraft = ref<ConnectionSettings>({ ...config.connectionSettings })
 const reconnectInitialSeconds = ref(config.connectionSettings.reconnectInitialDelayMs / 1000)
+const activeTab = ref<'chat' | 'app' | 'link'>('chat')
 const reconnectMaxSeconds = ref(config.connectionSettings.reconnectMaxDelayMs / 1000)
 const connectionError = ref('')
 const connectionSaved = ref(false)
@@ -140,8 +142,14 @@ onMounted(async () => {
 </script>
 <template>
   <div class="page">
-    <PageHead title="设置" @back="router.push('/')" />
+    <PageHead title="设置" @back="goBack(router, 'dashboard')" />
+      <div class="tabs" role="tablist" aria-label="设置分类">
+        <button :class="{ on: activeTab === 'chat' }" @click="activeTab = 'chat'">对话</button>
+        <button :class="{ on: activeTab === 'link' }" @click="activeTab = 'link'">连接与模型</button>
+        <button :class="{ on: activeTab === 'app' }" @click="activeTab = 'app'">应用</button>
+      </div>
     <main class="body">
+<template v-if="activeTab === 'app'">
       <p class="sec-label">会话</p>
       <div class="group">
         <button class="row" @click="router.push('/sessions')">
@@ -154,6 +162,9 @@ onMounted(async () => {
         </button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">权限模式</p>
       <div class="group">
         <button v-for="m in PERMISSION_MODES" :key="m.mode" class="row" @click="session.setPermissionMode(m.mode)">
@@ -172,6 +183,9 @@ onMounted(async () => {
         <button v-for="m in PERMISSION_MODES" :key="`default-${m.mode}`" class="option" :class="{ selected: config.defaultPermissionMode === m.mode }" @click="config.setDefaultPermissionMode(m.mode)">{{ m.label }}</button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">对话模式</p>
       <div class="group">
         <button class="row" @click="session.togglePlanMode()">
@@ -192,6 +206,9 @@ onMounted(async () => {
         </button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">推理强度</p>
       <div class="group compact-options">
         <button v-for="item in REASONING_EFFORTS" :key="item.value" class="option" :class="{ selected: config.reasoningEffort === item.value }" @click="session.setReasoningEffort(item.value)">
@@ -199,6 +216,9 @@ onMounted(async () => {
         </button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">狂暴模型</p>
       <div class="group model-list">
         <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先配置 Provider。</p>
@@ -212,6 +232,9 @@ onMounted(async () => {
       </div>
       <p class="option-note">{{ config.berserkModel ? '狂暴模式将使用 ' + config.berserkModel + ' 检查并继续任务' : '未设置狂暴模型：切换狂暴模式时会提示先配置' }}</p>
 
+</template>
+
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">工具调用上限</p>
       <div class="group compact-options rounds">
         <button v-for="rounds in [192, 256, 512]" :key="rounds" class="option" :class="{ selected: config.maxToolRounds === rounds }" @click="session.setMaxToolRounds(rounds)">
@@ -220,6 +243,9 @@ onMounted(async () => {
       </div>
       <p class="option-note">默认 192，256 为进阶选项，512 为硬上限。</p>
 
+</template>
+
+<template v-if="activeTab === 'link'">
       <p class="sec-label">连接、重试与并发</p>
       <div class="group numeric-settings">
         <label class="number-row">
@@ -249,6 +275,9 @@ onMounted(async () => {
         </div>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">身份定位</p>
       <div class="group">
         <button class="row" @click="router.push('/persona')">
@@ -261,6 +290,9 @@ onMounted(async () => {
         </button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'app'">
       <p class="sec-label">外观</p>
       <div class="group">
         <button class="row" @click="router.push('/appearance')">
@@ -286,6 +318,9 @@ onMounted(async () => {
         </button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'app'">
       <p class="sec-label">隐私</p>
       <div class="group">
         <button class="row" @click="toggleTelemetry">
@@ -302,6 +337,9 @@ onMounted(async () => {
         </button>
       </div>
 
+</template>
+
+<template v-if="activeTab === 'link'">
       <p class="sec-label">模型</p>
       <div class="group model-list">
         <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先到下面配置 Provider。</p>
@@ -313,6 +351,9 @@ onMounted(async () => {
           <CoomiIcon v-if="isCurrent(r.providerId, r.model)" name="check" :size="17" class="tick" />
         </button>
       </div>
+</template>
+
+<template v-if="activeTab === 'app'">
       <p class="sec-label">配置</p>
       <div class="group">
         <button class="row" @click="router.push('/sessions')">
@@ -323,7 +364,8 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div class="foot">
+      </template>
+<div class="foot">
         <span class="conn" :class="{ on: connection.isOpen }"><i />{{ connection.label }}</span>
         <span class="sid">{{ session.sessionId }}</span>
       </div>
@@ -334,6 +376,9 @@ onMounted(async () => {
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .body { flex: 1; overflow-y: auto; padding: 14px 12px calc(var(--safe-bottom) + 24px); }
+.tabs { display: flex; gap: 6px; margin: 10px 0 4px; }
+.tabs button { flex: 1; min-height: 36px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--bg); color: var(--text-2); font-size: 12.5px; }
+.tabs button.on { background: var(--blue-soft); border-color: var(--blue-border, var(--blue)); color: var(--blue); font-weight: 650; }
 .sec-label { margin: 16px 0 0; }
 .sec-label:first-child { margin-top: 2px; }
 

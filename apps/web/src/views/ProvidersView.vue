@@ -5,6 +5,7 @@ import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import ThemeSelect from '@/components/ThemeSelect.vue'
 import { useConfigStore, type ProviderConfig, type ProviderStatus, type SubAgentConfig } from '@/stores/config'
+import { apiGet, apiSend } from '@/bridge/http'
 
 const router = useRouter()
 const config = useConfigStore()
@@ -22,7 +23,27 @@ const configuredProviders = computed(() => config.providers.filter(provider => p
 const configuredProviderOptions = computed(() => configuredProviders.value.map(provider => ({ value: provider.id, label: provider.name, note: provider.id })))
 const subAgentDirty = computed(() => JSON.stringify({ agents: subAgents.value, fallbackId: fallbackId.value, maxAgents: subAgentLimit.value }) !== savedSnapshot.value)
 
+const autoModelCheck = ref(false)
+const autoModelCheckSaving = ref(false)
+async function loadAutoModelCheck() {
+  try {
+    const res = await apiGet<{ enabled: boolean }>('/api/settings/model-check')
+    autoModelCheck.value = !!res.enabled
+  } catch { /* 引擎不可用时保持默认关 */ }
+}
+async function toggleAutoModelCheck() {
+  if (autoModelCheckSaving.value) return
+  autoModelCheckSaving.value = true
+  const next = !autoModelCheck.value
+  try {
+    await apiSend('/api/settings/model-check', 'PUT', { enabled: next })
+    autoModelCheck.value = next
+  } catch { /* 失败时保持原状态 */ }
+  autoModelCheckSaving.value = false
+}
+
 onMounted(async () => {
+  void loadAutoModelCheck()
   await config.fetchProviders()
   await config.fetchSubAgentSettings()
   loadSubAgents()
@@ -145,6 +166,15 @@ function backToDashboard() {
     </PageHead>
 
     <main class="body">
+      <div class="group" style="margin-bottom: 14px;">
+        <button class="modelcheck-row" @click="toggleAutoModelCheck">
+          <span class="rt">
+            <span class="rmain">自动检查模型可用列表</span>
+            <span class="rsub">{{ autoModelCheck ? '开启中：激活/切换模型时会校验凭据并拉取模型列表' : '已关闭：激活/切换模型不做校验，避免不可用供应商报错' }}</span>
+          </span>
+          <span class="sw" :class="{ on: autoModelCheck }" />
+        </button>
+      </div>
       <div class="tabs" role="tablist">
         <button :class="{ on: tab === 'providers' }" @click="tab = 'providers'">主模型</button>
         <button :class="{ on: tab === 'subagents' }" @click="tab = 'subagents'">子代理 <span>{{ subAgents.length }}/{{ subAgentLimit }}</span></button>
@@ -228,6 +258,15 @@ function backToDashboard() {
 .banner :deep(svg) { flex-shrink: 0; margin-top: 1px; color: var(--orange); }
 .hint { padding: 4px; text-align: center; font-size: 13px; line-height: 1.65; color: var(--text-3); }
 .group { overflow: hidden; border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); }
+.modelcheck-row { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 56px; padding: 11px 13px; text-align: left; background: var(--bg); }
+.modelcheck-row:active { background: var(--fill); }
+.modelcheck-row .rt { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.modelcheck-row .rmain { font-size: 13.5px; font-weight: 620; color: var(--text); }
+.modelcheck-row .rsub { font-size: 11.5px; color: var(--text-3); }
+.sw { position: relative; flex-shrink: 0; width: 44px; height: 26px; border-radius: 13px; background: var(--border-strong); transition: background .2s; }
+.sw::after { content: ''; position: absolute; top: 2.5px; left: 2.5px; width: 21px; height: 21px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-1); transition: transform .2s; }
+.sw.on { background: var(--blue); }
+.sw.on::after { transform: translateX(18px); }
 .provider-row {
   display: flex; align-items: center; gap: 11px; width: 100%; min-height: 66px;
   padding: 11px 13px; text-align: left; background: var(--bg);

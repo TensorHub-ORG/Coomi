@@ -1060,6 +1060,10 @@ pub async fn serve(
             "/api/settings/experience",
             get(experience_settings_get).put(experience_settings_set),
         )
+        .route(
+            "/api/settings/model-check",
+            get(model_check_get).put(model_check_put),
+        )
 .route(
             "/api/ux-program",
             get(ux_program_get).put(ux_program_put),
@@ -4958,7 +4962,9 @@ async fn upsert_provider(
         .unwrap_or(false);
     if wants_activate {
         validate_provider_activation(&settings)?;
-        verify_provider_credentials(&settings).await?;
+        if auto_model_check_enabled(&document) {
+            verify_provider_credentials(&settings).await?;
+        }
         document.active = id.clone();
     }
     document.providers.insert(id.clone(), settings);
@@ -5019,7 +5025,9 @@ async fn activate_provider(
             return Err(ApiError::bad_request("DeepSeek 账号尚未登录"));
         }
     } else {
-        verify_provider_credentials(&provider).await?;
+        if auto_model_check_enabled(&document) {
+            verify_provider_credentials(&provider).await?;
+        }
     }
     document.active = id;
     document.save(&path).map_err(ApiError::from)?;
@@ -5064,6 +5072,35 @@ async fn select_provider_model(
     document.active = id;
     document.save(&path).map_err(ApiError::from)?;
     Ok(Json(json!({"ok": true})))
+}
+
+/// 自动检查模型可用列表（提供商设置开关，默认关闭）。开启后激活/切换模型时
+/// 才会做凭据校验与模型发现；关闭时直接信任用户配置，避免不可用供应商报错。
+fn auto_model_check_enabled(document: &ProviderDocument) -> bool {
+    document
+        .extra
+        .get("auto_model_check")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+async fn model_check_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let document = read_provider_document(&state.home)?;
+    Ok(Json(json!({ "enabled": auto_model_check_enabled(&document) })))
+}
+
+async fn model_check_put(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let enabled = body.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+    let path = providers_path(&state.home);
+    let mut document = read_provider_document(&state.home)?;
+    document
+        .extra
+        .insert("auto_model_check".into(), Value::Bool(enabled));
+    document.save(&path).map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "enabled": enabled })))
 }
 
 async fn verify_provider_credentials(provider: &ProviderSettings) -> Result<(), ApiError> {
@@ -6672,9 +6709,11 @@ async fn handle_command(
                             context.send_error(envelope_id, error.message);
                             return;
                         }
-                        if let Err(error) = verify_provider_credentials(&candidate).await {
-                            context.send_error(envelope_id, error.message);
-                            return;
+                        if auto_model_check_enabled(&document) {
+                            if let Err(error) = verify_provider_credentials(&candidate).await {
+                                context.send_error(envelope_id, error.message);
+                                return;
+                            }
                         }
                         document
                             .providers

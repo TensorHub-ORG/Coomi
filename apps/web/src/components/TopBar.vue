@@ -25,32 +25,35 @@ const modelOpen = ref(false)
 const pathPickerOpen = ref(false)
 const pathInput = ref('')
 const pathNotice = ref('')
-const activeModelCategory = ref('')
+
 const pathQuickOptions = computed(() => session.cwd ? [session.cwd] : [])
-// 按能力三分类（文本/图像理解/图像生成），恢复 v1.4.4 的模型选择卡片；
-// DeepSeek 账号模型归入文本模型。行内保留供应商标注。
-const modelGroups = computed(() => {
-  const groups: Record<'text' | 'vision' | 'image', Array<{ providerId: string; provider: string; model: string }>> = { text: [], vision: [], image: [] }
+// 先按供应商分组，供应商内再按三类能力（文本/图像理解/图像生成）分区；
+// DeepSeek 账号模型归入文本模型。
+interface PickerItem { providerId: string; provider: string; model: string }
+const providerGroups = computed(() => {
+  const list: Array<{ providerId: string; provider: string; caps: { text: PickerItem[]; vision: PickerItem[]; image: PickerItem[] } }> = []
   for (const provider of [...config.providers].sort((a, b) => Number(b.id === config.activeId) - Number(a.id === config.activeId))) {
+    const caps = { text: [] as PickerItem[], vision: [] as PickerItem[], image: [] as PickerItem[] }
     for (const model of new Set([...(provider.models ?? []), provider.model].filter(Boolean))) {
       const capabilities = provider.capabilityOverrides?.[model!]
       const item = { providerId: provider.id, provider: provider.name, model: model! }
-      if (capabilities?.text ?? true) groups.text.push(item)
-      if (capabilities?.vision ?? false) groups.vision.push(item)
-      if (capabilities?.image_generation ?? false) groups.image.push(item)
+      if (capabilities?.text ?? true) caps.text.push(item)
+      if (capabilities?.vision ?? false) caps.vision.push(item)
+      if (capabilities?.image_generation ?? false) caps.image.push(item)
+    }
+    if (caps.text.length + caps.vision.length + caps.image.length > 0) {
+      list.push({ providerId: provider.id, provider: provider.name, caps })
     }
   }
-  return [
-    { id: 'text' as const, label: '文本模型', items: groups.text },
-    { id: 'vision' as const, label: '图像理解', items: groups.vision },
-    { id: 'image' as const, label: '图像生成', items: groups.image },
-  ]
+  return list
 })
-const activeModelGroup = computed(() => modelGroups.value.find(group => group.id === activeModelCategory.value) ?? {
-  id: '__empty__',
-  label: '分类',
-  items: [] as Array<{ providerId: string; provider: string; model: string }>,
-})
+const CAP_SECTIONS: Array<{ key: 'text' | 'vision' | 'image'; label: string }> = [
+  { key: 'text', label: '文本模型' },
+  { key: 'vision', label: '图像理解' },
+  { key: 'image', label: '图像生成' },
+]
+const activeProviderId = ref('')
+const activeProvider = computed(() => providerGroups.value.find(group => group.providerId === activeProviderId.value) ?? providerGroups.value[0])
 const usagePercent = computed(() => Math.min(100, Math.max(0, Math.round((session.usage?.contextRatio ?? 0) * 100))))
 function choose(providerId: string, model: string) {
   session.selectModel(providerId, model)
@@ -106,10 +109,8 @@ onMounted(async () => {
 function toggleModel() {
   modelOpen.value = !modelOpen.value
   if (modelOpen.value) {
-    const selected = modelGroups.value.find(group => group.items.some(item => (
-      item.providerId === config.currentProviderId && item.model === config.currentModel
-    )))
-    activeModelCategory.value = selected?.id ?? modelGroups.value[0]?.id ?? ''
+    const selected = providerGroups.value.find(group => group.providerId === config.currentProviderId)
+    activeProviderId.value = selected?.providerId ?? providerGroups.value[0]?.providerId ?? ''
   }
 }
 
@@ -154,26 +155,33 @@ function browseInFileManager() {
     <Teleport to="body">
     <button v-if="modelOpen" class="model-scrim" aria-label="关闭模型选择" @click="modelOpen = false" />
     <div v-if="modelOpen" class="model-menu">
-      <div v-if="modelGroups.length" class="model-tabs" role="tablist" aria-label="按模型能力分类">
+      <div v-if="providerGroups.length" class="model-tabs" role="tablist" aria-label="按供应商分类">
         <button
-          v-for="group in modelGroups"
-          :key="group.id"
+          v-for="group in providerGroups"
+          :key="group.providerId"
           role="tab"
-          :aria-selected="activeModelCategory === group.id"
-          :class="{ active: activeModelCategory === group.id }"
-          @click="activeModelCategory = group.id"
-        >{{ group.label }}</button>
+          :aria-selected="activeProvider?.providerId === group.providerId"
+          :class="{ active: activeProvider?.providerId === group.providerId }"
+          @click="activeProviderId = group.providerId"
+        >{{ group.provider }}</button>
       </div>
       <section class="model-list" role="tabpanel">
-        <button
-          v-for="item in activeModelGroup.items" :key="item.providerId + ':' + item.model" class="model-row"
-          :class="{ selected: item.providerId === config.currentProviderId && item.model === config.currentModel }"
-          @click="choose(item.providerId, item.model)"
-        >
-          <span><b>{{ displayModelName(item.model) }}</b><small>{{ item.provider }}</small></span>
-          <CoomiIcon v-if="item.providerId === config.currentProviderId && item.model === config.currentModel" name="check" :size="15" />
-        </button>
-        <p v-if="activeModelGroup.items.length === 0" class="model-empty">{{ modelGroups.length ? '该分类暂无可用模型' : '暂无已配置供应商' }}</p>
+        <template v-if="activeProvider">
+          <template v-for="cap in CAP_SECTIONS" :key="cap.key">
+            <template v-if="activeProvider.caps[cap.key].length">
+              <p class="cap-label">{{ cap.label }}</p>
+              <button
+                v-for="item in activeProvider.caps[cap.key]" :key="item.providerId + ':' + item.model" class="model-row"
+                :class="{ selected: item.providerId === config.currentProviderId && item.model === config.currentModel }"
+                @click="choose(item.providerId, item.model)"
+              >
+                <span><b>{{ displayModelName(item.model) }}</b></span>
+                <CoomiIcon v-if="item.providerId === config.currentProviderId && item.model === config.currentModel" name="check" :size="15" />
+              </button>
+            </template>
+          </template>
+        </template>
+        <p v-if="!activeProvider || (activeProvider.caps.text.length + activeProvider.caps.vision.length + activeProvider.caps.image.length === 0)" class="model-empty">{{ providerGroups.length ? '该供应商暂无可用模型' : '暂无已配置供应商' }}</p>
       </section>
     </div>
     </Teleport>
@@ -281,6 +289,8 @@ function browseInFileManager() {
 .model-row.selected { background: var(--blue-soft); color: var(--blue); }
 .model-row:active { background: var(--fill-press); }
 .model-empty { padding: 16px 10px; text-align: center; font-size: 12.5px; color: var(--text-3); }
+.cap-label { margin: 10px 0 2px; font-size: 11px; font-weight: 700; color: var(--text-3); }
+.cap-label:first-child { margin-top: 2px; }
 .icon-btn {
   display: grid; place-items: center; flex-shrink: 0;
   width: 40px; height: 40px;
