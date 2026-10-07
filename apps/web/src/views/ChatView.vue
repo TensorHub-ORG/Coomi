@@ -32,7 +32,6 @@ import LoopProgressBar from '@/components/LoopProgressBar.vue'
 import ApprovalSheet from '@/components/ApprovalSheet.vue'
 import QuestionSheet from '@/components/QuestionSheet.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
-import SendMorphOverlay from '@/components/SendMorphOverlay.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
 const router = useRouter()
@@ -249,7 +248,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 
     <SideDrawer :open="drawerOpen" @close="closeDrawer" />
     <ArtifactMindMap :open="mindMapOpen" @close="closeMindMap" />
-    <SendMorphOverlay />
 
     <ApprovalSheet
       v-if="session.pendingApproval"
@@ -276,8 +274,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   background-size: cover;
   /* comax 主题的卡片阴影偏重(alpha .32~.48), 全宽卡片堆叠时在右缘形成
      连续的阴影渐变带; 会话页内统一换成 1.4.8 的轻阴影。 */
-  --shadow-1: 0 1px 3px rgba(15, 23, 42, .05);
-  --shadow-2: 0 4px 14px rgba(15, 23, 42, .07);
+  --shadow-1: none;
+  --shadow-2: none;
   overflow-x: clip;
 }
 

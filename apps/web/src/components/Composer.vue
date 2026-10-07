@@ -130,18 +130,7 @@ async function submit() {
   const requestText = [visibleText, fileInstruction].filter(Boolean).join('\n\n')
   const fileNames = files.map(path => path.split('/').pop() || '文件')
   const displayText = visibleText
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-  const morph = config.sendMorphAnimation && !reduceMotion && !session.isBusy && !session.pendingEdit
-  const source = sendButton.value?.getBoundingClientRect()
-  const messageId = session.sendMessage(requestText, displayText, morph && !!source, fileNames)
-  if (messageId && morph && source) {
-    window.dispatchEvent(new CustomEvent('coomi:send-morph', { detail: {
-      messageId,
-      source: { left: source.left, top: source.top, width: source.width, height: source.height },
-    } }))
-    // 覆盖层若因页面切换或旧 WebView 能力不足未接到事件，不能让消息永久隐藏。
-    setTimeout(() => session.completeSendMorph(messageId), 1600)
-  }
+  const messageId = session.sendMessage(requestText, displayText, false, fileNames)
   text.value = ''
   importedFiles.value = []
   await nextTick()

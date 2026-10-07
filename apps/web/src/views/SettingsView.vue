@@ -376,8 +376,8 @@ onMounted(async () => {
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .body { flex: 1; overflow-y: auto; padding: 14px 12px calc(var(--safe-bottom) + 24px); }
-.tabs { display: flex; gap: 6px; margin: 10px 0 4px; }
-.tabs button { flex: 1; min-height: 36px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--bg); color: var(--text-2); font-size: 12.5px; }
+.tabs { display: flex; gap: 6px; margin: 10px 0 4px;  overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; white-space: nowrap; }
+.tabs button { flex: 0 0 auto; min-height: 36px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--bg); color: var(--text-2); font-size: 12.5px; }
 .tabs button.on { background: var(--blue-soft); border-color: var(--blue-border, var(--blue)); color: var(--blue); font-weight: 650; }
 .sec-label { margin: 16px 0 0; }
 .sec-label:first-child { margin-top: 2px; }
