@@ -5066,7 +5066,9 @@ async fn select_provider_model(
             return Err(ApiError::bad_request("DeepSeek 账号尚未登录"));
         }
     } else {
-        verify_provider_credentials(&provider).await?;
+        if auto_model_check_enabled(&document) {
+            verify_provider_credentials(&provider).await?;
+        }
     }
     document.providers.insert(id.clone(), provider);
     document.active = id;
