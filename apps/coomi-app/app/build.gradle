@@ -3,8 +3,8 @@ plugins {
 }
 
 def coomiDevBuild = System.getenv("COOMI_DEV_BUILD") == "1"
-def coomiPackageName = coomiDevBuild ? "com.coomidev.android" : "com.cubee.newapp4"
-def coomiAppName = coomiDevBuild ? "CoomiDev" : "Comax"
+def coomiPackageName = coomiDevBuild ? "com.coomidev.android" : "com.coomi.android"
+def coomiAppName = coomiDevBuild ? "CoomiDev" : "Coomi"
 def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
 // A rollback release keeps the chosen stable source/versionName but must use a
 // newer Android versionCode. A project property takes precedence over the env.

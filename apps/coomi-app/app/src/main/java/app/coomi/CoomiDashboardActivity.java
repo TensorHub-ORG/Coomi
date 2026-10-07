@@ -2,6 +2,7 @@ package app.coomi;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -77,8 +78,6 @@ public class CoomiDashboardActivity extends Activity {
     private View mUsageButton;
     private View mFeedbackButton;
     private View mDonateButton;
-    private boolean mUpdateCheckStarted;
-    private AlertDialog mUpdateDialog;
     private String mAppliedThemeMode;
     private String mAppliedAppearanceSignature;
 
@@ -534,105 +533,18 @@ public class CoomiDashboardActivity extends Activity {
         }
     }
 
-    private JSONObject readReasoningStatistics() {
-        File file = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".coomi/usage/summary.json");
-        try {
-            if (!file.isFile()) return new JSONObject();
-            byte[] bytes;
-            try (InputStream input = new FileInputStream(file);
-                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[4096];
-                int count;
-                while ((count = input.read(buffer)) >= 0) output.write(buffer, 0, count);
-                bytes = output.toByteArray();
-            }
-            JSONObject document = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-            JSONObject totals = document.optJSONObject("efforts");
-            if (totals == null) totals = document;
-            JSONObject averages = new JSONObject();
-            String[] efforts = {"auto", "low", "medium", "high", "xhigh"};
-            for (String effort : efforts) {
-                JSONObject total = totals.optJSONObject(effort);
-                JSONObject average = new JSONObject();
-                long turns = total == null ? 0 : total.optLong("turns", 0);
-                long input = total == null ? 0 : total.optLong(
-                    "cache_observed_input_tokens",
-                    total.optLong("total_input_tokens", 0)
-                );
-                long cached = total == null ? 0 : total.optLong("total_cached_input_tokens", 0);
-                long tokens = total == null ? 0 : total.optLong("total_tokens", 0);
-                long duration = total == null ? 0 : total.optLong("total_duration_ms", 0);
-                long cacheTurns = total == null ? 0 : total.optLong("cache_turns", 0);
-                average.put("turns", turns);
-                average.put("cache_available", cacheTurns > 0 && input > 0);
-                if (cacheTurns > 0 && input > 0) {
-                    average.put("cache_hit_rate", Math.min(1.0d, (double) cached / input));
-                }
-                if (turns > 0) {
-                    average.put("average_duration_ms", duration / turns);
-                    average.put("average_total_tokens", tokens / turns);
-                }
-                averages.put(effort, average);
-            }
-            return averages;
-        } catch (Exception ignored) {
-            return new JSONObject();
-        }
-    }
-
-    private static String isoUtcNow() {
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
-        format.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return format.format(new Date());
-    }
-
     /** 检查更新：进入二级页面（正式/测试通道），页面内发起下载与安装。 */
     private void checkUpdate() {
         openCoomiRoute("#/updates");
     }
 
-    /** 每次应用启动进入控制台时检查一次；发现新版时展示版本与更新内容。 */
     private void checkUpdateSilently() {
-        if (mUpdateCheckStarted) return;
-        mUpdateCheckStarted = true;
-        UpdateChecker.checkDetails(this, (info, error) -> runOnUiThread(() -> {
-            if (isFinishing() || isDestroyed() || info == null || !info.hasUpdate(this)) return;
-            mUpdateDot.setVisibility(View.VISIBLE);
-            mCheckUpdateDesc.setText("发现新版本 " + info.version + "，点击更新");
-            showStartupUpdateDialog(info);
-        }));
-    }
-
-    private void showStartupUpdateDialog(UpdateChecker.UpdateInfo info) {
-        if (mUpdateDialog != null && mUpdateDialog.isShowing()) return;
-        StringBuilder message = new StringBuilder();
-        message.append("当前版本：").append(BuildConfig.VERSION_NAME)
-            .append("\n新版本：").append(info.version);
-        if (info.publishedAt != null && !info.publishedAt.trim().isEmpty()) {
-            message.append("\n发布时间：").append(info.publishedAt.trim());
-        }
-        if (info.size > 0L) {
-            message.append("\n安装包：")
-                .append(String.format(Locale.US, "%.1f MB", info.size / 1024d / 1024d));
-        }
-        if (info.notes != null && !info.notes.trim().isEmpty()) {
-            message.append("\n\n更新内容\n").append(info.notes.trim());
-        }
-        mUpdateDialog = new AlertDialog.Builder(this)
-            .setTitle("发现新版本 " + info.version)
-            .setMessage(message.toString())
-            .setNegativeButton("稍后", null)
-            .setNeutralButton("查看更新", (dialog, which) -> openCoomiRoute("#/updates"))
-            .setPositiveButton("立即更新", (dialog, which) -> {
-                if (info.apkUrl == null || info.apkUrl.trim().isEmpty()) {
-                    Toast.makeText(this, "更新信息缺少下载地址", Toast.LENGTH_LONG).show();
-                    return;
-                }
-                UpdateChecker.downloadAndInstall(this, info.apkUrl, info.version);
-            })
-            .create();
-        mUpdateDialog.setOnDismissListener(dialog -> mUpdateDialog = null);
-        mUpdateDialog.show();
+        UpdateChecker.checkSilent(this, (hasUpdate, version, notes, error) -> {
+            if (hasUpdate) {
+                mUpdateDot.setVisibility(View.VISIBLE);
+                mCheckUpdateDesc.setText("发现新版本 " + version + "，点击更新");
+            }
+        });
     }
 
 }

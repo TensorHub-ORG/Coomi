@@ -29,7 +29,10 @@ public final class CoomiConstants {
 
     // Notification
     public static final String NOTIFICATION_CHANNEL_ID = "coomi_engine";
-    public static final String NOTIFICATION_CHANNEL_NAME = "Comax Engine";
+    public static final String NOTIFICATION_CHANNEL_NAME = "Coomi Engine";
+    /** User-visible updates for background and long-running tasks. */
+    public static final String TASK_NOTIFICATION_CHANNEL_ID = "coomi_tasks";
+    public static final String TASK_NOTIFICATION_CHANNEL_NAME = "Coomi Tasks";
     public static final int NOTIFICATION_ID = 1001;
 
     // Bootstrap / Rust runtime
