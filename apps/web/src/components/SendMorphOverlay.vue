@@ -76,11 +76,14 @@ async function run(detail: MorphRequest) {
       const ease = 1 - Math.pow(1 - t, 3)
       const cx = startCX + (endCX - startCX) * ease
       const cy = startCY + (endCY - startCY) * ease
-      const w = source.width + (28 - source.width) * ease
+      const w = source.width + (30 - source.width) * ease
       node.style.width = `${w}px`
       node.style.height = `${w}px`
-      node.style.transform = `translate3d(${cx - w / 2}px, ${cy - w / 2}px, 0) scale(${1 - t * .25})`
-      node.style.opacity = String(1 - t * .55)
+      // 水墨感: 有机非对称圆角随进度轻微摆动, 像墨滴在表面张力下呼吸。
+      const wob = Math.sin(t * 9) * 3
+      node.style.borderRadius = `${46 + wob}% ${54 - wob}% ${50 - wob}% ${50 + wob}% / ${50 - wob}% ${52 + wob}% ${48 + wob}% ${50 - wob}%`
+      node.style.transform = `translate3d(${cx - w / 2}px, ${cy - w / 2}px, 0) rotate(${t * 14}deg)`
+      node.style.opacity = String(1 - t * .4)
       if (t < 1) requestAnimationFrame(step)
       else resolve()
     }
@@ -92,20 +95,21 @@ async function run(detail: MorphRequest) {
   const cx = rect.left + rect.width / 2
   const cy = rect.top + rect.height / 2
   node.style.opacity = '0'
+  // 水墨扩散: 墨斑以有机形状在落点晕开, 边缘随扩散虚化, 如墨滴入纸。
   if (ripple.value && typeof ripple.value.animate === 'function') {
-    const rings = [ripple.value]
+    const blots = [ripple.value]
     const r2 = ripple.value.nextElementSibling as HTMLElement | null
-    if (r2) rings.push(r2)
-    rings.forEach((el, idx) => {
-      el.style.left = `${cx - 26}px`
-      el.style.top = `${cy - 26}px`
+    if (r2) blots.push(r2)
+    blots.forEach((el, idx) => {
+      el.style.left = `${cx - 30}px`
+      el.style.top = `${cy - 30}px`
       const anim = el.animate([
-        { transform: 'scale(.35)', opacity: idx === 0 ? .6 : 0 },
-        { transform: 'scale(1.9)', opacity: 0 },
-      ], { duration: 460, delay: idx * 140, easing: 'cubic-bezier(.16,.84,.3,1)', fill: 'forwards' })
+        { transform: 'scale(.25) rotate(0deg)', opacity: idx === 0 ? .5 : .3, filter: 'blur(0px)' },
+        { transform: `scale(${1.35 + idx * .45}) rotate(${idx === 0 ? 14 : -10}deg)`, opacity: 0, filter: 'blur(3px)' },
+      ], { duration: 640, delay: idx * 150, easing: 'cubic-bezier(.14,.78,.28,1)', fill: 'forwards' })
       running.push(anim)
     })
-    await new Promise<void>(r => setTimeout(r, 620))
+    await new Promise<void>(r => setTimeout(r, 800))
   }
   finish(detail.messageId)
 }
@@ -135,15 +139,19 @@ onBeforeUnmount(() => {
 <style scoped>
 .send-morph-dot {
   position: fixed; z-index: 95; pointer-events: none;
-  background: var(--blue); color: transparent;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--blue) 52%, transparent);
+  background: color-mix(in srgb, var(--text) 78%, var(--blue));
+  color: transparent;
+  filter: blur(.3px);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--text) 30%, transparent);
   will-change: transform, width, height, border-radius, opacity;
 }
 .send-morph-ripple {
-  position: fixed; z-index: 94; width: 52px; height: 52px;
-  border: 2px solid color-mix(in srgb, var(--blue) 60%, transparent);
-  border-radius: 50%; background: transparent; pointer-events: none; opacity: 0;
+  position: fixed; z-index: 94; width: 60px; height: 60px;
+  pointer-events: none; opacity: 0;
+  background: radial-gradient(circle, color-mix(in srgb, var(--text) 22%, transparent) 0%, color-mix(in srgb, var(--text) 9%, transparent) 52%, transparent 70%);
+  border-radius: 46% 54% 52% 48% / 50% 44% 56% 50%;
 }
+
 @media (prefers-reduced-motion: reduce) {
   .send-morph-dot, .send-morph-ripple { display: none !important; }
 }
