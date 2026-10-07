@@ -441,7 +441,7 @@ public final class TermuxInstaller {
             Os.chmod(envScript.getAbsolutePath(), 0644);
 
             // bootstrap 由官方 Termux 构建，login 等 shell 脚本把包路径硬编码为
-            // "/data/data/com.termux/files"，在本包名（如 com.cubee.newapp4）下
+            // "/data/data/com.termux/files"，在本包名（如 com.coomi.android）下
             // interpreter 不存在 → exec $PREFIX/bin/login 报 ENOENT（"No such file"）。
             // 解压后把文本脚本中的包路径替换为本包路径（ELF 二进制不在此替换）。
             patchBootstrapPackagePaths();

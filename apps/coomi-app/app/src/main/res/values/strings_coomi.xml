@@ -3,8 +3,8 @@
 <resources>
 
     <!-- ===== 启动引导 ===== -->
-    <string name="coomi_brand">Comax</string>
-    <string name="coomi_launcher_title">Comax</string>
+    <string name="coomi_brand">Coomi</string>
+    <string name="coomi_launcher_title">Coomi</string>
     <string name="coomi_launcher_subtitle">手机上的自主编程 Agent</string>
     <string name="coomi_launcher_section_permission">开始之前</string>
     <string name="coomi_launcher_privacy">所有命令都在本机 Linux 环境内执行，权限仅用于保持引擎运行。</string>

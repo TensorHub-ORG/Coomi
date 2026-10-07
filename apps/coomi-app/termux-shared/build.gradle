@@ -2,7 +2,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
 
 def coomiDevBuild = System.getenv("COOMI_DEV_BUILD") == "1"
-def coomiTermuxPackageName = coomiDevBuild ? "com.coomidev.android" : "com.cubee.newapp4"
+def coomiTermuxPackageName = coomiDevBuild ? "com.coomidev.android" : "com.coomi.android"
 def coomiNdkHomeOverride = System.getenv("COOMI_NDK_HOME")
 def coomiPrebuiltNative = System.getenv("COOMI_PREBUILT_NATIVE") == "1"
 
