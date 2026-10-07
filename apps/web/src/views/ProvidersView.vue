@@ -6,6 +6,7 @@ import CoomiIcon from '@/components/CoomiIcon.vue'
 import ThemeSelect from '@/components/ThemeSelect.vue'
 import { useConfigStore, type ProviderConfig, type ProviderStatus, type SubAgentConfig } from '@/stores/config'
 import { apiGet, apiSend } from '@/bridge/http'
+import { goBack } from '@/bridge/navigation'
 
 const router = useRouter()
 const config = useConfigStore()
@@ -149,10 +150,7 @@ function openProvider(provider: ProviderConfig) {
   router.push(`/providers/${encodeURIComponent(provider.id)}`)
 }
 
-function backToDashboard() {
-  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
-  else router.push('/')
-}
+function backToDashboard() { goBack(router, 'dashboard') }
 </script>
 
 <template>

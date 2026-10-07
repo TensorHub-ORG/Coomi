@@ -4,9 +4,16 @@
  * 四个设置类页面共用，免得各写一套间距。
  */
 import CoomiIcon from './CoomiIcon.vue'
+import { onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { registerPageBack } from '@/bridge/navigation'
 
 defineProps<{ title: string }>()
 const emit = defineEmits<{ back: [] }>()
+const router = useRouter()
+let unregisterBack: (() => void) | undefined
+onMounted(() => { unregisterBack = registerPageBack(router, () => emit('back')) })
+onBeforeUnmount(() => unregisterBack?.())
 </script>
 
 <template>

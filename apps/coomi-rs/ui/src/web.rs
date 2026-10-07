@@ -813,6 +813,8 @@ pub async fn serve(
         collab_runs: Arc::new(StdMutex::new(HashMap::new())),
     };
     state.workflow_scheduler.start();
+    crate::snapshot_schedule::start_snapshot_scheduler(state.home.clone(), state.cwd.clone());
+    let ux_home = state.home.clone();
     refresh_registry_cache_background(state.clone());
     crate::life::start_background(state.home.clone());
     // 引擎启动时补发上次会话遗留的未上报事件（如进程被系统杀掉前没来得及 flush）。
@@ -1115,6 +1117,7 @@ pub async fn serve(
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("Coomi Rust bridge {BRIDGE_VERSION} listening on http://127.0.0.1:{port}");
+    tokio::spawn(crate::ux_profile::startup_refresh(ux_home));
 
     // 引擎被终止（SIGTERM/SIGINT，如 app 退出时 Android 侧 destroy）时，
     // 先清理所有由引擎启动的工具进程，再退出 —— 满足“关闭 app 后全部终止”。

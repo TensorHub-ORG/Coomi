@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { authedFetch } from '@/bridge/http'
+import { goBack } from '@/bridge/navigation'
 import { filterMarketItems } from '@/utils/marketSearch'
 
 const router = useRouter()
@@ -413,10 +414,7 @@ async function submitCustomMcp() {
   }
 }
 
-function goDashboard() {
-  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
-  else router.push('/')
-}
+function goDashboard() { goBack(router, 'dashboard') }
 </script>
 
 <template>

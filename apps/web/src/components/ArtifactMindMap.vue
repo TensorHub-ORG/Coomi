@@ -226,8 +226,8 @@ const close = () => emit('close')
 </template>
 
 <style scoped>
-.art-root { position: fixed; inset: 0; z-index: 65; pointer-events: none; }
-.art-root.open { pointer-events: auto; }
+.art-root { position: fixed; inset: 0; z-index: 65; pointer-events: none; visibility: hidden; transition: visibility 0s .3s; }
+.art-root.open { pointer-events: auto; visibility: visible; transition-delay: 0s; }
 .scrim { position: absolute; inset: 0; background: rgba(17, 22, 31, .38); opacity: 0; transition: opacity .28s ease; }
 .art-root.open .scrim { opacity: 1; }
 
@@ -237,12 +237,12 @@ const close = () => emit('close')
   width: 86%; max-width: 340px;
   padding-top: var(--safe-top);
   background: var(--bg);
-  box-shadow: var(--shadow-sheet);
+  box-shadow: none;
   transform: translateX(100%);
   transition: transform .3s cubic-bezier(.22, .68, .19, 1);
   overflow-y: auto;
 }
-.art-root.open .panel { transform: translateX(0); }
+.art-root.open .panel { transform: translateX(0); box-shadow: var(--shadow-sheet); }
 
 .dhead {
   display: flex; align-items: center; justify-content: space-between;

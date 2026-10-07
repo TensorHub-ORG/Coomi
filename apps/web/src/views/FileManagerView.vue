@@ -5,6 +5,7 @@ import { useSessionStore } from '@/stores/session'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { authedFetch, engineToken } from '@/bridge/http'
+import { goBack } from '@/bridge/navigation'
 
 interface Entry { name: string; is_dir: boolean; size: number; modified: number }
 interface ClipItem { path: string; name: string; isDir: boolean }
@@ -368,10 +369,7 @@ function setAsSessionDir() {
   notice.value = '已设为当前会话目录'
 }
 
-function goDashboard() {
-  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
-  else router.push('/')
-}
+function goDashboard() { goBack(router, 'dashboard') }
 
 onMounted(async () => {
   try {

@@ -463,6 +463,7 @@ public final class CoomiChatSession extends ContextWrapper {
         String prefill = getIntent().getStringExtra(EXTRA_PREFILL_DRAFT);
         String sessionId = getIntent().getStringExtra(EXTRA_SESSION_ID);
         String url = "http://127.0.0.1:" + port + "/?token=" + token
+            + (route != null && !route.equals("#/") ? "&entry=console" : "")
             + (sessionId != null && !sessionId.isEmpty() ? "&session_id=" + Uri.encode(sessionId) : "")
             + (route != null && route.startsWith("#") ? route : "");
         final String target = url;
@@ -483,7 +484,8 @@ public final class CoomiChatSession extends ContextWrapper {
         String sessionId = intent.getStringExtra(EXTRA_SESSION_ID);
         runOnUiThread(() -> {
             if (route != null && route.startsWith("#/")) {
-                mWebView.evaluateJavascript("window.location.hash=" + JSONObject.quote(route.substring(1)), null);
+                mWebView.evaluateJavascript("window.dispatchEvent(new CustomEvent('coomi:navigate',{detail:{route:"
+                    + JSONObject.quote(route.substring(1)) + "}}))", null);
             }
             if (sessionId != null && !sessionId.isEmpty()) {
                 mWebView.evaluateJavascript(

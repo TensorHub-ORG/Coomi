@@ -33,6 +33,7 @@ import ApprovalSheet from '@/components/ApprovalSheet.vue'
 import QuestionSheet from '@/components/QuestionSheet.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
+import { chatScroll } from '@/stores/viewState'
 
 const router = useRouter()
 const session = useSessionStore()
@@ -52,6 +53,8 @@ let mindMapTouching = false
 let runningPoll: ReturnType<typeof setInterval> | null = null
 
 const { following, follow, jumpToBottom } = useAutoScroll(scroller)
+const savedScroll = chatScroll.get(session.sessionId)
+if (savedScroll) following.value = savedScroll.following
 
 const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline))
 
@@ -87,7 +90,10 @@ onMounted(() => {
     if (content.value) ro.observe(content.value)
     if (scroller.value) ro.observe(scroller.value)
   }
-  nextTick(follow)
+  nextTick(() => {
+    if (savedScroll && !savedScroll.following && scroller.value) scroller.value.scrollTop = savedScroll.top
+    else follow()
+  })
   // 演示模式自动播一轮，省得进来还要先打字才能看见瀑布流。
   if (shouldAutoplay() && session.timeline.length === 0) {
     setTimeout(() => { if (session.timeline.length === 0) session.sendMessage(DEMO_PROMPT) }, 700)
@@ -98,6 +104,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (scroller.value) chatScroll.set(session.sessionId, { top: scroller.value.scrollTop, following: following.value })
+  unregisterOverlay('side-drawer')
+  unregisterOverlay('artifact-mindmap')
   window.removeEventListener('coomi:flush-persistence', session.flushPersistence)
   window.removeEventListener('focus', syncDigitalLifeMode)
   session.flushPersistence()
@@ -266,16 +275,12 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 .chat {
   height: 100%;
   min-height: 0;
-  background-color: transparent;
+  background-color: var(--bg);
   background-image:
     linear-gradient(var(--chat-background-overlay), var(--chat-background-overlay)),
     var(--chat-background-image);
   background-position: center;
   background-size: cover;
-  /* comax 主题的卡片阴影偏重(alpha .32~.48), 全宽卡片堆叠时在右缘形成
-     连续的阴影渐变带; 会话页内统一换成 1.4.8 的轻阴影。 */
-  --shadow-1: none;
-  --shadow-2: none;
   overflow-x: clip;
 }
 

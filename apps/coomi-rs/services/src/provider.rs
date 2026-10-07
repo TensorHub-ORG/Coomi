@@ -1447,27 +1447,19 @@ impl ChatStreamState {
             };
             if call.name.trim().is_empty() {
                 // 恢复 1：部分上游把完整调用（含 name）放进 arguments。
-                if let Ok(parsed) = serde_json::from_str::<Value>(&call.arguments) {
-                    let recovered = parsed
-                        .get("name")
-                        .or_else(|| parsed.get("tool"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                        .filter(|name| !name.trim().is_empty());
-                    if let Some(name) = recovered {
-                        match parse_arguments(&Value::String(call.arguments.clone())) {
-                            Ok(arguments) => {
-                                tool_calls.push(ToolCall { id, name, arguments });
-                                continue;
-                            }
-                            Err(error) => {
-                                invalid_tool_calls.push(InvalidToolCall {
-                                    id,
-                                    name,
-                                    reason: error.to_string(),
-                                });
-                                continue;
-                            }
+                if let Some((name, arguments)) = recover_wrapped_tool_arguments(&call.arguments) {
+                    match arguments {
+                        Ok(arguments) => {
+                            tool_calls.push(ToolCall { id, name, arguments });
+                            continue;
+                        }
+                        Err(error) => {
+                            invalid_tool_calls.push(InvalidToolCall {
+                                id,
+                                name,
+                                reason: error.to_string(),
+                            });
+                            continue;
                         }
                     }
                 }
@@ -1629,27 +1621,19 @@ impl ResponsesStreamState {
             };
             if call.name.trim().is_empty() {
                 // 恢复 1：部分上游把完整调用（含 name）放进 arguments。
-                if let Ok(parsed) = serde_json::from_str::<Value>(&call.arguments) {
-                    let recovered = parsed
-                        .get("name")
-                        .or_else(|| parsed.get("tool"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                        .filter(|name| !name.trim().is_empty());
-                    if let Some(name) = recovered {
-                        match parse_arguments(&Value::String(call.arguments.clone())) {
-                            Ok(arguments) => {
-                                tool_calls.push(ToolCall { id, name, arguments });
-                                continue;
-                            }
-                            Err(error) => {
-                                invalid_tool_calls.push(InvalidToolCall {
-                                    id,
-                                    name,
-                                    reason: error.to_string(),
-                                });
-                                continue;
-                            }
+                if let Some((name, arguments)) = recover_wrapped_tool_arguments(&call.arguments) {
+                    match arguments {
+                        Ok(arguments) => {
+                            tool_calls.push(ToolCall { id, name, arguments });
+                            continue;
+                        }
+                        Err(error) => {
+                            invalid_tool_calls.push(InvalidToolCall {
+                                id,
+                                name,
+                                reason: error.to_string(),
+                            });
+                            continue;
                         }
                     }
                 }
@@ -2197,6 +2181,17 @@ fn parse_function_call_item(item: &Value) -> Result<ToolCall> {
     })
 }
 
+fn recover_wrapped_tool_arguments(input: &str) -> Option<(String, Result<Value>)> {
+    let parsed = parse_argument_text(input).ok()?;
+    let envelope = parsed.get("function").filter(|value| value.is_object()).unwrap_or(&parsed);
+    let name = envelope.get("name").or_else(|| envelope.get("tool"))?.as_str()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let arguments = envelope.get("arguments").or_else(|| envelope.get("args"))?;
+    Some((name.to_owned(), parse_arguments(arguments)))
+}
+
 fn parse_arguments(value: &Value) -> Result<Value> {
     let parsed = match value {
         Value::String(value) => parse_argument_text(value)?,
@@ -2480,6 +2475,47 @@ mod tests {
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.invalid_tool_calls.len(), 1);
         assert_eq!(response.invalid_tool_calls[0].name, "read_file");
+    }
+
+    #[test]
+    fn streamed_wrapped_tool_arguments_are_unwrapped_before_execution() {
+        let mut state = ChatStreamState::default();
+        state.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "call-wrapped", "function": {"arguments": {
+                "name": "read_file", "arguments": {"path": "/tmp/example.txt"}
+            }}
+        }]}}]}), &IgnoreStream).expect("consume wrapped arguments");
+        let response = state.finish().expect("finish stream");
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls[0].id, "call-wrapped");
+        assert_eq!(response.tool_calls[0].name, "read_file");
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "/tmp/example.txt"}));
+    }
+
+    #[test]
+    fn responses_wrapped_function_and_string_arguments_are_unwrapped() {
+        let mut state = ResponsesStreamState::default();
+        state.tools.insert("call-response".into(), PartialToolCall {
+            id: "call-response".into(), name: String::new(),
+            arguments: json!({"function": {"name": "read_file", "arguments": "{\"path\":\"/tmp/example.txt\"}"}}).to_string(),
+        });
+        let response = state.finish().expect("finish response stream");
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls[0].name, "read_file");
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "/tmp/example.txt"}));
+    }
+
+    #[test]
+    fn wrapped_tool_arguments_reject_arrays_and_do_not_guess_names() {
+        let mut state = ChatStreamState::default();
+        state.tools.insert(0, PartialToolCall {
+            id: "call-invalid".into(), name: String::new(),
+            arguments: json!({"tool": "read_file", "args": []}).to_string(),
+        });
+        let response = state.finish().expect("finish invalid stream");
+        assert!(response.tool_calls.is_empty());
+        assert_eq!(response.invalid_tool_calls[0].name, "read_file");
+        assert!(recover_wrapped_tool_arguments("{\"name\":\"example.txt\",\"path\":\"/tmp\"}").is_none());
     }
 
     #[test]

@@ -5,6 +5,7 @@ import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { useConfigStore } from '@/stores/config'
 import { apiSend, apiGet } from '@/bridge/http'
+import { goBack } from '@/bridge/navigation'
 
 const router = useRouter()
 const config = useConfigStore()
@@ -135,7 +136,7 @@ async function logout() {
   isLogged.value = false; loggedUser.value = null; message.value = '已退出登录'
 }
 function switchMode(next: 'password' | 'sms') { mode.value = next; error.value = ''; message.value = '' }
-function backToProviders() { router.push('/providers') }
+function backToProviders() { goBack(router, '/providers') }
 </script>
 
 <template>

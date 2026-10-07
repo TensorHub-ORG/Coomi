@@ -111,6 +111,8 @@ async function openAuxiliary(event: Event) {
 watch(() => props.floating, floating => { if (floating) { auxiliaryRequest++; opened.value = false; active.value = null } })
 watch(() => route.name, name => { if (name !== 'chat') closeOrbit() })
 watch(opened, async value => {
+  if (value) registerOverlay('context-orbit', closeOrbit)
+  else unregisterOverlay('context-orbit')
   cancelAnimationFrame(measureFrame)
   if (!value) return
   await nextTick()
@@ -167,6 +169,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('animationend', afterAncestorMotion, true)
   window.removeEventListener('coomi:open-auxiliary', openAuxiliary)
   unregisterOverlay('context-tool-card')
+  unregisterOverlay('context-orbit')
 })
 const shortLabels: Record<Tool, string> = {
   version: '版本', tasks: '任务', files: '文件', floating: '小窗',

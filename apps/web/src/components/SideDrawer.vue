@@ -128,7 +128,7 @@ function openDashboard() {
         <span>开启新对话</span>
       </button>
       <div class="entry-grid" aria-label="工具入口">
-        <button class="entry" @click="go('/studio')"><CoomiIcon name="sparkle" :size="17" /><span>AI 工作台·预览</span></button>
+        <button class="entry" @click="go('/studio')"><CoomiIcon name="sparkle" :size="17" /><span>AI 工作室·预览</span></button>
         <button class="entry" @click="go('/collab')"><CoomiIcon name="team" :size="17" /><span>协同工作台·预览</span></button>
         <button class="entry" @click="go('/files')"><CoomiIcon name="folder" :size="17" /><span>文件</span></button>
         <button class="entry" @click="go('/im')"><CoomiIcon name="chat" :size="17" /><span>群聊</span></button>
@@ -303,7 +303,7 @@ function openDashboard() {
 
 .row {
   display: flex; align-items: center; gap: 4px;
-  padding: 6px 6px 6px 10px; border-radius: var(--r-md);
+  min-height: 44px; padding: 4px 6px 4px 10px; border-radius: var(--r-md);
 }
 .row:active { background: var(--fill); }
 .row.cur { background: var(--blue-soft); }

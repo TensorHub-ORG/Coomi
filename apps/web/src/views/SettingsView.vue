@@ -3,7 +3,7 @@
  * 设置。分组白卡 + 行的结构，选中态用蓝勾而不是描边 ——
  * 和抽屉、空态里的选中语言保持一致。
  */
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { goBack } from '@/bridge/navigation'
 import { useConfigStore, DEFAULT_CONNECTION_SETTINGS, PERMISSION_MODES, REASONING_EFFORTS, type ConnectionSettings } from '@/stores/config'
@@ -12,6 +12,7 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useConnectionStore } from '@/stores/connection'
 import { authedFetch } from '@/bridge/http'
 import { hasNativeTts } from '@/bridge/tts'
+import { settingsTab, settingsScroll } from '@/stores/viewState'
 import type { PermissionMode } from '@/protocol/commands'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
@@ -24,7 +25,20 @@ const connection = useConnectionStore()
 
 const connectionDraft = ref<ConnectionSettings>({ ...config.connectionSettings })
 const reconnectInitialSeconds = ref(config.connectionSettings.reconnectInitialDelayMs / 1000)
-const activeTab = ref<'chat' | 'link' | 'app'>('chat')
+const activeTab = settingsTab
+const body = ref<HTMLElement | null>(null)
+watch(activeTab, async (tab, previous) => {
+  if (body.value) settingsScroll.set(previous, body.value.scrollTop)
+  await nextTick()
+  if (body.value) body.value.scrollTop = settingsScroll.get(tab) ?? 0
+})
+onMounted(async () => {
+  await nextTick()
+  if (body.value) body.value.scrollTop = settingsScroll.get(activeTab.value) ?? 0
+})
+onBeforeUnmount(() => {
+  if (body.value) settingsScroll.set(activeTab.value, body.value.scrollTop)
+})
 const reconnectMaxSeconds = ref(config.connectionSettings.reconnectMaxDelayMs / 1000)
 const connectionError = ref('')
 const connectionSaved = ref(false)
@@ -164,7 +178,7 @@ onMounted(async () => {
         <button :class="{ on: activeTab === 'link' }" @click="activeTab = 'link'">连接与模型</button>
         <button :class="{ on: activeTab === 'app' }" @click="activeTab = 'app'">应用</button>
       </div>
-    <main class="body">
+    <main ref="body" class="body">
 <template v-if="activeTab === 'chat'">
       <p class="sec-label">权限模式</p>
       <div class="group">
@@ -278,7 +292,7 @@ onMounted(async () => {
       <div class="group">
         <button class="row" @click="router.push('/appearance')">
           <span class="ri"><CoomiIcon name="sun" :size="17" /></span>
-          <span class="rt"><span class="rmain">外观</span><span class="rsub">主题、颜色和背景</span></span>
+          <span class="rt"><span class="rmain">外观</span><span class="rsub">主题、颜色、背景与显示比例</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
       </div>
@@ -288,6 +302,11 @@ onMounted(async () => {
 <template v-if="activeTab === 'app'">
       <p class="sec-label">隐私</p>
       <div class="group">
+        <button class="row" @click="router.push('/ux-program')">
+          <span class="ri"><CoomiIcon name="shield" :size="17" /></span>
+          <span class="rt"><span class="rmain">用户体验改进计划</span><span class="rsub">主动加入、随时退出，不在会话页自动邀请</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
         <button class="row" @click="toggleTelemetry">
           <span class="ri" :class="{ on: telemetryEnabled }"><CoomiIcon name="shield" :size="17" /></span>
           <span class="rt">
@@ -355,12 +374,17 @@ onMounted(async () => {
       </div>
 </template>
 
-<template v-if="activeTab === 'app'">
+<template v-if="activeTab === 'chat'">
       <p class="sec-label">会话与体验</p>
       <div class="group">
         <button class="row" @click="router.push('/prompts')">
           <span class="ri"><CoomiIcon name="pencil" :size="17" /></span>
-          <span class="rt"><span class="rmain">常用提示词指令</span><span class="rsub">管理自定义提示词、分类标签与内置指令</span></span>
+          <span class="rt"><span class="rmain">提示词库</span><span class="rsub">分类管理、搜索编辑与一键填入</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/quick-commands')">
+          <span class="ri"><CoomiIcon name="bolt" :size="17" /></span>
+          <span class="rt"><span class="rmain">新会话快捷指令</span><span class="rsub">四条指令、多套方案与恢复默认</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
         <button class="row" @click="router.push('/sessions')">

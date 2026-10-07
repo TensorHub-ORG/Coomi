@@ -8,6 +8,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiGet, apiSend } from '@/bridge/http'
+import { goBack } from '@/bridge/navigation'
 import { useConnectionStore } from '@/stores/connection'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
@@ -132,10 +133,7 @@ const rows = computed(() => {
   ]
 })
 // 从控制台进入：返回统一回控制台（浏览器环境回聊天主页）
-function goDashboard() {
-  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
-  else router.push('/')
-}
+function goDashboard() { goBack(router, 'dashboard') }
 </script><template>
   <div class="page">
     <PageHead title="ProotLinux 环境" @back="goDashboard">

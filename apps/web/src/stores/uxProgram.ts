@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import { authedFetch } from '@/bridge/http'
 
 export type UxConsent = 'undecided' | 'joined' | 'local_only'
-const SHOWN_DATE_KEY = 'coomi.uxProgram.lastShownDate'
 
 export interface UxSubcategory { name: string; level: string; count?: number; example?: string }
 export interface UxScene { category: string; weight?: number; subcategories?: UxSubcategory[] }
@@ -28,8 +27,6 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
   const busy = ref(false)
   const consent = ref<UxConsent>('undecided')
   const autoUpdate = ref(true)
-  /** 会话页邀请浮条「不要再出现」——引擎侧持久化（localStorage 按随机端口隔离，重启即丢） */
-  const neverAsk = ref(false)
   const lastGeneratedAt = ref('')
   const lastError = ref('')
   const hasProfile = ref(false)
@@ -51,7 +48,6 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
     busy.value = Boolean(data.busy)
     consent.value = (data.consent as UxConsent) ?? 'undecided'
     autoUpdate.value = data.auto_update !== false
-    neverAsk.value = Boolean(data.never_ask)
     lastGeneratedAt.value = (data.last_generated_at as string) ?? ''
     lastError.value = (data.last_error as string) ?? ''
     hasProfile.value = Boolean(data.has_profile)
@@ -94,7 +90,6 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
   }
 
   async function setConsent(value: UxConsent, exitReason?: string) {
-    const previous = consent.value
     const body: Record<string, unknown> = { consent: value }
     if (exitReason) body.exit_reason = exitReason
     const res = await authedFetch('/api/ux-program', {
@@ -104,25 +99,6 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
     })
     if (res.ok) {
       await refresh()
-      // 退出计划后，下一次回到会话页应能重新看到邀请入口。
-      if (previous === 'joined' && value !== 'joined' && !neverAsk.value) {
-        try { localStorage.removeItem(SHOWN_DATE_KEY) } catch { /* ignore */ }
-      }
-    }
-  }
-
-  async function setNeverAsk(value: boolean) {
-    const res = await authedFetch('/api/ux-program', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ never_ask: value }),
-    })
-    if (res.ok) {
-      neverAsk.value = value
-      // 从“关闭”重新开启时清除当天抑制标记，让开关立即产生可见效果。
-      if (!value) {
-        try { localStorage.removeItem(SHOWN_DATE_KEY) } catch { /* ignore */ }
-      }
     }
   }
 
@@ -135,5 +111,5 @@ export const useUxProgramStore = defineStore('uxProgram', () => {
     if (res.ok) autoUpdate.value = value
   }
 
-  return { loaded, busy, consent, autoUpdate, neverAsk, lastGeneratedAt, lastError, hasProfile, profile, refresh, generate, setConsent, setNeverAsk, setAutoUpdate }
+  return { loaded, busy, consent, autoUpdate, lastGeneratedAt, lastError, hasProfile, profile, refresh, generate, setConsent, setAutoUpdate }
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import PageHead from '@/components/PageHead.vue'
 import { goBack } from '@/bridge/navigation'
@@ -14,7 +14,6 @@ import {
 } from '@/utils/quickCommands'
 
 const router = useRouter()
-const route = useRoute()
 const config = ref(loadQuickCommandConfig())
 const notice = ref('')
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
@@ -73,13 +72,7 @@ function editContent(command: QuickCommand) {
   command.guide = undefined
 }
 
-function back() {
-  if (route.query.native === '1' && window.CoomiAndroid?.closeHostActivity) {
-    window.CoomiAndroid.closeHostActivity()
-    return
-  }
-  goBack(router, '/')
-}
+function back() { goBack(router, 'dashboard') }
 
 onBeforeUnmount(() => {
   if (noticeTimer) clearTimeout(noticeTimer)

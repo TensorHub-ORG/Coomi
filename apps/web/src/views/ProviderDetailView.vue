@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
+import { goBack } from '@/bridge/navigation'
+import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import ModelPickerSheet from '@/components/ModelPickerSheet.vue'
 import ThemeSelect, { type ThemeSelectOption } from '@/components/ThemeSelect.vue'
 import {
@@ -353,13 +355,22 @@ function back() {
     pendingBack.value = true
     return
   }
-  router.push('/providers')
+  goBack(router, '/providers')
 }
 
 function discardAndBack() {
   pendingBack.value = false
-  router.push('/providers')
+  unregisterOverlay('provider-confirm')
+  goBack(router, '/providers')
 }
+
+watch([pendingBack, pendingClear, pendingDelete], values => {
+  if (values.some(Boolean)) registerOverlay('provider-confirm', () => {
+    pendingBack.value = pendingClear.value = pendingDelete.value = false
+  })
+  else unregisterOverlay('provider-confirm')
+})
+onBeforeUnmount(() => unregisterOverlay('provider-confirm'))
 
 function providerInput(value: ProviderDraft): ProviderInput {
   const capabilityOverrides = { ...value.capabilityOverrides }

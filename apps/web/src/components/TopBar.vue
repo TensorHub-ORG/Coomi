@@ -3,12 +3,13 @@
  * 顶栏：汉堡 / 模型名 / 上下文用量。
  * 忙的时候底边跑一条 2px 蓝色扫光，让「正在干活」这件事在最顶层也能看见。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
 import { apiGet } from '@/bridge/http'
+import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import CoomiIcon from './CoomiIcon.vue'
 import ContextTools from './ContextTools.vue'
 import UsageDetails from './UsageDetails.vue'
@@ -23,6 +24,18 @@ const connection = useConnectionStore()
 const router = useRouter()
 const modelOpen = ref(false)
 const pathPickerOpen = ref(false)
+watch(modelOpen, open => {
+  if (open) registerOverlay('model-picker', () => { modelOpen.value = false })
+  else unregisterOverlay('model-picker')
+})
+watch(pathPickerOpen, open => {
+  if (open) registerOverlay('session-path', () => { pathPickerOpen.value = false })
+  else unregisterOverlay('session-path')
+})
+onBeforeUnmount(() => {
+  unregisterOverlay('model-picker')
+  unregisterOverlay('session-path')
+})
 const pathInput = ref('')
 const pathNotice = ref('')
 

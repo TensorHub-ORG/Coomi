@@ -195,12 +195,7 @@ onMounted(() => { void ux.refresh() })
               <i />
             </button>
           </div>
-          <div class="auto-row">
-            <span>会话页邀请提示（已加入计划后自动关闭）</span>
-            <button class="switch" :class="{ on: !ux.neverAsk }" @click="ux.setNeverAsk(!ux.neverAsk)">
-              <i />
-            </button>
-          </div>
+          <p class="consent-note">本计划仅通过设置或控制台主动进入，会话界面不会自动显示邀请横幅。</p>
           <button class="ghost-btn" :disabled="ux.busy || updateCooldown || !modelReady" @click="generate">
             {{ ux.busy ? '凝练中…' : updateCooldown ? '今日已更新，明天可手动刷新' : '立即更新画像' }}
           </button>

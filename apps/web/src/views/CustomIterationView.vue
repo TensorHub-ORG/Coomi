@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 import { apiSend } from '@/bridge/http'
+import { goBack } from '@/bridge/navigation'
 import { useSessionStore } from '@/stores/session'
 
 const router = useRouter()
@@ -68,10 +69,7 @@ async function start() {
   }
 }
 
-function goDashboard() {
-  if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
-  else router.push('/')
-}
+function goDashboard() { goBack(router, 'dashboard') }
 </script>
 
 <template>

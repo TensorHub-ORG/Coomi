@@ -14,6 +14,7 @@ import { MorphIcon } from 'morphicons/vue'
 import { gsap, prefersReducedMotion } from '@/composables/useGsap'
 import { Menu, ChevronUp, Plus, X } from 'lucide'
 import CoomiIcon from './CoomiIcon.vue'
+import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
 const session = useSessionStore()
 const config = useConfigStore()
@@ -50,7 +51,13 @@ function sendControl() {
   }
 }
 const sendButton = ref<HTMLButtonElement | null>(null)
+const sendRipples = ref<number[]>([])
+let rippleSequence = 0
 const quickOpen = ref(false)
+watch(quickOpen, open => {
+  if (open) registerOverlay('composer-quick', () => { quickOpen.value = false })
+  else unregisterOverlay('composer-quick')
+})
 const transferText = ref('')
 const transferProgress = ref(0)
 const textareaScrollable = ref(false)
@@ -131,6 +138,9 @@ async function submit() {
   const fileNames = files.map(path => path.split('/').pop() || '文件')
   const displayText = visibleText
   const messageId = session.sendMessage(requestText, displayText, false, fileNames)
+  if (messageId && config.sendMorphAnimation && !prefersReducedMotion()) {
+    sendRipples.value = [++rippleSequence]
+  }
   text.value = ''
   importedFiles.value = []
   await nextTick()
@@ -193,6 +203,10 @@ async function insertSlash(cmd: string) {
 function toggleQuick() { quickOpen.value = !quickOpen.value }
 const controlMode = ref(false)
 const riskConfirm = ref(false)
+watch(riskConfirm, open => {
+  if (open) registerOverlay('control-risk', () => { riskConfirm.value = false })
+  else unregisterOverlay('control-risk')
+})
 const controlThinking = ref('')
 const controlChatPage = ref(false)
 /** 控制模式的两个系统权限：无障碍（操控屏幕）+ 悬浮窗（桌面悬浮层）。 */
@@ -348,6 +362,8 @@ onMounted(() => {
   loadDraft()
 })
 onBeforeUnmount(() => {
+  unregisterOverlay('composer-quick')
+  unregisterOverlay('control-risk')
   window.removeEventListener('coomi:file-transfer-progress', onTransferProgress)
   window.removeEventListener('coomi:files-imported', onFilesImported)
   window.removeEventListener('coomi:file-exported', onFileExported)
@@ -497,6 +513,7 @@ watch(text, () => {
             <CoomiIcon v-if="showStop" name="stop" :size="17" />
             <CoomiIcon v-else-if="isJumpIn" name="subtask" :size="18" />
             <CoomiIcon v-else name="arrowUp" :size="18" />
+            <span v-for="ripple in sendRipples" :key="ripple" class="send-ripple" aria-hidden="true" @animationend.self="sendRipples = sendRipples.filter(value => value !== ripple)"><i /><i /></span>
           </button>
         </div>
                 <Transition name="mode-pop">
@@ -564,7 +581,7 @@ watch(text, () => {
 </template>
 
 <style scoped>
-.composer { position: relative; padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); }
+.composer { position: relative; flex-shrink: 0; padding: 6px 10px calc(var(--safe-bottom) + 8px); background: var(--bg); }
 .control-float {
   position: fixed; left: 10px; right: 10px; bottom: calc(var(--safe-bottom) + 78px); z-index: 80;
   padding: 10px 12px; border: 1px solid var(--blue-border); border-radius: var(--r-card);
@@ -719,6 +736,7 @@ watch(text, () => {
 .act:active { background: var(--fill-press); }
 
 .send {
+  position: relative;
   display: grid; place-items: center; flex-shrink: 0;
   /* aspect-ratio 1 + min 尺寸：正常字号下仍是正圆，大字体下整体放大不破形。 */
   min-width: 36px; min-height: 36px; aspect-ratio: 1; padding: 6px;
@@ -730,6 +748,12 @@ watch(text, () => {
 .send.stop { background: var(--text); }
 .send:disabled { background: var(--border-strong); pointer-events: none; }
 .send:active { transform: scale(.92); }
+.send-ripple { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; animation: send-ripple-life .5s linear; }
+.send-ripple i { position: absolute; inset: 0; border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent); border-radius: inherit; background: transparent; opacity: 0; animation: send-ripple-expand .42s ease-out forwards; }
+.send-ripple i + i { animation-delay: .08s; }
+@keyframes send-ripple-life { from { opacity: 1; } to { opacity: 1; } }
+@keyframes send-ripple-expand { 0% { opacity: .65; transform: scale(.8); } 100% { opacity: 0; transform: scale(2.6); } }
+@media (prefers-reduced-motion: reduce) { .send-ripple { display: none; } }
 
 /* 指令面板浮层：可滚动卡片 */
 .quick-scrim { position: fixed; inset: 0; z-index: 1; }
