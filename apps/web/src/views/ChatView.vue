@@ -265,8 +265,6 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 </template>
 
 <style scoped>
-.chat ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none; }
-.chat * { scrollbar-width: none; }
 .chat {
   height: 100%;
   min-height: 0;

@@ -308,9 +308,12 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
   -webkit-overflow-scrolling: touch;
 }
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+/* 移动端隐藏全部滚动条：WebView 会在右缘渲染深色拇指条，
+   在浅色主题下呈现为一条黑边（全局规则，scoped 写法无法命中伪元素）。 */
+::-webkit-scrollbar { width: 0; height: 0; display: none; }
+::-webkit-scrollbar-thumb { background: transparent; }
 ::-webkit-scrollbar-track { background: transparent; }
+* { scrollbar-width: none; }
 
 /* ── 动效：瀑布流的基本单元 ── */
 @keyframes coomi-cascade {
