@@ -274,6 +274,11 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
     var(--chat-background-image);
   background-position: center;
   background-size: cover;
+  /* comax 主题的卡片阴影偏重(alpha .32~.48), 全宽卡片堆叠时在右缘形成
+     连续的阴影渐变带; 会话页内统一换成 1.4.8 的轻阴影。 */
+  --shadow-1: 0 1px 3px rgba(15, 23, 42, .05);
+  --shadow-2: 0 4px 14px rgba(15, 23, 42, .07);
+  overflow-x: clip;
 }
 
 

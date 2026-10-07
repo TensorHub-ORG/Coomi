@@ -11,6 +11,7 @@ interface MorphRequest { messageId: string; source: RectSnapshot }
 
 const session = useSessionStore()
 const dot = ref<HTMLElement | null>(null)
+const ripple = ref<HTMLElement | null>(null)
 const active = ref(false)
 let cancelled = false
 let running: Animation[] = []
@@ -54,15 +55,14 @@ async function run(detail: MorphRequest) {
   const source = detail.source
   const startCX = source.left + source.width / 2
   const startCY = source.top + source.height / 2
-  const DURATION = 620
+  const DURATION = 560
   const t0 = performance.now()
   let lastEnd: DOMRect | null = null
   node.style.left = '0'
   node.style.top = '0'
   node.style.opacity = '1'
 
-  // 逐帧动画：每帧重测目标气泡的位置（自动滚动 / 键盘弹出都会移动它），
-  // 水滴实时跟随目标，落点不再错位；单线程连续插值，两段拼接的跳变消失。
+  // 逐帧动画: 每帧重测目标气泡位置(自动滚动/键盘弹出会移动它), 水滴实时跟随。
   await new Promise<void>(resolve => {
     const step = () => {
       if (cancelled) { resolve(); return }
@@ -76,25 +76,39 @@ async function run(detail: MorphRequest) {
       const ease = 1 - Math.pow(1 - t, 3)
       const cx = startCX + (endCX - startCX) * ease
       const cy = startCY + (endCY - startCY) * ease
-      const w = source.width + (rect.width - source.width) * ease
-      const h = source.height + (rect.height - source.height) * ease
-      // 起手轻微压缩蓄力，随后随进度铺开成气泡；中段做非对称水滴形。
-      const squashX = t < .3 ? 1 + (0.3 - t) * .35 : 1
-      const radius = t < .5 ? 50 : Math.max(19, 50 - (t - .5) * 62)
+      const w = source.width + (28 - source.width) * ease
       node.style.width = `${w}px`
-      node.style.height = `${h}px`
-      node.style.borderRadius = `${radius}%`
-      node.style.transform = `translate3d(${cx - w / 2}px, ${cy - h / 2}px, 0) scale(${squashX}, ${2 - squashX})`
-      node.style.opacity = t > .92 ? String(Math.max(0, (1 - t) / .08)) : '1'
+      node.style.height = `${w}px`
+      node.style.transform = `translate3d(${cx - w / 2}px, ${cy - w / 2}px, 0) scale(${1 - t * .25})`
+      node.style.opacity = String(1 - t * .55)
       if (t < 1) requestAnimationFrame(step)
       else resolve()
     }
     requestAnimationFrame(step)
   })
+
+  // 到达后: 透明水波波纹发散(两圈), 不再做铺开转圈。
+  const rect = lastEnd ?? target.getBoundingClientRect()
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
   node.style.opacity = '0'
+  if (ripple.value && typeof ripple.value.animate === 'function') {
+    const rings = [ripple.value]
+    const r2 = ripple.value.nextElementSibling as HTMLElement | null
+    if (r2) rings.push(r2)
+    rings.forEach((el, idx) => {
+      el.style.left = `${cx - 26}px`
+      el.style.top = `${cy - 26}px`
+      const anim = el.animate([
+        { transform: 'scale(.35)', opacity: idx === 0 ? .6 : 0 },
+        { transform: 'scale(1.9)', opacity: 0 },
+      ], { duration: 460, delay: idx * 140, easing: 'cubic-bezier(.16,.84,.3,1)', fill: 'forwards' })
+      running.push(anim)
+    })
+    await new Promise<void>(r => setTimeout(r, 620))
+  }
   finish(detail.messageId)
 }
-
 function onRequest(event: Event) {
   const detail = (event as CustomEvent<MorphRequest>).detail
   if (!detail?.messageId || !detail.source) return
@@ -114,6 +128,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-show="active" ref="dot" class="send-morph-dot" aria-hidden="true" />
+  <i v-show="active" ref="ripple" class="send-morph-ripple" aria-hidden="true" />
+  <i v-show="active" class="send-morph-ripple send-morph-ripple-2" aria-hidden="true" />
 </template>
 
 <style scoped>
@@ -123,5 +139,12 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 18px color-mix(in srgb, var(--blue) 52%, transparent);
   will-change: transform, width, height, border-radius, opacity;
 }
-@media (prefers-reduced-motion: reduce) { .send-morph-dot { display: none !important; } }
+.send-morph-ripple {
+  position: fixed; z-index: 94; width: 52px; height: 52px;
+  border: 2px solid color-mix(in srgb, var(--blue) 60%, transparent);
+  border-radius: 50%; background: transparent; pointer-events: none; opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .send-morph-dot, .send-morph-ripple { display: none !important; }
+}
 </style>
