@@ -20,6 +20,7 @@ axum.workspace = true
 clap.workspace = true
 coomi-catalogs = { path = "../catalogs" }
 coomi-engine = { path = "../engine" }
+coomi-experience = { path = "../experience" }
 coomi-security = { path = "../security" }
 coomi-services = { path = "../services" }
 coomi-telemetry = { path = "../telemetry" }

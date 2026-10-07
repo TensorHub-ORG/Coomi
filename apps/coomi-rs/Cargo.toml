@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "services", "tools", "security", "ui", "catalogs", "telemetry"]
+members = ["engine", "services", "tools", "security", "ui", "catalogs", "telemetry", "experience"]
 resolver = "2"
 
 [workspace.package]

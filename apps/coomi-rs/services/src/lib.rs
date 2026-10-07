@@ -1,10 +1,14 @@
+mod ai_git;
 mod auto_config;
 mod capabilities;
 mod catalog_state;
 mod cognitive_runtime;
 mod collab;
 mod config;
+mod data_tools;
 mod deepseek;
+mod git_engine;
+mod ops;
 mod group_chat;
 mod mcp;
 mod memory;
@@ -16,6 +20,11 @@ pub mod studio;
 mod task_manager;
 mod update;
 
+pub use data_tools::*;
+pub use git_engine::*;
+pub use ops::*;
+pub use ai_git::AiGit;
+pub use ai_git::GitAiConfig;
 pub use auto_config::AutoConfigIntent;
 pub use auto_config::AutoConfigResult;
 pub use auto_config::apply_auto_config;

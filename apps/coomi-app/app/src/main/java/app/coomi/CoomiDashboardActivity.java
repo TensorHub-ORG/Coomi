@@ -77,7 +77,7 @@ public class CoomiDashboardActivity extends Activity {
     private View mMaintenanceButton;
     private View mUsageButton;
     private View mFeedbackButton;
-    private View mDonateButton;
+    private View mUxProgramButton;
     private String mAppliedThemeMode;
     private String mAppliedAppearanceSignature;
 
@@ -142,7 +142,7 @@ public class CoomiDashboardActivity extends Activity {
         mBackupButton = findViewById(R.id.btn_backup_data);
         mMaintenanceButton = findViewById(R.id.btn_maintenance);
         mUsageButton = findViewById(R.id.btn_usage);
-        mDonateButton = findViewById(R.id.btn_donate);
+        mUxProgramButton = findViewById(R.id.btn_ux_program);
         mFeedbackButton = findViewById(R.id.btn_feedback);
         mPermissionSettingsButton = findViewById(R.id.btn_permission_settings);
         mStorageSettingsButton = findViewById(R.id.btn_storage_settings);
@@ -178,7 +178,8 @@ public class CoomiDashboardActivity extends Activity {
         mUsageButton.setOnClickListener(v -> openCoomiRoute("#/usage"));
         mFeedbackButton.setOnClickListener(v ->
             startActivity(new Intent(this, CoomiFeedbackActivity.class)));
-        mDonateButton.setOnClickListener(v -> showDonateDialog());
+        mUxProgramButton.setOnClickListener(v -> openCoomiRoute("#/ux-program"));
+        findViewById(R.id.btn_prompt_library).setOnClickListener(v -> openCoomiRoute("#/prompts"));
         mPermissionSettingsButton.setOnClickListener(v -> openPermissionSettings());
         mStorageSettingsButton.setOnClickListener(v -> openStorageSettings());
 
@@ -461,78 +462,6 @@ public class CoomiDashboardActivity extends Activity {
 
     /** Collect a proactive suggestion or issue without including conversations or credentials.
      *  主动反馈已迁移至「问题反馈与诊断」二级页（CoomiFeedbackActivity）。 */
-    /** 捐赠者计划弹窗：微信收款码 + 加 QQ 群。 */
-    private void showDonateDialog() {
-        int padding = (int) (16 * getResources().getDisplayMetrics().density);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-        root.setPadding(padding, padding, padding, padding);
-
-        TextView hint = new TextView(this);
-        hint.setText(R.string.coomi_dash_donate_hint);
-        hint.setTextSize(13);
-        hint.setTextColor(resolveThemeColor(R.attr.coomiText2));
-        hint.setGravity(android.view.Gravity.CENTER);
-        root.addView(hint, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        ImageView qr = new ImageView(this);
-        qr.setImageResource(R.drawable.coomi_donate_qr);
-        qr.setAdjustViewBounds(true);
-        int qrSize = (int) (240 * getResources().getDisplayMetrics().density);
-        LinearLayout.LayoutParams qrParams = new LinearLayout.LayoutParams(qrSize, qrSize);
-        qrParams.topMargin = (int) (14 * getResources().getDisplayMetrics().density);
-        root.addView(qr, qrParams);
-
-        Button qqButton = new Button(this);
-        qqButton.setText(R.string.coomi_dash_donate_qq);
-        qqButton.setTextColor(0xFFFFFFFF);
-        qqButton.setTextSize(13);
-        qqButton.setAllCaps(false);
-        qqButton.setBackgroundResource(R.drawable.coomi_bg_button_primary);
-        LinearLayout.LayoutParams qqParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, (int) (46 * getResources().getDisplayMetrics().density));
-        qqParams.topMargin = (int) (16 * getResources().getDisplayMetrics().density);
-        qqButton.setLayoutParams(qqParams);
-        qqButton.setOnClickListener(v -> openQQGroup());
-        root.addView(qqButton);
-
-        CoomiTheme.applyCustomColors(this, root);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle(R.string.coomi_dash_donate_title)
-            .setView(root)
-            .setNegativeButton(R.string.coomi_dash_donate_close, null)
-            .create();
-        dialog.setOnShowListener(ignored -> {
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setBackgroundDrawableResource(R.drawable.coomi_bg_dialog);
-                CoomiTheme.applyCustomColors(this, dialog.getWindow().getDecorView());
-            }
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(resolveThemeColor(R.attr.coomiText2));
-        });
-        dialog.show();
-    }
-
-    /** 跳转 QQ 加群链接（群里反馈 / 捐赠交流）。 */
-    private int resolveThemeColor(int attribute) {
-        android.util.TypedValue value = new android.util.TypedValue();
-        if (!getTheme().resolveAttribute(attribute, value, true)) return 0;
-        return value.resourceId != 0 ? getColor(value.resourceId) : value.data;
-    }
-
-    private void openQQGroup() {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW,
-                Uri.parse("https://qm.qq.com/q/2JVYVRKnBe"));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        } catch (Throwable error) {
-            Toast.makeText(this, "无法打开 QQ，请手动搜索群号 1108467806",
-                Toast.LENGTH_LONG).show();
-        }
-    }
-
     /** 检查更新：进入二级页面（正式/测试通道），页面内发起下载与安装。 */
     private void checkUpdate() {
         openCoomiRoute("#/updates");

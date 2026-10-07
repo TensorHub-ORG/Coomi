@@ -125,6 +125,36 @@ use uuid::Uuid;
 
 mod collaboration_api;
 use collaboration_api::*;
+use axum::http::HeaderName;
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use coomi_services::AiGit;
+use coomi_services::BranchInfo;
+use coomi_services::CommitInfo;
+use coomi_services::ContributionReport;
+use coomi_services::CredentialStore;
+use coomi_services::DayUsage;
+use coomi_services::DiffInfo;
+use coomi_services::GitAiConfig;
+use coomi_services::GitEngine;
+use coomi_services::GitStatus;
+use coomi_services::GuestTool;
+use coomi_services::LoginResult;
+use coomi_services::NetworkReport;
+use coomi_services::OpsEngine;
+use coomi_services::ProjectInfo;
+use coomi_services::RemoteInfo;
+use coomi_services::RestoreReport;
+use coomi_services::SearchHit;
+use coomi_services::Snapshot;
+use coomi_services::SnapshotPreview;
+use coomi_services::StashEntry;
+use coomi_services::StorageReport;
+use coomi_services::contribution_stats;
+use coomi_services::export_session_markdown;
+use coomi_services::search_sessions;
+use coomi_services::usage_by_day;
+use futures_util::FutureExt;
+use std::process::Command;
 
 const PROTOCOL_VERSION: u8 = 1;
 const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -967,6 +997,89 @@ pub async fn serve(
             post(analyze_tool_failures).layer(DefaultBodyLimit::max(32 * 1024)),
         )
         .route("/ws/session/{session_id}", get(websocket_route))
+.route("/api/sessions/{id}/children", post(create_auxiliary_session))
+.route("/api/sessions/history", get(sessions_history_get))
+.route("/api/sessions/{id}/clear", post(clear_session_data))
+.route("/api/prompts", get(get_prompt_library).put(set_prompt_library))
+.route("/api/ux-program/generate", post(ux_program_generate))
+.route("/api/git/check", get(git_check))
+.route("/api/git/status", get(git_status))
+.route("/api/git/diff", get(git_diff))
+.route("/api/git/stage", post(git_stage))
+.route("/api/git/unstage", post(git_unstage))
+.route("/api/git/commit", post(git_commit))
+.route("/api/git/branches", get(git_branches))
+.route("/api/git/branch", post(git_branch_create))
+.route("/api/git/checkout", post(git_checkout))
+.route("/api/git/log", get(git_log))
+.route("/api/git/stash", get(git_stash_list))
+.route("/api/git/stash/push", post(git_stash_push))
+.route("/api/git/stash/pop", post(git_stash_pop))
+.route("/api/git/stash/drop", post(git_stash_drop))
+.route("/api/git/remotes", get(git_remotes))
+.route("/api/git/remote", post(git_remote_add))
+.route("/api/git/fetch", post(git_fetch))
+.route("/api/git/pull", post(git_pull))
+.route("/api/git/push", post(git_push))
+.route("/api/git/project-info", get(git_project_info))
+.route("/api/git/snapshots/{id}/preview", post(git_snapshot_preview))
+.route("/api/git/snapshots/{id}/restore", post(git_snapshot_restore))
+.route("/api/git/snapshots/{id}/update", post(git_snapshot_update))
+.route("/api/git/snapshots/{id}/diff", get(git_snapshot_diff))
+.route("/api/git/snapshots/{id}", delete(git_snapshot_delete))
+.route("/api/git/compare", post(git_compare))
+.route("/api/git/backup", post(git_backup))
+.route("/api/git/network-diagnostics", get(git_network_diagnostics))
+.route("/api/git/storage", get(git_storage))
+.route("/api/git/log-bundle", post(git_log_bundle))
+.route("/api/git/guest-tools", get(git_guest_tools))
+.route("/api/git/remote/test", post(git_remote_test))
+.route("/api/git/ai/commit-message", post(git_ai_commit_message))
+.route("/api/git/ai/summarize", post(git_ai_summarize))
+.route("/api/git/ai/review", post(git_ai_review))
+.route("/api/git/ai/adversarial-review", post(git_ai_adversarial_review))
+.route("/api/git/ai/root-cause", post(git_ai_root_cause))
+.route("/api/git/ai/compare", post(git_ai_compare))
+.route("/api/git/ai/fix/suggest", post(git_ai_fix_suggest))
+.route("/api/git/ai/fix/apply", post(git_ai_fix_apply))
+.route("/api/git/ai/conflict", post(git_ai_conflict))
+.route("/api/git/ai/readme", post(git_ai_readme))
+.route("/api/git/ai/config", get(git_ai_config_get).post(git_ai_config_save))
+.route("/api/git/ai/config/test", post(git_ai_config_test))
+.route("/api/git/pr/describe", post(git_pr_describe))
+.route("/api/git/pr/create", post(git_pr_create))
+.route("/api/git/contributions", get(git_contributions))
+.route("/api/sessions/search", get(sessions_search))
+.route("/api/sessions/{id}/export", post(session_export_markdown))
+.route("/api/usage/by-day", get(usage_by_day_handler))
+.route(
+            "/api/experience",
+            get(experience_list).delete(experience_clear),
+        )
+.route(
+            "/api/settings/experience",
+            get(experience_settings_get).put(experience_settings_set),
+        )
+.route(
+            "/api/ux-program",
+            get(ux_program_get).put(ux_program_put),
+        )
+.route(
+            "/api/git/credentials",
+            get(git_credentials_list).post(git_credentials_save),
+        )
+.route(
+            "/api/git/credentials/{service}/{key}",
+            delete(git_credentials_delete),
+        )
+.route(
+            "/api/git/snapshots",
+            get(git_snapshots_list).post(git_snapshot_create),
+        )
+.route(
+            "/api/git/snapshots/schedule",
+            get(git_snapshot_schedule_get).put(git_snapshot_schedule_put),
+        )
         .fallback_service(files)
         // Local bridge: only allow same-origin browser access (the Android WebView and
         // a browser pointed at 127.0.0.1:{port}). Restricting CORS + WS Origin closes the
@@ -9635,4 +9748,1843 @@ mod tests {
             "interrupted"
         );
     }
+}
+
+async fn sessions_search(
+    State(state): State<AppState>,
+    Query(query): Query<SessionSearchQuery>,
+) -> Result<Json<Vec<SearchHit>>, ApiError> {
+    let hits = search_sessions(
+        &state.home,
+        query.q.as_deref().unwrap_or(""),
+        query.limit.unwrap_or(50),
+    )
+    .await
+    .map_err(ApiError::from)?;
+    Ok(Json(hits))
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionSearchQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn create_auxiliary_session(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let parent_id = Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid parent session id"))?;
+    let store = SessionStore::new(&state.home);
+    let parent = match store.load(parent_id) {
+        Ok(parent) => parent,
+        Err(error) if store.contains(parent_id) => {
+            return Err(ApiError::internal(format!("failed to read parent session: {error:#}")));
+        }
+        Err(_) => {
+            let registry = ProviderRegistry::load(&providers_path(&state.home))
+                .map_err(|error| ApiError::bad_request(format!("configure a provider first: {error}")))?;
+            let provider = registry.resolve(None).map_err(|error| ApiError::bad_request(error.to_string()))?;
+            let mut parent = coomi_engine::Session::new(&provider.id, &provider.model, state.cwd.clone());
+            parent.id = parent_id;
+            store.save(&parent).map_err(|error| ApiError::internal(error.to_string()))?;
+            parent
+        }
+    };
+    if parent.parent_session_id.is_some() {
+        return Err(ApiError::bad_request("auxiliary sessions cannot own auxiliary sessions"));
+    }
+    let mut child = coomi_engine::Session::new(parent.provider_id, parent.model, parent.cwd);
+    child.parent_session_id = Some(parent_id);
+    child.title = "辅助对话".to_owned();
+    store.save(&child).map_err(|error| ApiError::internal(format!("failed to create auxiliary session: {error:#}")))?;
+    Ok(Json(json!({ "id": child.id, "parent_session_id": parent_id })))
+}
+
+async fn git_ai_config_save(
+    State(state): State<AppState>,
+    Json(body): Json<GitAiConfig>,
+) -> Result<Json<GitAiConfig>, ApiError> {
+    body.save(&git_ai_config_path(&state.home))
+        .map_err(ApiError::from)?;
+    Ok(Json(body))
+}
+
+fn git_ai_config_path(home: &Path) -> PathBuf {
+    home.join("config").join("git-ai.json")
+}
+
+async fn ux_program_generate(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    if crate::ux_profile::is_busy() {
+        return Err(ApiError::conflict("profile generation already running"));
+    }
+    let registry = ProviderRegistry::load(&providers_path(&state.home))
+        .map_err(|error| ApiError::bad_request(format!("provider unavailable: {error}")))?;
+    let selector = body.get("provider_id").and_then(Value::as_str).map(str::trim);
+    let provider_config = registry
+        .resolve(selector)
+        .map_err(|error| ApiError::bad_request(format!("provider unavailable: {error}")))?;
+    crate::ux_profile::start_generate(state.home.clone(), provider_config)
+        .map_err(|error| ApiError::conflict(format!("{error:#}")))?;
+    Ok(Json(json!({ "ok": true, "busy": true })))
+}
+
+async fn git_remotes(State(state): State<AppState>) -> Result<Json<Vec<RemoteInfo>>, ApiError> {
+    let engine = git_engine(&state);
+    let remotes = engine.remotes().await.map_err(ApiError::from)?;
+    Ok(Json(remotes))
+}
+
+fn git_engine(state: &AppState) -> GitEngine {
+    GitEngine::new(state.home.clone(), state.cwd.clone())
+        .with_runtime_home(state.home.clone())
+}
+
+async fn git_stash_push(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<GitStashPushBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .stash_push(body.message.as_deref())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+#[derive(Debug, Default)]
+struct OptionalJson<T>(T);
+
+impl<T, S> axum::extract::FromRequest<S> for OptionalJson<T>
+where
+    T: serde::de::DeserializeOwned + Default,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        match Json::<T>::from_request(req, state).await {
+            Ok(Json(value)) => Ok(OptionalJson(value)),
+            Err(_) => Ok(OptionalJson(T::default())),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GitStashPushBody {
+    message: Option<String>,
+}
+
+async fn git_stage(
+    State(state): State<AppState>,
+    Json(body): Json<GitStageBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let paths = body.paths.unwrap_or_default();
+    engine
+        .stage(&paths, body.all.unwrap_or(false))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStageBody {
+    paths: Option<Vec<String>>,
+    all: Option<bool>,
+}
+
+async fn git_backup(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let dest_dir = state.home.join("backups");
+    let path = engine.bundle(&dest_dir).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "path": path.display().to_string() })))
+}
+
+async fn git_commit(
+    State(state): State<AppState>,
+    Json(body): Json<GitCommitBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let hash = engine.commit(&body.message).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "hash": hash })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCommitBody {
+    message: String,
+}
+
+async fn git_ai_fix_suggest(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiPathBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let path = body.path;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let issues = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.suggest_fixes(&engine, path.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "issues": issues })))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiPathBody {
+    path: Option<String>,
+}
+
+fn ai_git(state: &AppState) -> AiGit {
+    let git_config = GitAiConfig::load(&git_ai_config_path(&state.home));
+    if git_config.is_usable() {
+        return AiGit::from_git_config(&git_config);
+    }
+    match ProviderRegistry::load(&providers_path(&state.home))
+        .and_then(|registry| registry.resolve(None))
+    {
+        Ok(config) => AiGit::from_provider(&config),
+        Err(_) => AiGit::default(),
+    }
+}
+
+async fn git_stash_list(State(state): State<AppState>) -> Result<Json<Vec<StashEntry>>, ApiError> {
+    let engine = git_engine(&state);
+    let entries = engine.stash_list().await.map_err(ApiError::from)?;
+    Ok(Json(entries))
+}
+
+async fn git_guest_tools(State(state): State<AppState>) -> Result<Json<Vec<GuestTool>>, ApiError> {
+    let tools = ops_engine(&state).guest_tools().await;
+    Ok(Json(tools))
+}
+
+fn ops_engine(state: &AppState) -> OpsEngine {
+    OpsEngine::new(state.home.clone(), state.cwd.clone())
+}
+
+async fn git_storage(State(state): State<AppState>) -> Result<Json<StorageReport>, ApiError> {
+    let report = ops_engine(&state).storage_analysis().await;
+    Ok(Json(report))
+}
+
+async fn git_snapshot_update(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<SnapshotUpdateBody>,
+) -> Result<Json<Snapshot>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    let snap = engine
+        .snapshot_update(&id, body.note.as_deref(), body.locked)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(snap))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotUpdateBody {
+    note: Option<String>,
+    locked: Option<bool>,
+}
+
+async fn require_snapshot(engine: &GitEngine, id: &str) -> Result<Snapshot, ApiError> {
+    let list = engine.snapshot_list().await.map_err(ApiError::from)?;
+    list.into_iter()
+        .find(|snap| snap.id == id)
+        .ok_or_else(|| ApiError::not_found(format!("snapshot not found: {id}")))
+}
+
+async fn git_ai_review(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiPathBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let path = body.path;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.code_review(&engine, path.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+async fn sessions_history_get(
+    State(state): State<AppState>,
+    Query(query): Query<SessionHistoryQuery>,
+) -> Json<Value> {
+    let store = SessionStore::new(&state.home);
+    let summaries = store.list(None).unwrap_or_default();
+    let mut by_day: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut by_month: BTreeMap<String, u64> = BTreeMap::new();
+    for summary in &summaries {
+        let local = summary.updated_at.with_timezone(&chrono::Local);
+        let day = local.format("%Y-%m-%d").to_string();
+        let month = local.format("%Y-%m").to_string();
+        let full = store.load(summary.id).ok();
+        let turns = full.as_ref().map(|session| session.messages.len()).unwrap_or(0);
+        let preview = full
+            .as_ref()
+            .and_then(|session| {
+                session
+                    .messages
+                    .iter()
+                    .find(|message| message.role == coomi_engine::Role::User && !message.internal)
+            })
+            .map(|message| message.content.chars().take(60).collect::<String>())
+            .unwrap_or_default();
+        let item = json!({
+            "id": summary.id.to_string(),
+            "title": summary.title,
+            "turns": turns,
+            "updatedAtMs": summary.updated_at.timestamp_millis(),
+            "preview": preview,
+        });
+        by_day.entry(day.clone()).or_default().push(item);
+        *by_month.entry(month).or_insert(0) += 1;
+    }
+    if let Some(date) = query.date.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        let sessions = by_day.remove(date).unwrap_or_default();
+        let total = sessions.len() as u64;
+        return Json(json!({
+            "days": [{"day": date, "count": total, "sessions": sessions}],
+            "total": total,
+        }));
+    }
+    if let Some(month) = query.month.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        let prefix = format!("{month}-");
+        let mut days = by_day
+            .into_iter()
+            .filter(|(day, _)| day.starts_with(&prefix))
+            .map(|(day, sessions)| {
+                let count = sessions.len() as u64;
+                json!({ "day": day, "count": count, "sessions": sessions })
+            })
+            .collect::<Vec<_>>();
+        days.sort_by(|left, right| {
+            right["day"]
+                .as_str()
+                .cmp(&left["day"].as_str())
+        });
+        let total = days.iter().map(|day| day["count"].as_u64().unwrap_or(0)).sum::<u64>();
+        return Json(json!({ "days": days, "total": total }));
+    }
+    let mut months = by_month
+        .into_iter()
+        .map(|(month, count)| json!({ "month": month, "count": count }))
+        .collect::<Vec<_>>();
+    months.sort_by(|left, right| {
+        right["month"]
+            .as_str()
+            .cmp(&left["month"].as_str())
+    });
+    Json(json!({ "months": months }))
+}
+
+#[derive(Default, Deserialize)]
+struct SessionHistoryQuery {
+    #[serde(default)]
+    month: Option<String>,
+    #[serde(default)]
+    date: Option<String>,
+}
+
+async fn git_pull(
+    State(state): State<AppState>,
+    Json(body): Json<GitPullBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .pull(&body.remote, &body.branch)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitPullBody {
+    remote: String,
+    branch: String,
+}
+
+async fn git_branches(State(state): State<AppState>) -> Result<Json<BranchInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let info = engine.branches().await.map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+async fn set_prompt_library(
+    State(state): State<AppState>,
+    Json(library): Json<PromptLibrary>,
+) -> Result<Json<PromptLibrary>, ApiError> {
+    save_prompt_library(&state.home, &library)?;
+    Ok(Json(library))
+}
+
+fn save_prompt_library(home: &Path, library: &PromptLibrary) -> Result<(), ApiError> {
+    validate_prompt_library(library)?;
+    // Refuse to replace an unreadable or corrupt library with a client's empty cache.
+    read_prompt_library(home)?;
+    let bytes = serde_json::to_vec_pretty(library)
+        .map_err(|error| ApiError::internal(format!("failed to serialize prompt library: {error}")))?;
+    let temporary = home.join(format!(".prompts.{}.tmp", Uuid::new_v4()));
+    // Reuse the synced-file writer, then atomically replace the destination in one rename.
+    write_embedded_file(&temporary, &bytes)
+        .map_err(|error| ApiError::internal(format!("failed to write prompt library: {error}")))?;
+    if let Err(error) = fs::rename(&temporary, home.join("prompts.json")) {
+        let _ = fs::remove_file(&temporary);
+        return Err(ApiError::internal(format!("failed to replace prompt library: {error}")));
+    }
+    Ok(())
+}
+
+fn read_prompt_library(home: &Path) -> Result<PromptLibrary, ApiError> {
+    let bytes = match fs::read(home.join("prompts.json")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(PromptLibrary::default()),
+        Err(error) => return Err(ApiError::internal(format!("failed to read prompt library: {error}"))),
+    };
+    let library: PromptLibrary = serde_json::from_slice(&bytes)
+        .map_err(|error| ApiError::internal(format!("invalid prompts.json; original file retained: {error}")))?;
+    validate_prompt_library(&library)
+        .map_err(|error| ApiError::internal(format!("invalid prompts.json; original file retained: {}", error.message)))?;
+    Ok(library)
+}
+
+fn validate_prompt_library(library: &PromptLibrary) -> Result<(), ApiError> {
+    if library.prompts.len() > 500 {
+        return Err(ApiError::bad_request("at most 500 custom prompts are allowed"));
+    }
+    let mut ids = HashSet::new();
+    let mut total_bytes = 0usize;
+    for prompt in &library.prompts {
+        if prompt.id.trim().is_empty() || prompt.id != prompt.id.trim()
+            || prompt.id.len() > 128 || prompt.id.starts_with("builtin:")
+            || prompt.id.chars().any(char::is_control) || !ids.insert(&prompt.id)
+        {
+            return Err(ApiError::bad_request("custom prompt ids must be unique, nonempty and not builtin ids"));
+        }
+        if prompt.title.trim().is_empty() || prompt.title.chars().count() > 256
+            || prompt.content.trim().is_empty() || prompt.content.len() > 65_536
+        {
+            return Err(ApiError::bad_request("prompt title and content are required (title: 256 characters, content: 64 KiB maximum)"));
+        }
+        if prompt.tags.len() > 16 || prompt.tags.iter().any(|tag| tag.trim().is_empty() || tag.chars().count() > 64) {
+            return Err(ApiError::bad_request("use at most 16 nonempty tags of up to 64 characters each"));
+        }
+        total_bytes += prompt.id.len() + prompt.title.len() + prompt.content.len()
+            + prompt.tags.iter().map(String::len).sum::<usize>();
+    }
+    if total_bytes > 1_048_576 {
+        return Err(ApiError::bad_request("custom prompt library exceeds 1 MiB"));
+    }
+    Ok(())
+}
+
+/// Custom prompts belong to the engine home, independent of the webview origin.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct LibraryPrompt {
+    id: String,
+    title: String,
+    content: String,
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct PromptLibrary {
+    prompts: Vec<LibraryPrompt>,
+}
+
+async fn git_ai_adversarial_review(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiPathBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let path = body.path;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.adversarial_review(&engine, path.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+async fn git_fetch(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.fetch().await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+
+#[derive(Debug, Deserialize)]
+struct LifeJournalReplyRequest {
+    id: String,
+    text: String,
+}
+
+async fn git_ai_readme(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.generate_readme(&engine)).map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+async fn git_ai_summarize(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiSinceBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let since = body.since;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.summarize_changes(&engine, since.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiSinceBody {
+    since: Option<String>,
+}
+
+async fn git_project_info(State(state): State<AppState>) -> Result<Json<ProjectInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let info = engine.project_info().await.map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+
+#[derive(Debug, Deserialize)]
+struct StoryGenerateRequest {
+    session_id: String,
+    genre: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+async fn git_ai_compare(
+    State(state): State<AppState>,
+    Json(body): Json<AiCompareBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (branch_a, branch_b) = parse_ab_branches(&body.branch_a, &body.branch_b)
+        .ok_or_else(|| ApiError::bad_request("branch_a and branch_b are required"))?;
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.compare_implementations(&engine, &branch_a, &branch_b))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+fn parse_ab_branches(branch_a: &str, branch_b: &str) -> Option<(String, String)> {
+    let a = branch_a.trim();
+    let b = branch_b.trim();
+    if a.is_empty() || b.is_empty() {
+        None
+    } else {
+        Some((a.to_owned(), b.to_owned()))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AiCompareBody {
+    branch_a: String,
+    branch_b: String,
+}
+
+async fn session_export_markdown(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(ApiError::bad_request("session id is required"));
+    }
+    let path = export_session_markdown(&state.home, id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "path": path.display().to_string() })))
+}
+
+async fn git_log(
+    State(state): State<AppState>,
+    Query(query): Query<GitLogQuery>,
+) -> Result<Json<Vec<CommitInfo>>, ApiError> {
+    let engine = git_engine(&state);
+    let commits = engine
+        .log(query.path.as_deref(), query.limit.unwrap_or(30))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(commits))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLogQuery {
+    path: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn git_status(State(state): State<AppState>) -> Result<Json<GitStatus>, ApiError> {
+    let engine = git_engine(&state);
+    let status = engine.status().await.map_err(ApiError::from)?;
+    Ok(Json(status))
+}
+
+async fn git_push(
+    State(state): State<AppState>,
+    Json(body): Json<GitPushBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .push(&body.remote, &body.branch, body.token.as_deref())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitPushBody {
+    remote: String,
+    branch: String,
+    token: Option<String>,
+}
+
+async fn git_ai_commit_message(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiContextBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let context = body.context;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.suggest_commit_message(&engine, context.as_deref()))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiContextBody {
+    context: Option<String>,
+}
+
+async fn git_stash_drop(
+    State(state): State<AppState>,
+    Json(body): Json<GitStashIndexBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.stash_drop(body.index).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitStashIndexBody {
+    index: usize,
+}
+
+async fn git_contributions(
+    State(state): State<AppState>,
+    Query(query): Query<ContributionsQuery>,
+) -> Result<Json<ContributionReport>, ApiError> {
+    let engine = git_engine(&state);
+    let report = contribution_stats(&engine, query.since_days)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(report))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContributionsQuery {
+    since_days: Option<u64>,
+}
+
+async fn git_snapshot_diff(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<DiffInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let snap = require_snapshot(&engine, &id).await?;
+    let info = git_diff_between(&state.cwd, &snap.sha, "HEAD", 3, Some(&state.home)).await?;
+    Ok(Json(info))
+}
+
+async fn git_diff_between(
+    cwd: &Path,
+    from: &str,
+    to: &str,
+    context: usize,
+    runtime_home: Option<&Path>,
+) -> Result<DiffInfo, ApiError> {
+    let stat = run_git(
+        cwd,
+        &["diff", "--stat", "--no-ext-diff", from, to],
+        runtime_home,
+    )
+    .await?;
+    let full = run_git(
+        cwd,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-color",
+            &format!("--unified={context}"),
+            from,
+            to,
+        ],
+        runtime_home,
+    )
+    .await?;
+    const MAX_DIFF_BYTES: usize = 200 * 1024;
+    let truncated = full.len() > MAX_DIFF_BYTES;
+    let diff = if truncated {
+        let mut cut = full;
+        cut.truncate(MAX_DIFF_BYTES);
+        cut.push_str("\n... [diff truncated]");
+        cut
+    } else {
+        full
+    };
+    Ok(DiffInfo { stat, diff, truncated })
+}
+
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    runtime_home: Option<&Path>,
+) -> Result<String, ApiError> {
+    let (code, stdout, stderr) = coomi_services::run_git(cwd, args, &[], runtime_home)
+        .await
+        .map_err(|error| ApiError::internal(format!("failed to run git: {error}")))?;
+    if code != 0 {
+        return Err(ApiError::bad_request(format!(
+            "git {} failed: {}",
+            args.first().copied().unwrap_or(""),
+            stderr.trim()
+        )));
+    }
+    Ok(stdout)
+}
+
+async fn git_ai_config_get(
+    State(state): State<AppState>,
+) -> Result<Json<GitAiConfig>, ApiError> {
+    Ok(Json(GitAiConfig::load(&git_ai_config_path(&state.home))))
+}
+
+async fn git_ai_root_cause(
+    State(state): State<AppState>,
+    OptionalJson(body): OptionalJson<AiCommitBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let commit = resolve_commit_arg(body.commit.as_deref());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.root_cause(&engine, Some(&commit)))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+fn resolve_commit_arg(commit: Option<&str>) -> String {
+    commit
+        .map(str::trim)
+        .filter(|commit| !commit.is_empty())
+        .unwrap_or("HEAD")
+        .to_owned()
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AiCommitBody {
+    commit: Option<String>,
+}
+
+async fn git_pr_describe(
+    State(state): State<AppState>,
+    Json(body): Json<PrDescribeBody>,
+) -> Result<Json<Value>, ApiError> {
+    let base = body.base.trim().to_string();
+    if base.is_empty() {
+        return Err(ApiError::bad_request("base is required"));
+    }
+    let engine = git_engine(&state);
+    let head = resolve_pr_head(&engine, body.head.as_deref()).await?;
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.generate_pr_description(&engine, &base, &head))
+            .map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+async fn resolve_pr_head(engine: &GitEngine, head: Option<&str>) -> Result<String, ApiError> {
+    match head.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(head) => Ok(head.to_owned()),
+        None => engine
+            .branches()
+            .await
+            .map_err(ApiError::from)?
+            .current
+            .ok_or_else(|| {
+                ApiError::bad_request("cannot determine current branch; please specify head")
+            }),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PrDescribeBody {
+    base: String,
+    head: Option<String>,
+}
+
+async fn get_prompt_library(State(state): State<AppState>) -> Result<Json<PromptLibrary>, ApiError> {
+    read_prompt_library(&state.home).map(Json)
+}
+
+async fn git_snapshot_delete(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    engine.snapshot_delete(&id).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn git_snapshot_restore(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<RestoreReport>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    let report = engine.snapshot_restore(&id).await.map_err(ApiError::from)?;
+    Ok(Json(report))
+}
+
+async fn git_remote_test(
+    State(state): State<AppState>,
+    Json(body): Json<GitRemoteTestBody>,
+) -> Result<Json<Value>, ApiError> {
+    let url = body.url.trim().to_string();
+    if url.is_empty() {
+        return Err(ApiError::bad_request("url is required"));
+    }
+    let token = body
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty());
+    let helper = match token {
+        Some(token) => Some(write_credential_helper(&state.home, token)?),
+        None => None,
+    };
+    let envs: Vec<(&str, &str)> = match (&helper, token) {
+        (Some(_), Some(token)) => vec![("COOMI_GIT_TOKEN", token)],
+        _ => Vec::new(),
+    };
+    let args: Vec<String> = match &helper {
+        Some(path) => {
+            // guest 内 credential helper 脚本与 workspace 同步可见于 /workspace/.git。
+            let helper_arg = format!(
+                "credential.helper={}",
+                coomi_services::map_guest_path(&state.cwd, &path.to_string_lossy())
+            );
+            vec![
+                "-c".to_string(),
+                helper_arg,
+                "ls-remote".to_string(),
+                url.clone(),
+                "HEAD".to_string(),
+            ]
+        }
+        None => vec!["ls-remote".to_string(), url.clone(), "HEAD".to_string()],
+    };
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let result = tokio::time::timeout(
+        Duration::from_secs(15),
+        coomi_services::run_git(&state.cwd, &arg_refs, &envs, Some(&state.home)),
+    )
+    .await;
+    if let Some(path) = helper {
+        let _ = std::fs::remove_file(&path);
+    }
+    let payload = match result {
+        Ok(Ok((code, _stdout, _stderr))) if code == 0 => json!({ "ok": true }),
+        Ok(Ok((_code, _stdout, stderr))) => json!({
+            "ok": false,
+            "error": stderr.trim().to_string(),
+        }),
+        Ok(Err(error)) => json!({ "ok": false, "error": format!("failed to run git: {error}") }),
+        Err(_) => json!({ "ok": false, "error": "timeout after 15s".to_string() }),
+    };
+    Ok(Json(payload))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitRemoteTestBody {
+    url: String,
+    token: Option<String>,
+}
+
+fn write_credential_helper(home: &Path, token: &str) -> Result<PathBuf, ApiError> {
+    let dir = home.join("diagnostics");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| ApiError::internal(format!("create diagnostics dir: {error}")))?;
+    let path = dir.join(format!(
+        "coomi-cred-helper-{}-{}",
+        Uuid::new_v4(),
+        token.len()
+    ));
+    let script = "#!/bin/sh\necho \"username=oauth2\"\necho \"password=${COOMI_GIT_TOKEN}\"\n";
+    std::fs::write(&path, script)
+        .map_err(|error| ApiError::internal(format!("write credential helper: {error}")))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .map_err(|error| ApiError::internal(format!("helper metadata: {error}")))?
+            .permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(&path, perms)
+            .map_err(|error| ApiError::internal(format!("helper chmod: {error}")))?;
+    }
+    Ok(path)
+}
+
+async fn git_pr_create(
+    State(state): State<AppState>,
+    Json(body): Json<PrCreateBody>,
+) -> Result<Json<Value>, ApiError> {
+    let base = body.base.trim().to_string();
+    if base.is_empty() {
+        return Err(ApiError::bad_request("base is required"));
+    }
+    let engine = git_engine(&state);
+    let head = resolve_pr_head(&engine, body.head.as_deref()).await?;
+    let remotes = engine.remotes().await.map_err(ApiError::from)?;
+
+    // 1. 合并目标仓库（base 所在；fork 场景即上游）：upstream 参数 / upstream remote / remote。
+    let base_remote = resolve_pr_base_remote(&remotes, body.upstream.as_deref(), body.remote.as_deref())?;
+    let platform = coomi_services::detect_platform(&base_remote.url);
+    let api_base = match platform.as_str() {
+        "GitHub" => "https://api.github.com",
+        "Gitee" => "https://gitee.com/api/v5",
+        "AtomGit" => "https://atomgit.com/api/v5",
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "unsupported platform for PR creation: {other}"
+            )));
+        }
+    };
+    let (owner, repo) = parse_remote_repo(&base_remote.url).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "cannot parse owner/repo from target remote url: {}",
+            base_remote.url
+        ))
+    })?;
+
+    // 2. head（fork）仓库：显式 head_repo 优先，否则自动取当前 remote 的 owner。
+    let head_owner = resolve_pr_head_owner(&remotes, body.remote.as_deref(), body.head_repo.as_deref())?;
+    let head_field = match head_owner {
+        Some(owner) => pr_head_field(&head, Some(&owner)),
+        None => head.clone(),
+    };
+
+    // 3. token：请求体优先，缺省从凭据存储读取（service=平台小写，key="token"）。
+    let token = match body.token.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        Some(token) => token.to_owned(),
+        None => {
+            let store = CredentialStore::new(state.home.clone());
+            store.get(&platform.to_ascii_lowercase(), "token").ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "no token provided and no saved credential for {platform}"
+                ))
+            })?
+        }
+    };
+
+    let payload = create_remote_pr(
+        api_base,
+        &owner,
+        &repo,
+        &base,
+        &head_field,
+        body.title.as_deref(),
+        body.body.as_deref(),
+        &token,
+        &platform,
+    )
+    .await?;
+    Ok(Json(payload))
+}
+
+fn parse_remote_repo(url: &str) -> Option<(String, String)> {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let rest = rest.strip_prefix("git@").unwrap_or(rest);
+    let path = if let Some(idx) = rest.find(':') {
+        // scp 形式：host:owner/repo.git
+        &rest[idx + 1..]
+    } else {
+        // https 形式：host/owner/repo.git，取第一个 '/' 之后的部分。
+        let start = rest.find('/')?;
+        &rest[start + 1..]
+    };
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let mut parts = path.split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim();
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_owned(), repo.to_owned()))
+}
+
+async fn create_remote_pr(
+    api_base: &str,
+    owner: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+    title: Option<&str>,
+    body: Option<&str>,
+    token: &str,
+    platform: &str,
+) -> Result<Value, ApiError> {
+    let endpoint = format!(
+        "{api_base}/repos/{}/{}/pulls",
+        urlencode(owner),
+        urlencode(repo)
+    );
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| ApiError::internal(format!("build http client: {error}")))?;
+    let title = title.map(str::trim).filter(|t| !t.is_empty()).unwrap_or("").to_owned();
+    let body = body.map(str::trim).filter(|b| !b.is_empty()).unwrap_or("").to_owned();
+    if title.is_empty() && body.is_empty() {
+        return Err(ApiError::bad_request(
+            "title and body are empty; call /api/git/pr/describe first to generate one",
+        ));
+    }
+    let response = if platform == "Gitee" {
+        client
+            .post(&endpoint)
+            .form(&[
+                ("access_token", token),
+                ("title", title.as_str()),
+                ("head", head),
+                ("base", base),
+                ("body", body.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|error| ApiError::internal(format!("Gitee PR request failed: {error}")))?
+    } else if platform == "AtomGit" {
+        // AtomGit 采用 Gitee 兼容的 API v5，但认证走 Authorization: token 头。
+        client
+            .post(&endpoint)
+            .header("Authorization", format!("token {token}"))
+            .header("User-Agent", "Coomi")
+            .json(&json!({
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            }))
+            .send()
+            .await
+            .map_err(|error| ApiError::internal(format!("AtomGit PR request failed: {error}")))?
+    } else {
+        client
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("User-Agent", "Coomi")
+            .json(&json!({
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            }))
+            .send()
+            .await
+            .map_err(|error| ApiError::internal(format!("GitHub PR request failed: {error}")))?
+    };
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(ApiError::bad_request(format!(
+            "{platform} PR 创建失败 HTTP {status}: {}",
+            truncate_platform_error(&text)
+        )));
+    }
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|error| ApiError::internal(format!("parse {platform} PR response: {error}")))?;
+    let url = value
+        .get("html_url")
+        .or_else(|| value.get("url"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::internal(format!("{platform} PR response missing url")))?;
+    let number = value
+        .get("number")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| ApiError::internal(format!("{platform} PR response missing number")))?;
+    Ok(json!({ "url": url, "number": number }))
+}
+
+fn truncate_platform_error(text: &str) -> String {
+    const MAX: usize = 500;
+    let text = text.trim();
+    if text.chars().count() <= MAX {
+        return text.to_owned();
+    }
+    let mut truncated: String = text.chars().take(MAX).collect();
+    truncated.push_str("…");
+    truncated
+}
+
+fn urlencode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn pr_head_field(head: &str, head_repo: Option<&str>) -> String {
+    match head_repo.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(repo) => format!("{}:{}", repo.split('/').next().unwrap_or(repo), head),
+        None => head.to_owned(),
+    }
+}
+
+fn resolve_pr_head_owner(
+    remotes: &[RemoteInfo],
+    remote: Option<&str>,
+    head_repo: Option<&str>,
+) -> Result<Option<String>, ApiError> {
+    if let Some(value) = head_repo.map(str::trim).filter(|value| !value.is_empty()) {
+        let owner = value.split('/').next().unwrap_or(value).trim();
+        if owner.is_empty() {
+            return Err(ApiError::bad_request("head_repo owner is empty"));
+        }
+        return Ok(Some(owner.to_owned()));
+    }
+    let head_remote = match remote.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => remotes
+            .iter()
+            .find(|r| r.name == name)
+            .ok_or_else(|| ApiError::bad_request(format!("remote not found: {name}")))?,
+        None => remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| remotes.first())
+            .ok_or_else(|| ApiError::bad_request("no git remote configured"))?,
+    };
+    Ok(parse_remote_repo(&head_remote.url).map(|(owner, _)| owner))
+}
+
+fn resolve_pr_base_remote(
+    remotes: &[RemoteInfo],
+    upstream: Option<&str>,
+    remote: Option<&str>,
+) -> Result<RemoteInfo, ApiError> {
+    if let Some(value) = upstream.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(found) = remotes.iter().find(|r| r.name == value) {
+            return Ok(found.clone());
+        }
+        if !(value.contains("://") || value.starts_with("git@")) {
+            return Err(ApiError::bad_request(format!(
+                "upstream 不是已配置的 remote 名，且缺少协议前缀（请输入 https://... 或 git@... 完整地址）：{value}"
+            )));
+        }
+        return Ok(RemoteInfo {
+            name: "upstream".to_owned(),
+            url: value.to_owned(),
+            platform: coomi_services::detect_platform(value),
+        });
+    }
+    if let Some(found) = remotes.iter().find(|r| r.name == "upstream") {
+        return Ok(found.clone());
+    }
+    match remote.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => remotes
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
+            .ok_or_else(|| ApiError::bad_request(format!("remote not found: {name}"))),
+        None => remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| remotes.first())
+            .cloned()
+            .ok_or_else(|| ApiError::bad_request("no git remote configured")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PrCreateBody {
+    base: String,
+    head: Option<String>,
+    /// 跨仓库（fork→上游）PR 时填写 fork 仓库所有者；格式 `owner` 或 `owner/repo`，
+    /// 内部只取 owner 拼成平台 API 的 `owner:branch`。留空=自动取当前 remote 的 owner。
+    head_repo: Option<String>,
+    title: Option<String>,
+    body: Option<String>,
+    /// head（fork）仓库来源的 remote 名；缺省取 origin/第一个。留空时目标仓库
+    /// 取 upstream 参数或名为 upstream 的 remote。
+    remote: Option<String>,
+    /// 合并目标（base 所在）仓库：可为 remote 名（如 upstream）或完整 URL
+    /// （https://github.com/owner/repo.git）。缺省优先名为 upstream 的 remote，
+    /// 再回退 `remote` 参数/origin/第一个（同仓库 PR）。
+    upstream: Option<String>,
+    token: Option<String>,
+}
+
+
+async fn git_branch_create(
+    State(state): State<AppState>,
+    Json(body): Json<GitBranchBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine
+        .create_branch(&body.name)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "branch": body.name, "output": output })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitBranchBody {
+    name: String,
+}
+
+async fn git_checkout(
+    State(state): State<AppState>,
+    Json(body): Json<GitCheckoutBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.checkout(&body.branch).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "branch": body.branch, "output": output })))
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCheckoutBody {
+    branch: String,
+}
+
+async fn git_remote_add(
+    State(state): State<AppState>,
+    Json(body): Json<GitRemoteBody>,
+) -> Result<Json<Value>, ApiError> {
+    let name = body.name.trim();
+    let url = body.url.trim();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("remote name cannot be empty"));
+    }
+    if url.is_empty() {
+        return Err(ApiError::bad_request("remote url cannot be empty"));
+    }
+    let output = run_git(&state.cwd, &["remote", "add", name, url], Some(&state.home)).await?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitRemoteBody {
+    name: String,
+    url: String,
+}
+
+async fn git_ai_conflict(
+    State(state): State<AppState>,
+    Json(body): Json<AiConflictBody>,
+) -> Result<Json<Value>, ApiError> {
+    let path = body.path.trim().to_string();
+    if path.is_empty() {
+        return Err(ApiError::bad_request("path is required"));
+    }
+    let engine = git_engine(&state);
+    let ai = ai_git(&state);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let text = tokio::task::spawn_blocking(move || {
+        rt.block_on(ai.resolve_conflict(&engine, &path)).map_err(ApiError::from)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??;
+    Ok(Json(json!({ "text": text })))
+}
+
+#[derive(Debug, Deserialize)]
+struct AiConflictBody {
+    path: String,
+}
+
+async fn git_diff(
+    State(state): State<AppState>,
+    Query(query): Query<GitDiffQuery>,
+) -> Result<Json<DiffInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let info = engine
+        .diff(
+            query.path.as_deref(),
+            query.cached.unwrap_or(false),
+            query.context.unwrap_or(3),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitDiffQuery {
+    path: Option<String>,
+    cached: Option<bool>,
+    context: Option<usize>,
+}
+
+async fn git_ai_config_test(
+    State(state): State<AppState>,
+    Json(body): Json<GitAiConfig>,
+) -> Result<Json<Value>, ApiError> {
+    if !body.is_usable() {
+        return Ok(Json(json!({
+            "ok": false,
+            "error": "请先填写完整的 Base URL、API Key 与模型名，再点「测试」"
+        })));
+    }
+    let ai = AiGit::from_git_config(&body);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+    let result = tokio::task::spawn_blocking(move || rt.block_on(ai.ping()))
+        .await
+        .map_err(|error| ApiError::internal(format!("ai task join: {error}")))?
+        .map_err(ApiError::from);
+    match result {
+        Ok(_) => Ok(Json(json!({ "ok": true }))),
+        Err(error) => Ok(Json(json!({ "ok": false, "error": error.message }))),
+    }
+}
+
+async fn git_check(State(state): State<AppState>) -> Json<Value> {
+    let engine = git_engine(&state);
+    let version = engine.check_git().await;
+    Json(json!({ "ok": version.is_some(), "version": version }))
+}
+
+async fn clear_session_data(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    body: Option<Json<ClearSessionRequest>>,
+) -> Result<Json<Value>, ApiError> {
+    let session_id =
+        Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?;
+    let mode = body
+        .as_ref()
+        .and_then(|Json(request)| request.mode.as_deref())
+        .unwrap_or("context");
+    if mode != "context" && mode != "all" {
+        return Err(ApiError::bad_request("mode must be context or all"));
+    }
+    // Clearing while a turn is running would allow its completion handler to
+    // persist the old transcript again. Stop the in-memory task first, then
+    // clear and save the authoritative session record.
+    let active_task = state
+        .tasks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&id)
+        .cloned();
+    if let Some(task) = active_task {
+        let _ = stop_session_task(&state, &id, &task).await;
+    }
+    // 批次四 #14 修复补充：常驻会话文件缺失/损坏时（自愈只在引擎启动时跑一次），
+    // clear 的 load 会失败 → 前端"清空失败"。此处就地自愈：隔离损坏文件、
+    // 重建空会话后再清空，保证常驻会话的"清空"永远可达。
+    let store = SessionStore::new(&state.home);
+    let session = match store.clear_data(session_id) {
+        Ok(session) => session,
+        Err(clear_error) => {
+            let global_id = uuid::Uuid::parse_str(crate::life::GLOBAL_SESSION_ID)
+                .expect("GLOBAL_SESSION_ID is a valid uuid");
+            if session_id != global_id {
+                return Err(ApiError::internal(format!(
+                    "failed to clear session {id}: {clear_error:#}"
+                )));
+            }
+            crate::life::ensure_global_session(&state.home, &state.cwd).map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to heal global session before clear: {error:#}"
+                ))
+            })?;
+            store.clear_data(session_id).map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to clear session {id} after heal: {error:#}"
+                ))
+            })?
+        }
+    };
+    // mode=all（仅常驻会话提供）：极为干净的彻底清除——删除会话文件并
+    // 清空常驻记忆/日记后重建，不留任何历史痕迹。
+    if mode == "all" {
+        let global_id = uuid::Uuid::parse_str(crate::life::GLOBAL_SESSION_ID)
+            .expect("GLOBAL_SESSION_ID is a valid uuid");
+        if session_id != global_id {
+            return Err(ApiError::bad_request(
+                "full wipe is only available for the global session",
+            ));
+        }
+        store.delete(global_id).map_err(|error| {
+            ApiError::internal(format!("failed to wipe session {id}: {error:#}"))
+        })?;
+        let _ = std::fs::remove_file(crate::life::life_root(&state.home)
+            .join("primary")
+            .join("memory.jsonl"));
+        let _ = std::fs::remove_file(crate::life::life_root(&state.home).join("journal.jsonl"));
+        crate::life::ensure_global_session(&state.home, &state.cwd).map_err(|error| {
+            ApiError::internal(format!("failed to rebuild global session: {error:#}"))
+        })?;
+    }
+    Ok(Json(json!({
+        "cleared": true,
+        "id": id,
+        "title": session.title,
+        "pinned": session.pinned,
+        "provider_id": session.provider_id,
+        "model": session.model,
+        "mode": session.mode,
+    })))
+}
+
+#[derive(Deserialize)]
+struct ClearSessionRequest {
+    /// "context"（默认）：清消息/工具记录/上下文，全新记忆开始；
+    /// "all"：极简彻底清除——删除会话文件与常驻记忆/日记后重建。
+    mode: Option<String>,
+}
+
+async fn git_ai_fix_apply(
+    State(state): State<AppState>,
+    Json(body): Json<AiFixApplyBody>,
+) -> Result<Json<Value>, ApiError> {
+    let patch = body.patch.trim().to_string();
+    if patch.is_empty() {
+        return Err(ApiError::bad_request("patch is required"));
+    }
+    let engine = git_engine(&state);
+    // 1. 修复前自动备份：任何后续失败都可从该快照回滚。
+    let snapshot = engine
+        .snapshot_create("pre-fix", None, None, "before ai fix")
+        .await
+        .map_err(ApiError::from)?;
+    // 2. 应用补丁（apply_patch 内部先 --check 干跑，未通过不落地修改）。
+    engine.apply_patch(&patch).await.map_err(|error| {
+        ApiError::internal(format!(
+            "应用补丁失败（快照 {} 可回滚）：{error:#}",
+            snapshot.id
+        ))
+    })?;
+    // 3. 可选：暂存并提交。
+    let mut commit_hash = None;
+    if body.commit {
+        let paths: Vec<String> = body
+            .path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(|path| vec![path.to_owned()])
+            .unwrap_or_default();
+        if paths.is_empty() {
+            // 未指定文件时暂存全部改动。
+            engine.stage(&[], true).await.map_err(ApiError::from)?;
+        } else {
+            engine.stage(&paths, false).await.map_err(ApiError::from)?;
+        }
+        let message = match body.message {
+            Some(message) if !message.trim().is_empty() => message.trim().to_owned(),
+            _ => {
+                // 生成提交信息（AiGit future 非 Send，走当前线程 runtime）。
+                let engine_for_ai = git_engine(&state);
+                let ai = ai_git(&state);
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| ApiError::internal(format!("ai runtime: {error}")))?;
+                tokio::task::spawn_blocking(move || {
+                    rt.block_on(ai.suggest_commit_message(&engine_for_ai, None))
+                        .map_err(ApiError::from)
+                })
+                .await
+                .map_err(|error| ApiError::internal(format!("ai task join: {error}")))??
+            }
+        };
+        let hash = engine.commit(&message).await.map_err(ApiError::from)?;
+        commit_hash = Some(hash);
+    }
+    Ok(Json(json!({
+        "ok": true,
+        "snapshot_id": snapshot.id,
+        "commit_hash": commit_hash,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct AiFixApplyBody {
+    /// 待应用的 unified diff 补丁（来自 AI 输出，apply 前会先 --check）。
+    patch: String,
+    /// 提交阶段暂存的目标文件；缺省时暂存全部改动。
+    path: Option<String>,
+    /// 是否应用后自动提交。
+    #[serde(default)]
+    commit: bool,
+    /// 提交信息；缺省时由 AiGit::suggest_commit_message 生成。
+    message: Option<String>,
+}
+
+async fn git_log_bundle(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let path = ops_engine(&state).log_bundle().await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "path": path.display().to_string() })))
+}
+
+async fn git_compare(
+    State(state): State<AppState>,
+    Json(body): Json<GitCompareBody>,
+) -> Result<Json<DiffInfo>, ApiError> {
+    let engine = git_engine(&state);
+    let from = resolve_compare_ref(&engine, &body.from).await?;
+    let to = resolve_compare_ref(&engine, &body.to).await?;
+    let info = git_diff_between(&state.cwd, &from, &to, 3, Some(&state.home)).await?;
+    Ok(Json(info))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCompareBody {
+    from: String,
+    to: String,
+}
+
+async fn resolve_compare_ref(engine: &GitEngine, spec: &str) -> Result<String, ApiError> {
+    if spec.eq_ignore_ascii_case("head") {
+        return Ok("HEAD".to_owned());
+    }
+    if let Some(id) = spec.strip_prefix("snapshot:") {
+        require_snapshot(engine, id).await?;
+        return Ok(format!("refs/coomi/snap/{id}"));
+    }
+    Err(ApiError::bad_request(format!("invalid ref spec: {spec}")))
+}
+
+async fn git_snapshot_preview(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<SnapshotPreview>, ApiError> {
+    let engine = git_engine(&state);
+    require_snapshot(&engine, &id).await?;
+    let preview = engine.snapshot_preview(&id).await.map_err(ApiError::from)?;
+    Ok(Json(preview))
+}
+
+async fn git_stash_pop(
+    State(state): State<AppState>,
+    Json(body): Json<GitStashIndexBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let output = engine.stash_pop(body.index).await.map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true, "output": output })))
+}
+
+async fn usage_by_day_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DayUsage>>, ApiError> {
+    let days = usage_by_day(&state.home).await.map_err(ApiError::from)?;
+    Ok(Json(days))
+}
+
+async fn git_unstage(
+    State(state): State<AppState>,
+    Json(body): Json<GitStageBody>,
+) -> Result<Json<Value>, ApiError> {
+    let engine = git_engine(&state);
+    let paths = body.paths.unwrap_or_default();
+    engine
+        .unstage(&paths, body.all.unwrap_or(false))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn git_network_diagnostics(
+    State(state): State<AppState>,
+) -> Result<Json<NetworkReport>, ApiError> {
+    let report = ops_engine(&state).network_diagnostics().await;
+    Ok(Json(report))
+}
+
+async fn git_snapshot_schedule_put(
+    State(state): State<AppState>,
+    Json(body): Json<SnapshotScheduleUpdate>,
+) -> Result<Json<crate::snapshot_schedule::SnapshotSchedule>, ApiError> {
+    let mut config = crate::snapshot_schedule::load_schedule(&state.home);
+    if let Some(enabled) = body.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(cron) = body.cron {
+        if let Some(expr) = cron.as_deref() {
+            if !crate::snapshot_schedule::is_valid_cron(expr) {
+                return Err(ApiError::bad_request(format!(
+                    "invalid cron expression: {expr}"
+                )));
+            }
+        }
+        config.cron = cron;
+    }
+    if let Some(retain) = body.retain {
+        config.retain = retain;
+    }
+    crate::snapshot_schedule::save_schedule(&state.home, &config).map_err(ApiError::from)?;
+    Ok(Json(config))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SnapshotScheduleUpdate {
+    enabled: Option<bool>,
+    cron: Option<Option<String>>,
+    retain: Option<usize>,
+}
+
+async fn git_snapshot_schedule_get(
+    State(state): State<AppState>,
+) -> Result<Json<crate::snapshot_schedule::SnapshotSchedule>, ApiError> {
+    Ok(Json(crate::snapshot_schedule::load_schedule(&state.home)))
+}
+
+async fn git_snapshot_create(
+    State(state): State<AppState>,
+    Json(body): Json<SnapshotCreateBody>,
+) -> Result<Json<Snapshot>, ApiError> {
+    match body.kind.as_str() {
+        "turn" if body.session_id.is_none() || body.turn.is_none() => {
+            return Err(ApiError::bad_request(
+                "snapshot kind \"turn\" requires sessionId and turn",
+            ));
+        }
+        "session" if body.session_id.is_none() => {
+            return Err(ApiError::bad_request(
+                "snapshot kind \"session\" requires sessionId",
+            ));
+        }
+        "turn" | "session" | "manual" | "pre-restore" => {}
+        _ => {
+            return Err(ApiError::bad_request(format!(
+                "invalid snapshot kind: {}",
+                body.kind
+            )));
+        }
+    }
+    if body.summary.trim().is_empty() {
+        return Err(ApiError::bad_request("snapshot summary cannot be empty"));
+    }
+    let engine = git_engine(&state);
+    let snap = engine
+        .snapshot_create(
+            &body.kind,
+            body.session_id.as_deref(),
+            body.turn,
+            &body.summary,
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(snap))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotCreateBody {
+    kind: String,
+    session_id: Option<String>,
+    turn: Option<u64>,
+    summary: String,
+}
+
+async fn git_snapshots_list(State(state): State<AppState>) -> Result<Json<Vec<Snapshot>>, ApiError> {
+    let engine = git_engine(&state);
+    let list = engine.snapshot_list().await.map_err(ApiError::from)?;
+    Ok(Json(list))
+}
+
+async fn git_credentials_delete(
+    State(state): State<AppState>,
+    AxumPath((service, key)): AxumPath<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let store = CredentialStore::new(state.home.clone());
+    store.delete(&service, &key).map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn git_credentials_save(
+    State(state): State<AppState>,
+    Json(body): Json<GitCredentialBody>,
+) -> Result<Json<Value>, ApiError> {
+    if body.service.trim().is_empty() || body.key.trim().is_empty() || body.token.trim().is_empty()
+    {
+        return Err(ApiError::bad_request("service, key and token are required"));
+    }
+    let store = CredentialStore::new(state.home.clone());
+    store
+        .save(&body.service, &body.key, &body.token)
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCredentialBody {
+    service: String,
+    key: String,
+    token: String,
+}
+
+async fn git_credentials_list(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<(String, Vec<String>)>>, ApiError> {
+    let store = CredentialStore::new(state.home.clone());
+    Ok(Json(store.list_keys()))
+}
+
+async fn ux_program_put(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    if let Some(consent) = body.get("consent").and_then(Value::as_str) {
+        crate::ux_profile::set_consent(&state.home, consent)
+            .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+        if consent == "joined" {
+            crate::ux_profile::upload(&state.home);
+        }
+    }
+    if let Some(auto_update) = body.get("auto_update").and_then(Value::as_bool) {
+        crate::ux_profile::set_auto_update(&state.home, auto_update)
+            .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    }
+    if let Some(exit_reason) = body.get("exit_reason").and_then(Value::as_str) {
+        let _ = crate::ux_profile::set_exit_reason(&state.home, exit_reason);
+    }
+    if let Some(never_ask) = body.get("never_ask").and_then(Value::as_bool) {
+        crate::ux_profile::set_never_ask(&state.home, never_ask)
+            .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    }
+    Ok(Json(json!({ "ok": true, "summary": crate::ux_profile::summary(&state.home) })))
+}
+
+async fn ux_program_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(crate::ux_profile::summary(&state.home)))
+}
+
+async fn experience_settings_set(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let enabled = body
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::bad_request("missing enabled: true|false"))?;
+    coomi_experience::set_enabled(&state.home, enabled)
+        .map_err(|error| ApiError::internal(format!("failed to save experience setting: {error:#}")))?;
+    Ok(Json(json!({ "ok": true, "enabled": enabled })))
+}
+
+async fn experience_settings_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!({ "enabled": coomi_experience::enabled(&state.home) })))
+}
+
+async fn experience_clear(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    coomi_experience::clear(&state.home)
+        .map_err(|error| ApiError::internal(format!("failed to clear experience: {error:#}")))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn experience_list(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!({
+        "enabled": coomi_experience::enabled(&state.home),
+        "lessons": coomi_experience::load_lessons(&state.home),
+    })))
 }

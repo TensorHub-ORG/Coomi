@@ -39,6 +39,8 @@ mod life;
 mod terminal_ui;
 mod web;
 mod workflow;
+mod snapshot_schedule;
+mod ux_profile;
 
 #[derive(Debug, Parser)]
 #[command(

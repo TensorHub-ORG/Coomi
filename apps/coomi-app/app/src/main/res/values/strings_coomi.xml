@@ -167,14 +167,10 @@
     <string name="coomi_dash_feedback">问题反馈与诊断</string>
     <string name="coomi_dash_feedback_desc">一键反馈问题、查看反馈记录与诊断信息</string>
     <string name="coomi_splash_feedback">一键反馈问题</string>
+    <string name="coomi_dash_prompts">提示词库</string>
+    <string name="coomi_dash_prompts_desc">沉淀常用指令与角色设定，聊天中一键复用</string>
     <string name="coomi_dash_ux_program">用户体验改进计划</string>
     <string name="coomi_dash_ux_program_desc">生成并查看你的使用画像</string>
-    <string name="coomi_dash_donate">捐赠者计划</string>
-    <string name="coomi_dash_donate_desc">喜欢 Coomi 就给魔改作者买杯咖啡，或加 QQ 群 1108467806 反馈与交流</string>
-    <string name="coomi_dash_donate_title">支持 Coomi</string>
-    <string name="coomi_dash_donate_hint">微信扫一扫赞赏随意，你的支持是魔改继续下去的动力。</string>
-    <string name="coomi_dash_donate_qq">加入 QQ 交流群 1108467806</string>
-    <string name="coomi_dash_donate_close">关闭</string>
     <string name="coomi_feedback_title">反馈建议</string>
     <string name="coomi_feedback_intro">告诉我们哪里可以做得更好。问题反馈可附截图，便于快速定位。</string>
     <string name="coomi_feedback_type_label">反馈类型</string>

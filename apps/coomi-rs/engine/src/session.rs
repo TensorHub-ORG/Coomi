@@ -31,6 +31,9 @@ pub enum SessionMode {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Session {
+    /// 辅助会话：父会话 id（1.4.8 辅助对话体系）。
+    #[serde(default)]
+    pub parent_session_id: Option<Uuid>,
     pub id: Uuid,
     pub provider_id: String,
     pub model: String,
@@ -83,6 +86,7 @@ impl Session {
             mode: SessionMode::Agent,
             title: String::new(),
             title_manually_set: false,
+            parent_session_id: None,
             pinned: false,
             summary: String::new(),
             context: ContextState::default(),
@@ -96,6 +100,17 @@ impl Session {
     pub fn switch_model(&mut self, provider_id: impl Into<String>, model: impl Into<String>) {
         self.provider_id = provider_id.into();
         self.model = model.into();
+        self.touch();
+    }
+
+    pub fn clear_data(&mut self) {
+        self.messages.clear();
+        self.usage = TokenUsage::default();
+        self.context = ContextState::default();
+        self.plan = None;
+        self.loop_state = None;
+        self.hooks_started = false;
+        self.summary.clear();
         self.touch();
     }
 
@@ -161,6 +176,12 @@ impl SessionStore {
         let mut session = self.load(id)?;
         session.touch();
         self.save(&session)
+    }
+    pub fn clear_data(&self, id: Uuid) -> Result<Session> {
+        let mut session = self.load(id)?;
+        session.clear_data();
+        self.save(&session)?;
+        Ok(session)
     }
 }
 
