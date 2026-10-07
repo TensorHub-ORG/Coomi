@@ -40,8 +40,8 @@ async function findTarget(id: string): Promise<HTMLElement | null> {
 
 async function run(detail: MorphRequest) {
   if (active.value || cancelled) { pendingIds.delete(detail.messageId); session.completeSendMorph(detail.messageId); return }
-  const target = await findTarget(detail.messageId)
   const node = dot.value
+  const target = await findTarget(detail.messageId)
   if (!target || !node || cancelled || typeof node.animate !== 'function') {
     session.completeSendMorph(detail.messageId)
     return
@@ -50,43 +50,49 @@ async function run(detail: MorphRequest) {
   active.value = true
   await nextFrame()
   if (cancelled || !active.value) return finish(detail.messageId)
+
   const source = detail.source
-  const end = target.getBoundingClientRect()
-  const sx = source.left + source.width / 2
-  const sy = source.top + source.height / 2
-  const tx = end.left + end.width / 2
-  const ty = end.top + end.height / 2
+  const startCX = source.left + source.width / 2
+  const startCY = source.top + source.height / 2
+  const DURATION = 620
+  const t0 = performance.now()
+  let lastEnd: DOMRect | null = null
   node.style.left = '0'
   node.style.top = '0'
-  node.style.width = '36px'
-  node.style.height = '36px'
-  node.style.borderRadius = '50%'
   node.style.opacity = '1'
 
-  try {
-    const fly = node.animate([
-      { transform: `translate(${sx - 18}px, ${sy - 18}px) scale(1)`, borderRadius: '50%' },
-      { offset: .22, transform: `translate(${sx - 5}px, ${sy - 5}px) scale(.28)`, borderRadius: '50%' },
-      { offset: .68, transform: `translate(${sx + (tx - sx) * .68 - 5}px, ${sy + (ty - sy) * .68 - 17}px) scale(.28)`, borderRadius: '55% 45% 62% 38%' },
-      { transform: `translate(${tx - 5}px, ${ty - 5}px) scale(.28)`, borderRadius: '50%' },
-    ], { duration: 440, easing: 'cubic-bezier(.24,.72,.2,1)', fill: 'forwards' })
-    running.push(fly)
-    await fly.finished
-    if (cancelled) return finish(detail.messageId)
-
-    node.style.width = `${end.width}px`
-    node.style.height = `${end.height}px`
-    const spread = node.animate([
-      { transform: `translate(${tx - end.width / 2}px, ${ty - end.height / 2}px) scale(.035,.12)`, borderRadius: '55% 45% 62% 38%', opacity: 1 },
-      { offset: .64, transform: `translate(${end.left}px, ${end.top}px) scale(1.04,.96)`, borderRadius: '21px 21px 9px 21px', opacity: 1 },
-      { transform: `translate(${end.left}px, ${end.top}px) scale(1)`, borderRadius: '19px 19px 7px 19px', opacity: 1 },
-    ], { duration: 270, easing: 'cubic-bezier(.18,.84,.22,1.18)', fill: 'forwards' })
-    running.push(spread)
-    await spread.finished
-    finish(detail.messageId)
-  } catch {
-    finish(detail.messageId)
-  }
+  // 逐帧动画：每帧重测目标气泡的位置（自动滚动 / 键盘弹出都会移动它），
+  // 水滴实时跟随目标，落点不再错位；单线程连续插值，两段拼接的跳变消失。
+  await new Promise<void>(resolve => {
+    const step = () => {
+      if (cancelled) { resolve(); return }
+      const now = performance.now()
+      const t = Math.min(1, (now - t0) / DURATION)
+      const end = target.getBoundingClientRect()
+      if (end.width > 0 && end.height > 0) lastEnd = end
+      const rect = lastEnd ?? end
+      const endCX = rect.left + rect.width / 2
+      const endCY = rect.top + rect.height / 2
+      const ease = 1 - Math.pow(1 - t, 3)
+      const cx = startCX + (endCX - startCX) * ease
+      const cy = startCY + (endCY - startCY) * ease
+      const w = source.width + (rect.width - source.width) * ease
+      const h = source.height + (rect.height - source.height) * ease
+      // 起手轻微压缩蓄力，随后随进度铺开成气泡；中段做非对称水滴形。
+      const squashX = t < .3 ? 1 + (0.3 - t) * .35 : 1
+      const radius = t < .5 ? 50 : Math.max(19, 50 - (t - .5) * 62)
+      node.style.width = `${w}px`
+      node.style.height = `${h}px`
+      node.style.borderRadius = `${radius}%`
+      node.style.transform = `translate3d(${cx - w / 2}px, ${cy - h / 2}px, 0) scale(${squashX}, ${2 - squashX})`
+      node.style.opacity = t > .92 ? String(Math.max(0, (1 - t) / .08)) : '1'
+      if (t < 1) requestAnimationFrame(step)
+      else resolve()
+    }
+    requestAnimationFrame(step)
+  })
+  node.style.opacity = '0'
+  finish(detail.messageId)
 }
 
 function onRequest(event: Event) {

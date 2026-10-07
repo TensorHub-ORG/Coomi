@@ -1425,6 +1425,9 @@ impl ChatStreamState {
                 }
                 if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
                     target.arguments.push_str(arguments);
+                } else if let Some(object) = function.get("arguments").filter(|value| value.is_object()) {
+                    // 部分上游把 arguments 以对象（而非字符串）流式下发。
+                    target.arguments.push_str(&object.to_string());
                 }
             }
         }
@@ -1435,6 +1438,7 @@ impl ChatStreamState {
         let tools = std::mem::take(&mut self.tools);
         let mut tool_calls = Vec::new();
         let mut invalid_tool_calls = Vec::new();
+        let mut content_fallback_used = false;
         for (index, call) in tools.into_values().enumerate() {
             let id = if call.id.is_empty() {
                 format!("call-{index}")
@@ -1442,6 +1446,39 @@ impl ChatStreamState {
                 call.id
             };
             if call.name.trim().is_empty() {
+                // 恢复 1：部分上游把完整调用（含 name）放进 arguments。
+                if let Ok(parsed) = serde_json::from_str::<Value>(&call.arguments) {
+                    let recovered = parsed
+                        .get("name")
+                        .or_else(|| parsed.get("tool"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .filter(|name| !name.trim().is_empty());
+                    if let Some(name) = recovered {
+                        match parse_arguments(&Value::String(call.arguments.clone())) {
+                            Ok(arguments) => {
+                                tool_calls.push(ToolCall { id, name, arguments });
+                                continue;
+                            }
+                            Err(error) => {
+                                invalid_tool_calls.push(InvalidToolCall {
+                                    id,
+                                    name,
+                                    reason: error.to_string(),
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                }
+                // 恢复 2：DeepSeek 兼容协议把工具调用以 JSON 文本形式写在正文里。
+                if !content_fallback_used {
+                    if let Some(tool_call) = parse_deepseek_tool_call(&self.content) {
+                        content_fallback_used = true;
+                        tool_calls.push(tool_call);
+                        continue;
+                    }
+                }
                 invalid_tool_calls.push(InvalidToolCall {
                     id,
                     name: "unknown".into(),
@@ -1583,6 +1620,7 @@ impl ResponsesStreamState {
         let tools = std::mem::take(&mut self.tools);
         let mut tool_calls = Vec::new();
         let mut invalid_tool_calls = Vec::new();
+        let mut content_fallback_used = false;
         for (index, call) in tools.into_values().enumerate() {
             let id = if call.id.is_empty() {
                 format!("call-{index}")
@@ -1590,6 +1628,39 @@ impl ResponsesStreamState {
                 call.id
             };
             if call.name.trim().is_empty() {
+                // 恢复 1：部分上游把完整调用（含 name）放进 arguments。
+                if let Ok(parsed) = serde_json::from_str::<Value>(&call.arguments) {
+                    let recovered = parsed
+                        .get("name")
+                        .or_else(|| parsed.get("tool"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .filter(|name| !name.trim().is_empty());
+                    if let Some(name) = recovered {
+                        match parse_arguments(&Value::String(call.arguments.clone())) {
+                            Ok(arguments) => {
+                                tool_calls.push(ToolCall { id, name, arguments });
+                                continue;
+                            }
+                            Err(error) => {
+                                invalid_tool_calls.push(InvalidToolCall {
+                                    id,
+                                    name,
+                                    reason: error.to_string(),
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                }
+                // 恢复 2：正文 JSON 兜底。
+                if !content_fallback_used {
+                    if let Some(tool_call) = parse_deepseek_tool_call(&self.content) {
+                        content_fallback_used = true;
+                        tool_calls.push(tool_call);
+                        continue;
+                    }
+                }
                 invalid_tool_calls.push(InvalidToolCall {
                     id,
                     name: "unknown".into(),
