@@ -38,16 +38,13 @@ function sendControl() {
   const t = controlText.value.trim()
   if (!t) return
   controlText.value = ''
-  const bridge = nativeBridge()
   if (!accessibilityReady.value && !overlayReady.value) {
     controlThinking.value = '还没有屏幕操控权限，请先点上方「开启无障碍」'
     return
   }
   controlThinking.value = `已发送：${t}`
   pushFloat('控制模式 · 正在发送', t)
-  if (bridge?.controlSendText) {
-    try { bridge.controlSendText(t) } catch { /* 原生桥不可用时保持提示 */ }
-  }
+  session.sendMessage(`控制模式任务：先用 ui_automation read_screen 查看当前手机界面，再按控件文字或返回坐标操作，每次操作后读取界面验证。\n\n${t}`)
 }
 const sendButton = ref<HTMLButtonElement | null>(null)
 const quickOpen = ref(false)
@@ -81,7 +78,7 @@ watch(barOpen, (open) => {
   const panel = modePopEl.value
   if (!panel) return
   const buttons = Array.from(panel.querySelectorAll<HTMLElement>('.pill'))
-  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  if (prefersReducedMotion() || !config.sendMorphAnimation || config.allAnimationsOff) return
   if (open) {
     gsap.killTweensOf(buttons)
     gsap.fromTo(buttons,
@@ -131,7 +128,7 @@ async function submit() {
   const fileNames = files.map(path => path.split('/').pop() || '文件')
   const displayText = visibleText
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-  const morph = config.sendMorphAnimation && !reduceMotion && !session.isBusy && !session.pendingEdit
+  const morph = config.sendMorphAnimation && !config.allAnimationsOff && !reduceMotion && !session.isBusy && !session.pendingEdit
   const source = sendButton.value?.getBoundingClientRect()
   const messageId = session.sendMessage(requestText, displayText, morph && !!source, fileNames)
   if (messageId && morph && source) {
@@ -473,7 +470,7 @@ watch(text, () => {
               :size="15"
               stroke-width="2"
               :spring="{ stiffness: 300, damping: 22 }"
-              :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+              :reduced-motion="(config.sendMorphAnimation && !config.allAnimationsOff) ? 'never' : 'always'"
             />
             <span>模式</span>
           </button>
@@ -486,7 +483,7 @@ watch(text, () => {
               :size="21"
               stroke-width="2"
               :spring="{ stiffness: 320, damping: 24 }"
-              :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+              :reduced-motion="(config.sendMorphAnimation && !config.allAnimationsOff) ? 'never' : 'always'"
             />
           </button>
 

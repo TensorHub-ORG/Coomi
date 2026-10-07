@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
 
 use super::pow::{pow_header_json, PowChallenge, PowSolution};
 
@@ -48,6 +49,29 @@ const DEVICE_ID: &str = "coomi-android";
 /// 接近真人在 App 里手动操作的频率，顺带把并发请求串行化。
 static REQUEST_GATE: OnceLock<Mutex<Instant>> = OnceLock::new();
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(400);
+static AUTH_REQUEST_GATE: OnceLock<Mutex<()>> = OnceLock::new();
+static AUTH_COOLDOWN: OnceLock<std::sync::Mutex<Option<Instant>>> = OnceLock::new();
+
+// 用户身份验证只允许一个在途请求；不伪装客户端、不循环重试平台风控。
+async fn begin_auth_request() -> Result<MutexGuard<'static, ()>> {
+    let guard = AUTH_REQUEST_GATE.get_or_init(|| Mutex::new(())).lock().await;
+    let remaining = AUTH_COOLDOWN.get_or_init(|| std::sync::Mutex::new(None))
+        .lock().unwrap_or_else(|p| p.into_inner())
+        .and_then(|until| until.checked_duration_since(Instant::now()));
+    if let Some(remaining) = remaining {
+        return Err(anyhow!("DeepSeek 认证请求已暂停，请等待 {} 秒后再试；持续被拒绝请在官方应用完成验证", remaining.as_secs() + 1));
+    }
+    Ok(guard)
+}
+
+fn note_auth_rejection(value: &serde_json::Value) {
+    let global = value.get("code").and_then(serde_json::Value::as_i64).unwrap_or(0);
+    let biz = value.pointer("/data/biz_code").and_then(serde_json::Value::as_i64).unwrap_or(0);
+    if matches!(global, 40300 | 40301 | 40302 | 40029 | 11) || biz == 11 {
+        *AUTH_COOLDOWN.get_or_init(|| std::sync::Mutex::new(None))
+            .lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now() + Duration::from_secs(60));
+    }
+}
 
 async fn throttle_account_request() {
     let gate = REQUEST_GATE.get_or_init(|| Mutex::new(Instant::now() - MIN_REQUEST_INTERVAL));
@@ -61,6 +85,7 @@ async fn throttle_account_request() {
 
 /// 密码登录。官方 2.3.1 对邮箱和手机号使用不同请求结构，不能发送 `account`。
 pub async fn login(client: &Client, account: &str, password: &str, device_id: &str) -> Result<LoginResult> {
+    let _auth_guard = begin_auth_request().await?;
     throttle_account_request().await;
     let account = account.trim();
     let body = if account.contains('@') {
@@ -87,6 +112,7 @@ pub async fn login(client: &Client, account: &str, password: &str, device_id: &s
 /// 注意：`mobile_number` 必须是**不带国家码**的纯号码，服务端对 `+86...` 会直接返回
 /// `INVALID_MOBILE_NUMBER`（biz_code 99），因此这里不能再拼接 area_code。
 pub async fn send_sms_code(client: &Client, mobile: &str, _area_code: &str) -> Result<()> {
+    let _auth_guard = begin_auth_request().await?;
     throttle_account_request().await;
     let full_mobile = mobile
         .trim()
@@ -111,6 +137,7 @@ pub async fn send_sms_code(client: &Client, mobile: &str, _area_code: &str) -> R
         .context("发送验证码请求失败")?;
     let status = resp.status();
     let value: serde_json::Value = resp.json().await.context("解析验证码响应失败")?;
+    note_auth_rejection(&value);
     if !status.is_success() {
         return Err(anyhow!("发送验证码失败 HTTP {status}: {value}"));
     }
@@ -133,6 +160,7 @@ pub async fn create_guest_challenge(client: &Client, target_path: &str) -> Resul
         .context("创建 guest challenge 请求失败")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().await.context("解析 guest challenge 失败")?;
+    note_auth_rejection(&body);
     if !status.is_success() {
         return Err(anyhow!("创建 guest challenge 失败 HTTP {status}: {body}"));
     }
@@ -155,6 +183,7 @@ pub async fn login_by_mobile_sms(
     code: &str,
     device_id: &str,
 ) -> Result<LoginResult> {
+    let _auth_guard = begin_auth_request().await?;
     let path = "/api/v0/users/login_by_mobile_sms";
     let challenge = create_guest_challenge(client, path).await?;
     let solution = super::pow::solve_challenge(&challenge)
@@ -179,6 +208,7 @@ async fn login_request(client: &Client, path: &str, body: serde_json::Value) -> 
         .context("登录请求失败")?;
     let status = resp.status();
     let value: serde_json::Value = resp.json().await.context("解析登录响应失败")?;
+    note_auth_rejection(&value);
     if !status.is_success() {
         return Err(anyhow!("登录失败 HTTP {status}: {value}"));
     }
@@ -193,6 +223,7 @@ async fn login_request_with_pow(
     body: serde_json::Value,
     pow_header: &str,
 ) -> Result<LoginResult> {
+    throttle_account_request().await;
     let resp = with_client_headers(client.post(format!("{API_BASE}{path}")))
         .header("Content-Type", "application/json")
         .header("X-DS-Guest-Pow-Response", pow_header)
@@ -202,6 +233,7 @@ async fn login_request_with_pow(
         .context("登录请求失败")?;
     let status = resp.status();
     let value: serde_json::Value = resp.json().await.context("解析登录响应失败")?;
+    note_auth_rejection(&value);
     if !status.is_success() {
         return Err(anyhow!("登录失败 HTTP {status}: {value}"));
     }
@@ -220,10 +252,10 @@ fn ensure_business_success(value: &serde_json::Value, action: &str) -> Result<()
         if global_code == 40002 {
             return Err(anyhow!("DeepSeek 登录已失效，请重新登录（40002）：{message}"));
         }
-        // 40300/40301/40302 都出自风控的 PoW 校验环节：缺头 / 解不对 / 结构不对。
+        // 40300/40301/40302：PoW 校验未通过（客户端校验异常）。
         if matches!(global_code, 40300 | 40301 | 40302) {
             return Err(anyhow!(
-                "DeepSeek 风控校验未通过（{global_code}：{message}）。可改用密码登录，或稍后再试。"
+                "DeepSeek 验证失败（{global_code}：{message}）。可改用密码登录，或稍后再试。"
             ));
         }
         if global_code == 40029 || message.contains("TOO_MANY_REQUESTS") {
@@ -599,6 +631,13 @@ impl ChatState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn auth_rejection_stops_duplicate_requests_without_network() {
+        note_auth_rejection(&serde_json::json!({"code":40301}));
+        assert!(begin_auth_request().await.unwrap_err().to_string().contains("认证请求已暂停"));
+        *AUTH_COOLDOWN.get().unwrap().lock().unwrap() = None;
+    }
 
     #[test]
     fn login_token_accepts_access_token_and_trims_it() {

@@ -38,7 +38,7 @@ onMounted(() => {
   const el = rootEl.value
   if (!el) return
   if (props.card.status !== 'starting' && props.card.status !== 'running') return
-  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  if (prefersReducedMotion() || !config.sendMorphAnimation || config.allAnimationsOff) return
   gsap.fromTo(el,
     { x: -24, opacity: 0 },
     { x: 0, opacity: 1, duration: 0.42, ease: 'power3.out' },
@@ -236,34 +236,48 @@ watch(open, (value, previous) => {
   if (!element || previous === undefined) return
   // 动画开关合并到水滴动画开关：关掉水滴动画的同时也关掉工具卡展开动画，
   // 让用户在「要动效 / 不要动效」上只有一个总开关。
-  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  if (prefersReducedMotion() || !config.sendMorphAnimation || config.allAnimationsOff) {
+    gsap.killTweensOf(element)
+    gsap.set(element, { clearProps: 'transform,opacity,transformOrigin' })
+    collapsing.value = false
+    return
+  }
   gsap.killTweensOf(element)
   if (value) {
-    // v-show 刚把元素切到可见，此时布局未完成、scrollHeight 可能为 0。
-    // 先等一帧拿到真实内容高度，再从 0 展开 —— 否则会「卡一下直接展开」。
+    collapsing.value = false
+    // 展开：用 scaleY 替代 height 动画 —— 不触发重排，GPU 合成，
+    // Android WebView 里长列表工具卡展开不再整屏闪。
     nextTick(() => requestAnimationFrame(() => {
-      const target = element.scrollHeight
-      gsap.fromTo(element, { height: 0, opacity: 0 }, {
-        height: target,
-        opacity: 1,
-        duration: 0.26,
-        ease: 'power2.out',
-        onComplete: () => { gsap.set(element, { clearProps: 'height' }) },
-      })
+      if (!open.value || config.allAnimationsOff || prefersReducedMotion()) return
+      gsap.fromTo(element,
+        { scaleY: 0.05, opacity: 0, transformOrigin: 'top center' },
+        {
+          scaleY: 1, opacity: 1,
+          duration: 0.28, ease: 'power3.out',
+          onComplete: () => { gsap.set(element, { clearProps: 'scaleY,opacity,transformOrigin' }) },
+        })
     }))
   } else {
+    // 收起：先播动画再允许 v-show 隐藏（collapsing 标志保持元素可见）。
     collapsing.value = true
-    gsap.to(element, {
-      height: 0,
-      opacity: 0,
-      duration: 0.22,
-      ease: 'power2.in',
-      onComplete: () => {
-        gsap.set(element, { clearProps: 'height,opacity' })
-        collapsing.value = false
-      },
-    })
+    gsap.fromTo(element,
+      { scaleY: 1, opacity: 1, transformOrigin: 'top center' },
+      {
+        scaleY: 0.05, opacity: 0,
+        duration: 0.22, ease: 'power3.in',
+        onComplete: () => {
+          gsap.set(element, { clearProps: 'scaleY,opacity,transformOrigin' })
+          collapsing.value = false
+        },
+      })
   }
+})
+
+watch(() => config.allAnimationsOff, (off) => {
+  if (!off || !bodyRef.value) return
+  gsap.killTweensOf(bodyRef.value)
+  gsap.set(bodyRef.value, { clearProps: 'transform,opacity,transformOrigin' })
+  collapsing.value = false
 })
 
 onBeforeUnmount(() => {

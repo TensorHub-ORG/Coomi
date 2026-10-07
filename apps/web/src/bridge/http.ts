@@ -72,7 +72,11 @@ export async function authedFetch(
 
 export async function apiGet<T>(path: string): Promise<T> {
   const r = await authedFetch(`${API_BASE}${path}`, { headers: { Accept: 'application/json' } })
-  if (!r.ok) throw new Error(`GET ${path} → ${r.status}`)
+  if (!r.ok) {
+    let message = `GET ${path} → ${r.status}`
+    try { const data = await r.json(); if(typeof data?.error === 'string') message=data.error } catch { /* non-JSON response */ }
+    throw new Error(message)
+  }
   return r.json() as Promise<T>
 }
 

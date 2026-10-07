@@ -207,10 +207,12 @@ export const useSessionStore = defineStore('session', () => {
     transport.value = t
     connectedSessionId = targetSessionId
     let lastEventSeq = 0
-    t.onStateChange(status => {
+    t.onStateChange(async status => {
       if (transport.value !== t || sessionId.value !== targetSessionId) return
       connection.setStatus(status)
       if (status.state === 'open') {
+        await config.syncStartupPermission()
+        if (transport.value !== t || sessionId.value !== targetSessionId) return
         t.send({ command: 'set_permission_mode', mode: config.permissionMode })
         t.send({ command: 'set_session_mode', mode: mode.value })
         const meta = sessions.find(targetSessionId)
@@ -493,6 +495,7 @@ export const useSessionStore = defineStore('session', () => {
     }
     persistActiveSessionId(id)
     lifeAutoSent = false
+    try { (window.CoomiAndroid as any)?.setControlSession?.(id, config.currentProviderId, config.currentModel) } catch { /* bridge unavailable */ }
   }
 
   /**

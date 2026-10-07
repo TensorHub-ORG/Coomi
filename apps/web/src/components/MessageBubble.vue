@@ -156,7 +156,7 @@ async function copyAll() {
   </div>
 
   <div v-else class="assistant response-card" :class="{ life: isLife, streaming }">
-    <div v-if="streaming" class="output-glow"><i /></div>
+    <svg v-if="streaming" class="card-border-tracer" aria-hidden="true"><rect x="1" y="1" pathLength="100" /></svg>
     <div v-if="isLife" class="life-tag"><CoomiIcon name="lifeRings" :size="12" /><span>生命体</span></div>
     <div v-for="(h, i) in blocks" :key="i" class="md blk cascade" v-html="h" />
     <FileInline v-if="filePaths.length" :paths="filePaths" />

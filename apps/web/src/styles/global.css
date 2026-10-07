@@ -335,6 +335,13 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
 }
 
 /* 流式文本的"正在写"光标 */
+/* 全局关闭动画时：Morphicons 走 reduced-motion="always"，这里兜底禁用常见过渡 */
+[data-all-animations-off] .chev,
+[data-all-animations-off] .gchev,
+[data-all-animations-off] .sw,
+[data-all-animations-off] .ri,
+[data-all-animations-off] .btn { transition: none !important; }
+
 .stream-caret {
   display: inline-block; width: 7px; height: 1.02em; margin-left: 3px;
   background: var(--blue); border-radius: 1.5px; vertical-align: text-bottom;
@@ -349,6 +356,30 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
   -webkit-text-fill-color: transparent;
   animation: coomi-shimmer 1.6s linear infinite;
 }
+
+/* ── 全局动画关闭：总开关。
+   设在 document.documentElement（data-all-animations-off）上，
+   一次性禁用所有 CSS keyframes / transitions / GSAP 时间线也会被 JS 一并清理。 */
+[data-all-animations-off] *,
+[data-all-animations-off] *::before,
+[data-all-animations-off] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+[data-all-animations-off] * { scroll-behavior: auto !important; }
+
+/* ── 助手卡片跑马灯边框：沿对话卡片外缘旋转的光（不是顶部那一条线） ── */
+.response-card.streaming {
+  position: relative;
+}
+.card-border-tracer { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+.card-border-tracer rect {
+  width:calc(100% - 2px); height:calc(100% - 2px); rx:14px; ry:14px;
+  fill:none; stroke:var(--blue); stroke-width:1.5; vector-effect:non-scaling-stroke;
+  stroke-linecap:round; stroke-dasharray:12 88; opacity:.8;
+  animation:card-tracer-orbit 2.8s linear infinite;
+}
+@keyframes card-tracer-orbit { to { stroke-dashoffset:-100; } }
 
 /* ── Markdown 正文 ── */
 .md { font-size: 15.5px; line-height: 1.72; word-break: break-word; }

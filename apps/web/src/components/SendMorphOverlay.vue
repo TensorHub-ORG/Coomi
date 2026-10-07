@@ -1,121 +1,75 @@
 <script setup lang="ts">
-/**
- * 主对话发送液滴覆盖层。消息会立刻发给引擎；这里只负责把发送按钮的位置
- * 连接到新用户气泡，任何定位或动画能力异常都会立刻降级为普通显示。
- */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
-
+import { useConfigStore } from '@/stores/config'
+import { prefersReducedMotion } from '@/composables/useGsap'
 interface RectSnapshot { left: number; top: number; width: number; height: number }
 interface MorphRequest { messageId: string; source: RectSnapshot }
-
-const session = useSessionStore()
-const dot = ref<HTMLElement | null>(null)
-const active = ref(false)
-let cancelled = false
-let running: Animation[] = []
-const pendingIds = new Set<string>()
-
-function finish(id: string) {
-  running.forEach(animation => animation.cancel())
-  running = []
-  active.value = false
-  pendingIds.delete(id)
-  session.completeSendMorph(id)
+const session=useSessionStore(), config=useConfigStore()
+const dot=ref<HTMLElement|null>(null), ripple=ref<HTMLElement|null>(null), active=ref(false)
+let disposed=false, epoch=0
+let running:Animation[]=[]
+const pending=new Set<string>()
+const frame=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
+function finish(id:string) { session.completeSendMorph(id);pending.delete(id) }
+function stop() {
+  epoch++
+  for(const a of running) a.cancel()
+  running=[];active.value=false
+  for(const id of pending) session.completeSendMorph(id)
+  pending.clear()
 }
-
-async function nextFrame(): Promise<void> {
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-}
-
-async function findTarget(id: string): Promise<HTMLElement | null> {
-  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, '\\$&')
-  for (let attempt = 0; attempt < 18 && !cancelled; attempt++) {
-    await nextFrame()
-    const target = document.querySelector<HTMLElement>(`[data-message-id="${escaped}"] .bubble`)
-    if (target && target.getBoundingClientRect().width > 0) return target
-  }
-  return null
-}
-
-async function run(detail: MorphRequest) {
-  if (active.value || cancelled) { pendingIds.delete(detail.messageId); session.completeSendMorph(detail.messageId); return }
-  const target = await findTarget(detail.messageId)
-  const node = dot.value
-  if (!target || !node || cancelled || typeof node.animate !== 'function') {
-    session.completeSendMorph(detail.messageId)
-    return
-  }
-
-  active.value = true
-  await nextFrame()
-  if (cancelled || !active.value) return finish(detail.messageId)
-  const source = detail.source
-  const end = target.getBoundingClientRect()
-  const sx = source.left + source.width / 2
-  const sy = source.top + source.height / 2
-  const tx = end.left + end.width / 2
-  const ty = end.top + end.height / 2
-  node.style.left = '0'
-  node.style.top = '0'
-  node.style.width = '36px'
-  node.style.height = '36px'
-  node.style.borderRadius = '50%'
-  node.style.opacity = '1'
-
+async function run(detail:MorphRequest) {
+  if(active.value||disposed||prefersReducedMotion()||!config.sendMorphAnimation){finish(detail.messageId);return}
+  active.value=true
+  const ticket=++epoch
+  const valid=()=>!disposed&&ticket===epoch&&!config.allAnimationsOff
   try {
-    const fly = node.animate([
-      { transform: `translate(${sx - 18}px, ${sy - 18}px) scale(1)`, borderRadius: '50%' },
-      { offset: .22, transform: `translate(${sx - 5}px, ${sy - 5}px) scale(.28)`, borderRadius: '50%' },
-      { offset: .68, transform: `translate(${sx + (tx - sx) * .68 - 5}px, ${sy + (ty - sy) * .68 - 17}px) scale(.28)`, borderRadius: '55% 45% 62% 38%' },
-      { transform: `translate(${tx - 5}px, ${ty - 5}px) scale(.28)`, borderRadius: '50%' },
-    ], { duration: 440, easing: 'cubic-bezier(.24,.72,.2,1)', fill: 'forwards' })
-    running.push(fly)
-    await fly.finished
-    if (cancelled) return finish(detail.messageId)
-
-    node.style.width = `${end.width}px`
-    node.style.height = `${end.height}px`
-    const spread = node.animate([
-      { transform: `translate(${tx - end.width / 2}px, ${ty - end.height / 2}px) scale(.035,.12)`, borderRadius: '55% 45% 62% 38%', opacity: 1 },
-      { offset: .64, transform: `translate(${end.left}px, ${end.top}px) scale(1.04,.96)`, borderRadius: '21px 21px 9px 21px', opacity: 1 },
-      { transform: `translate(${end.left}px, ${end.top}px) scale(1)`, borderRadius: '19px 19px 7px 19px', opacity: 1 },
-    ], { duration: 270, easing: 'cubic-bezier(.18,.84,.22,1.18)', fill: 'forwards' })
-    running.push(spread)
-    await spread.finished
+    let target:HTMLElement|null=null
+    for(let tries=0;tries<12&&valid();tries++) {
+      await frame()
+      const escaped=CSS.escape(detail.messageId)
+      target=document.querySelector(`[data-message-id="${escaped}"] .bubble`)
+      if(target&&target.getBoundingClientRect().width>0)break
+    }
+    const node=dot.value
+    if(!valid()||!target||!node||!node.animate)return
+    const end=target.getBoundingClientRect(), source=detail.source
+    const sx=source.left+source.width/2-8, sy=source.top+source.height/2-8
+    const tx=end.left+end.width/2-8,ty=end.top+end.height/2-8
+    node.style.width='16px';node.style.height='16px'
+    // One transform timeline, not competing translate/scale animations on the same node.
+    const flight=node.animate([
+      {transform:`translate(${sx}px,${sy}px) scale(1.4)`,opacity:.85},
+      {transform:`translate(${sx}px,${sy}px) scale(.5)`,opacity:1,offset:.16},
+      {transform:`translate(${sx+(tx-sx)*.55}px,${sy+(ty-sy)*.48-18}px) scale(.7)`,opacity:1,offset:.62},
+      {transform:`translate(${tx}px,${ty}px) scale(.65)`,opacity:.9,offset:.85},
+      {transform:`translate(${tx}px,${ty}px) scale(1.9)`,opacity:0},
+    ],{duration:530,easing:'cubic-bezier(.2,.75,.25,1)',fill:'forwards'})
+    running.push(flight)
+    if(ripple.value) {
+      ripple.value.style.left=`${tx+8}px`;ripple.value.style.top=`${ty+8}px`
+      running.push(ripple.value.animate([
+        {transform:'translate(-50%,-50%) scale(.3)',opacity:0},
+        {opacity:.55,offset:.18},
+        {transform:'translate(-50%,-50%) scale(1.5)',opacity:0},
+      ],{duration:250,delay:370,easing:'ease-out',fill:'both'}))
+    }
+    await flight.finished
+  } catch { /* cancelled or unsupported animation: reveal the actual message immediately */ }
+  finally {
     finish(detail.messageId)
-  } catch {
-    finish(detail.messageId)
+    if(ticket===epoch){for(const a of running)a.cancel();running=[];active.value=false}
   }
 }
-
-function onRequest(event: Event) {
-  const detail = (event as CustomEvent<MorphRequest>).detail
-  if (!detail?.messageId || !detail.source) return
-  pendingIds.add(detail.messageId)
-  void run(detail)
-}
-
-onMounted(() => window.addEventListener('coomi:send-morph', onRequest))
-onBeforeUnmount(() => {
-  cancelled = true
-  window.removeEventListener('coomi:send-morph', onRequest)
-  running.forEach(animation => animation.cancel())
-  pendingIds.forEach(id => session.completeSendMorph(id))
-  pendingIds.clear()
-})
+function onRequest(event:Event){const d=(event as CustomEvent<MorphRequest>).detail;if(!d?.messageId||!d.source)return;pending.add(d.messageId);void run(d)}
+watch(()=>config.allAnimationsOff,off=>{if(off)stop()})
+watch(()=>session.sessionId,stop)
+onMounted(()=>{window.addEventListener('coomi:send-morph',onRequest);window.addEventListener('coomi:all-animations-off',stop)})
+onBeforeUnmount(()=>{disposed=true;stop();window.removeEventListener('coomi:send-morph',onRequest);window.removeEventListener('coomi:all-animations-off',stop)})
 </script>
-
-<template>
-  <div v-show="active" ref="dot" class="send-morph-dot" aria-hidden="true" />
-</template>
-
+<template><div v-show="active" ref="dot" class="send-morph-dot" aria-hidden="true"/><div v-show="active" ref="ripple" class="send-ripple" aria-hidden="true"/></template>
 <style scoped>
-.send-morph-dot {
-  position: fixed; z-index: 95; pointer-events: none;
-  background: var(--blue); color: transparent;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--blue) 52%, transparent);
-  will-change: transform, width, height, border-radius, opacity;
-}
-@media (prefers-reduced-motion: reduce) { .send-morph-dot { display: none !important; } }
+.send-morph-dot{position:fixed;left:0;top:0;z-index:95;pointer-events:none;border-radius:50%;background:var(--blue);box-shadow:0 0 10px color-mix(in srgb,var(--blue) 35%,transparent);will-change:transform,opacity}
+.send-ripple{position:fixed;width:30px;height:30px;z-index:94;pointer-events:none;border:1px solid var(--blue);border-radius:50%}
 </style>

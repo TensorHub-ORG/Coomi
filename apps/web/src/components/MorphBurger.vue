@@ -36,7 +36,7 @@ function onClick() {
       :size="22"
       stroke-width="1.9"
       :spring="{ stiffness: 300, damping: 22 }"
-      :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+      :reduced-motion="(config.sendMorphAnimation && !config.allAnimationsOff) ? 'never' : 'always'"
       class="burger-icon"
     />
   </button>

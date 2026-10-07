@@ -889,6 +889,11 @@ public class CoomiActivity extends Activity {
 
         // ── 控制模式：桌面悬浮层 ────────────────────────────────────────
 
+        @JavascriptInterface
+        public void setControlSession(String sessionId, String providerId, String model) {
+            CoomiFloatService.setSession(sessionId, providerId, model);
+        }
+
         /** 显示桌面悬浮层（展开态卡片）。 */
         @JavascriptInterface
         public void startControlFloat() {

@@ -10,7 +10,7 @@ import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
 import { apiGet } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
-import { costCny, fmtMoney, priceFor } from '@/utils/modelPrices'
+import { costWithPrice, fmtMoney, priceFor, type ModelPrice } from '@/utils/modelPrices'
 import CoomiMark from './CoomiMark.vue'
 import MorphBurger from './MorphBurger.vue'
 
@@ -134,6 +134,7 @@ watch(() => session.isBusy, busy => {
 
 function toggleModel() {
   modelOpen.value = !modelOpen.value
+  balanceOpen.value = false
   usageOpen.value = false
   if (modelOpen.value) {
     const selected = modelGroups.value.find(group => group.items.some(item => (
@@ -146,6 +147,7 @@ function toggleModel() {
 function toggleUsage() {
   usageOpen.value = !usageOpen.value
   modelOpen.value = false
+  balanceOpen.value = false
 }
 
 // ── 会话标记路径（第三批 5：绑定为会话执行目录）──
@@ -173,54 +175,53 @@ function browseInFileManager() {
   router.push('/files')
 }
 
-  // ── 余额与消耗（右上角）──
-  const balanceOpen = ref(false)
-  const balanceData = ref<{
-    available_yuan: number
-    lamp_remaining: number
-    expires_at: number
-    provider: string
-  } | null>(null)
-  const balanceLoading = ref(false)
-  const balanceError = ref('')
-
-  async function fetchBalance() {
-    if (balanceLoading.value) return
-    balanceLoading.value = true
-    balanceError.value = ''
-    try {
-      const data = await apiGet<{ ok: boolean; provider: string; balance: { available_yuan: number; lamp_remaining: number; expires_at: number } }>('/api/balance')
-      balanceData.value = data.balance ? {
-        available_yuan: Number(data.balance.available_yuan) || 0,
-        lamp_remaining: Number(data.balance.lamp_remaining) || 0,
-        expires_at: Number(data.balance.expires_at) || 0,
-        provider: data.provider,
-      } : null
-    } catch (e) {
-      balanceError.value = e instanceof Error ? e.message : String(e)
-      balanceData.value = null
-    } finally {
-      balanceLoading.value = false
-    }
+// Currency and prices come from the currently selected session provider, not global active config.
+const balanceOpen = ref(false)
+const balances = ref<Array<{ currency: string; amount: number }>>([])
+const balanceLoading = ref(false), balanceError = ref('')
+const livePrice = ref<ModelPrice | null>(null)
+const priceLoading = ref(false)
+const modelUnit = computed(() => livePrice.value ?? priceFor(config.currentModel))
+interface BillingRecord { turn_id: string; provider_id: string; model: string; input_tokens: number; cached_input_tokens: number; output_tokens: number }
+const billingRecords = ref<BillingRecord[]>([])
+const billingNote = ref(''), billingError = ref('')
+let fetchVersion = 0
+async function fetchBalance() {
+  const version = ++fetchVersion, provider = config.currentProviderId, model = config.currentModel, id = session.sessionId
+  balanceLoading.value = true; priceLoading.value = true; balanceError.value = ''; billingError.value = ''
+  const query = `provider_id=${encodeURIComponent(provider)}&model=${encodeURIComponent(model)}`
+  await Promise.all([
+    apiGet<{ ok: boolean; balances: Array<{ currency: string; amount: number }> }>(`/api/balance?${query}`)
+      .then(data => { if (version===fetchVersion) balances.value = data.balances ?? [] })
+      .catch(e => { if (version===fetchVersion) { balances.value=[]; balanceError.value=String(e) } })
+      .finally(() => {if(version===fetchVersion) balanceLoading.value=false}),
+    apiGet<ModelPrice>(`/api/model-pricing?${query}`)
+      .then(data => {if(version===fetchVersion) livePrice.value=data})
+      .catch(() => {if(version===fetchVersion) livePrice.value=null})
+      .finally(() => {if(version===fetchVersion) priceLoading.value=false}),
+    apiGet<{ records: BillingRecord[]; note: string }>(`/api/sessions/${id}/billing`)
+      .then(data => {if(version===fetchVersion) {billingRecords.value=data.records;billingNote.value=data.note}})
+      .catch(e => {if(version===fetchVersion) {billingRecords.value=[];billingError.value=String(e)}}),
+  ])
+}
+function toggleBalance() { balanceOpen.value=!balanceOpen.value; usageOpen.value=false; modelOpen.value=false; if(balanceOpen.value) void fetchBalance() }
+function totals(records: BillingRecord[]): { amounts: Record<string,number>; unknown: number } {
+  const amounts:Record<string,number>={};let unknown=0
+  for(const record of records) {
+    const p = record.model===config.currentModel && record.provider_id===config.currentProviderId ? modelUnit.value : priceFor(record.model)
+    const cost=costWithPrice(p,record.input_tokens,record.output_tokens,record.cached_input_tokens)
+    if(cost==null||!p) {unknown++;continue}
+    amounts[p.currency]=(amounts[p.currency]??0)+cost
   }
-
-  function toggleBalance() {
-    balanceOpen.value = !balanceOpen.value
-    if (balanceOpen.value) fetchBalance()
-  }
-
-  // 消耗估算：会话累计 = input+output（缓存按 20% 计入价格表）；本轮 = 本轮输出增量。
-  const sessionCost = computed(() => {
-    const u = session.usage
-    if (!u) return 0
-    return costCny(config.currentModel, u.input ?? 0, u.output ?? 0, u.cachedInput ?? 0)
-  })
-  const turnCost = computed(() => {
-    const u = session.usage
-    if (!u) return 0
-    return costCny(config.currentModel, 0, u.turnOutputTokens ?? 0, 0)
-  })
-  const modelUnit = computed(() => priceFor(config.currentModel))
+  return {amounts,unknown}
+}
+const sessionCost = computed(() => totals(billingRecords.value))
+const turnCost = computed(() => {
+  const last=billingRecords.value[billingRecords.value.length - 1]?.turn_id
+  return totals(billingRecords.value.filter(r=>r.turn_id===last))
+})
+watch([()=>config.currentProviderId,()=>config.currentModel,()=>session.sessionId],()=>{livePrice.value=null;balances.value=[];billingRecords.value=[];if(balanceOpen.value)void fetchBalance()})
+watch(()=>session.runState,(v)=>{if(v==='idle'&&balanceOpen.value)void fetchBalance()})
 </script>
 
 <template>
@@ -229,9 +230,9 @@ function browseInFileManager() {
 
     <button class="center" :aria-expanded="modelOpen" @click="toggleModel">
       <span class="model">{{ config.currentModel }}</span>
-        <button v-if="session.mode === 'life'" class="life-orbit" aria-label="查看数字生命统计" title="查看生命统计" @click.stop="session.toggleLifeStats()">
+        <span role="button" tabindex="0" v-if="session.mode === 'life'" class="life-orbit" aria-label="查看数字生命统计" title="查看生命统计" @click.stop="session.toggleLifeStats()">
           <i class="orbit outer" /><i class="orbit inner" />
-        </button>
+        </span>
       <CoomiMark v-if="showSessionBrand" :size="22" class="session-brand" :class="{ spinning: session.isBusy, settling: settlingBrand, enter: enteringBrand }" />
       <span v-if="connection.demo" class="demo">演示</span>
       <span v-if="config.planMode" class="plan">计划</span>
@@ -272,10 +273,32 @@ function browseInFileManager() {
     </button>
       <button class="balance-button" :aria-expanded="balanceOpen" aria-label="余额与消耗" @click="toggleBalance">
         <CoomiIcon name="bolt" :size="16" />
-        <span v-if="balanceData" class="balance-num">{{ fmtMoney(balanceData.available_yuan) }}</span>
+
       </button>
 
     <Teleport to="body">
+      <button v-if="balanceOpen" class="usage-scrim" aria-label="关闭余额与计费" @click="balanceOpen=false" />
+      <section v-if="balanceOpen" class="usage-menu" aria-label="余额与计费">
+        <p class="usage-title">余额与计费</p>
+        <div class="balance-row"><span>{{ config.currentProviderId }}</span><button @click="fetchBalance">刷新</button></div>
+        <p v-if="balanceLoading" class="usage-empty">余额查询中…</p>
+        <p v-else-if="balanceError" class="usage-empty">{{ balanceError }}</p>
+        <div v-for="item in balances" :key="item.currency" class="balance-row"><span>账户余额 · {{ item.currency }}</span><strong>{{ fmtMoney(item.amount) }}</strong></div>
+        <p class="usage-subtitle">当前模型单价 · 每百万 Token</p>
+        <template v-if="modelUnit">
+          <div class="balance-row"><span>输入 / 输出</span><strong>{{ modelUnit.currency }} {{ fmtMoney(modelUnit.in) }} / {{ fmtMoney(modelUnit.out) }}</strong></div>
+          <div class="balance-row"><span>缓存命中输入</span><strong>{{ modelUnit.cached == null ? '未公布，按普通输入估算' : modelUnit.currency+' '+fmtMoney(modelUnit.cached) }}</strong></div>
+          <p class="usage-empty">{{ modelUnit.source }} · {{ modelUnit.note || '参考单价；最终扣费以服务商账单为准' }}</p>
+        </template>
+        <p v-else class="usage-empty">{{ priceLoading ? '价格查询中…' : '该服务商未公布单价，且本地未收录；不会使用虚构默认价' }}</p>
+        <p class="usage-subtitle">本轮消耗 · 含输入、输出、缓存</p>
+        <div v-for="(cost,currency) in turnCost.amounts" :key="currency" class="balance-row"><span>{{ currency }}</span><strong>≈ {{ fmtMoney(cost) }}</strong></div>
+        <p v-if="turnCost.unknown" class="usage-empty">{{ turnCost.unknown }} 次请求缺少单价，未计入估算</p>
+        <p class="usage-subtitle">当前会话消耗 · 按实际调用模型累计</p>
+        <div v-for="(cost,currency) in sessionCost.amounts" :key="currency" class="balance-row"><span>{{ currency }}</span><strong>≈ {{ fmtMoney(cost) }}</strong></div>
+        <p v-if="sessionCost.unknown" class="usage-empty">{{ sessionCost.unknown }} 次请求缺少单价，未计入估算</p>
+        <p class="usage-empty">{{ billingError || billingNote || '尚无已记录的 API 请求' }}</p>
+      </section>
     <button v-if="usageOpen" class="usage-scrim" aria-label="关闭上下文数据" @click="usageOpen = false" />
     <div v-if="usageOpen" class="usage-menu">
       <p class="usage-title">上下文用量</p>
@@ -305,23 +328,6 @@ function browseInFileManager() {
       <div class="usage-path">
         <span>会话标记路径</span>
         <button class="path-btn" @click="openPathPicker">{{ session.cwd || '点击选择' }}</button>
-      </div>
-      <div class="usage-balance">
-        <p class="usage-subtitle">余额与消耗（估算）</p>
-        <template v-if="balanceData">
-          <div class="balance-row">
-            <span>账户余额</span><strong>¥ {{ fmtMoney(balanceData.available_yuan) }}</strong>
-          </div>
-          <div class="balance-row"><span>LAMP</span><strong>{{ balanceData.lamp_remaining }}</strong></div>
-          <div v-if="balanceData.expires_at > 0" class="balance-row">
-            <span>订阅到期</span><strong>{{ new Date(balanceData.expires_at).toLocaleDateString() }}</strong>
-          </div>
-        </template>
-        <p v-else-if="balanceLoading" class="usage-empty">查询中…</p>
-        <p v-else class="usage-empty">{{ balanceError || '无余额数据（非中转站 Key 可能不支持）' }}</p>
-        <div class="balance-row"><span>当前模型单价</span><strong>入 ¥{{ fmtMoney(modelUnit.in * 7.2) }}/M · 出 ¥{{ fmtMoney(modelUnit.out * 7.2) }}/M</strong></div>
-        <div class="balance-row"><span>本轮消耗</span><strong class="cost">≈ ¥{{ fmtMoney(turnCost) }}</strong></div>
-        <div class="balance-row"><span>会话累计消耗</span><strong class="cost">≈ ¥{{ fmtMoney(sessionCost) }}</strong></div>
       </div>
       <div v-if="runtimeInfo" class="usage-env">
         <span>运行环境</span>

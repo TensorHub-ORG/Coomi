@@ -12,6 +12,7 @@ import gsap from 'gsap'
 
 /** 用户是否要求减少动效；WebView 里这个查询也支持。 */
 export function prefersReducedMotion(): boolean {
+  if (typeof document !== 'undefined' && document.documentElement.dataset.allAnimationsOff === '1') return true
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }

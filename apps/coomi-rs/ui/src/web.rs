@@ -802,6 +802,7 @@ pub async fn serve(
             get(get_custom_prompt).post(set_custom_prompt),
         )
         .route("/api/settings/production-mode", post(set_production_mode))
+        .route("/api/settings/permission", get(get_permission_settings).put(put_permission_settings))
         .route("/api/settings/berserk-model", post(set_berserk_model))
         .route("/api/settings/collab", get(get_collab_settings).put(set_collab_settings))
         .route("/api/settings/collaboration", get(get_collaboration_settings).put(set_collaboration_settings))
@@ -866,6 +867,9 @@ pub async fn serve(
         )
         .route("/api/usage", get(usage_ledger))
         .route("/api/balance", get(balance_status))
+        .route("/api/model-pricing", get(model_pricing))
+        .route("/api/sessions/{id}/billing", get(session_billing))
+        .route("/api/control/tasks", post(submit_control_task))
         .route("/api/catalog", get(catalog_index))
         .route("/api/workflows", get(list_workflows).post(create_workflow))
         .route("/api/workflows/templates", get(list_workflow_templates))
@@ -6077,6 +6081,30 @@ async fn websocket_route(
     ws.on_upgrade(move |socket| websocket_session(socket, state, session_id))
 }
 
+async fn submit_control_task(State(state): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let id = body.get("session_id").and_then(Value::as_str).unwrap_or("");
+    Uuid::parse_str(id).map_err(|_| ApiError::bad_request("invalid control session"))?;
+    let text = body.get("text").and_then(Value::as_str).unwrap_or("").trim();
+    if text.is_empty() || text.len() > 32_000 { return Err(ApiError::bad_request("control task text is empty or too long")); }
+    let task = state.task(id);
+    if task.running.load(Ordering::SeqCst) { return Err(ApiError::conflict("当前任务正在运行，请等待完成或在会话中补充指令")); }
+    let (tx, _rx) = mpsc::unbounded_channel::<Message>();
+    let context = Arc::new(ConnectionContext::new(tx, Arc::clone(&state.permission), Arc::clone(&task),
+        configured_reasoning_effort(&state.home), configured_max_tool_rounds(&state.home), production_mode_enabled(&state.home)));
+    let provider = body.get("provider_id").and_then(Value::as_str).unwrap_or("");
+    let model = body.get("model").and_then(Value::as_str).unwrap_or("");
+    if !provider.is_empty() && !model.is_empty() {
+        let registry = ProviderRegistry::load(&providers_path(&state.home)).map_err(ApiError::from)?;
+        let selector = format!("{provider}:{model}");
+        registry.resolve(Some(&selector)).map_err(ApiError::from)?;
+        *context.selected_model.write().await = Some(selector);
+    }
+    let prompt = format!("控制模式任务。先调用 ui_automation read_screen 查看当前手机界面，依据返回的文字、控件坐标执行用户要求。不要猜测已经完成，每次操作后读取界面验证。\n\n用户任务：{text}");
+    handle_command(&state, id, context, None, json!({"command":"send_message","text":prompt})).await;
+    if !task.running.load(Ordering::SeqCst) { return Err(ApiError::bad_request("任务未能启动，请检查模型配置")); }
+    Ok(Json(json!({"ok":true,"session_id":id})))
+}
+
 async fn websocket_session(socket: WebSocket, state: AppState, session_id: String) {
     let (mut sink, mut source) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -7043,6 +7071,8 @@ async fn compact_web_session(
         .with_mcp_runtime(mcp_runtime)
         .with_memory(Arc::new(MemoryManager::new(&state.home, &cwd)))
         .with_hooks(Arc::new(HookRunner::load(&state.home)?));
+    let billing_provider = provider_config.id.clone();
+    let billing_model = provider_config.model.clone();
     let provider = HttpModelProvider::new(provider_config)?;
     let observer = BrowserObserver::new(
         Arc::clone(&context.task),
@@ -7053,7 +7083,7 @@ async fn compact_web_session(
         session.usage.cache_observed_input_tokens,
         session.usage.output_tokens,
         BTreeMap::new(),
-    );
+    ).with_billing(session_id, &billing_provider, &billing_model);
     // 需求 9：压缩前把当前进度写入 work.md 与持久记忆，压缩后仍可读取。
     {
         let mut work = String::new();
@@ -7367,6 +7397,8 @@ async fn run_turn(
         Some(format!("{}:{}", provider_config.id, provider_config.model)),
         routed_skills,
     );
+    let billing_provider = provider_config.id.clone();
+    let billing_model = provider_config.model.clone();
     let provider = HttpModelProvider::new(provider_config)?;
     let approval = BrowserApproval {
         task: Arc::clone(&task),
@@ -7395,7 +7427,7 @@ async fn run_turn(
         session.usage.cache_observed_input_tokens,
         session.usage.output_tokens,
         context_categories,
-    );
+    ).with_billing(session_id, &billing_provider, &billing_model);
     // 第 6 项：本轮开始自动读取 work[会话id].md（上一轮产出的工作进度），
     // 作为额外上下文注入，节省 tokens 且保持跨轮连续性。
     {
@@ -7530,8 +7562,11 @@ async fn run_turn(
                     .and_then(|pc| HttpModelProvider::new(pc).ok())
             });
             let use_provider = berserk_provider.as_ref().unwrap_or(&provider);
+            let (check_provider, check_model) = berserk_selector.as_deref().and_then(|sel| ProviderRegistry::load(&providers_path(&state.home)).ok().and_then(|reg|reg.resolve(Some(sel)).ok()).map(|p|(p.id,p.model))).unwrap_or((billing_provider.clone(),billing_model.clone()));
+            let mut check_observer = BrowserObserver::new(Arc::clone(&task),state.home.clone(),"xhigh".into(),session.usage.input_tokens,session.usage.cached_input_tokens,session.usage.cache_observed_input_tokens,session.usage.output_tokens,BTreeMap::new()).with_billing(session_id,&check_provider,&check_model);
+            check_observer.billing_turn = observer.billing_turn.clone();
             let r = agent
-                .run_turn(&mut session, check.to_owned(), use_provider, &tools, &approval, &observer)
+                .run_turn(&mut session, check.to_owned(), use_provider, &tools, &approval, &check_observer)
                 .await;
             if let Err(error) = &r {
                 maybe_degrade_vision(state, session_id, &session, error);
@@ -7638,6 +7673,10 @@ struct BrowserObserver {
     download_calls: StdMutex<HashMap<String, String>>,
     usage: StdMutex<BrowserUsageState>,
     context_categories: BTreeMap<String, u64>,
+    billing_session: String,
+    billing_provider: String,
+    billing_model: String,
+    billing_turn: String,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -7685,7 +7724,13 @@ impl BrowserObserver {
                 ..BrowserUsageState::default()
             }),
             context_categories,
+            billing_session: String::new(), billing_provider: String::new(), billing_model: String::new(),
+            billing_turn: Uuid::new_v4().to_string(),
         }
+    }
+
+    fn with_billing(mut self, session: &str, provider: &str, model: &str) -> Self {
+        self.billing_session=session.into(); self.billing_provider=provider.into(); self.billing_model=model.into(); self
     }
 
     fn send_usage(&self) {
@@ -7851,6 +7896,22 @@ fn update_reasoning_stats(
     }
 }
 
+fn append_billing_request(home: &Path, session: &str, provider: &str, model: &str, turn: &str, usage: &coomi_engine::TokenUsage) {
+    let _guard=USAGE_FILE_LOCK.get_or_init(|| StdMutex::new(())).lock().unwrap_or_else(|p|p.into_inner());
+    let dir=home.join("usage").join("sessions");
+    if fs::create_dir_all(&dir).is_err(){return;}
+    let record=json!({"turn_id":turn,"provider_id":provider,"model":model,"input_tokens":usage.input_tokens,"cached_input_tokens":usage.cached_input_tokens.min(usage.input_tokens),"output_tokens":usage.output_tokens});
+    if let Ok(mut file)=fs::OpenOptions::new().create(true).append(true).open(dir.join(format!("{session}.jsonl"))) {
+        use std::io::Write; let _=writeln!(file,"{}",record);
+    }
+}
+async fn session_billing(State(state):State<AppState>,AxumPath(id):AxumPath<String>)->Result<Json<Value>,ApiError>{
+    Uuid::parse_str(&id).map_err(|_|ApiError::bad_request("invalid session"))?;
+    let text=fs::read_to_string(state.home.join("usage").join("sessions").join(format!("{id}.jsonl"))).unwrap_or_default();
+    let records:Vec<Value>=text.lines().filter_map(|line|serde_json::from_str(line).ok()).collect();
+    Ok(Json(json!({"records":records,"note":"仅统计此版本后已记录的请求，不把历史的未计费消息当作零消耗"})))
+}
+
 fn usage_ledger_path(home: &Path) -> PathBuf { home.join("usage").join("ledger.jsonl") }
 
 fn append_usage_ledger(home: &Path, effort: &str, usage: &coomi_engine::TokenUsage, elapsed: Duration) {
@@ -7896,200 +7957,88 @@ async fn usage_ledger(
     Ok(Json(json!({ "from": from, "to": to, "input_tokens": input, "cached_input_tokens": cached, "output_tokens": output, "total_tokens": total, "requests": records.len(), "records": records })))
 }
 
-async fn balance_status(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+async fn balance_status(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     let document = read_provider_document(&state.home).map_err(ApiError::from)?;
-    let provider = document
-        .providers
-        .get(&document.active)
-        .cloned()
-        .ok_or_else(|| ApiError::not_found("no active provider"))?;
-    if provider.api_key.trim().is_empty() && provider.api_keys.is_empty() {
-        return Err(ApiError::bad_request("active provider has no API key"));
-    }
-    let key = provider
-        .api_keys
-        .first()
-        .map(|s| s.as_str())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or(&provider.api_key)
-        .trim();
-    let base = provider.base_url.trim_end_matches('/');
-    if base.is_empty() {
-        return Err(ApiError::bad_request("active provider has no base URL"));
-    }
-    let provider_type = provider.provider_type.to_ascii_lowercase();
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .map_err(|e| ApiError::internal(format!("http client: {e}")))?;
-
-    // ── 按厂商/协议选择余额接口 ──
-    // 1) 中转站 / DeepSeek 官方 / 任何带 user/balance 的兼容站：DeepSeek 风格
-    // 2) OpenAI 官方 / 兼容站：/v1/dashboard/billing/subscription + usage
-    // 3) Anthropic：官方无公开余额接口
-    // 4) Gemini：官方 key 无统一余额接口（需 Cloud 计费 API）
-    let wants_deepseek = provider_type.contains("deepseek")
-        || provider_type.contains("account")
-        || base.contains("monai")
-        || base.contains("ccwu")
-        || base.contains("relay");
-    let wants_openai = provider_type.contains("openai")
-        || provider_type.contains("chat_completions")
-        || provider_type.contains("responses")
-        || base.contains("openai");
-
-    let mut last_error = String::new();
-
-    // DeepSeek 风格：优先 /v1/user/balance，其次 /user/balance
-    if wants_deepseek {
-        let candidates = [
-            format!("{base}/v1/user/balance"),
-            format!("{base}/user/balance"),
-            format!("{base}/v1/dashboard/billing/subscription"),
-        ];
-        for url in candidates {
-            let response = match client.get(&url).bearer_auth(key).send().await {
-                Ok(r) => r,
-                Err(e) => { last_error = e.to_string(); continue }
-            };
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if status.is_success() {
-                if let Ok(value) = serde_json::from_str::<Value>(&body) {
-                    let lamp = value.get("lamp_remaining").and_then(Value::as_u64).unwrap_or(0);
-                    let available_yuan = value
-                        .get("available_yuan")
-                        .and_then(Value::as_f64)
-                        .or_else(|| value.get("balance").and_then(Value::as_f64))
-                        .unwrap_or(0.0);
-                    let expires_at = value.get("expires_at").and_then(Value::as_i64).unwrap_or(0);
-                    return Ok(Json(json!({
-                        "ok": true,
-                        "provider": document.active,
-                        "style": "deepseek",
-                        "balance": {
-                            "currency": "CNY",
-                            "available_yuan": available_yuan,
-                            "lamp_remaining": lamp,
-                            "expires_at": expires_at,
-                        },
-                        "raw": value,
-                    })));
+    let id = params.get("provider_id").map(String::as_str).unwrap_or(&document.active);
+    let provider = document.providers.get(id).ok_or_else(|| ApiError::not_found("provider not found"))?;
+    let key = provider.api_keys.iter().find(|k| !k.trim().is_empty()).map(String::as_str).unwrap_or(&provider.api_key).trim();
+    if key.is_empty() { return Err(ApiError::bad_request("provider has no API key")); }
+    if provider.provider_type.contains("account") { return Err(ApiError::bad_request("账号聊天不提供 API 余额接口，请配置官方 API Key")); }
+    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none()).build().map_err(|e| ApiError::internal(e.to_string()))?;
+    let base = &provider.base_url;
+    let paths: Vec<&str> = if base.contains("openrouter.ai") { vec!["/v1/credits", "/v1/key"] }
+        else if base.contains("siliconflow") { vec!["/v1/user/info"] }
+        else { vec!["/user/balance", "/v1/user/balance"] };
+    let mut last = "该服务没有提供可识别的余额接口".to_owned();
+    for path in paths {
+        let url = crate::billing::endpoint(base, path).map_err(ApiError::bad_request)?;
+        match client.get(url).bearer_auth(key).send().await {
+            Ok(response) => {
+                let status = response.status();
+                if !status.is_success() { last = format!("余额接口 HTTP {status}"); continue; }
+                let value: Value = match response.json().await {Ok(v)=>v,Err(_)=>{last="余额接口返回的不是 JSON".into();continue}};
+                if let Some(mut normalized) = crate::billing::normalize_balance(&value) {
+                    normalized["ok"] = json!(true); normalized["provider"] = json!(id);
+                    return Ok(Json(normalized));
                 }
+                last = "余额接口格式不支持（未将缺失字段当作零）".into();
             }
-            last_error = format!("HTTP {status}: {}", preview(&body));
-        }
-    } else if wants_openai {
-        // OpenAI 风格：subscription（总额/到期）+ usage（已用）→ 剩余 = hard_limit - total_usage
-        let sub_url = format!("{base}/v1/dashboard/billing/subscription");
-        let usage_url = format!("{base}/v1/dashboard/billing/usage");
-        let mut total_limit: f64 = 0.0;
-        let mut expires_at: i64 = 0;
-        let mut sub_ok = false;
-        if let Ok(response) = client.get(&sub_url).bearer_auth(key).send().await {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if status.is_success() {
-                if let Ok(value) = serde_json::from_str::<Value>(&body) {
-                    total_limit = value
-                        .get("hard_limit_usd")
-                        .and_then(Value::as_f64)
-                        .unwrap_or(0.0);
-                    expires_at = value
-                        .get("access_until")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(0);
-                    sub_ok = total_limit > 0.0 || expires_at > 0;
-                }
-            } else {
-                last_error = format!("subscription HTTP {status}: {}", preview(&body));
-            }
-        }
-        let mut used: f64 = 0.0;
-        if let Ok(response) = client.get(&usage_url).bearer_auth(key).send().await {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if status.is_success() {
-                if let Ok(value) = serde_json::from_str::<Value>(&body) {
-                    used = value
-                        .pointer("/total_usage")
-                        .and_then(Value::as_f64)
-                        .map(|v| v / 100.0)
-                        .unwrap_or(0.0);
-                }
-            }
-        }
-        if sub_ok {
-            return Ok(Json(json!({
-                "ok": true,
-                "provider": document.active,
-                "style": "openai",
-                "balance": {
-                    "currency": "USD",
-                    "total_limit": total_limit,
-                    "used": used,
-                    "available_yuan": (total_limit - used) * 7.2,
-                    "expires_at": expires_at,
-                },
-            })));
-        }
-        if !sub_ok {
-            // OpenAI 站不支持余额接口时给明确提示
-            return Err(ApiError::bad_gateway(format!(
-                "该 OpenAI 兼容站不支持余额查询（subscription 接口不可用）：{last_error}"
-            )));
-        }
-    } else if provider_type.contains("anthropic") || provider_type.contains("claude") {
-        return Err(ApiError::bad_gateway(
-            "Anthropic 官方 API 不提供余额查询接口（按量计费，无预充值）",
-        ));
-    } else if provider_type.contains("gemini") || provider_type.contains("google") {
-        return Err(ApiError::bad_gateway(
-            "Gemini 官方 API 不提供余额查询接口（按量计费，需在 Google Cloud 控制台查看）",
-        ));
-    } else {
-        // 未知厂商：先试 DeepSeek 风格，再试 OpenAI 风格
-        let candidates = [
-            format!("{base}/v1/user/balance"),
-            format!("{base}/user/balance"),
-            format!("{base}/v1/dashboard/billing/subscription"),
-        ];
-        for url in candidates {
-            let response = match client.get(&url).bearer_auth(key).send().await {
-                Ok(r) => r,
-                Err(e) => { last_error = e.to_string(); continue }
-            };
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if status.is_success() {
-                if let Ok(value) = serde_json::from_str::<Value>(&body) {
-                    let lamp = value.get("lamp_remaining").and_then(Value::as_u64).unwrap_or(0);
-                    let available_yuan = value
-                        .get("available_yuan")
-                        .and_then(Value::as_f64)
-                        .or_else(|| value.get("balance").and_then(Value::as_f64))
-                        .unwrap_or(0.0);
-                    let expires_at = value.get("expires_at").and_then(Value::as_i64).unwrap_or(0);
-                    return Ok(Json(json!({
-                        "ok": true,
-                        "provider": document.active,
-                        "style": "auto",
-                        "balance": {
-                            "currency": "CNY",
-                            "available_yuan": available_yuan,
-                            "lamp_remaining": lamp,
-                            "expires_at": expires_at,
-                        },
-                        "raw": value,
-                    })));
-                }
-            }
-            last_error = format!("HTTP {status}: {}", preview(&body));
+            Err(_) => last = "余额接口连接失败或超时".into(),
         }
     }
-    Err(ApiError::bad_gateway(format!("balance query failed: {last_error}")))
+    // Legacy OpenAI-compatible prepaid sites only; never treat a failed usage call as zero usage.
+    if !base.contains("api.openai.com") && !base.contains("api.anthropic.com") && !base.contains("googleapis.com") {
+        let sub = crate::billing::endpoint(base,"/dashboard/billing/subscription").map_err(ApiError::bad_request)?;
+        if let Ok(response) = client.get(sub).bearer_auth(key).send().await {
+            if response.status().is_success() {
+                if let Ok(value) = response.json::<Value>().await {
+                    if let Some(limit) = value.get("hard_limit_usd").and_then(crate::billing::amount) {
+                        let today = chrono::Utc::now().date_naive();
+                        let start = (today - chrono::Duration::days(90)).to_string();
+                        let end = (today + chrono::Duration::days(1)).to_string();
+                        let url = crate::billing::endpoint(base,"/dashboard/billing/usage").map_err(ApiError::bad_request)?;
+                        if let Ok(response) = client.get(url).query(&[("start_date",start),("end_date",end)]).bearer_auth(key).send().await {
+                            if response.status().is_success() {
+                                if let Ok(used) = response.json::<Value>().await {
+                                    if let Some(cents) = used.get("total_usage").and_then(crate::billing::amount) {
+                                        return Ok(Json(json!({"ok":true,"provider":id,"balances":[{"currency":"USD","amount":limit-cents/100.0}],"note":"兼容站账期查询，最终以服务商后台为准"})));
+                                    }
+                                }
+                            }
+                        }
+                        last = "服务商返回总额度，但没有返回账期用量，无法推算余额".into();
+                    }
+                }
+            }
+        }
+    }
+    Err(ApiError::bad_gateway(last))
+}
+
+async fn model_pricing(State(state): State<AppState>, Query(params): Query<HashMap<String,String>>) -> Result<Json<Value>,ApiError> {
+    let document = read_provider_document(&state.home).map_err(ApiError::from)?;
+    let id = params.get("provider_id").map(String::as_str).unwrap_or(&document.active);
+    let provider = document.providers.get(id).ok_or_else(||ApiError::not_found("provider not found"))?;
+    let model = params.get("model").map(String::as_str).unwrap_or(&provider.model);
+    let url = if provider.base_url.contains("openrouter.ai") { "https://openrouter.ai/api/v1/models".to_owned() }
+        else { crate::billing::endpoint(&provider.base_url,"/v1/models").map_err(ApiError::bad_request)? };
+    let key = provider.api_keys.iter().find(|k|!k.trim().is_empty()).map(String::as_str).unwrap_or(&provider.api_key);
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(8)).redirect(reqwest::redirect::Policy::none()).build().map_err(|e|ApiError::internal(e.to_string()))?;
+    let response=client.get(url).bearer_auth(key).send().await.map_err(|_|ApiError::bad_gateway("价格接口不可用"))?;
+    if !response.status().is_success(){ return Err(ApiError::bad_gateway("服务商未提供价格接口")); }
+    let value:Value=response.json().await.map_err(|_|ApiError::bad_gateway("价格接口未返回 JSON"))?;
+    let entries=value.get("data").or_else(||value.get("models")).and_then(Value::as_array).ok_or_else(||ApiError::bad_gateway("模型列表格式不支持"))?;
+    let entry=entries.iter().find(|e|e.get("id").or_else(||e.get("name")).and_then(Value::as_str)==Some(model)).ok_or_else(||ApiError::not_found("该模型没有返回报价"))?;
+    if provider.base_url.contains("openrouter.ai") {
+        if let (Some(input),Some(output))=(entry.pointer("/pricing/prompt").and_then(crate::billing::amount),entry.pointer("/pricing/completion").and_then(crate::billing::amount)) {
+            return Ok(Json(json!({"in":input*1e6,"out":output*1e6,"cached":entry.pointer("/pricing/input_cache_read").and_then(crate::billing::amount).map(|n|n*1e6),"currency":"USD","source":"服务商模型列表"})));
+        }
+    }
+    if let (Some(input),Some(output))=(entry.pointer("/pricing/input_per_million").or_else(||entry.pointer("/cost/input")).and_then(crate::billing::amount),entry.pointer("/pricing/output_per_million").or_else(||entry.pointer("/cost/output")).and_then(crate::billing::amount)) {
+        return Ok(Json(json!({"in":input,"out":output,"cached":entry.pointer("/pricing/cached_input_per_million").or_else(||entry.pointer("/cost/cache_read")).and_then(crate::billing::amount),"currency":entry.pointer("/pricing/currency").and_then(Value::as_str).unwrap_or("USD"),"source":"服务商模型列表"})));
+    }
+    Err(ApiError::not_found("该服务商没有公布此模型单价，将使用本地参考价（如已收录）"))
 }
 
 fn add_reasoning_sample(
@@ -8300,6 +8249,9 @@ impl AgentObserver for BrowserObserver {
                 }));
             }
             AgentEvent::ModelUsage { total, request } => {
+                if !self.billing_session.is_empty() {
+                    append_billing_request(&self.home, &self.billing_session, &self.billing_provider, &self.billing_model, &self.billing_turn, request);
+                }
                 if let Ok(mut state) = self.usage.lock() {
                     // 本轮第一次用量上报：从这里开始计时（真正的模型请求起点）。
                     if state.turn_started_at.is_none() {
@@ -8613,7 +8565,7 @@ Access policy: {policy}",
         policy = policy.label(),
     ));
     prompt.push_str(
-        "\n\nRuntime routing: shell/local_shell accept environment=auto|host|termux|proot. Use proot for Linux userland tools, termux for Android-native tools, and host for file APIs/exports. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
+        "\n\nRuntime routing: shell/local_shell accept environment=auto|host|termux|proot|shizuku. Use proot for Linux userland tools. environment=shizuku executes Android /system/bin/sh with the user's granted Shizuku shell permissions (not root, not Linux guest permissions). It requires the Shizuku service to be running and this application to be authorized; report failure honestly if unavailable. local_shell returns shizuku:<id> sessions with write/wait/terminate support. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
         Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text. When a tool result provides paths_guest, use those /workspace/... paths inside shell commands (they resolve in both Termux and ProotLinux), and the corresponding host absolute paths with built-in file tools.",
     );
     prompt.push_str(
@@ -8784,13 +8736,70 @@ fn permission_settings_path(home: &Path) -> PathBuf {
     home.join("config").join("web-settings.json")
 }
 
+fn permission_label(mode: PermissionMode) -> &'static str {
+    match mode {
+        PermissionMode::Ask => "ask",
+        PermissionMode::Auto => "auto",
+        PermissionMode::Full => "full",
+        PermissionMode::Minimal => "minimal",
+    }
+}
+
+fn parse_permission(value: &str) -> Option<PermissionMode> {
+    match value {
+        "ask" => Some(PermissionMode::Ask),
+        "auto" => Some(PermissionMode::Auto),
+        "full" => Some(PermissionMode::Full),
+        "minimal" => Some(PermissionMode::Minimal),
+        _ => None,
+    }
+}
+
+fn read_permission_settings(home: &Path) -> Value {
+    fs::read(permission_settings_path(home)).ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .filter(Value::is_object).unwrap_or_else(|| json!({}))
+}
+
+// 权限的临时选择和启动默认值分开保存；页面源地址改变后也不会丢失默认值。
+static PERMISSION_FILE_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+fn persist_permission_setting(home: &Path, field: &str, mode: PermissionMode) -> Result<()> {
+    let _guard = PERMISSION_FILE_LOCK.get_or_init(|| StdMutex::new(()))
+        .lock().unwrap_or_else(|p| p.into_inner());
+    let path = permission_settings_path(home);
+    fs::create_dir_all(path.parent().context("permission settings parent")?)?;
+    let mut settings = read_permission_settings(home);
+    settings[field] = json!(permission_label(mode));
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, serde_json::to_vec_pretty(&settings)?)?;
+    fs::rename(temp, path)?;
+    Ok(())
+}
+
+async fn get_permission_settings(State(state): State<AppState>) -> Json<Value> {
+    let settings = read_permission_settings(&state.home);
+    let default = settings.get("defaultPermissionMode").and_then(Value::as_str)
+        .and_then(parse_permission);
+    Json(json!({ "defaultPermissionMode": default.map(permission_label) }))
+}
+
+async fn put_permission_settings(
+    State(state): State<AppState>, Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let mode = body.get("defaultPermissionMode").and_then(Value::as_str)
+        .and_then(parse_permission).ok_or_else(|| ApiError::bad_request("invalid default permission mode"))?;
+    persist_permission_setting(&state.home, "defaultPermissionMode", mode).map_err(ApiError::from)?;
+    *state.permission.write().await = mode;
+    Ok(Json(json!({ "defaultPermissionMode": permission_label(mode) })))
+}
+
 fn load_permission_mode(home: &Path) -> PermissionMode {
     let value = fs::read_to_string(permission_settings_path(home))
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
     match value
         .as_ref()
-        .and_then(|value| value.get("permissionMode"))
+        .and_then(|value| value.get("defaultPermissionMode").or_else(|| value.get("permissionMode")))
         .and_then(Value::as_str)
     {
         Some("auto") => PermissionMode::Auto,
@@ -8801,21 +8810,31 @@ fn load_permission_mode(home: &Path) -> PermissionMode {
 }
 
 fn save_permission_mode(home: &Path, mode: PermissionMode) -> Result<()> {
-    let path = permission_settings_path(home);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    persist_permission_setting(home, "permissionMode", mode)
+}
+
+#[cfg(test)]
+mod permission_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn default_survives_temporary_mode_and_restart() {
+        let home = tempfile::tempdir().unwrap();
+        persist_permission_setting(home.path(), "defaultPermissionMode", PermissionMode::Auto).unwrap();
+        save_permission_mode(home.path(), PermissionMode::Ask).unwrap();
+        assert_eq!(permission_label(load_permission_mode(home.path())), "auto");
+        assert_eq!(read_permission_settings(home.path())["permissionMode"], "ask");
     }
-    let mode = match mode {
-        PermissionMode::Ask => "ask",
-        PermissionMode::Auto => "auto",
-        PermissionMode::Full => "full",
-        PermissionMode::Minimal => "minimal",
-    };
-    fs::write(
-        path,
-        serde_json::to_vec_pretty(&json!({"permissionMode": mode}))?,
-    )?;
-    Ok(())
+
+    #[test]
+    fn updates_do_not_remove_unrelated_settings() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join("config")).unwrap();
+        fs::write(permission_settings_path(home.path()), br#"{"custom":"keep","permissionMode":"ask"}"#).unwrap();
+        persist_permission_setting(home.path(), "defaultPermissionMode", PermissionMode::Full).unwrap();
+        assert_eq!(read_permission_settings(home.path())["custom"], "keep");
+        assert_eq!(permission_label(load_permission_mode(home.path())), "full");
+    }
 }
 
 fn mask_key(key: &str) -> String {
@@ -9547,7 +9566,12 @@ mod tests {
             task_manager: Arc::clone(&task_manager),
             vision_degraded: Arc::new(StdMutex::new(HashSet::new())),
             registry_cache: Arc::new(StdMutex::new(None)),
-        workflow_scheduler: crate::workflow::WorkflowScheduler::new(&PathBuf::from(("test"))),
+            workflow_scheduler: crate::workflow::WorkflowScheduler::new(&home),
+            studio_approvals: Arc::new(StdMutex::new(HashMap::new())),
+            studio_runs: Arc::new(StdMutex::new(HashMap::new())),
+            studio_events: Arc::new(StdMutex::new(HashMap::new())),
+            group_chat_runs: Arc::new(StdMutex::new(HashMap::new())),
+            collab_runs: Arc::new(StdMutex::new(HashMap::new())),
         };
 
         let store = SessionStore::new(&home);

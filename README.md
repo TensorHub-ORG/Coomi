@@ -1,7 +1,7 @@
 # Comax
 
 <p align="center">
-  <img alt="release" src="https://img.shields.io/badge/release-v1.5.0o6-2563eb?style=flat-square" />
+  <img alt="release" src="https://img.shields.io/badge/release-v1.5.1o3-2563eb?style=flat-square" />
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-0f766e?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Android%207.0%2B-16a34a?style=flat-square&logo=android&logoColor=white" />
   <img alt="agent" src="https://img.shields.io/badge/agent-Comax-7c3aed?style=flat-square" />
@@ -22,7 +22,7 @@
   <a href="https://qm.qq.com/q/2JVYVRKnBe"><strong>💬 QQ 交流群 1108467806</strong></a>
 </p>
 
-- 最新版：**v1.5.0o6**（versionCode 73）
+- 最新版：**v1.5.1o3**（versionCode 77）
 - 官网：https://api.monai.ccwu.cc/coomi/
 - GitHub：https://github.com/maxtwin114514/comax
 
@@ -72,6 +72,8 @@ Comax-Android/
 ```
 
 ## 构建
+
+最新版更新见 [1.5.1o3 更新说明](RELEASE_NOTES_v1.5.1o3.md)。余额和报价依赖服务商接口，Token 费用仅为估算；Shizuku 需用户授权，悬浮窗输入法和控制能力需真机验证。
 
 参见仓库内 `docs/` 与各模块说明；主要工具链：Android SDK（API 34）、Rust stable-aarch64-linux-android、Node 22 + Vue 3/Vite。
 

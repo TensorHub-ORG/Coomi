@@ -16,6 +16,11 @@ let enabled = false
 /** 控制模式开关由 Composer 驱动。 */
 export function setControlModeActive(value: boolean): void {
   enabled = value
+  if (value) void import('@/stores/session').then(async ({ useSessionStore }) => {
+    const { useConfigStore } = await import('@/stores/config')
+    const s = useSessionStore(), c = useConfigStore()
+    try { (window.CoomiAndroid as any)?.setControlSession?.(s.sessionId, c.currentProviderId, c.currentModel) } catch { /* unavailable */ }
+  })
 }
 
 export function isControlModeActive(): boolean {
