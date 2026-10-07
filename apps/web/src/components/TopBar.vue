@@ -232,12 +232,12 @@ function browseInFileManager() {
   to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 .model-tabs {
-  display: flex; flex-wrap: nowrap; overflow-x: hidden; scrollbar-width: none;
+  display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
   max-width: 100%; min-height: 42px; border-bottom: 1px solid var(--border);
 }
 .model-tabs::-webkit-scrollbar { display: none; }
 .model-tabs button {
-  position: relative; flex: 1; min-width: 0; padding: 0 2px;
+  position: relative; flex: 1 0 auto; min-width: 0; padding: 0 10px;
   color: var(--text-3); font-size: 11.5px; font-weight: 600;
   white-space: nowrap; text-align: center;
 }
