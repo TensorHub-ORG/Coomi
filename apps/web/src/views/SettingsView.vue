@@ -11,6 +11,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { useConnectionStore } from '@/stores/connection'
 import { authedFetch } from '@/bridge/http'
+import { hasNativeTts } from '@/bridge/tts'
 import type { PermissionMode } from '@/protocol/commands'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
@@ -23,11 +24,10 @@ const connection = useConnectionStore()
 
 const connectionDraft = ref<ConnectionSettings>({ ...config.connectionSettings })
 const reconnectInitialSeconds = ref(config.connectionSettings.reconnectInitialDelayMs / 1000)
-const activeTab = ref<'chat' | 'app' | 'link'>('chat')
+const activeTab = ref<'chat' | 'link' | 'app'>('chat')
 const reconnectMaxSeconds = ref(config.connectionSettings.reconnectMaxDelayMs / 1000)
 const connectionError = ref('')
 const connectionSaved = ref(false)
-
 function resetConnectionSettings() {
   connectionDraft.value = { ...DEFAULT_CONNECTION_SETTINGS }
   reconnectInitialSeconds.value = DEFAULT_CONNECTION_SETTINGS.reconnectInitialDelayMs / 1000
@@ -49,8 +49,8 @@ async function saveConnectionSettings() {
     return
   }
   if (!Number.isInteger(connectionDraft.value.wsRetryCount)
-    || connectionDraft.value.wsRetryCount < 0 || connectionDraft.value.wsRetryCount > 100) {
-    connectionError.value = 'WebSocket 重连次数需为 0 - 100 的整数'
+    || connectionDraft.value.wsRetryCount < 0 || connectionDraft.value.wsRetryCount > 30) {
+    connectionError.value = 'WebSocket 重连次数需为 0 - 30 的整数'
     return
   }
   if (!Number.isFinite(reconnectInitialSeconds.value)
@@ -109,6 +109,18 @@ async function toggleTelemetry() {
   }
 }
 
+/** 任务完成通知开关：原生侧 SharedPreferences（默认开）；桌面/浏览器无桥时隐藏整组。 */
+const taskNotifySupported = ref(false)
+const taskNotifyEnabled = ref(true)
+function toggleTaskNotify() {
+  const next = !taskNotifyEnabled.value
+  taskNotifyEnabled.value = next
+  try { window.CoomiAndroid?.setTaskNotifyEnabled?.(next) } catch { /* 本地状态仍可用 */ }
+}
+
+/** F8 语音陪伴：仅原生 TTS 桥存在时显示整组设置（桌面/浏览器自动隐藏）。 */
+const nativeTts = ref(hasNativeTts())
+
 const MODE_ICON: Record<PermissionMode, string> = { ask: 'shield', auto: 'bolt', full: 'plusCircle', minimal: 'terminal' }
 
 /** provider × model 拍平成一维列表，省掉一层嵌套标题。 */
@@ -137,33 +149,22 @@ onMounted(async () => {
       telemetryEnabled.value = data.enabled ?? true
     }
   } catch { /* 旧引擎进程：接口不存在，保持默认开启 */ }
+  taskNotifySupported.value = typeof window.CoomiAndroid?.getTaskNotifyEnabled === 'function'
+  if (taskNotifySupported.value) {
+    try { taskNotifyEnabled.value = window.CoomiAndroid?.getTaskNotifyEnabled?.() ?? true } catch { /* 使用默认值 */ }
+  }
 })
 
 </script>
 <template>
   <div class="page">
-    <PageHead title="设置" @back="goBack(router, 'dashboard')" />
+    <PageHead title="设置" @back="goBack(router, '/')" />
       <div class="tabs" role="tablist" aria-label="设置分类">
         <button :class="{ on: activeTab === 'chat' }" @click="activeTab = 'chat'">对话</button>
         <button :class="{ on: activeTab === 'link' }" @click="activeTab = 'link'">连接与模型</button>
         <button :class="{ on: activeTab === 'app' }" @click="activeTab = 'app'">应用</button>
       </div>
     <main class="body">
-<template v-if="activeTab === 'app'">
-      <p class="sec-label">会话</p>
-      <div class="group">
-        <button class="row" @click="router.push('/sessions')">
-          <span class="ri"><CoomiIcon name="chat" :size="17" /></span>
-          <span class="rt">
-            <span class="rmain">会话历史</span>
-            <span class="rsub">查看、导入与导出聊天记录</span>
-          </span>
-          <CoomiIcon name="chevronRight" :size="15" class="arw" />
-        </button>
-      </div>
-
-</template>
-
 <template v-if="activeTab === 'chat'">
       <p class="sec-label">权限模式</p>
       <div class="group">
@@ -177,10 +178,6 @@ onMounted(async () => {
           </span>
           <CoomiIcon v-if="config.permissionMode === m.mode" name="check" :size="17" class="tick" />
         </button>
-      </div>
-      <p class="option-note">当前默认：{{ PERMISSION_MODES.find(m => m.mode === config.defaultPermissionMode)?.label }}。点击下方选项可设置应用启动时的模式。</p>
-      <div class="group compact-options permission-defaults">
-        <button v-for="m in PERMISSION_MODES" :key="`default-${m.mode}`" class="option" :class="{ selected: config.defaultPermissionMode === m.mode }" @click="config.setDefaultPermissionMode(m.mode)">{{ m.label }}</button>
       </div>
 
 </template>
@@ -219,22 +216,6 @@ onMounted(async () => {
 </template>
 
 <template v-if="activeTab === 'chat'">
-      <p class="sec-label">狂暴模型</p>
-      <div class="group model-list">
-        <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先配置 Provider。</p>
-        <button v-for="r in modelRows" :key="'bk-' + r.key" class="row" @click="config.setBerserkModel(r.providerId + ':' + r.model)">
-          <span class="rt">
-            <span class="rmain mono">{{ r.model }}</span>
-            <span class="rsub">{{ r.provider }}</span>
-          </span>
-          <CoomiIcon v-if="config.berserkModel === r.providerId + ':' + r.model" name="check" :size="17" class="tick" />
-        </button>
-      </div>
-      <p class="option-note">{{ config.berserkModel ? '狂暴模式将使用 ' + config.berserkModel + ' 检查并继续任务' : '未设置狂暴模型：切换狂暴模式时会提示先配置' }}</p>
-
-</template>
-
-<template v-if="activeTab === 'chat'">
       <p class="sec-label">工具调用上限</p>
       <div class="group compact-options rounds">
         <button v-for="rounds in [192, 256, 512]" :key="rounds" class="option" :class="{ selected: config.maxToolRounds === rounds }" @click="session.setMaxToolRounds(rounds)">
@@ -258,7 +239,7 @@ onMounted(async () => {
         </label>
         <label class="number-row">
           <span class="rt"><span class="rmain">WebSocket 重连次数</span><span class="rsub">界面与引擎断开后的尝试次数</span></span>
-          <input v-model.number="connectionDraft.wsRetryCount" type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="WebSocket 重连次数" />
+          <input v-model.number="connectionDraft.wsRetryCount" type="number" min="0" max="30" step="1" inputmode="numeric" aria-label="WebSocket 重连次数" />
         </label>
         <label class="number-row">
           <span class="rt"><span class="rmain">首次重连间隔</span><span class="rsub">0.5 - 60 秒</span></span>
@@ -300,22 +281,6 @@ onMounted(async () => {
           <span class="rt"><span class="rmain">外观</span><span class="rsub">主题、颜色和背景</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
-        <button class="row" @click="config.setSendMorphAnimation(!config.sendMorphAnimation)">
-          <span class="ri" :class="{ on: config.sendMorphAnimation }"><CoomiIcon name="sparkle" :size="17" /></span>
-          <span class="rt">
-            <span class="rmain">液滴发送动画</span>
-            <span class="rsub">发送时显示小点飞行、液滴扩散、环绕光效和按键弹出；也控制工具卡展开/划入动画</span>
-          </span>
-          <span class="sw" :class="{ on: config.sendMorphAnimation }" />
-        </button>
-        <button class="row" @click="config.setMinimalUi(!config.minimalUi)">
-          <span class="ri" :class="{ on: config.minimalUi }"><CoomiIcon name="terminal" :size="17" /></span>
-          <span class="rt">
-            <span class="rmain">极简界面模式</span>
-            <span class="rsub">工具调用折叠成一小块方框，点开才看详情；文本与卡片更小更紧凑</span>
-          </span>
-          <span class="sw" :class="{ on: config.minimalUi }" />
-        </button>
       </div>
 
 </template>
@@ -337,6 +302,43 @@ onMounted(async () => {
         </button>
       </div>
 
+      <p v-if="taskNotifySupported" class="sec-label">通知</p>
+      <div v-if="taskNotifySupported" class="group">
+        <button class="row" @click="toggleTaskNotify">
+          <span class="ri" :class="{ on: taskNotifyEnabled }"><CoomiIcon name="bell" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">任务完成通知</span>
+            <span class="rsub">{{ taskNotifyEnabled ? '后台任务完成时在通知栏提醒，点击可回前台查看结果' : '已关闭：任务完成时不再发送通知' }}</span>
+          </span>
+          <span class="sw" :class="{ on: taskNotifyEnabled }" />
+        </button>
+      </div>
+
+      <p v-if="nativeTts" class="sec-label">语音朗读</p>
+      <div v-if="nativeTts" class="group">
+        <button class="row" @click="config.setTtsAutoRead(!config.ttsAutoRead)">
+          <span class="ri" :class="{ on: config.ttsAutoRead }"><CoomiIcon name="volume2" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">AI 回复自动朗读</span>
+            <span class="rsub">{{ config.ttsAutoRead ? 'AI 发送新消息后自动朗读内容' : '关闭自动朗读' }}</span>
+          </span>
+          <span class="sw" :class="{ on: config.ttsAutoRead }" />
+        </button>
+        <div class="row slider-row">
+          <span class="ri"><CoomiIcon name="tachometer" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">朗读语速 {{ config.ttsRate.toFixed(1) }}x</span>
+            <span class="rsub">拖动调整朗读速度（0.5 - 2.0 倍）</span>
+          </span>
+          <input
+            type="range" min="0.5" max="2" step="0.1"
+            :value="config.ttsRate"
+            @input="config.setTtsRate(Number(($event.target as HTMLInputElement).value))"
+            class="slider" aria-label="朗读语速"
+          />
+        </div>
+      </div>
+
 </template>
 
 <template v-if="activeTab === 'link'">
@@ -354,12 +356,44 @@ onMounted(async () => {
 </template>
 
 <template v-if="activeTab === 'app'">
-      <p class="sec-label">配置</p>
+      <p class="sec-label">会话与体验</p>
       <div class="group">
+        <button class="row" @click="router.push('/prompts')">
+          <span class="ri"><CoomiIcon name="pencil" :size="17" /></span>
+          <span class="rt"><span class="rmain">常用提示词指令</span><span class="rsub">管理自定义提示词、分类标签与内置指令</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
         <button class="row" @click="router.push('/sessions')">
           <span class="ri"><CoomiIcon name="chat" :size="17" /></span>
           <span class="rt"><span class="rmain">会话历史</span></span>
           <span class="rside">{{ sessions.metas.length }}</span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+      </div>
+
+</template>
+
+<template v-if="activeTab === 'app'">
+      <p class="sec-label">版本管理</p>
+      <div class="group">
+        <button class="row" @click="router.push('/git')">
+          <span class="ri"><CoomiIcon name="git" :size="17" /></span>
+          <span class="rt"><span class="rmain">Git 面板</span><span class="rsub">改动、分支、历史、Stash 与远端同步</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/restore')">
+          <span class="ri"><CoomiIcon name="clock" :size="17" /></span>
+          <span class="rt"><span class="rmain">一键还原</span><span class="rsub">按快照预览差异并回退工作区</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/ops')">
+          <span class="ri"><CoomiIcon name="wrench" :size="17" /></span>
+          <span class="rt"><span class="rmain">运维诊断</span><span class="rsub">网络连通、存储分析与凭据管理</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="router.push('/data')">
+          <span class="ri"><CoomiIcon name="grep" :size="17" /></span>
+          <span class="rt"><span class="rmain">数据工具</span><span class="rsub">贡献统计、用量与会话导出搜索</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
       </div>
@@ -376,7 +410,8 @@ onMounted(async () => {
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .body { flex: 1; overflow-y: auto; padding: 14px 12px calc(var(--safe-bottom) + 24px); }
-.tabs { display: flex; gap: 6px; margin: 10px 0 4px;  overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; white-space: nowrap; }
+.tabs { display: flex; gap: 6px; margin: 10px 0 4px; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+.tabs::-webkit-scrollbar { display: none; }
 .tabs button { flex: 1 0 auto; min-height: 36px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--bg); color: var(--text-2); font-size: 12.5px; }
 .tabs button.on { background: var(--blue-soft); border-color: var(--blue-border, var(--blue)); color: var(--blue); font-weight: 650; }
 .sec-label { margin: 16px 0 0; }
@@ -392,6 +427,7 @@ onMounted(async () => {
 .option { min-width: 0; height: 38px; padding: 0 4px; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 13px; }
 .option.selected { background: var(--blue-soft); color: var(--blue); font-weight: 650; }
 .option-note { margin: 6px 4px 0; font-size: 11.5px; color: var(--text-3); }
+.option-note.ok { color: var(--ok); }
 .row {
   display: flex; align-items: center; gap: 11px;
   width: 100%; min-height: 56px; padding: 11px 13px;
@@ -430,8 +466,7 @@ onMounted(async () => {
 .arw { flex-shrink: 0; color: var(--text-3); }
 .empty { padding: 15px 14px; font-size: 13px; line-height: 1.6; color: var(--text-3); }
 
-.sw {
-  position: relative; flex-shrink: 0;
+.sw { position: relative; flex-shrink: 0;
   width: 44px; height: 26px; border-radius: 13px;
   background: var(--border-strong); transition: background .2s;
 }
@@ -442,6 +477,33 @@ onMounted(async () => {
 }
 .sw.on { background: var(--blue); }
 .sw.on::after { transform: translateX(18px); }
+
+/* F8 语音陪伴：朗读语速滑杆 */
+.slider-row { min-height: 64px; }
+.slider-row .rt { flex: 1; }
+.slider {
+  flex-shrink: 0; width: 118px; height: 26px;
+  appearance: none; -webkit-appearance: none; background: transparent;
+  cursor: pointer; touch-action: none;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 3px;
+  background: var(--border-strong);
+}
+.slider::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin-top: -7.5px; border-radius: 50%;
+  background: var(--blue); box-shadow: var(--shadow-1);
+  border: none; transition: transform .12s;
+}
+.slider::-webkit-slider-thumb:active { transform: scale(1.12); }
+.slider::-moz-range-track {
+  height: 5px; border-radius: 3px; background: var(--border-strong);
+}
+.slider::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--blue); box-shadow: var(--shadow-1); border: none;
+}
 
 .foot { display: flex; align-items: center; justify-content: center; gap: 9px; margin-top: 22px; }
 .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-3); }

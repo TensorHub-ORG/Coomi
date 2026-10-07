@@ -183,6 +183,23 @@ export function displayModelName(name: string): string {
 
 export const useConfigStore = defineStore('config', () => {
   const savedPermission = localStorage.getItem('coomi.permissionMode') as PermissionMode | null
+  const ttsAutoRead = ref(localStorage.getItem('coomi.ttsAutoRead') === '1')
+  const ttsRate = ref(readStoredRate())
+  function setTtsAutoRead(enabled: boolean) {
+    ttsAutoRead.value = enabled
+    localStorage.setItem('coomi.ttsAutoRead', enabled ? '1' : '0')
+  }
+
+  function readStoredRate(): number {
+    const value = Number(localStorage.getItem('coomi.ttsRate'))
+    return Number.isFinite(value) && value >= 0.5 && value <= 2 ? value : 1
+  }
+  function setTtsRate(rate: number) {
+    const clamped = Math.min(2, Math.max(0.5, rate))
+    ttsRate.value = clamped
+    localStorage.setItem('coomi.ttsRate', String(clamped))
+  }
+  
   const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
   const planMode = ref(false)
   const savedProduction = (localStorage.getItem('coomi.productionMode') || 'normal') as 'normal' | 'overload' | 'berserk'
@@ -649,6 +666,7 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   return {
+    ttsAutoRead, ttsRate, setTtsAutoRead, setTtsRate,
     permissionMode, defaultPermissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, productionMode, setProductionMode, berserkModel, setBerserkModel, sendMorphAnimation, setSendMorphAnimation, minimalUi, setMinimalUi, providers, activeId, loading, usingMock, lastError, subAgentSettings,
     currentProviderId, currentModel, currentProvider, mergedProviders,
     fetchProviders, selectModel, syncDisplayModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, setDefaultPermissionMode, togglePlanMode,

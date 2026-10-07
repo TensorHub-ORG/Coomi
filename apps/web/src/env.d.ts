@@ -34,6 +34,16 @@ interface Window {
     openFloatingWindow?(): void
     /** 测试通道红点开关读取/写入（仅 Coomi 本线原生提供）。 */
     getTestUpdateDotEnabled?(): boolean
+    closeHostActivity?(): void
+    updateTaskStatusDetails?(status: string, sessionId: string, background: boolean): void
+    setDisplayScale?(scale: number): void
+    getQuickCommands?(): string
+    setQuickCommands?(json: string): boolean
+    getTaskNotifyEnabled?(): boolean
+    setTaskNotifyEnabled?(enabled: boolean): void
+    speak?(text: string): void
+    ttsStop?(): void
+    setTtsRate?(rate: number): void
     setTestUpdateDotEnabled?(enabled: boolean): void
   }
 }

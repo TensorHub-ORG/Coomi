@@ -19,58 +19,57 @@ export function goBack(router: Router, fallback: BackFallback): void {
   void router.replace(fallback === 'dashboard' ? '/' : fallback)
 }
 
-export function installSystemBackHandler(router: Router): void {
-  window.__coomiHandleSystemBack = () => {
-    if (closeTopOverlay()) return true
-    const route = router.currentRoute.value.path
-    // 会话页 / 控制台主页：交给原生（会话→控制台；控制台→退到桌面即退出）。
-    if (route === '/' || route === '/home') return false
-    // 三级页（记忆库/心情日记）先回二级（数字生命体）。
-    if (route.startsWith('/life/')) goBack(router, '/life')
-    else if (route === '/appearance' || route === '/persona') goBack(router, '/settings')
-    else if (
-      route === '/hooks'
-      || route === '/life'
-      || route === '/memory'
-      || route === '/runtime'
-      || route === '/custom-iteration'
-      || route === '/files'
-      || route === '/catalog'
-      || route === '/workflows'
-      || route === '/maintenance'
-      || route === '/usage'
-      || route === '/updates'
-      || route === '/prompts'
-      || route === '/ux-program'
-      || route === '/git'
-      || route === '/restore'
-      || route === '/ops'
-      || route === '/data'
-      || route === '/collab'
-      || route === '/im'
-      || route === '/providers'
-      || route.startsWith('/providers/')
-    ) goBack(router, 'dashboard')
-    else if (route.startsWith('/im/')) goBack(router, '/im')
-    else if (route.startsWith('/collab/')) goBack(router, '/collab')
-    else goBack(router, '/')
-    return true
-  }
-}
+type BackTarget = 'session' | 'console' | 'exit' | string
 
-/**
- * 统一返回入口（页面内返回按钮使用）：
- * 覆盖层 → 嵌套历史 → 分层兜底（会话页/控制台主页交给原生）。
- */
-export function systemBack(router: Router): void {
-  if (closeTopOverlay()) return
-  const route = router.currentRoute.value.path
-  if (route === '/' || route === '/home') {
+/** 每个路由的父级(与各页面左上角返回按钮的落点一致)。 */
+const routeParents: Array<[RegExp, BackTarget]> = [
+  [/^\/providers\/[^/]+/, '/providers'],
+  [/^\/life\//, '/life'],
+  [/^\/im\/[^/]+/, '/im'],
+  [/^\/collab\/[^/]+/, '/collab'],
+  [/^\/settings/, 'session'],
+  [/^\/appearance/, '/settings'],
+  [/^\/persona/, '/settings'],
+  [/^\/studio/, 'session'],
+  [/^\/collab/, 'session'],
+  [/^\/im/, 'session'],
+  [/^\/quick-commands/, 'console'],
+  [/^\/(hooks|memory|runtime|files|catalog|workflows|maintenance|usage|updates|prompts|ux-program|git|restore|ops|data)/, 'console'],
+  [/^\/providers/, 'console'],
+  [/^\/life/, 'console'],
+]
+
+function applyBack(router: Router, target: BackTarget): void {
+  if (target === 'session') { void router.replace('/'); return }
+  if (target === 'console') {
     if (window.CoomiAndroid?.openDashboard) window.CoomiAndroid.openDashboard()
-    else goBack(router, 'dashboard')
+    else void router.replace('/home')
     return
   }
-  if (route.startsWith('/life/')) { goBack(router, '/life'); return }
-  if (route === '/appearance' || route === '/persona') { goBack(router, '/settings'); return }
-  goBack(router, 'dashboard')
+  if (target === 'exit') {
+    if (window.CoomiAndroid?.closeHostActivity) window.CoomiAndroid.closeHostActivity()
+    return
+  }
+  void router.replace(target)
+}
+
+/** 统一返回入口: 覆盖层 → 嵌套历史 → 每页父级。硬件返回与页内按钮共用。 */
+export function systemBack(router: Router): 'handled' | 'native-console' | 'native-exit' {
+  if (closeTopOverlay()) return 'handled'
+  const route = router.currentRoute.value.path
+  if (route === '/') return 'native-console'
+  if (route === '/home') return 'native-exit'
+  if (window.history.state?.back) { router.back(); return 'handled' }
+  for (const [re, target] of routeParents) {
+    if (re.test(route)) { applyBack(router, target); return 'handled' }
+  }
+  applyBack(router, 'console')
+  return 'handled'
+}
+
+export function installSystemBackHandler(router: Router): void {
+  window.__coomiHandleSystemBack = () => {
+    const result = systemBack(router)
+    return result === 'handled'
+  }
 }

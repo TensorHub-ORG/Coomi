@@ -303,7 +303,7 @@ function openDashboard() {
 
 .row {
   display: flex; align-items: center; gap: 4px;
-  padding: 9px 6px 9px 10px; border-radius: var(--r-md);
+  padding: 6px 6px 6px 10px; border-radius: var(--r-md);
 }
 .row:active { background: var(--fill); }
 .row.cur { background: var(--blue-soft); }
@@ -314,7 +314,7 @@ function openDashboard() {
 }
 .row.cur .rtitle { color: var(--blue); font-weight: 600; }
 .rmeta {
-  display: flex; align-items: center; gap: 4px; margin-top: 3px;
+  display: flex; align-items: center; gap: 4px; margin-top: 2px;
   font-size: 11.5px; color: var(--text-3);
 }
 /* 会话在后台执行中的小圈（放在时间/轮数之后，与 meta 文字同高） */

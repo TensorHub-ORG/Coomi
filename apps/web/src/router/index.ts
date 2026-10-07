@@ -41,6 +41,7 @@ export const router = createRouter({
     { path: '/usage', name: 'usage', component: () => import('@/views/UsageView.vue') },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
     { path: '/prompts', name: 'prompts', component: () => import('@/views/PromptsView.vue') },
+    { path: '/quick-commands', name: 'quick-commands', component: () => import('@/views/QuickCommandsView.vue') },
     { path: '/git', name: 'git', component: () => import('@/views/GitPanelView.vue') },
     { path: '/restore', name: 'restore', component: () => import('@/views/RestoreView.vue') },
     { path: '/ops', name: 'ops', component: () => import('@/views/OpsView.vue') },
