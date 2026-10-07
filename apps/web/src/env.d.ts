@@ -30,6 +30,8 @@ interface Window {
     installApk?(url: string, version: string): void
     /** 双通道更新：读取本地版本名（展示用，原生缺失时降级为 build 码）。 */
     getAppVersionName?(): string
+    /** 小窗聊天：把当前聊天移入原生悬浮窗（本线原生提供）。 */
+    openFloatingWindow?(): void
     /** 测试通道红点开关读取/写入（仅 Coomi 本线原生提供）。 */
     getTestUpdateDotEnabled?(): boolean
     setTestUpdateDotEnabled?(enabled: boolean): void

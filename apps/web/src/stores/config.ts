@@ -175,6 +175,12 @@ const MOCK_PROVIDERS: ProviderConfig[] = [
   { id: 'anthropic', name: 'Anthropic', apiKeyMasked: '****9f3c', hasKey: true, models: ['claude-sonnet-4', 'claude-opus-4'] },
 ]
 
+export function displayModelName(name: string): string {
+  if (!name) return name
+  const cleaned = name.replace(/[ --​-‏‪-‮⁦-⁩︀-️ﹰ-﻿￰-￿]/g, '')
+  return cleaned || name
+}
+
 export const useConfigStore = defineStore('config', () => {
   const savedPermission = localStorage.getItem('coomi.permissionMode') as PermissionMode | null
   const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedPermission ?? '') ? savedPermission! : 'ask')

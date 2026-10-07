@@ -3,74 +3,55 @@
  * 顶栏：汉堡 / 模型名 / 上下文用量。
  * 忙的时候底边跑一条 2px 蓝色扫光，让「正在干活」这件事在最顶层也能看见。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { useConnectionStore } from '@/stores/connection'
 import { apiGet } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
-import { costCny, fmtMoney, priceFor } from '@/utils/modelPrices'
-import CoomiMark from './CoomiMark.vue'
-import MorphBurger from './MorphBurger.vue'
+import ContextTools from './ContextTools.vue'
+import UsageDetails from './UsageDetails.vue'
+import { displayModelName } from '@/stores/config'
 
-const props = defineProps<{ menuOpen?: boolean }>()
 defineEmits<{ menu: [] }>()
+const props = defineProps<{ floating?: boolean }>()
 
 const config = useConfigStore()
 const session = useSessionStore()
 const connection = useConnectionStore()
 const router = useRouter()
 const modelOpen = ref(false)
-const usageOpen = ref(false)
 const pathPickerOpen = ref(false)
 const pathInput = ref('')
 const pathNotice = ref('')
+const activeModelCategory = ref('')
 const pathQuickOptions = computed(() => session.cwd ? [session.cwd] : [])
-const showSessionBrand = computed(() => session.timeline.length > 0)
-const settlingBrand = ref(false)
-const enteringBrand = ref(false)
-let settleTimer: ReturnType<typeof setTimeout> | null = null
-let enterTimer: ReturnType<typeof setTimeout> | null = null
-watch(() => session.timeline.length, (n, prev) => {
-  if (prev === 0 && n > 0) {
-    enteringBrand.value = true
-    if (enterTimer) clearTimeout(enterTimer)
-    enterTimer = setTimeout(() => { enteringBrand.value = false; enterTimer = null }, 1200)
+// 按能力三分类（文本/图像理解/图像生成），恢复 v1.4.4 的模型选择卡片；
+// DeepSeek 账号模型归入文本模型。行内保留供应商标注。
+const modelGroups = computed(() => {
+  const groups: Record<'text' | 'vision' | 'image', Array<{ providerId: string; provider: string; model: string }>> = { text: [], vision: [], image: [] }
+  for (const provider of [...config.providers].sort((a, b) => Number(b.id === config.activeId) - Number(a.id === config.activeId))) {
+    for (const model of new Set([...(provider.models ?? []), provider.model].filter(Boolean))) {
+      const capabilities = provider.capabilityOverrides?.[model!]
+      const item = { providerId: provider.id, provider: provider.name, model: model! }
+      if (capabilities?.text ?? true) groups.text.push(item)
+      if (capabilities?.vision ?? false) groups.vision.push(item)
+      if (capabilities?.image_generation ?? false) groups.image.push(item)
+    }
   }
+  return [
+    { id: 'text' as const, label: '文本模型', items: groups.text },
+    { id: 'vision' as const, label: '图像理解', items: groups.vision },
+    { id: 'image' as const, label: '图像生成', items: groups.image },
+  ]
 })
-const activeProviderId = ref('')
-const modelGroups = computed(() => [...config.providers]
-  .filter(provider => provider.models.length > 0)
-  .sort((a, b) => Number(b.id === config.activeId) - Number(a.id === config.activeId))
-  .map(provider => ({
-    id: provider.id,
-    label: provider.name,
-    items: provider.models.map(model => ({ providerId: provider.id, provider: provider.name, model })),
-  })))
-const activeModelGroup = computed(() => modelGroups.value.find(group => group.id === activeProviderId.value) ?? modelGroups.value[0] ?? { id:'', label:'模型厂商', items:[] })
+const activeModelGroup = computed(() => modelGroups.value.find(group => group.id === activeModelCategory.value) ?? {
+  id: '__empty__',
+  label: '分类',
+  items: [] as Array<{ providerId: string; provider: string; model: string }>,
+})
 const usagePercent = computed(() => Math.min(100, Math.max(0, Math.round((session.usage?.contextRatio ?? 0) * 100))))
-const usageStroke = computed(() => `${usagePercent.value} ${100 - usagePercent.value}`)
-const effortLabels = { auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高' } as const
-const categoryLabels = { system_tools: '系统工具', messages: '消息', skills: '技能', mcp_tools: 'MCP 工具', system_prompt: '系统提示', other: '其他' } as const
-const categoryTotal = computed(() => Object.values(session.usage?.contextCategories ?? {}).reduce((sum, value) => sum + (value ?? 0), 0))
-function categoryPercent(value: number | undefined): string {
-  return categoryTotal.value > 0 ? `${((value ?? 0) / categoryTotal.value * 100).toFixed(1)}%` : '--'
-}
-
-function formatTokens(value: number): string {
-  if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M'
-  if (value >= 1000) return (value / 1000).toFixed(1) + 'k'
-  return String(value)
-}
-function formatPercent(value: number | null | undefined): string {
-  return value == null ? '暂无缓存数据' : `${(value * 100).toFixed(1)}%`
-}
-function formatDuration(value: number | null | undefined): string {
-  if (value == null) return '--'
-  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`
-}
-
 function choose(providerId: string, model: string) {
   session.selectModel(providerId, model)
   modelOpen.value = false
@@ -97,7 +78,9 @@ const envBadgeLabel = computed(() => {
   const doctor = runtimeInfo.value
   const runtime = doctor?.runtime
   if (runtime?.status === 'ready') {
-    return doctor?.facts?.sh ? 'Debian 12 · proot' : '环境异常'
+    const version = runtime.active_version ?? ''
+    const system = version.includes('ubuntu') ? 'Ubuntu 24.04' : version.includes('debian') ? 'Debian 12' : 'Linux'
+    return doctor?.facts?.sh ? `${system} · proot` : '环境异常'
   }
   if (doctor?.termux_available) return 'Termux 降级'
   return '运行环境未就绪'
@@ -120,32 +103,14 @@ onMounted(async () => {
   }
 })
 
-watch(() => session.isBusy, busy => {
-  if (busy) {
-    settlingBrand.value = false
-    if (settleTimer) { clearTimeout(settleTimer); settleTimer = null }
-    return
-  }
-  if (!showSessionBrand.value) return
-  settlingBrand.value = true
-  if (settleTimer) clearTimeout(settleTimer)
-  settleTimer = setTimeout(() => { settlingBrand.value = false; settleTimer = null }, 1000)
-})
-
 function toggleModel() {
   modelOpen.value = !modelOpen.value
-  usageOpen.value = false
   if (modelOpen.value) {
     const selected = modelGroups.value.find(group => group.items.some(item => (
       item.providerId === config.currentProviderId && item.model === config.currentModel
     )))
-    activeProviderId.value = selected?.id ?? modelGroups.value[0]?.id ?? ''
+    activeModelCategory.value = selected?.id ?? modelGroups.value[0]?.id ?? ''
   }
-}
-
-function toggleUsage() {
-  usageOpen.value = !usageOpen.value
-  modelOpen.value = false
 }
 
 // ── 会话标记路径（第三批 5：绑定为会话执行目录）──
@@ -153,7 +118,6 @@ function openPathPicker() {
   pathInput.value = session.cwd || ''
   pathNotice.value = ''
   pathPickerOpen.value = true
-  usageOpen.value = false
 }
 
 function pickPath(path: string) {
@@ -172,82 +136,32 @@ function browseInFileManager() {
   pathPickerOpen.value = false
   router.push('/files')
 }
-
-  // ── 余额与消耗（右上角）──
-  const balanceOpen = ref(false)
-  const balanceData = ref<{
-    available_yuan: number
-    lamp_remaining: number
-    expires_at: number
-    provider: string
-  } | null>(null)
-  const balanceLoading = ref(false)
-  const balanceError = ref('')
-
-  async function fetchBalance() {
-    if (balanceLoading.value) return
-    balanceLoading.value = true
-    balanceError.value = ''
-    try {
-      const data = await apiGet<{ ok: boolean; provider: string; balance: { available_yuan: number; lamp_remaining: number; expires_at: number } }>('/api/balance')
-      balanceData.value = data.balance ? {
-        available_yuan: Number(data.balance.available_yuan) || 0,
-        lamp_remaining: Number(data.balance.lamp_remaining) || 0,
-        expires_at: Number(data.balance.expires_at) || 0,
-        provider: data.provider,
-      } : null
-    } catch (e) {
-      balanceError.value = e instanceof Error ? e.message : String(e)
-      balanceData.value = null
-    } finally {
-      balanceLoading.value = false
-    }
-  }
-
-  function toggleBalance() {
-    balanceOpen.value = !balanceOpen.value
-    if (balanceOpen.value) fetchBalance()
-  }
-
-  // 消耗估算：会话累计 = input+output（缓存按 20% 计入价格表）；本轮 = 本轮输出增量。
-  const sessionCost = computed(() => {
-    const u = session.usage
-    if (!u) return 0
-    return costCny(config.currentModel, u.input ?? 0, u.output ?? 0, u.cachedInput ?? 0)
-  })
-  const turnCost = computed(() => {
-    const u = session.usage
-    if (!u) return 0
-    return costCny(config.currentModel, 0, u.turnOutputTokens ?? 0, 0)
-  })
-  const modelUnit = computed(() => priceFor(config.currentModel))
 </script>
 
 <template>
   <header class="topbar">
-    <MorphBurger :open="props.menuOpen ?? false" @toggle="$emit('menu')" />
+    <button class="icon-btn" aria-label="会话历史" @click="$emit('menu')">
+      <CoomiIcon name="menu" />
+    </button>
 
     <button class="center" :aria-expanded="modelOpen" @click="toggleModel">
-      <span class="model">{{ config.currentModel }}</span>
-        <button v-if="session.mode === 'life'" class="life-orbit" aria-label="查看数字生命统计" title="查看生命统计" @click.stop="session.toggleLifeStats()">
-          <i class="orbit outer" /><i class="orbit inner" />
-        </button>
-      <CoomiMark v-if="showSessionBrand" :size="22" class="session-brand" :class="{ spinning: session.isBusy, settling: settlingBrand, enter: enteringBrand }" />
+      <span class="model">{{ displayModelName(config.currentModel) }}</span>
       <span v-if="connection.demo" class="demo">演示</span>
       <span v-if="config.planMode" class="plan">计划</span>
       <CoomiIcon name="chevronDown" :size="13" class="caret" />
     </button>
 
+    <Teleport to="body">
     <button v-if="modelOpen" class="model-scrim" aria-label="关闭模型选择" @click="modelOpen = false" />
     <div v-if="modelOpen" class="model-menu">
-      <div class="model-tabs" role="tablist" aria-label="模型厂商">
+      <div v-if="modelGroups.length" class="model-tabs" role="tablist" aria-label="按模型能力分类">
         <button
           v-for="group in modelGroups"
           :key="group.id"
           role="tab"
-          :aria-selected="activeProviderId === group.id"
-          :class="{ active: activeProviderId === group.id }"
-          @click="activeProviderId = group.id"
+          :aria-selected="activeModelCategory === group.id"
+          :class="{ active: activeModelCategory === group.id }"
+          @click="activeModelCategory = group.id"
         >{{ group.label }}</button>
       </div>
       <section class="model-list" role="tabpanel">
@@ -256,82 +170,17 @@ function browseInFileManager() {
           :class="{ selected: item.providerId === config.currentProviderId && item.model === config.currentModel }"
           @click="choose(item.providerId, item.model)"
         >
-          <span><b>{{ item.model }}</b><small>{{ item.provider }}</small></span>
+          <span><b>{{ displayModelName(item.model) }}</b><small>{{ item.provider }}</small></span>
           <CoomiIcon v-if="item.providerId === config.currentProviderId && item.model === config.currentModel" name="check" :size="15" />
         </button>
-        <p v-if="activeModelGroup.items.length === 0" class="model-empty">该厂商暂无可用模型</p>
+        <p v-if="activeModelGroup.items.length === 0" class="model-empty">{{ modelGroups.length ? '该分类暂无可用模型' : '暂无已配置供应商' }}</p>
       </section>
     </div>
-    
-
-    <button class="usage-button" :aria-expanded="usageOpen" aria-label="上下文用量" @click="toggleUsage">
-      <svg class="usage-ring" viewBox="0 0 36 36" aria-hidden="true">
-        <circle class="usage-track" cx="18" cy="18" r="15" pathLength="100" />
-        <circle class="usage-value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="usageStroke" />
-      </svg>
-    </button>
-      <button class="balance-button" :aria-expanded="balanceOpen" aria-label="余额与消耗" @click="toggleBalance">
-        <CoomiIcon name="bolt" :size="16" />
-        <span v-if="balanceData" class="balance-num">{{ fmtMoney(balanceData.available_yuan) }}</span>
-      </button>
-
-    <Teleport to="body">
-    <button v-if="usageOpen" class="usage-scrim" aria-label="关闭上下文数据" @click="usageOpen = false" />
-    <div v-if="usageOpen" class="usage-menu">
-      <p class="usage-title">上下文用量</p>
-      <div v-if="session.usage" class="usage-stats">
-        <div><span>会话 Token</span><strong>{{ formatTokens(session.usage.total) }}</strong></div>
-        <div><span>上下文使用</span><strong>{{ formatTokens(session.usage.contextUsed) }} / {{ formatTokens(session.usage.contextWindow) }}</strong></div>
-        <div><span>本轮缓存命中</span><strong>{{ formatPercent(session.usage.turnCacheHitRate) }}</strong></div>
-        <div><span>会话平均命中</span><strong>{{ formatPercent(session.usage.cacheHitRate) }}</strong></div>
-      </div>
-      <p v-else class="usage-empty">此对话尚无用量数据</p>
-      <template v-if="session.usage">
-        <p class="usage-subtitle">上下文构成</p>
-        <div class="category-grid">
-          <div v-for="(label, category) in categoryLabels" :key="category"><span>{{ label }}</span><strong>{{ categoryPercent(session.usage.contextCategories[category]) }}</strong></div>
-        </div>
-        <p class="usage-subtitle">各推理强度均轮统计</p>
-        <div class="effort-table">
-          <div class="effort-head"><span>强度</span><span>命中</span><span>耗时</span><span>用量</span></div>
-          <div v-for="(label, effort) in effortLabels" :key="effort" class="effort-row">
-            <span>{{ label }}</span>
-            <span>{{ formatPercent(session.usage.reasoningEfforts[effort]?.cache_hit_rate) }}</span>
-            <span>{{ formatDuration(session.usage.reasoningEfforts[effort]?.average_duration_ms) }}</span>
-            <span>{{ session.usage.reasoningEfforts[effort]?.average_total_tokens == null ? '--' : formatTokens(session.usage.reasoningEfforts[effort]!.average_total_tokens!) }}</span>
-          </div>
-        </div>
-      </template>
-      <div class="usage-path">
-        <span>会话标记路径</span>
-        <button class="path-btn" @click="openPathPicker">{{ session.cwd || '点击选择' }}</button>
-      </div>
-      <div class="usage-balance">
-        <p class="usage-subtitle">余额与消耗（估算）</p>
-        <template v-if="balanceData">
-          <div class="balance-row">
-            <span>账户余额</span><strong>¥ {{ fmtMoney(balanceData.available_yuan) }}</strong>
-          </div>
-          <div class="balance-row"><span>LAMP</span><strong>{{ balanceData.lamp_remaining }}</strong></div>
-          <div v-if="balanceData.expires_at > 0" class="balance-row">
-            <span>订阅到期</span><strong>{{ new Date(balanceData.expires_at).toLocaleDateString() }}</strong>
-          </div>
-        </template>
-        <p v-else-if="balanceLoading" class="usage-empty">查询中…</p>
-        <p v-else class="usage-empty">{{ balanceError || '无余额数据（非中转站 Key 可能不支持）' }}</p>
-        <div class="balance-row"><span>当前模型单价</span><strong>入 ¥{{ fmtMoney(modelUnit.in * 7.2) }}/M · 出 ¥{{ fmtMoney(modelUnit.out * 7.2) }}/M</strong></div>
-        <div class="balance-row"><span>本轮消耗</span><strong class="cost">≈ ¥{{ fmtMoney(turnCost) }}</strong></div>
-        <div class="balance-row"><span>会话累计消耗</span><strong class="cost">≈ ¥{{ fmtMoney(sessionCost) }}</strong></div>
-      </div>
-      <div v-if="runtimeInfo" class="usage-env">
-        <span>运行环境</span>
-        <span class="env-row">
-          <em class="env-badge" :class="envBadgeClass">{{ envBadgeLabel }}</em>
-          <small v-if="envDetail" class="env-detail">{{ envDetail }}</small>
-        </span>
-      </div>
-    </div>
     </Teleport>
+
+    <ContextTools :floating="props.floating" :usage-percent="usagePercent" @open="modelOpen = false">
+      <template #usage><UsageDetails :runtime-info="runtimeInfo" :env-badge-class="envBadgeClass" :env-badge-label="envBadgeLabel" :env-detail="envDetail" @path="openPathPicker" /></template>
+    </ContextTools>
 
     <div v-if="pathPickerOpen" class="path-mask" @click="pathPickerOpen = false">
       <div class="path-sheet" @click.stop>
@@ -357,28 +206,32 @@ function browseInFileManager() {
 <style scoped>
 .topbar {
   position: relative;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-shrink: 0;
   min-height: 52px; padding: calc(var(--safe-top) + 6px) 8px 6px;
   background: var(--bg);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 .model-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: rgba(0,0,0,0.3); }
 .model-menu {
-    position: absolute; z-index: 20; top: calc(var(--safe-top) + 49px); left: 50%;
-    width: min(78vw, 300px); max-height: min(52vh, 380px); overflow-y: auto;
-    transform: translateX(-50%); padding: 6px; border: 1px solid var(--border);
+  position: fixed; z-index: 20; top: calc(var(--safe-top) + 49px); left: 50%;
+  width: min(78vw, 300px); max-height: min(70vh, 420px); overflow-y: auto;
+  transform: translateX(-50%); padding: 6px; border: 1px solid var(--border);
   border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-2);
   animation: menu-pop .2s cubic-bezier(.2, .9, .3, 1.2) both;
 }
-@keyframes menu-pop { from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(.97); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(.97); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
 .model-tabs {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    min-height: 42px; border-bottom: 1px solid var(--border);
-    overflow-x: auto;
+  display: flex; flex-wrap: nowrap; overflow-x: hidden; scrollbar-width: none;
+  max-width: 100%; min-height: 42px; border-bottom: 1px solid var(--border);
 }
 .model-tabs::-webkit-scrollbar { display: none; }
 .model-tabs button {
-    position: relative; min-width: 0; padding: 0 3px;
-    color: var(--text-3); font-size: 12px; font-weight: 600;
+  position: relative; flex: 1; min-width: 0; padding: 0 2px;
+  color: var(--text-3); font-size: 11.5px; font-weight: 600;
+  white-space: nowrap; text-align: center;
 }
 .model-tabs button.active { color: var(--blue); }
 .model-tabs button.active::after {
@@ -387,55 +240,9 @@ function browseInFileManager() {
 }
 .model-list { max-height: min(43vh, 322px); overflow-y: auto; padding-top: 5px; scrollbar-width: none; }
 .model-list::-webkit-scrollbar { display: none; }
-.usage-scrim { position: fixed; inset: 0; z-index: 19; border: 0; background: transparent; }
-.usage-menu {
-  position: absolute; z-index: 20; top: calc(var(--safe-top) + 49px); right: 8px;
-  width: min(92vw, 390px); max-height: min(72vh, 560px); overflow-y: auto; padding: 12px 13px;
-  border: 1px solid var(--border); border-radius: var(--r-card);
-  background: var(--bg); box-shadow: var(--shadow-2);
-}
-.usage-title { margin: 0 0 9px; font-size: 12px; font-weight: 650; color: var(--text-2); }
-.usage-stats { display: grid; gap: 8px; }
-.usage-stats div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.usage-stats span { font-size: 12px; color: var(--text-3); }
-.usage-stats strong { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
-.usage-empty { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-3); }
-.usage-subtitle { margin: 12px 0 6px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; font-weight: 650; color: var(--text-2); }
-.category-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px 12px; }
-.category-grid div { display:flex; justify-content:space-between; gap:8px; font-size:11px; }
-.category-grid span { color:var(--text-3); }
-.category-grid strong { color:var(--text-2); font-family:var(--font-mono); }
-.effort-table { display: grid; gap: 1px; font-variant-numeric: tabular-nums; }
-.effort-head, .effort-row { display: grid; grid-template-columns: 44px minmax(82px, 1.4fr) 54px 50px; align-items: center; gap: 5px; min-height: 27px; }
-.effort-head { color: var(--text-3); font-size: 10.5px; }
-.effort-row { border-top: 1px solid var(--border); color: var(--text-2); font-size: 11px; }
-.effort-head span:not(:first-child), .effort-row span:not(:first-child) { text-align: right; }
-.usage-path {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
-}
-.usage-path span { font-size: 12px; color: var(--text-3); flex-shrink: 0; }
-.usage-env {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-top: 6px; padding-top: 9px; border-top: 1px solid var(--border);
-}
-.usage-env > span { font-size: 12px; color: var(--text-3); flex-shrink: 0; }
-.usage-env .env-row { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; min-width: 0; }
-.env-badge {
-  font-style: normal; font-size: 11px; padding: 3px 9px; border-radius: var(--r-pill);
-  white-space: nowrap;
-}
-.env-badge.ok { background: var(--ok-soft, #e8f5ee); color: var(--ok, #18794e); }
-.env-badge.warn { background: var(--warn-soft, #fdf3e2); color: var(--focus, #b4690e); }
-.env-badge.down { background: var(--fill); color: var(--text-3); }
-.env-detail { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
-.path-btn {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11.5px; color: var(--blue);
-  background: var(--blue-soft); border-radius: var(--r-sm); padding: 5px 9px;
-}
 .path-mask { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.4); display: flex; align-items: flex-end; }
 .path-sheet {
+  max-height: 100%; overflow-y: auto;
   width: 100%;
   background: var(--bg-card);
   border-radius: 18px 18px 0 0;
@@ -480,59 +287,20 @@ function browseInFileManager() {
   border: 0; border-radius: 50%; background: none; color: var(--text-2);
 }
 .icon-btn:active { background: var(--fill); }
-.balance-button {
-  display: inline-flex; align-items: center; gap: 4px;
-  min-width: 34px; height: 34px; padding: 6px 8px;
-  border: 0; border-radius: 50%; background: none; color: var(--text-2);
-  font-size: 12.5px; font-weight: 650;
-}
-.balance-button:active { background: var(--fill); }
-.balance-num { color: var(--ok); }
-.usage-balance {
-  display: flex; flex-direction: column; gap: 6px;
-  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
-}
-.balance-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--text-2); }
-.balance-row strong { font-weight: 700; color: var(--text); }
-.balance-row .cost { color: var(--orange); }
-.usage-button {
-  position: relative; display: grid; place-items: center; flex-shrink: 0;
-  width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--text-2);
-}
-.usage-button:active { background: var(--fill); }
-.usage-ring { width: 30px; height: 30px; transform: rotate(-90deg); }
-.usage-ring circle { fill: none; stroke-width: 3.8; }
-.usage-track { stroke: var(--border-strong); }
-.usage-value { stroke: var(--blue); stroke-linecap: round; transition: stroke-dasharray .22s ease; }
-
+.floating-button:focus-visible { box-shadow: inset 0 0 0 2px var(--blue); }
+/* 顶栏流内子元素是 菜单/小窗/用量 三个：space-between 会把小窗按钮挤到正中间，
+   被绝对定位的模型名盖住。margin-left:auto 让它靠右与用量按钮成组。 */
+.floating-button { margin-left: auto; margin-right: 2px; }
 .center {
-    position: relative; flex: 1; min-width: 0;
-    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-    height: 36px; padding: 0 10px;
-    border: 0; border-radius: var(--r-pill); background: none; color: var(--text);
+  position: relative; flex: 1; min-width: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 36px; padding: 0 6px;
+  border: 0; border-radius: var(--r-pill); background: none; color: var(--text);
+  transition: background .15s;
 }
-.center:active { background: var(--fill); }
-.session-brand { flex-shrink:0; }
-.session-brand.enter { animation: session-brand-enter 1.1s cubic-bezier(.12,.8,.22,1) both; }
-.session-brand.spinning { animation:session-brand-spin 1s cubic-bezier(.62,.02,.2,.92) infinite; }
-.session-brand.settling { animation:session-brand-settle 1s cubic-bezier(.2,.8,.2,1) both; }
-.life-orbit { position: relative; display: inline-grid; place-items: center; width: 20px; height: 20px; margin: 0 3px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; flex-shrink: 0; }
-.orbit { position: absolute; inset: 2px; border-radius: 50%; }
-.orbit.outer { border: 1.6px solid transparent; border-top-color: var(--blue); border-right-color: var(--blue); animation: topbar-life-spin 1.8s linear infinite; }
-.orbit.inner { inset: 5px; border: 1.6px solid transparent; border-bottom-color: var(--orange); border-left-color: var(--orange); animation: topbar-life-spin-reverse 1.15s linear infinite; }
-@keyframes topbar-life-spin { to { transform: rotate(360deg); } }
-@keyframes topbar-life-spin-reverse { to { transform: rotate(-360deg); } }
-@media (prefers-reduced-motion: reduce) { .orbit.outer, .orbit.inner { animation-duration: 6s; } }
-@keyframes session-brand-enter {
-  0% { transform:translateX(-46vw) scale(3.2) rotate(0deg); opacity:0; }
-  18% { opacity:1; }
-  62% { transform:translateX(-4vw) scale(1.15) rotate(300deg); }
-  100% { transform:translateX(0) scale(1) rotate(360deg); opacity:1; }
-}
-@keyframes session-brand-spin { 0% { transform:rotate(0deg); } 72% { transform:rotate(300deg); } 100% { transform:rotate(360deg); } }
-@keyframes session-brand-settle { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+.center:active { background: var(--fill-strong); }
 .model {
-  font-size: 15.5px; font-weight: 600; letter-spacing: -.1px;
+  font-size: 15.5px; font-weight: 650; letter-spacing: -.1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .plan {
