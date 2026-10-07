@@ -11,12 +11,12 @@ import paramiko
 
 SSH_CFG = r"F:\_WorkSpace\Projects\AILab\SSH-Agent\ssh-configs\ssh-8.148.146.68-2C2G-阿里云.txt"
 APK_LOCAL = r"apps/coomi-app/app/build/outputs/apk/release/coomi-app_apt-android-7-release_arm64-v8a.apk"
-NAME = "Coomi-Android-arm64-v1.4.9-test.1.apk"
+NAME = "Coomi-Android-arm64-v1.4.9-test.1-80.apk"
 BASE = "/www/wwwroot/updates.septemc.com/coomi/android_test"
 SITE_PATH = "/www/wwwroot/coomi.septemc.com/index.html"
 
 VERSION = "1.4.9-test.1"
-VERSION_CODE = 79
+VERSION_CODE = 80
 HEADING = "v1.4.9-test.1 更新说明【测试】"
 
 NOTES = """v1.4.9-test.1 更新说明【测试】
@@ -32,8 +32,12 @@ NOTES = """v1.4.9-test.1 更新说明【测试】
 6. 推理强度粒子特效回归（1.4.8 同款，档位越高粒子越强），并支持系统减弱动效降级。
 
 动画与稳定性：
-7. 发送水滴动画重写：逐帧跟随目标气泡（自动滚动 / 键盘弹出不再错位），到达后改为透明水波波纹发散，取消原铺开转圈。
+7. 发送水滴动画重写：逐帧跟随目标气泡（自动滚动 / 键盘弹出不再错位）。
 8. 引擎修复：DeepSeek 流式工具调用函数名缺失导致的「unknown / 工具参数纠正后仍未通过校验」失败——现在兼容 arguments 对象下发、从 arguments 内恢复函数名、并以正文 JSON 工具调用兜底。
+9. 修复点击模型不生效：/select-model 端点的凭据校验已受「自动检查」开关控制。
+10. 发送水滴特效按反馈移除，消息发出后立即渲染。
+11. 右缘阴影渐变直接全部去除（不做软化）。
+12. 顶栏供应商标签与设置页分类标签支持横向滑动。
 
 底层升级（来自 Comax 1.5.1o2）：无障碍控制模式（让 Coomi 替你操作屏幕 + 桌面悬浮层 + Shizuku 兜底）、上下文压缩增强提示词、Provider 多 API Key 轮换、并行会话修复、DeepSeek 官方模型空 assistant 消息 400 修复等。
 
