@@ -184,6 +184,8 @@
     const nodes = [];
     let n;
     while (n = walker.nextNode()) {
+      // 已包裹的 span.stream-word 内的文本节点跳过，否则换行动画会自我触发无限循环。
+      if (n.parentElement && n.parentElement.classList.contains("stream-word")) continue;
       if (n.textContent.trim() && !seenTextNodes.has(n)) { seenTextNodes.add(n); nodes.push(n); }
     }
     nodes.forEach(tn => {
