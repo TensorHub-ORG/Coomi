@@ -6,7 +6,7 @@ defineEmits<{ path: [] }>()
 const session = useSessionStore()
 const effortLabels = { auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高' } as const
 const categoryLabels = { system_tools: '系统工具', messages: '消息', skills: '技能', mcp_tools: 'MCP 工具', system_prompt: '系统提示', other: '其他' } as const
-const categoryTotal = computed(() => Object.values(session.usage?.contextCategories ?? {}).reduce((sum, value) => sum + (value ?? 0), 0))
+const categoryTotal = computed(() => Object.values(session.usage?.contextCategories ?? {}).reduce((sum: number, value) => sum + (value ?? 0), 0))
 function categoryPercent(value: number | undefined): string {
   return categoryTotal.value > 0 ? `${((value ?? 0) / categoryTotal.value * 100).toFixed(1)}%` : '--'
 }

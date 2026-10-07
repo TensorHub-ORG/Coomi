@@ -3,7 +3,8 @@ import { ref, computed } from 'vue'
 import type { ConnectionState, ConnectionStatus } from '@/bridge'
 import { isDemoMode } from '@/bridge/demoMode'
 
-export const useConnectionStore = defineStore('connection', () => {
+function defineConnectionStore(id: string) {
+return defineStore(id, () => {
   const state = ref<ConnectionState>('connecting')
   const retryMessage = ref<string | null>(null)
   const retryAttempt = ref(0)
@@ -40,3 +41,15 @@ export const useConnectionStore = defineStore('connection', () => {
 
   return { state, retryMessage, retryAttempt, retryMax, retryDelayMs, wsUrl, isOpen, demo, label, setStatus, setState, setRetry, setWsUrl }
 })
+}
+
+export const useConnectionStore = defineConnectionStore('connection')
+const scopedConnections = new Map<string, ReturnType<typeof defineConnectionStore>>()
+export function useScopedConnectionStore(id: string) {
+  let definition = scopedConnections.get(id)
+  if (!definition) {
+    definition = defineConnectionStore(`connection:${id}`)
+    scopedConnections.set(id, definition)
+  }
+  return definition()
+}

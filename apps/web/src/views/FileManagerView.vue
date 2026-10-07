@@ -10,6 +10,7 @@ interface Entry { name: string; is_dir: boolean; size: number; modified: number 
 interface ClipItem { path: string; name: string; isDir: boolean }
 type ConflictChoice = 'skip' | 'keep' | 'replace' | 'cancel'
 
+const props = defineProps<{ embedded?: boolean }>()
 const router = useRouter()
 const session = useSessionStore()
 const path = ref('/')
@@ -375,7 +376,7 @@ function goDashboard() {
 onMounted(async () => {
   try {
     const health = await api('GET', '/api/runtime/health')
-    await load(health.home || health.cwd || '/')
+    await load((props.embedded && session.cwd) || health.home || health.cwd || '/')
   } catch {
     await load(path.value)
   }
@@ -384,8 +385,8 @@ onBeforeUnmount(clearPressTimer)
 </script>
 
 <template>
-  <div class="page">
-    <PageHead title="文件管理" @back="goDashboard" />
+  <div class="page" :class="{ embedded: props.embedded }">
+    <PageHead v-if="!props.embedded" title="文件管理" @back="goDashboard" />
     <main class="body">
       <div class="crumbs">
         <button class="crumb" @click="load('/')">/</button>
@@ -503,6 +504,12 @@ onBeforeUnmount(clearPressTimer)
 
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
+.page.embedded { position:relative; min-height:0; background:var(--bg); container-type:inline-size; }
+.embedded .body { padding:4px 2px 12px; }
+.embedded .sheet-mask { position:absolute; }
+.embedded .sheet { max-height:100%; overflow:auto; }
+.embedded .file-meta { max-width:30%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.embedded .tool-action { font-size:clamp(10px,3.5cqw,12px); }
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px calc(var(--safe-bottom) + 24px); }
 .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-bottom: 10px; }
 .crumb { max-width: 180px; padding: 5px 6px; overflow: hidden; border-radius: var(--r-sm); color: var(--blue); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -522,9 +529,9 @@ onBeforeUnmount(clearPressTimer)
 .delete-copy { margin: 6px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.65; }
 .danger-fill { background: var(--danger); color: #fff; }
 .hint, .empty { padding: 20px 0; color: var(--text-3); font-size: 13px; text-align: center; }
-.file-list { display: flex; flex-direction: column; gap: 3px; }
+.file-list { display: flex; flex-direction: column; gap: 2px; }
 .file-item { overflow: hidden; border-radius: var(--r-md); background: var(--bg-card); }
-.file-row { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 8px 8px 8px 12px; touch-action: pan-y; }
+.file-row { display: flex; align-items: center; gap: 9px; min-height: 47px; padding: 6px 8px 6px 12px; touch-action: pan-y; }
 .file-row.selected { background: var(--blue-soft); }
 .file-row.expanded { background: var(--fill); }
 .selection-mark { display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; border: 1.5px solid var(--border-strong); border-radius: 50%; color: #fff; }

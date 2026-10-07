@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, shallowRef, watch } from 'vue'
+import { ref, computed, shallowRef, watch, inject, hasInjectionContext, type Ref, type InjectionKey } from 'vue'
 import { createTransport, type Transport } from '@/bridge'
 import { authedFetch, apiGet } from '@/bridge/http'
 import { isDemoMode } from '@/bridge/demoMode'
@@ -8,7 +8,7 @@ import type { ReasoningEffortStats } from '@/protocol/events'
 import type { ReasoningEffort } from '@/protocol/commands'
 import type { InboundEnvelope } from '@/protocol/commands'
 import { nextId } from '@/bridge/envelope'
-import { useConnectionStore } from './connection'
+import { useConnectionStore, useScopedConnectionStore } from './connection'
 import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { isGlobalSession as isGlobalSessionId } from '@/bridge/life'
@@ -16,8 +16,9 @@ import { router } from '@/router'
 import { pushStatus as pushControlStatus, pushTrace, setControlModeActive } from '@/bridge/controlFloat'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace, UserMessage } from './viewModel'
 
-export const useSessionStore = defineStore('session', () => {
-  const connection = useConnectionStore()
+function defineSessionStore(storeId: string, auxiliary = false) {
+  return defineStore(storeId, () => {
+  const connection = auxiliary ? useScopedConnectionStore(storeId) : useConnectionStore()
   const config = useConfigStore()
   const sessions = useSessionsStore()
 
@@ -127,7 +128,7 @@ export const useSessionStore = defineStore('session', () => {
     return null
   })
 
-  persistActiveSessionId(sessionId.value)
+  if (!auxiliary) persistActiveSessionId(sessionId.value)
 
   // Native task status is derived from /api/tasks in the sessions store. A
   // foreground idle session must not overwrite another session's running state.
@@ -189,8 +190,8 @@ export const useSessionStore = defineStore('session', () => {
       const providerId = meta?.providerId ?? config.currentProviderId
       const model = meta?.model ?? config.currentModel
       if (providerId && model) existing.send({ command: 'select_model', provider_id: providerId, model })
-      existing.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
-      existing.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
+      if (!auxiliary) existing.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
+      if (!auxiliary) existing.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
       return
     }
     if (wsUrl) connection.setWsUrl(wsUrl)
@@ -219,8 +220,8 @@ export const useSessionStore = defineStore('session', () => {
         if (providerId && model) {
           t.send({ command: 'select_model', provider_id: providerId, model })
         }
-        t.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
-        t.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
+        if (!auxiliary) t.send({ command: 'set_reasoning_effort', effort: config.reasoningEffort })
+        if (!auxiliary) t.send({ command: 'set_max_tool_rounds', rounds: config.maxToolRounds })
       }
     })
     t.onMessage(env => {
@@ -412,7 +413,7 @@ export const useSessionStore = defineStore('session', () => {
         }
         break
       }
-      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); void router.push(ev.route); break
+      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); if (!auxiliary) void router.push(ev.route); break
       case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); pushNotice('warn', '已停止本轮执行'); break
       case 'bg_task_detached': pushNotice('info', `↪ 已转入后台任务 #${ev.task_id}（${ev.tool_name}）`); break
       case 'bg_task_completed': pushNotice(ev.is_error ? 'error' : 'success', `${ev.is_error ? '✕' : '✓'} 后台任务 #${ev.task_id} ${ev.is_error ? '失败' : '完成'}`); break
@@ -491,7 +492,7 @@ export const useSessionStore = defineStore('session', () => {
     if (meta?.providerId && meta.model) {
       config.syncDisplayModel(meta.providerId, meta.model)
     }
-    persistActiveSessionId(id)
+    if (!auxiliary) persistActiveSessionId(id)
     lifeAutoSent = false
   }
 
@@ -923,7 +924,8 @@ export const useSessionStore = defineStore('session', () => {
   function toggleLifeStats() { lifeStatsOpen.value = !lifeStatsOpen.value }
 
   return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeStatsOpen, toggleLifeStats, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, completeSendMorph, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setProductionMode, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide }
-})
+  })
+}
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }
 
@@ -1052,4 +1054,31 @@ function createSessionId(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+
+const useMainSessionStore = defineSessionStore('session')
+export type SessionStore = ReturnType<typeof useMainSessionStore>
+export const SessionScope: InjectionKey<Ref<SessionStore | null>> = Symbol('session-scope')
+export function useSessionStore(): SessionStore {
+  const scoped = hasInjectionContext() ? inject(SessionScope, null) : null
+  return scoped?.value ?? useMainSessionStore()
+}
+
+const auxiliaryStores = new Map<string, ReturnType<typeof defineSessionStore>>()
+const auxiliaryTransfers = new Map<string, (paths: string[]) => void>()
+export function completePendingFileTransfer(requestId: string, paths: string[]): boolean {
+  const complete = auxiliaryTransfers.get(requestId)
+  if (!complete) return false
+  auxiliaryTransfers.delete(requestId)
+  complete(paths)
+  return true
+}
+export function useAuxiliarySessionStore(id: string): SessionStore {
+  let definition = auxiliaryStores.get(id)
+  if (!definition) {
+    definition = defineSessionStore(`auxiliary:${id}`, true)
+    auxiliaryStores.set(id, definition)
+  }
+  return definition()
 }

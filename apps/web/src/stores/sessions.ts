@@ -37,6 +37,8 @@ export interface SessionMeta {
   preview?: string
   /** 引擎侧模型名。 */
   model?: string
+  /** 辅助会话：父会话 id（1.4.8 辅助对话体系）。 */
+  parentSessionId?: string
   /** 本会话绑定的提供商与模型，避免切换其它会话时串模型。 */
   providerId?: string
   modelLocked?: boolean
@@ -323,13 +325,14 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 排序时间 = 最后一轮 agent 的执行时间，由引擎在任务完成/中断时
    * 落盘到会话 updated_at，前端轮询合并——点击/打开会话不应改变排序。
    */
-  function touch(id: string, patch: Partial<Pick<SessionMeta, 'title' | 'turns'>> = {}) {
+  function touch(id: string, patch: Partial<Pick<SessionMeta, 'title' | 'turns' | 'parentSessionId' | 'mode'>> = {}) {
     const m = ensure(id)
     // Automatic titles may arrive again after reconnecting or syncing with the engine.
     // Once the user has renamed a session, that explicit title always wins.
     if (patch.title && !m.renamed) m.title = patch.title
     if (patch.turns != null) m.turns = patch.turns
     persistMeta()
+    if (patch.parentSessionId) m.parentSessionId = patch.parentSessionId
   }
 
   function setMode(id: string, mode: 'agent' | 'life') {
@@ -540,7 +543,27 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
+
+  function childrenOf(parentId: string) {
+    return sorted.value.filter(meta => meta.parentSessionId === parentId)
+  }
+
+  async function createAuxiliary(parentId: string): Promise<string> {
+    const child = await apiSend<{ id: string }>(`/api/sessions/${encodeURIComponent(parentId)}/children`, 'POST', {})
+    ensure(child.id)
+    touch(child.id, { parentSessionId: parentId, title: '辅助对话', mode: 'agent' })
+    await syncFromEngine()
+    return child.id
+  }
+
+  async function removeAuxiliary(id: string) {
+    if (!find(id)?.parentSessionId) throw new Error('不是辅助对话')
+    await apiSend(`/api/sessions/${encodeURIComponent(id)}`, 'DELETE')
+    remove(id)
+  }
+
   return {
+    childrenOf, createAuxiliary, removeAuxiliary,
     metas, query, sorted, filtered, groups, currentCwd, setCurrentCwd,
     tasks, runningIds, taskConcurrencyLimit, refreshTasks, cancelTask, taskAction, taskDetail,
     syncFromEngine,

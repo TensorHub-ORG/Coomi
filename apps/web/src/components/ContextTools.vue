@@ -1,25 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import CoomiIcon from './CoomiIcon.vue'
+import PromptLibrary from './PromptLibrary.vue'
 
 const props = defineProps<{ floating?: boolean; usagePercent: number }>()
 const emit = defineEmits<{ open: [] }>()
 const session = useSessionStore()
 const route = useRoute()
-const router = useRouter()
-// Comax 覆盖后引擎/前端不带本线内嵌面板，扇区改为跳转对应前端路由；
-// 8 扇区 1.4.8 观感保持不变。
-const navTargets: Record<string, string> = {
-  version: '/maintenance',
-  tasks: '/tasks',
-  files: '/files',
-  prompts: '/catalog',
-  auxiliary: '/sessions',
-  memory: '/memory',
-}
 const tools = [
   { id: 'version', label: '版本工具', icon: 'git' },
   { id: 'tasks', label: '任务中心', icon: 'todo' },
@@ -31,11 +21,25 @@ const tools = [
   { id: 'usage', label: '上下文用量', icon: 'tachometer' },
 ] as const
 type Tool = typeof tools[number]['id']
+const versionViews = {
+  git: defineAsyncComponent(() => import('@/views/GitPanelView.vue')),
+  restore: defineAsyncComponent(() => import('@/views/RestoreView.vue')),
+  ops: defineAsyncComponent(() => import('@/views/OpsView.vue')),
+  data: defineAsyncComponent(() => import('@/views/DataView.vue')),
+}
+const AuxiliaryChat = defineAsyncComponent(() => import('./AuxiliaryChat.vue'))
+const FileManager = defineAsyncComponent(() => import('@/views/FileManagerView.vue'))
+const TasksView = defineAsyncComponent(() => import('@/views/TasksView.vue'))
+const MemoryView = defineAsyncComponent(() => import('@/views/MemoryView.vue'))
+const versionTabs = [{ id: 'git', label: 'Git 面板' }, { id: 'restore', label: '一键还原' }, { id: 'ops', label: '运维诊断' }, { id: 'data', label: '数据工具' }] as const
+const version = ref<keyof typeof versionViews>('git')
 const opened = ref(false), active = ref<Tool | 'usage' | null>(null)
 const anchor = ref<HTMLButtonElement | null>(null)
 const closeAnchor = ref<HTMLButtonElement | null>(null)
 const card = ref<HTMLElement | null>(null)
+const initialChild = ref('')
 let mounted = true
+let auxiliaryRequest = 0
 let anchorObserver: ResizeObserver | null = null
 let measureFrame = 0
 const bounds = ref({ x: 0, y: 0, width: 360, height: 640 })
@@ -66,21 +70,19 @@ function afterAncestorMotion(event: Event) {
       && event.target.contains(anchor.value)) measure()
 }
 function toggle() {
+  auxiliaryRequest++
   if (opened.value) { opened.value = false; active.value = null; void nextTick(() => anchor.value?.focus()) }
   else { measure(); opened.value = true; emit('open') }
 }
 function closeOrbit() {
+  auxiliaryRequest++
   opened.value = false
   active.value = null
+  initialChild.value = ''
 }
 function choose(id: Tool) {
-  if (id !== 'usage' && id !== 'floating') {
-    const target = navTargets[id]
-    closeOrbit()
-    if (target) void router.push(target)
-    return
-  }
   active.value = active.value === id ? null : id
+  initialChild.value = ''
 }
 function outside(event: PointerEvent) {
   if (!active.value) return
@@ -91,9 +93,22 @@ function outside(event: PointerEvent) {
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && active.value) { event.preventDefault(); active.value = null; closeAnchor.value?.focus() }
 }
+function fill(text: string) {
+  window.dispatchEvent(new CustomEvent('coomi:prefill-draft', { detail: { sessionId: session.sessionId, text } }))
+  active.value = null
+}
 function showUsage() { active.value = 'usage' }
 function openFloating() { window.CoomiAndroid?.openFloatingWindow?.() }
-watch(() => props.floating, floating => { if (floating) { opened.value = false; active.value = null } })
+async function openAuxiliary(event: Event) {
+  const detail = (event as CustomEvent<{ parentId: string; sessionId: string }>).detail
+  if (!detail?.parentId || !detail.sessionId || props.floating) return
+  const request = ++auxiliaryRequest
+  if (session.sessionId !== detail.parentId) await session.openSession(detail.parentId)
+  await nextTick()
+  if (!mounted || props.floating || request !== auxiliaryRequest || session.sessionId !== detail.parentId) return
+  measure(); opened.value = true; active.value = 'auxiliary'; initialChild.value = detail.sessionId; emit('open')
+}
+watch(() => props.floating, floating => { if (floating) { auxiliaryRequest++; opened.value = false; active.value = null } })
 watch(() => route.name, name => { if (name !== 'chat') closeOrbit() })
 watch(opened, async value => {
   cancelAnimationFrame(measureFrame)
@@ -112,7 +127,7 @@ watch(opened, async value => {
   }
   measureFrame = requestAnimationFrame(followOpening)
 })
-watch(() => session.sessionId, () => { active.value = null })
+watch(() => session.sessionId, () => { active.value = null; initialChild.value = '' })
 watch(active, value => {
   if (value) registerOverlay('context-tool-card', () => { active.value = null })
   else unregisterOverlay('context-tool-card')
@@ -134,10 +149,12 @@ onMounted(() => {
   document.addEventListener('keydown', keydown)
   document.addEventListener('transitionend', afterAncestorMotion, true)
   document.addEventListener('animationend', afterAncestorMotion, true)
+  window.addEventListener('coomi:open-auxiliary', openAuxiliary)
 })
 onBeforeUnmount(() => {
   mounted = false
   closeOrbit()
+  auxiliaryRequest++
   cancelAnimationFrame(measureFrame)
   anchorObserver?.disconnect()
   anchorObserver = null
@@ -148,6 +165,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', keydown)
   document.removeEventListener('transitionend', afterAncestorMotion, true)
   document.removeEventListener('animationend', afterAncestorMotion, true)
+  window.removeEventListener('coomi:open-auxiliary', openAuxiliary)
   unregisterOverlay('context-tool-card')
 })
 const shortLabels: Record<Tool, string> = {
@@ -213,11 +231,15 @@ const fanEdgePath = computed(() => `M 0 0 A ${radius.value} ${radius.value} 0 0 
           <header class="card-heading"><span class="eyebrow">快捷工具</span><h2>{{ title }}</h2><button class="usage-link" @click="showUsage">上下文 {{ usagePercent }}%<CoomiIcon name="chevronRight" :size="12" /></button><button class="card-close" aria-label="关闭工具卡片" @click="active = null">收起卡片</button></header>
           <div class="card-content">
             <slot v-if="active === 'usage'" name="usage" />
-            <div v-else-if="navTargets[active as string]" class="floating-content">
-              <CoomiIcon :name="tools.find(t => t.id === active)?.icon ?? 'git'" :size="30" />
-              <h3>{{ title }}</h3>
-              <p>已在聊天页打开对应页面。</p>
-            </div>
+            <template v-else-if="active === 'version'">
+              <nav class="version-tabs" aria-label="版本管理工具"><button v-for="tab in versionTabs" :key="tab.id" :class="{ selected: version === tab.id }" @click="version = tab.id">{{ tab.label }}</button></nav>
+              <div class="version-content"><component :is="versionViews[version]" embedded /></div>
+            </template>
+            <PromptLibrary v-else-if="active === 'prompts'" embedded @fill="fill" />
+            <AuxiliaryChat v-else-if="active === 'auxiliary'" :parent-id="session.sessionId" :initial-session-id="initialChild" />
+            <TasksView v-else-if="active === 'tasks'" embedded />
+            <MemoryView v-else-if="active === 'memory'" embedded />
+            <FileManager v-else-if="active === 'files'" embedded />
             <div v-else class="floating-content"><CoomiIcon name="floatingWindow" :size="30" /><h3>小窗聊天</h3><p>{{ nativeFloating ? '将当前聊天移入悬浮窗口，切换应用时也能继续查看进展。' : '小窗聊天可在 Android 应用中使用。' }}</p><button v-if="nativeFloating" class="floating-action" @click="openFloating">打开悬浮窗口</button></div>
           </div>
         </section>
