@@ -43,6 +43,7 @@ pub struct SecurityPolicy {
     mode: AccessMode,
     /// 工作区内的私有屏蔽区（如 .coomi/sessions）：任何模式（含 FullAccess）都不可访问。
     blocked: Vec<PathBuf>,
+    readable_files: Vec<PathBuf>,
     /// 屏蔽区的其它路径写法（词法规范化/原始形式），供 shell 命令文本匹配用
     /// （Android 上 /data/data 与 /data/user/0 互为符号链接，两种写法都要拦）。
     blocked_aliases: Vec<PathBuf>,
@@ -59,8 +60,22 @@ impl SecurityPolicy {
             allowed_roots: Vec::new(),
             mode,
             blocked: Vec::new(),
+            readable_files: Vec::new(),
             blocked_aliases: Vec::new(),
         })
+    }
+
+    /// Allow a single engine-selected file for read tools only. Shell and writes
+    /// retain the blocked-directory policy; siblings never inherit this grant.
+    pub fn with_readable_file(mut self, path: PathBuf) -> Self {
+        if path.is_file() {
+            if let Ok(path) = path.canonicalize() {
+                self.blocked.push(path.clone());
+                self.blocked_aliases.push(path.clone());
+                self.readable_files.push(path);
+            }
+        }
+        self
     }
 
     pub fn with_blocked(mut self, blocked: impl IntoIterator<Item = PathBuf>) -> Self {
@@ -225,11 +240,14 @@ impl SecurityPolicy {
     }
 
     fn assess_path(&self, path: &Path, write: bool) -> Decision {
-        let Ok(path) = normalize_path(path) else {
+        let Ok(path) = normalize_path(path).and_then(|path| resolve_symlinks(&path)) else {
             return Decision::Deny("path could not be normalized".into());
         };
         // 私有屏蔽区优先于权限模式：会话/配置/记忆目录在全局会话记忆关闭时
         // 对工具完全不可见（FullAccess 也一样被拦）。
+        if !write && self.readable_files.contains(&path) {
+            return Decision::Allow;
+        }
         for blocked in &self.blocked {
             if path.starts_with(blocked) {
                 return Decision::Deny(
@@ -314,6 +332,27 @@ fn read_only_command() -> Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auxiliary_parent_exception_is_exact_and_read_only() {
+        let root = tempfile::tempdir().unwrap();
+        let private = root.path().join("sessions");
+        std::fs::create_dir_all(&private).unwrap();
+        let parent = private.join("parent.json");
+        let sibling = private.join("other.json");
+        std::fs::write(&parent, "parent transcript").unwrap();
+        std::fs::write(&sibling, "unrelated transcript").unwrap();
+        let policy = SecurityPolicy::new(root.path(), AccessMode::FullAccess).unwrap()
+            .with_blocked([private.clone()]).with_readable_file(parent.clone());
+        assert!(matches!(policy.assess_read(&parent), Decision::Allow));
+        assert!(matches!(policy.assess_write(&parent), Decision::Deny(_)));
+        assert!(matches!(policy.assess_read(&sibling), Decision::Deny(_)));
+        assert!(matches!(policy.assess_read(&private), Decision::Deny(_)));
+        assert!(matches!(policy.assess_shell(&format!("cat {}", parent.display())), Decision::Deny(_)));
+        let unrelated = SecurityPolicy::new(root.path(), AccessMode::FullAccess).unwrap()
+            .with_blocked([private]);
+        assert!(matches!(unrelated.assess_read(&parent), Decision::Deny(_)));
+    }
 
     #[test]
     fn workspace_policy_blocks_escape_and_allows_local_write() {

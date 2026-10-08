@@ -208,7 +208,7 @@ export const useConfigStore = defineStore('config', () => {
   const defaultPermissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedDefaultMode ?? '') ? savedDefaultMode! : permissionMode.value)
   const sendMorphAnimation = ref(localStorage.getItem('coomi.sendMorphAnimation') !== '0')
   /** 极简界面模式：工具调用折叠成一小块方框（点开才看详情），文字缩小。 */
-  const minimalUi = ref(localStorage.getItem('coomi.minimalUi') === '1')
+  const minimalUi = ref(localStorage.getItem('coomi.minimalUi') !== '0')
   const themeMode = ref<ThemeMode>(readThemeMode())
   const savedEffort = localStorage.getItem('coomi.reasoningEffort') as ReasoningEffort | null
   const reasoningEffort = ref<ReasoningEffort>(REASONING_EFFORTS.some(item => item.value === savedEffort) ? savedEffort! : 'auto')

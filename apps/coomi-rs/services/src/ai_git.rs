@@ -1474,6 +1474,7 @@ line after
             kind,
             display: "Test".to_string(),
             api_key: api_key.to_string(),
+            api_keys: Vec::new(),
             base_url: base_url.to_string(),
             model: "test-model".to_string(),
             fast_model: None,
@@ -1483,6 +1484,9 @@ line after
             model_parameters: BTreeMap::new(),
             capabilities: Default::default(),
             remote_compaction_mode: RemoteCompactionMode::V2,
+            extra_headers: BTreeMap::new(),
+            deepseek_thinking_enabled: true,
+            deepseek_search_enabled: false,
         }
     }
 

@@ -1368,6 +1368,17 @@ async fn read_sse(
             consume(value)?;
         }
     }
+    // A number of compatible endpoints close immediately after their last data
+    // line. Do not drop that line (it can contain the only function name).
+    if !buffer.is_empty() {
+        let line = std::str::from_utf8(&buffer).context("provider stream was not UTF-8")?;
+        if let Some(data) = line.trim().strip_prefix("data:") {
+            let data = data.trim();
+            if !data.is_empty() && data != "[DONE]" {
+                consume(serde_json::from_str(data).context("provider stream contained invalid SSE JSON")?)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1390,7 +1401,8 @@ impl ChatStreamState {
         if value.get("usage").is_some_and(|usage| !usage.is_null()) {
             self.usage = openai_usage(value.get("usage"));
         }
-        let Some(delta) = value.pointer("/choices/0/delta") else {
+        let Some(delta) = value.pointer("/choices/0/delta")
+            .or_else(|| value.pointer("/choices/0/message")) else {
             return Ok(());
         };
         if let Some(reasoning) = delta
@@ -1404,24 +1416,45 @@ impl ChatStreamState {
             self.content.push_str(content);
             observer.on_text_delta(content);
         }
-        for item in delta
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
+        let legacy;
+        let items = if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
+            calls.as_slice()
+        } else if let Some(function) = delta.get("function_call") {
+            legacy = vec![json!({"index": 0, "function": function})];
+            legacy.as_slice()
+        } else {
+            &[]
+        };
+        for (position, item) in items.iter().enumerate()
         {
+            let id = item.get("id").and_then(Value::as_str).filter(|id| !id.is_empty());
             let index = item
                 .get("index")
                 .and_then(Value::as_u64)
                 .and_then(|value| usize::try_from(value).ok())
-                .unwrap_or(self.tools.len());
+                .or_else(|| id.and_then(|id| self.tools.iter().find_map(|(index, call)|
+                    (call.id == id).then_some(*index))))
+                // Index-less single-call deltas belong to the same call. Using
+                // tools.len() here created one nameless call per argument chunk.
+                .unwrap_or_else(|| {
+                    if let Some(id) = id && self.tools.get(&position)
+                        .is_some_and(|call| !call.id.is_empty() && call.id != id) {
+                        return self.tools.keys().next_back().map_or(0, |index| index + 1);
+                    }
+                    if id.is_none() && items.len() == 1 && self.tools.len() == 1 {
+                        return *self.tools.keys().next().expect("one tool");
+                    }
+                    position
+                });
             let target = self.tools.entry(index).or_default();
-            if let Some(id) = item.get("id").and_then(Value::as_str) {
-                target.id.push_str(id);
+            if let Some(id) = id {
+                target.id = id.to_owned();
             }
             if let Some(function) = item.get("function") {
                 if let Some(name) = function.get("name").and_then(Value::as_str) {
-                    target.name.push_str(name);
+                    if target.name != name {
+                        target.name.push_str(name);
+                    }
                 }
                 if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
                     target.arguments.push_str(arguments);
@@ -1549,6 +1582,9 @@ impl CompactionStreamState {
 struct ResponsesStreamState {
     content: String,
     tools: BTreeMap<String, PartialToolCall>,
+    // Responses argument deltas use item_id (fc_*), while tool results must
+    // reference call_id (call_*). They identify the same call, not two calls.
+    item_ids: BTreeMap<String, String>,
     usage: TokenUsage,
 }
 
@@ -1576,6 +1612,13 @@ impl ResponsesStreamState {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_owned();
+                    let item_id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+                    if !item_id.is_empty() {
+                        self.item_ids.insert(item_id.to_owned(), id.clone());
+                        if item_id != id && let Some(early) = self.tools.remove(item_id) {
+                            self.tools.entry(id.clone()).or_insert(early);
+                        }
+                    }
                     let target = self.tools.entry(id.clone()).or_default();
                     target.id = id;
                     if let Some(name) = item.get("name").and_then(Value::as_str) {
@@ -1593,12 +1636,31 @@ impl ResponsesStreamState {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
+                let id = self.item_ids.get(&id).cloned().unwrap_or(id);
                 if let Some(delta) = value.get("delta").and_then(Value::as_str) {
                     self.tools.entry(id).or_default().arguments.push_str(delta);
                 }
             }
+            Some("response.function_call_arguments.done") => {
+                let id = value.get("call_id").or_else(|| value.get("item_id"))
+                    .and_then(Value::as_str).unwrap_or_default();
+                let id = self.item_ids.get(id).map(String::as_str).unwrap_or(id).to_owned();
+                let target = self.tools.entry(id).or_default();
+                if let Some(name) = value.get("name").and_then(Value::as_str) {
+                    target.name = name.to_owned();
+                }
+                if let Some(arguments) = value.get("arguments").and_then(Value::as_str) {
+                    target.arguments = arguments.to_owned();
+                }
+            }
             Some("response.completed") => {
                 self.usage = responses_usage(value.pointer("/response/usage"));
+                // Some gateways emit the full output only in the final frame.
+                if let Some(output) = value.pointer("/response/output").and_then(Value::as_array) {
+                    for item in output {
+                        self.consume(&json!({"type": "response.output_item.done", "item": item}), observer)?;
+                    }
+                }
             }
             Some("error" | "response.failed") => {
                 return Err(stream_event_error("response_stream", value));
@@ -2475,6 +2537,116 @@ mod tests {
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.invalid_tool_calls.len(), 1);
         assert_eq!(response.invalid_tool_calls[0].name, "read_file");
+    }
+
+    #[test]
+    fn chat_stream_without_indexes_keeps_name_and_argument_chunks_together() {
+        let mut state = ChatStreamState::default();
+        for item in [
+            json!({"id": "call-1", "function": {"name": "read_file", "arguments": ""}}),
+            json!({"function": {"arguments": "{\"path\":"}}),
+            json!({"function": {"arguments": "\"/tmp/test.txt\"}"}}),
+        ] {
+            state.consume(&json!({"choices": [{"delta": {"tool_calls": [item]}}]}), &IgnoreStream).unwrap();
+        }
+        let response = state.finish().unwrap();
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].id, "call-1");
+        assert_eq!(response.tool_calls[0].name, "read_file");
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "/tmp/test.txt"}));
+    }
+
+    #[test]
+    fn chat_stream_routes_parallel_indexless_calls_by_id() {
+        let mut state = ChatStreamState::default();
+        for item in [
+            json!({"id": "call-1", "function": {"name": "read_file", "arguments": "{\"path\":"}}),
+            json!({"id": "call-2", "function": {"name": "shell", "arguments": "{\"command\":"}}),
+            json!({"id": "call-2", "function": {"arguments": "\"pwd\"}"}}),
+            json!({"id": "call-1", "function": {"arguments": "\"a.txt\"}"}}),
+        ] {
+            state.consume(&json!({"choices": [{"delta": {"tool_calls": [item]}}]}), &IgnoreStream).unwrap();
+        }
+        let response = state.finish().unwrap();
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "a.txt"}));
+        assert_eq!(response.tool_calls[1].arguments, json!({"command": "pwd"}));
+    }
+
+    #[test]
+    fn chat_stream_supports_legacy_function_calls_and_repeated_identifiers() {
+        let mut state = ChatStreamState::default();
+        for function in [
+            json!({"name": "read_file", "arguments": "{\"path\":"}),
+            json!({"name": "read_file", "arguments": "\"a.txt\"}"}),
+        ] {
+            state.consume(&json!({"choices": [{"delta": {"function_call": function}}]}), &IgnoreStream).unwrap();
+        }
+        let response = state.finish().unwrap();
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls[0].name, "read_file");
+    }
+
+    #[test]
+    fn responses_stream_joins_item_ids_to_call_ids_without_a_done_snapshot() {
+        let mut state = ResponsesStreamState::default();
+        for (item_id, call_id, name) in [("fc_1", "call_1", "read_file"), ("fc_2", "call_2", "shell")] {
+            state.consume(&json!({"type": "response.output_item.added", "item": {
+                "type": "function_call", "id": item_id, "call_id": call_id, "name": name, "arguments": ""
+            }}), &IgnoreStream).unwrap();
+        }
+        for (item_id, arguments) in [("fc_2", "{\"command\":\"pwd\"}"), ("fc_1", "{\"path\":\"a.txt\"}")] {
+            state.consume(&json!({"type": "response.function_call_arguments.delta", "item_id": item_id, "delta": arguments}), &IgnoreStream).unwrap();
+        }
+        let response = state.finish().unwrap();
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].id, "call_1");
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "a.txt"}));
+        assert_eq!(response.tool_calls[1].id, "call_2");
+        assert_eq!(response.tool_calls[1].arguments, json!({"command": "pwd"}));
+    }
+
+    #[test]
+    fn responses_stream_final_snapshot_does_not_leave_a_phantom_unknown_call() {
+        let mut state = ResponsesStreamState::default();
+        state.consume(&json!({"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": "{\"path\":"}), &IgnoreStream).unwrap();
+        state.consume(&json!({"type": "response.completed", "response": {"output": [{
+            "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file", "arguments": "{\"path\":\"a.txt\"}"
+        }]}}), &IgnoreStream).unwrap();
+        let response = state.finish().unwrap();
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].id, "call_1");
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "a.txt"}));
+    }
+
+    #[tokio::test]
+    async fn sse_consumes_final_tool_frame_without_a_newline() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).await.unwrap();
+            let data = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"中文.txt\\\"}\"}}]}}]}";
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", data.len()).as_bytes()).await.unwrap();
+            // Split a UTF-8 character across network writes as well.
+            for bytes in data.as_bytes().chunks(7) {
+                socket.write_all(bytes).await.unwrap();
+            }
+        });
+        let response = Client::new().get(format!("http://{address}")).send().await.unwrap();
+        let mut state = ChatStreamState::default();
+        read_sse(response, "test", |value| state.consume(&value, &IgnoreStream)).await.unwrap();
+        server.await.unwrap();
+        let response = state.finish().unwrap();
+        assert!(response.invalid_tool_calls.is_empty());
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].arguments, json!({"path": "中文.txt"}));
     }
 
     #[test]

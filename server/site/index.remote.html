@@ -651,7 +651,7 @@
           <button class="platform-tab" type="button" role="tab" aria-selected="false" data-platform="desktop" data-platform-tab>桌面端</button>
         </div>
         <div class="actions">
-          <a id="downloadButtonAndroid" class="button button-primary" href="https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.8.apk" data-stat-action="download" data-download-button="android">
+          <a id="downloadButtonAndroid" class="button button-primary" href="https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.9.apk" data-stat-action="download" data-download-button="android">
             <span class="download-arrow" aria-hidden="true">↓</span>
             <span data-download-label="android">下载 APK</span>
           </a>
@@ -677,7 +677,7 @@
         </div>
         <div class="compatibility-item">
           <span class="compatibility-label">当前版本</span>
-          <span id="versionValue" class="compatibility-value">1.4.7</span>
+          <span id="versionValue" class="compatibility-value">1.4.9</span>
         </div>
       </div>
       <div class="container compatibility-grid" data-platform-panel="desktop">
@@ -701,9 +701,22 @@
       <div class="container">
       <div class="changelog-channel-tabs"><button class="channel-tab" type="button" role="tab" aria-selected="true" data-channel-tab="stable">移动端正式版</button><button class="channel-tab" type="button" role="tab" aria-selected="false" data-channel-tab="test">移动端测试版</button></div>
             <div data-channel-panel="stable">
-
-        
-              <h2 class="changelog-title">v1.4.8 更新说明【稳定】</h2>
+<h2 class="changelog-title">v1.4.9 更新说明【稳定】</h2>
+<p class="changelog-sub">2026-10-08 发布 · Android 7.0+ · ARM64</p>
+<ul class="changelog-list">
+<li>修复控制台设置分组嵌套错误和布局错位，恢复清晰的卡片、入口与导航。</li>
+<li>新会话快捷指令默认收起为极简箭头，展开宽度限制为 280px；展开和收起时品牌标记、文案与指令列表平滑过渡，支持连续点击和系统减少动画设置。</li>
+<li>完整恢复 1.4.8 辅助对话链路：新建、切换、归档、独立模型、工具执行、授权、问题回答及文件导入导出；修复刷新后丢失主从关联，并保持主会话模型、权限和上下文独立。</li>
+<li>辅助助手可按需只读访问所属主对话，保留对其他会话和私有目录的隔离；关闭卡片后任务继续运行。</li>
+<li>极简会话界面默认开启，用户可在设置中关闭，显式选择会继续保留。</li>
+<li>会话设置整理为“对话、连接、应用”，找回默认工具权限、超载模型、极简界面和连接重试等选项。</li>
+<li>修复工具调用显示 unknown 并误报参数校验失败的问题，兼容无索引流式工具片段、Responses 标识别名、旧式函数调用及无末尾换行的事件，避免调用被错误拆分。</li>
+<li>延续新版引擎、工作室和协同工作台底座，完善手机返回链路、任务状态、快捷工具和附件体验。</li>
+</ul>
+<details class="changelog-history">
+<summary>展开全部更新记录</summary>
+<div class="history-inner">
+<h3 class="history-version">v1.4.8 更新说明【稳定】</h3>
               <p class="changelog-sub">2026-09-14 发布</p>
               <ul class="changelog-list">
                 <li><strong>会话连续性与流式稳定性</strong>：修复长会话压缩后消息顺序错乱造成的“忘记上一轮”问题；稳定思考过程、问题反馈、工具调用和正文的瀑布流更新，解决展开困难、结束状态错误与反复闪烁。</li>
@@ -716,9 +729,6 @@
                 <li><strong>附件、外观与移动布局</strong>：附件标签、图片缩略图和文本共用限高滚动区；新增 75%–110% 软件显示比例，比例控件可在手机单屏完成设置，并统一主题、侧栏、待机页和卡片布局。</li>
               </ul>
 
-              <details class="changelog-history">
-                <summary>展开全部更新记录</summary>
-                <div class="history-inner">
 <h3 class="history-version">v1.4.7 更新说明【稳定】</h3>
 <p class="changelog-sub">2026-09-09 发布</p>
 <ul class="changelog-list">
@@ -922,8 +932,10 @@
                     <li><strong>停止按钮</strong>：点击停止可真正终止正在执行的工具与 shell 进程，界面即时反馈「已取消」状态。</li>
                     <li><strong>安全加固</strong>：<code>fetch</code> 增加 SSRF 防护与读取上限，本地服务收紧跨域访问，防止 API Key 泄露。</li>
                   </ul>
-                </div>
-              </details>
+
+</div>
+</details>
+
 
               <details class="changelog-history">
                 <summary>历史版本安装包下载</summary>
@@ -1026,7 +1038,7 @@ v1.5.1o2（Comax）合并说明【测试】
 </ul>
 
 
-        
+
               <h2 class="changelog-title">v1.4.8-test.3 更新说明【测试】</h2>
               <p class="changelog-sub">2026-09-13 发布</p>
               <ul class="changelog-list">
@@ -1124,14 +1136,14 @@ v1.5.1o2（Comax）合并说明【测试】
                 <li><strong>界面动画</strong>：Coomi logo 呼吸律动、弹层展开动画、输入框聚焦微光。</li>
               </ul>
 
-              
+
 <h3 class="history-version">v1.4.6-test.7 更新说明【测试】</h3>
               <p class="changelog-sub">2026-09-07 发布</p>
               <ul class="changelog-list">
                 <li><strong>修复控制台闪退（热修复）</strong>：更新检查回调线程错误导致打开控制台即崩溃，升级本版恢复正常。</li>
               </ul>
 
-              
+
 <h3 class="history-version">v1.4.6-test.6 更新说明【测试】</h3>
 <p class="changelog-sub">2026-09-07 发布</p>
 <ul class="changelog-list">
@@ -1557,7 +1569,7 @@ v1.5.1o2（Comax）合并说明【测试】
       resolveLatestRelease("desktop");
       statsRequest("/view", { eventId: eventId("view") }).then(renderStats).catch(() => {});
     })();
-  
+
       // 更新说明通道切换（正式/测试）
       (function () {
         const tabs = Array.from(document.querySelectorAll('[data-channel-tab]'));

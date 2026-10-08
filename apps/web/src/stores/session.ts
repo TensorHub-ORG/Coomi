@@ -22,7 +22,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   const config = useConfigStore()
   const sessions = useSessionsStore()
 
-  const sessionId = ref(readActiveSessionId())
+  const sessionId = ref(auxiliary ? createSessionId() : readActiveSessionId())
   const mode = ref<'agent' | 'life'>(sessions.find(sessionId.value)?.mode ?? 'agent')
   const timeline = ref<Timelineitem[]>(sessions.loadTranscript(sessionId.value))
   const runState = ref<RunState>('idle')
@@ -358,6 +358,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         runState.value = 'awaiting_question'
         break
       case 'file_transfer_request':
+        if (auxiliary) auxiliaryTransfers.set(ev.request_id, paths => completeFileTransfer(ev.request_id, paths))
         if (ev.operation === 'import') {
           window.CoomiAndroid?.importFilesForRequest?.(ev.request_id)
         } else if (ev.path) {
@@ -501,7 +502,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
    * 历史会话即使曾被切成 life，关闭全局开关后也强制回到 agent（人格只活在它该在的地方）。
    */
   function resolveLifeMode(id: string): 'agent' | 'life' {
-    return config.digitalLifeEnabled && (isGlobalSessionId(id) || config.lifeGlobalMode) ? 'life' : 'agent'
+    return !auxiliary && config.digitalLifeEnabled && (isGlobalSessionId(id) || config.lifeGlobalMode) ? 'life' : 'agent'
   }
 
   const isGlobalSession = computed(() => isGlobalSessionId(sessionId.value))
@@ -608,7 +609,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   function setPermissionMode(mode: 'ask' | 'auto' | 'full' | 'minimal') { config.setPermissionMode(mode); transport.value?.send({ command: 'set_permission_mode', mode }) }
   function togglePlanMode() { const entering = !config.planMode; config.togglePlanMode(); transport.value?.send({ command: entering ? 'enter_plan_mode' : 'exit_plan_mode' }) }
   async function selectModel(providerId: string, model: string) {
-    if (!(await config.validateAndSelectModel(providerId, model))) {
+    if (!auxiliary && !(await config.validateAndSelectModel(providerId, model))) {
       pushNotice('error', config.lastError || '模型凭据验证失败，未切换模型')
       return
     }

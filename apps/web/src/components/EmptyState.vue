@@ -11,7 +11,7 @@ import { useConfigStore } from '@/stores/config'
 import { useConnectionStore } from '@/stores/connection'
 import { useSessionStore } from '@/stores/session'
 import { QUICK_COMMAND_CHANGED_EVENT, loadQuickCommandConfig, type QuickCommand } from '@/utils/quickCommands'
-import { gsap, useGsapScope } from '@/composables/useGsap'
+import { gsap, prefersReducedMotion, useGsapScope } from '@/composables/useGsap'
 import CoomiIcon from './CoomiIcon.vue'
 import CoomiMark from './CoomiMark.vue'
 
@@ -19,6 +19,40 @@ const config = useConfigStore()
 const session = useSessionStore()
 const connection = useConnectionStore()
 const suggestions = ref<QuickCommand[]>([])
+const suggestionsExpanded = ref(false)
+let reveal: gsap.core.Tween | null = null
+function animateSuggestions(element: Element, done: () => void, opening: boolean) {
+  reveal?.kill()
+  const panel = element as HTMLElement
+  // Animate the small panel's layout height so the centered brand above it
+  // moves continuously with the list, including interrupted toggle gestures.
+  panel.inert = !opening
+  if (prefersReducedMotion()) {
+    panel.style.height = opening ? 'auto' : '0px'
+    panel.style.opacity = opening ? '1' : '0'
+    done()
+    return
+  }
+  reveal = gsap.to(panel, {
+    height: opening ? panel.scrollHeight : 0,
+    opacity: opening ? 1 : 0,
+    duration: opening ? .42 : .32,
+    ease: 'power2.inOut',
+    onComplete: () => {
+      if (opening) panel.style.height = 'auto'
+      reveal = null
+      done()
+    },
+  })
+}
+function beforeSuggestionsEnter(element: Element) {
+  const panel = element as HTMLElement
+  if (!panel.style.height) {
+    panel.style.height = '0px'
+    panel.style.opacity = '0'
+  }
+}
+onBeforeUnmount(() => reveal?.kill())
 function refreshSuggestions() {
   const value = loadQuickCommandConfig()
   suggestions.value = (value.sets.find(set => set.id === value.activeSetId) ?? value.sets[0]).commands
@@ -65,6 +99,17 @@ useGsapScope(root, (_context, element) => {
     <div class="brand-aura"><CoomiMark :size="64" class="logo" /></div>
     <p class="motto">{{ motto }}</p>
     <p class="sub">准备好了，就告诉我想做什么</p>
+    <button class="suggestions-toggle" :class="{ expanded: suggestionsExpanded }" type="button"
+      :aria-label="suggestionsExpanded ? '收起快捷开始' : '展开快捷开始'"
+      :aria-expanded="suggestionsExpanded" aria-controls="start-suggestions"
+      @click="suggestionsExpanded = !suggestionsExpanded">
+      <CoomiIcon name="chevronDown" :size="18" />
+    </button>
+    <Transition :css="false" @before-enter="beforeSuggestionsEnter"
+      @enter="(el, done) => animateSuggestions(el, done, true)"
+      @leave="(el, done) => animateSuggestions(el, done, false)"
+      @enter-cancelled="() => reveal?.kill()" @leave-cancelled="() => reveal?.kill()">
+    <div v-if="suggestionsExpanded" id="start-suggestions" class="suggestions-reveal">
     <div class="suggestions" aria-label="新会话快捷指令">
       <button v-for="command in suggestions" :key="command.id" class="suggestion" @click="runSuggestion(command)">
         <CoomiIcon :name="command.icon" :size="16" />
@@ -72,6 +117,8 @@ useGsapScope(root, (_context, element) => {
         <CoomiIcon name="chevronRight" :size="12" />
       </button>
     </div>
+    </div>
+    </Transition>
     <p v-if="connection.demo" class="demobar">
       <CoomiIcon name="alert" :size="14" />
       <span>演示模式：对话由脚本驱动，只用来预览界面，不会真的执行命令。</span>
@@ -85,11 +132,17 @@ useGsapScope(root, (_context, element) => {
 .logo { display:block; }
 .motto { margin:12px 0 0; color:var(--text); font-size:17px; line-height:1.6; font-weight:750; letter-spacing:.04em; }
 .sub { margin-top:8px; color:var(--text-3); font-size:13px; }
-.suggestions { display: grid; gap: 6px; width: min(100%, 340px); margin-top: 20px; }
+.suggestions-toggle { display: grid; place-items: center; width: 44px; height: 36px; margin-top: 14px; padding: 0; border: 0; border-radius: 18px; background: transparent; color: var(--text-3); }
+.suggestions-toggle:active, .suggestions-toggle:focus-visible { background: var(--fill); color: var(--blue); }
+.suggestions-toggle :deep(svg) { transition: transform .2s; }
+.suggestions-toggle.expanded :deep(svg) { transform: rotate(180deg); }
+.suggestions-reveal { width: min(calc(100% - 32px), 280px); overflow: hidden; flex-shrink: 0; }
+.suggestions { display: grid; gap: 6px; width: 100%; padding-top: 6px; }
 .suggestion { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--fill); color: var(--text-2); text-align: left; font-size: 13px; }
 .suggestion span { flex: 1; min-width: 0; }
 .suggestion > :first-child { color: var(--blue); flex-shrink: 0; }
 .suggestion:active { background: var(--blue-soft); color: var(--blue); }
 .demobar { display:flex; align-items:flex-start; gap:7px; max-width:320px; margin-top:18px; padding:9px 12px; border-radius:var(--r-md); background:var(--orange-soft); color:var(--orange); font-size:12.5px; line-height:1.55; text-align:left; }
 .demobar :deep(svg) { flex-shrink:0; margin-top:1px; }
+@media (prefers-reduced-motion: reduce) { .suggestions-toggle :deep(svg) { transition: none; } }
 </style>

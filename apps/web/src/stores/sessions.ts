@@ -203,7 +203,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const filtered = computed(() => {
     const q = query.value.trim().toLowerCase()
     // 全局常驻会话由侧边栏第一行专门渲染，不进分组/搜索。
-    const withoutGlobal = sorted.value.filter(m => m.id !== GLOBAL_SESSION_ID)
+    const withoutGlobal = sorted.value.filter(m => m.id !== GLOBAL_SESSION_ID && !m.parentSessionId)
     if (!q) return withoutGlobal
     // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
     // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文 + 技术符号 +.#），
@@ -389,7 +389,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  function remove(id: string) {
+  function remove(id: string, syncEngine = true) {
     metas.value = metas.value.filter(m => m.id !== id)
     try {
       localStorage.removeItem(TRANSCRIPT_PREFIX + id)
@@ -398,7 +398,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
     persist()
     // 同步删除引擎磁盘上的会话记录（权威源），否则下次 syncFromEngine 时“复活”。
-    authedFetch(`/api/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
+    if (syncEngine) authedFetch(`/api/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
   }
 
   /** Migrate pre-Rust session ids while preserving the local transcript and metadata. */
@@ -484,6 +484,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       const remote = (data.sessions ?? []) as Array<{
         id: string
         provider_id: string
+        parent_session_id?: string
         model: string
         cwd: string
         updated_at: string
@@ -512,6 +513,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         }
         return {
           id: r.id,
+          parentSessionId: r.parent_session_id || undefined,
           title: r.title_manually_set
             ? r.title
             : (legacyTitle || r.title || local?.title || (r.preview ? deriveTitle(r.preview) : '新对话')),

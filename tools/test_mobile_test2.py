@@ -5,7 +5,7 @@ from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / 'build/release-test2/ui'
+OUTPUT = ROOT / 'build/repair-20261008/ui'
 PROVIDER = {'id': 'test', 'name': 'UI Test', 'baseUrl': 'https://example.invalid/v1',
             'apiKey': 'test-only', 'type': 'openai-compatible', 'models': ['test-model'],
             'model': 'test-model', 'contextWindow': 128000}
@@ -60,16 +60,48 @@ setQuickCommands:value=>{localStorage.setItem("test.nativeQuickCommands",value);
         errors = []
         page.on('pageerror', lambda error: errors.append(error.stack or str(error)))
         page.goto(args.url + '/?demo=1&autoplay=0')
-        page.locator('.suggestion').first.wait_for()
+        page.get_by_role('button', name='展开快捷开始', exact=True).wait_for()
+        assert page.locator('.chat').evaluate("el => el.classList.contains('minimal-ui')")
+        page.wait_for_timeout(1500)
+        assert page.locator('.suggestion').count() == 0
+        assert page.get_by_role('button', name='展开快捷开始', exact=True).get_attribute('aria-expanded') == 'false'
+        motion = page.evaluate('''async () => {
+          const samples=[]; const start=performance.now();
+          document.querySelector('.suggestions-toggle').click();
+          await new Promise(resolve => {
+            const tick=()=> { samples.push({t:performance.now()-start,
+              y:document.querySelector('.motto').getBoundingClientRect().y,
+              h:document.querySelector('.suggestions-reveal')?.getBoundingClientRect().height ?? 0});
+              if(performance.now()-start<650) requestAnimationFrame(tick); else resolve(); };
+            requestAnimationFrame(tick);
+          }); return samples;
+        }''')
+        assert len({round(s['h']) for s in motion}) >= 6, motion
+        assert len({round(s['y']) for s in motion}) >= 6, motion
+        assert max(abs(b['y'] - a['y']) for a, b in zip(motion, motion[1:])) < 25, motion
         assert page.locator('.suggestion').count() == 4
         for width in [320, 390, 430]:
             page.set_viewport_size({'width': width, 'height': 844})
             page.wait_for_timeout(350)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            assert page.locator('.suggestions').bounding_box()['width'] <= 280
             assert page.locator('.art-root').evaluate('element => getComputedStyle(element).visibility') == 'hidden'
             assert page.locator('.art-root .panel').evaluate('element => getComputedStyle(element).boxShadow') == 'none'
             assert page.locator('.stream').evaluate('element => getComputedStyle(element).overflowY') == 'auto'
             page.screenshot(path=str(OUTPUT / f'chat-{width}.png'))
+        page.get_by_role('button', name='收起快捷开始', exact=True).click()
+        page.locator('.suggestion').first.wait_for(state='detached')
+        assert page.locator('.suggestion').count() == 0
+        page.screenshot(path=str(OUTPUT / 'chat-collapsed.png'))
+        page.get_by_role('button', name='展开快捷开始', exact=True).click()
+        for _ in range(4):
+            page.wait_for_timeout(55)
+            page.locator('.suggestions-toggle').click()
+        page.wait_for_timeout(650)
+        assert page.locator('.suggestions-reveal').evaluate("el => el.style.height === 'auto'")
+        assert page.locator('.suggestion').count() == 4
+        passed.append('brand and shortcuts move smoothly together, rapid toggles settle, minimal UI defaults on')
+        passed.append('quick start defaults to a compact toggle, expands within 280px and collapses again')
         passed.append('320/390/430px layouts, no closed-drawer shadow, scrollbar retained')
         page.set_viewport_size({'width': 390, 'height': 844})
         page.get_by_role('button', name='快捷指令', exact=True).click()
@@ -90,7 +122,17 @@ setQuickCommands:value=>{localStorage.setItem("test.nativeQuickCommands",value);
         passed.append('fan returns card -> band -> session without opening console')
         page.locator('textarea.input').fill('保留会话草稿')
         open_settings(page)
+        assert page.locator('.tabs button').all_text_contents() == ['对话', '连接', '应用']
+        assert page.locator('.permission-defaults button').count() == 4
+        page.screenshot(path=str(OUTPUT / 'settings-chat.png'))
+        page.locator('.tabs button').filter(has_text='连接').click()
+        assert page.get_by_text('狂暴模型', exact=True).is_visible()
+        assert page.get_by_role('spinbutton', name='WebSocket 重连次数', exact=True).get_attribute('max') == '100'
+        page.screenshot(path=str(OUTPUT / 'settings-connection.png'))
         page.locator('.tabs button').filter(has_text='应用').click()
+        assert page.get_by_text('极简界面模式', exact=True).is_visible()
+        assert page.get_by_text('液滴发送动画', exact=True).count() == 0
+        page.screenshot(path=str(OUTPUT / 'settings-app.png'))
         page.get_by_role('button').filter(has_text='主题、颜色、背景与显示比例').click()
         wait_route(page, '/appearance')
         hardware_back(page, '/settings')
@@ -130,6 +172,7 @@ setQuickCommands:value=>{localStorage.setItem("test.nativeQuickCommands",value);
         assert page.evaluate('window.__nativeCloses') == 1
         page.evaluate('window.dispatchEvent(new CustomEvent("coomi:navigate",{detail:{route:"/"}}))')
         wait_route(page, '/')
+        page.get_by_role('button', name='展开快捷开始', exact=True).click()
         assert page.locator('.suggestion').first.inner_text() == '我的快捷测试'
         passed.append('native quick-command editor persists and updates the four session shortcuts')
         page.locator('textarea.input').fill('测试波纹')

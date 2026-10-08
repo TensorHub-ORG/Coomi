@@ -63,8 +63,8 @@ async function saveConnectionSettings() {
     return
   }
   if (!Number.isInteger(connectionDraft.value.wsRetryCount)
-    || connectionDraft.value.wsRetryCount < 0 || connectionDraft.value.wsRetryCount > 30) {
-    connectionError.value = 'WebSocket 重连次数需为 0 - 30 的整数'
+    || connectionDraft.value.wsRetryCount < 0 || connectionDraft.value.wsRetryCount > 100) {
+    connectionError.value = 'WebSocket 重连次数需为 0 - 100 的整数'
     return
   }
   if (!Number.isFinite(reconnectInitialSeconds.value)
@@ -175,7 +175,7 @@ onMounted(async () => {
     <PageHead title="设置" @back="goBack(router, '/')" />
       <div class="tabs" role="tablist" aria-label="设置分类">
         <button :class="{ on: activeTab === 'chat' }" @click="activeTab = 'chat'">对话</button>
-        <button :class="{ on: activeTab === 'link' }" @click="activeTab = 'link'">连接与模型</button>
+        <button :class="{ on: activeTab === 'link' }" @click="activeTab = 'link'">连接</button>
         <button :class="{ on: activeTab === 'app' }" @click="activeTab = 'app'">应用</button>
       </div>
     <main ref="body" class="body">
@@ -197,6 +197,11 @@ onMounted(async () => {
 </template>
 
 <template v-if="activeTab === 'chat'">
+      <p class="option-note">当前默认：{{ PERMISSION_MODES.find(m => m.mode === config.defaultPermissionMode)?.label }}。点击下方选项可设置应用启动时的模式。</p>
+      <div class="group compact-options permission-defaults">
+        <button v-for="m in PERMISSION_MODES" :key="`default-${m.mode}`" class="option" :class="{ selected: config.defaultPermissionMode === m.mode }" @click="config.setDefaultPermissionMode(m.mode)">{{ m.label }}</button>
+      </div>
+
       <p class="sec-label">对话模式</p>
       <div class="group">
         <button class="row" @click="session.togglePlanMode()">
@@ -253,7 +258,7 @@ onMounted(async () => {
         </label>
         <label class="number-row">
           <span class="rt"><span class="rmain">WebSocket 重连次数</span><span class="rsub">界面与引擎断开后的尝试次数</span></span>
-          <input v-model.number="connectionDraft.wsRetryCount" type="number" min="0" max="30" step="1" inputmode="numeric" aria-label="WebSocket 重连次数" />
+          <input v-model.number="connectionDraft.wsRetryCount" type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="WebSocket 重连次数" />
         </label>
         <label class="number-row">
           <span class="rt"><span class="rmain">首次重连间隔</span><span class="rsub">0.5 - 60 秒</span></span>
@@ -294,6 +299,14 @@ onMounted(async () => {
           <span class="ri"><CoomiIcon name="sun" :size="17" /></span>
           <span class="rt"><span class="rmain">外观</span><span class="rsub">主题、颜色、背景与显示比例</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+        <button class="row" @click="config.setMinimalUi(!config.minimalUi)">
+          <span class="ri" :class="{ on: config.minimalUi }"><CoomiIcon name="terminal" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">极简界面模式</span>
+            <span class="rsub">工具调用折叠成一小块方框，点开才看详情；文本与卡片更小更紧凑</span>
+          </span>
+          <span class="sw" :class="{ on: config.minimalUi }" />
         </button>
       </div>
 
@@ -361,6 +374,19 @@ onMounted(async () => {
 </template>
 
 <template v-if="activeTab === 'link'">
+      <p class="sec-label">狂暴模型</p>
+      <div class="group model-list">
+        <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先配置 Provider。</p>
+        <button v-for="r in modelRows" :key="'bk-' + r.key" class="row" @click="config.setBerserkModel(r.providerId + ':' + r.model)">
+          <span class="rt">
+            <span class="rmain mono">{{ r.model }}</span>
+            <span class="rsub">{{ r.provider }}</span>
+          </span>
+          <CoomiIcon v-if="config.berserkModel === r.providerId + ':' + r.model" name="check" :size="17" class="tick" />
+        </button>
+      </div>
+      <p class="option-note">{{ config.berserkModel ? '狂暴模式将使用 ' + config.berserkModel + ' 检查并继续任务' : '未设置狂暴模型：切换狂暴模式时会提示先配置' }}</p>
+
       <p class="sec-label">模型</p>
       <div class="group model-list">
         <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先到下面配置 Provider。</p>
