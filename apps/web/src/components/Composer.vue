@@ -7,7 +7,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PERMISSION_MODES, REASONING_EFFORTS, useConfigStore } from '@/stores/config'
-import { useSessionStore } from '@/stores/session'
+import { completePendingFileTransfer, useSessionStore } from '@/stores/session'
 import { useRouter } from 'vue-router'
 import { pushTrace, setControlModeActive } from '@/bridge/controlFloat'
 import { MorphIcon } from 'morphicons/vue'
@@ -335,6 +335,7 @@ function onTransferProgress(event: Event) {
 function onFilesImported(event: Event) {
   const detail = (event as CustomEvent<{ paths?: string[]; requestId?: string }>).detail ?? {}
   const paths = detail.paths ?? []
+  if (detail.requestId && completePendingFileTransfer(detail.requestId, paths)) return
   transferText.value = paths.length ? `已导入 ${paths.length} 个文件` : '文件导入完成'
   transferProgress.value = 100
   if (detail.requestId) session.completeFileTransfer(detail.requestId, paths)
@@ -343,6 +344,7 @@ function onFilesImported(event: Event) {
 }
 function onFileExported(event: Event) {
   const detail = (event as CustomEvent<{ requestId?: string; path?: string }>).detail ?? {}
+  if (detail.requestId && completePendingFileTransfer(detail.requestId, detail.path ? [detail.path] : [])) return
   if (detail.requestId) session.completeFileTransfer(detail.requestId, detail.path ? [detail.path] : [])
 }
 function removeImportedFile(path: string) {

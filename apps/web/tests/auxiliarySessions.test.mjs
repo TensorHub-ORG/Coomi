@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { build } from 'esbuild'
+import { readFileSync } from 'node:fs'
 
 test('auxiliary sockets, model selection, timeline and active main session stay isolated', async () => {
+  const composer = readFileSync(new URL('../src/components/Composer.vue', import.meta.url), 'utf8')
+  const nativeHandlers = composer.slice(composer.indexOf('function onFilesImported('), composer.indexOf('function removeImportedFile('))
   const memory = new Map()
   globalThis.localStorage = { getItem: key => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value), removeItem: key => memory.delete(key) }
   globalThis.window = { location: { search: '' } }
@@ -18,14 +21,14 @@ test('auxiliary sockets, model selection, timeline and active main session stay 
   }
   const result = await build({
     absWorkingDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'),
-    stdin: { contents: `import { createPinia, setActivePinia } from 'pinia'; import { useSessionStore, useAuxiliarySessionStore, completePendingFileTransfer } from './src/stores/session'; import { useSessionsStore } from './src/stores/sessions'; import { sockets } from '@/bridge'; setActivePinia(createPinia()); export { useSessionStore, useAuxiliarySessionStore, useSessionsStore, completePendingFileTransfer, sockets };`, resolveDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1') },
+    stdin: { loader: 'ts', contents: `import { createPinia, setActivePinia } from 'pinia'; import { useSessionStore, useAuxiliarySessionStore, completePendingFileTransfer } from './src/stores/session'; import { useSessionsStore } from './src/stores/sessions'; import { sockets } from '@/bridge'; setActivePinia(createPinia()); const session = useSessionStore(); const transferText = { value: '' }, transferProgress = { value: 0 }, importedFiles = { value: [] }; ${nativeHandlers} export { useSessionStore, useAuxiliarySessionStore, useSessionsStore, completePendingFileTransfer, sockets, onFilesImported, onFileExported };`, resolveDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1') },
     bundle: true, platform: 'node', format: 'esm', write: false,
     plugins: [{ name: 'agent-transport', setup(builder) {
       builder.onResolve({ filter: /.*/ }, args => args.path in mocks ? { path: args.path, namespace: 'mock' } : undefined)
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, args => ({ contents: mocks[args.path], loader: 'js' }))
     } }],
   })
-  const { useSessionStore, useAuxiliarySessionStore, useSessionsStore, completePendingFileTransfer, sockets } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`)
+  const { useSessionStore, useAuxiliarySessionStore, useSessionsStore, completePendingFileTransfer, sockets, onFilesImported, onFileExported } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`)
   const main = useSessionStore()
   const mainId = main.sessionId
   main.connect()
@@ -54,9 +57,13 @@ test('auxiliary sockets, model selection, timeline and active main session stay 
   assert.equal(socket.sent.at(-1).command, 'answer_question')
   assert.equal(main.timeline.length, 0)
   socket.message({ type: 'event', payload: { event_type: 'file_transfer_request', operation: 'import', request_id: 'child-file' } })
-  assert.equal(completePendingFileTransfer('child-file', ['/tmp/input.txt']), true)
+  onFilesImported(new CustomEvent('coomi:files-imported', { detail: { requestId: 'child-file', paths: ['/tmp/input.txt'] } }))
   assert.deepEqual(socket.sent.at(-1), { command: 'file_transfer_result', request_id: 'child-file', paths: ['/tmp/input.txt'] })
   assert.equal(completePendingFileTransfer('child-file', []), false)
+  socket.message({ type: 'event', payload: { event_type: 'file_transfer_request', operation: 'export', request_id: 'child-export', path: '/tmp/output.txt' } })
+  onFileExported(new CustomEvent('coomi:file-exported', { detail: { requestId: 'child-export', path: '/tmp/output.txt' } }))
+  assert.deepEqual(socket.sent.at(-1), { command: 'file_transfer_result', request_id: 'child-export', paths: ['/tmp/output.txt'] })
+  assert.equal(sockets.find(s => s.id === mainId).sent.some(s => s.command === 'file_transfer_result'), false)
   child.cancel()
   assert.equal(socket.sent.at(-1).command, 'cancel')
   assert.equal(sockets.find(s => s.id === secondId).sent.some(s => s.command === 'cancel'), false)
