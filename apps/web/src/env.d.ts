@@ -24,6 +24,7 @@ interface Window {
     getDigitalLifeEnabled?(): boolean
     setDigitalLifeEnabled?(enabled: boolean): void
     getAppearanceConfig?(): string
+    setMottoFont?(font: 'default' | 'guofeng'): void
     /** 当前安装的 versionCode（检查更新页对比用）。 */
     getAppVersionCode?(): number
     /** 下载并安装更新 APK（url 为 APK 直链，version 用于文件名/提示）。 */
@@ -49,6 +50,7 @@ interface Window {
 }
 
 interface AppearanceConfig {
+  mottoFont?: 'default' | 'guofeng'
   customEnabled?: boolean
   colors?: Record<string, string>
   chatBackground?: boolean

@@ -8,6 +8,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PERMISSION_MODES, REASONING_EFFORTS, useConfigStore } from '@/stores/config'
 import { completePendingFileTransfer, useSessionStore } from '@/stores/session'
+import { settingsTab } from '@/stores/viewState'
 import { useRouter } from 'vue-router'
 import { pushTrace, setControlModeActive } from '@/bridge/controlFloat'
 import { MorphIcon } from 'morphicons/vue'
@@ -16,6 +17,7 @@ import { Menu, ChevronUp, Plus, X } from 'lucide'
 import CoomiIcon from './CoomiIcon.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
+const emit = defineEmits<{ (e: 'modes-open', open: boolean): void }>()
 const session = useSessionStore()
 const config = useConfigStore()
 const router = useRouter()
@@ -85,6 +87,9 @@ function toggleBar() {
 /** 模式面板：原大小按钮从模式键位置模糊分裂展开（stagger），收回时聚拢消失。 */
 const modePopEl = ref<HTMLElement | null>(null)
 watch(barOpen, (open) => {
+  emit('modes-open', open)
+  if (open) registerOverlay('composer-modes', () => { barOpen.value=false; barIcon.value=Menu })
+  else unregisterOverlay('composer-modes')
   const panel = modePopEl.value
   if (!panel) return
   const buttons = Array.from(panel.querySelectorAll<HTMLElement>('.pill'))
@@ -105,7 +110,7 @@ watch(barOpen, (open) => {
       duration: 0.2, ease: 'power2.in', stagger: 0.025,
     })
   }
-})
+}, { flush: 'post' })
 const modeLabel = computed(() => PERMISSION_MODES.find(m => m.mode === config.permissionMode)?.label ?? '')
 const providerReady = computed(() => config.providers.some(provider => (
   provider.id === config.activeId
@@ -165,19 +170,21 @@ let modeNoticeTimer: ReturnType<typeof setTimeout> | null = null
 function flashModeNotice(text: string) {
   modeNotice.value = text
   if (modeNoticeTimer) clearTimeout(modeNoticeTimer)
-  modeNoticeTimer = setTimeout(() => { modeNotice.value = ''; modeNoticeTimer = null }, 2600)
+  modeNoticeTimer = setTimeout(() => { modeNotice.value = ''; modeNoticeTimer = null }, 8000)
+}
+function openOverloadSettings() {
+  modeNotice.value = ''; barOpen.value = false
+  settingsTab.value = 'link'
+  void router.push('/settings#overload-model')
 }
 function cycleProductionMode() {
-  const order: ('normal' | 'overload' | 'berserk')[] = ['normal', 'overload', 'berserk']
-  const idx = order.indexOf(config.productionMode)
-  const next = order[(idx + 1) % order.length]
-  if (next === 'berserk' && !config.berserkModel) {
-    // 未配置狂暴模型：回退到普通模式并明确提示（避免卡在超载/狂暴）
-    session.setProductionMode('normal')
-    flashModeNotice('未设置狂暴模型，请到「设置 → 狂暴模型」选择后再切换狂暴')
+  if (config.productionMode !== 'normal') { session.setProductionMode('normal'); return }
+  if (!config.berserkModel) {
+    barOpen.value = false; barIcon.value = Menu
+    flashModeNotice('选择超载模型，让 AI 自动检查成果并继续完成任务。')
     return
   }
-  session.setProductionMode(next)
+  session.setProductionMode('berserk')
 }
 function toggleProductionMode() { cycleProductionMode() }
 
@@ -227,7 +234,11 @@ function refreshControlPermissions() {
   try {
     if (typeof bridge.isAccessibilityEnabled === 'function') accessibilityReady.value = !!bridge.isAccessibilityEnabled()
     if (typeof bridge.isOverlayGranted === 'function') overlayReady.value = !!bridge.isOverlayGranted()
-    if (typeof bridge.isControlFloatRunning === 'function') floatRunning.value = !!bridge.isControlFloatRunning()
+    if (typeof bridge.isControlFloatRunning === 'function') {
+      const now = !!bridge.isControlFloatRunning()
+      if (floatRunning.value && !now && controlMode.value) { exitControlMode(); return }
+      floatRunning.value = now
+    }
   } catch { /* 桥不可用时保持原状态 */ }
 }
 
@@ -311,9 +322,9 @@ function startControlReply() {
 watch([accessibilityReady, overlayReady, controlMode], ([accessible, overlay, active]) => {
   const bridge = nativeBridge()
   if (!active) return
-  if (!accessible && !overlay) return
+  if (!overlay) return
   if (!bridge?.startControlFloat) return
-  try { bridge.startControlFloat() } catch { /* 忽略 */ }
+  try { bridge.startControlFloat(); floatRunning.value=!!bridge.isControlFloatRunning?.() } catch { /* 忽略 */ }
   pushFloat('控制模式已就绪', accessible ? '无障碍已开启，可以直接操作屏幕' : '悬浮窗已开启，屏幕操控仍需要无障碍')
 })
 
@@ -364,6 +375,7 @@ onMounted(() => {
   loadDraft()
 })
 onBeforeUnmount(() => {
+  unregisterOverlay('composer-modes')
   unregisterOverlay('composer-quick')
   unregisterOverlay('control-risk')
   window.removeEventListener('coomi:file-transfer-progress', onTransferProgress)
@@ -530,7 +542,7 @@ watch(text, () => {
             </button>
             <button class="pill production-pill" :class="{ on: config.productionMode !== 'normal', 'warn-on': config.productionMode === 'berserk' }" @click="toggleProductionMode()">
               <CoomiIcon name="target" :size="14" />
-              <span>{{ config.productionMode === 'berserk' ? '狂暴' : config.productionMode === 'overload' ? '超载' : '普通' }}</span>
+              <span>{{ config.productionMode !== 'normal' ? '超载' : '普通' }}</span>
             </button>
             <button class="pill control-pill" :class="{ on: controlMode }" @click="toggleControlMode()">
               <CoomiIcon name="cursor" :size="14" />
@@ -545,7 +557,7 @@ watch(text, () => {
     <div v-if="riskConfirm" class="risk-mask" @click.self="cancelControlMode">
       <div class="risk-dialog">
         <p class="risk-title">控制模式</p>
-        <p class="risk-text">该功能风险极高，如出现问题软件作者不负责，且需要多模态模型与大量 token 消耗。确认后需要开启「无障碍」与「悬浮窗」权限：无障碍用于代替你点击、输入、发送，悬浮窗用于在你切换到别的 App 后继续显示执行进度（缩成小球，不挡屏幕）。</p>
+        <p class="risk-text">该功能风险极高，如出现问题软件作者不负责，且需要多模态模型与大量 token 消耗。确认后需要开启「无障碍」与「悬浮窗」权限：无障碍用于代替你点击、输入、发送，悬浮窗用于在你切换到别的 App 后继续显示执行进度（收起为窄条带，不挡屏幕）。</p>
         <div class="risk-actions">
           <button class="btn ghost" @click="cancelControlMode">取消</button>
           <button class="btn danger" @click="confirmControlMode">确认进入</button>
@@ -553,7 +565,7 @@ watch(text, () => {
       </div>
     </div>
     <!-- 控制模式浮窗：权限状态 + 指令输入 -->
-    <div v-if="controlMode" class="control-float">
+    <div v-if="controlMode && !(hasNative && overlayReady)" class="control-float">
       <div class="control-bar">
         <span class="control-label">控制模式</span>
         <button class="exit-control" @click="exitControlMode">退出</button>
@@ -578,7 +590,7 @@ watch(text, () => {
       <p v-if="controlThinking" class="control-thinking">{{ controlThinking }}</p>
       <button v-if="controlChatPage" class="control-chat-btn" type="button" @click="startControlReply">对话</button>
     </div>
-    <p v-if="modeNotice" class="mode-notice">{{ modeNotice }}</p>
+    <div v-if="modeNotice" class="mode-notice" role="status"><div class="mode-notice-head"><CoomiIcon name="sparkle" :size="17"/><b>开启超载模式</b><button aria-label="关闭提示" @click="modeNotice=''"><CoomiIcon name="close" :size="15"/></button></div><p>{{ modeNotice }}</p><button class="mode-config" @click="openOverloadSettings">选择超载模型 <CoomiIcon name="arrowRight" :size="14"/></button></div>
   </div>
 </template>
 
@@ -608,12 +620,15 @@ watch(text, () => {
 .risk-actions .btn.ghost { background: var(--fill); color: var(--text-2); }
 .risk-actions .btn.danger { background: var(--danger); color: #fff; }
 .mode-notice {
-  position: fixed; left: 50%; top: calc(var(--safe-top) + 10px); z-index: 95;
-  transform: translateX(-50%); max-width: 86vw; padding: 8px 14px;
-  border-radius: var(--r-pill); background: var(--orange-soft); color: var(--orange);
-  font-size: 12.5px; font-weight: 650; text-align: center;
-  box-shadow: var(--shadow-2); animation: control-pop .2s ease both;
+  position:fixed;left:20px;right:20px;bottom:clamp(150px,28dvh,280px);z-index:95;
+  max-width:360px;margin:0 auto;padding:15px 16px;border:1px solid var(--blue-border);
+  border-radius:16px;background:var(--bg);color:var(--text);box-shadow:var(--shadow-2);
+  animation:control-pop .2s ease both;
 }
+.mode-notice-head{display:flex;align-items:center;gap:8px;color:var(--blue);font-size:13px}
+.mode-notice-head button{display:grid;place-items:center;margin-left:auto;width:28px;height:28px;border:0;background:none;color:var(--text-3)}
+.mode-notice p{margin:8px 0 12px;color:var(--text-2);font-size:12px;line-height:1.6}
+.mode-config{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:36px;padding:0 10px;border:0;border-radius:9px;background:var(--blue-soft);color:var(--blue);font-size:12px}
 .control-pill.on { background: var(--danger-soft); color: var(--danger); }
 .control-bar { display: flex; align-items: center; gap: 8px; }
 .control-bar .model-pick { margin-right: auto; }
@@ -712,11 +727,11 @@ watch(text, () => {
 .spacer { flex: 1 1 auto; min-width: 4px; }
 /* 模式竖向弹出面板：在输入框上方竖排，带展开动画（由快到慢）。 */
 .mode-pop {
-  position: absolute; z-index: 5; left: 10px; right: 10px; bottom: calc(100% + 8px);
+  position: absolute; z-index: 30; left: 10px; right: 10px; bottom: calc(100% - 4px);
   display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
   flex-wrap: wrap; gap: 6px;
   /* 透明浮层：按钮就是普通 pill 大小，从模式键位置模糊分裂出来 */
-  background: transparent; border: 0; box-shadow: none; padding: 0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-2); padding: 12px; min-height: 66px;
 }
 .mode-pop .pill {
   /* 保持与以前一样大小的按钮 */

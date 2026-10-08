@@ -6,7 +6,7 @@
  * 动效交给 GSAP：一次编排（标记落位 → 格言 → 副文案），再挂一个很轻的呼吸循环。
  * 比两段独立的 CSS keyframes 更容易对齐节奏，也方便在 reduced-motion 下整体关掉。
  */
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { useConnectionStore } from '@/stores/connection'
 import { useSessionStore } from '@/stores/session'
@@ -66,7 +66,6 @@ onMounted(() => {
   window.addEventListener(QUICK_COMMAND_CHANGED_EVENT, refreshSuggestions)
 })
 onBeforeUnmount(() => window.removeEventListener(QUICK_COMMAND_CHANGED_EVENT, refreshSuggestions))
-const motto = computed(() => config.productionMode ? '慎终如始，则无败事' : '海内存知己，天涯若比邻')
 
 const root = ref<HTMLElement | null>(null)
 useGsapScope(root, (_context, element) => {
@@ -97,7 +96,10 @@ useGsapScope(root, (_context, element) => {
 <template>
   <div ref="root" class="empty">
     <div class="brand-aura"><CoomiMark :size="64" class="logo" /></div>
-    <p class="motto">{{ motto }}</p>
+    <p class="motto" :class="{ 'motto-guofeng': config.mottoFont === 'guofeng' }">
+      <span v-if="config.mottoFont === 'guofeng'" class="motto-art" role="img" aria-label="慎终如始，则无败事" />
+      <template v-else>慎终如始，则无败事</template>
+    </p>
     <p class="sub">准备好了，就告诉我想做什么</p>
     <button class="suggestions-toggle" :class="{ expanded: suggestionsExpanded }" type="button"
       :aria-label="suggestionsExpanded ? '收起快捷开始' : '展开快捷开始'"
@@ -130,7 +132,9 @@ useGsapScope(root, (_context, element) => {
 .empty { margin:auto 0; padding:34px 4px 18px; display:flex; flex-direction:column; align-items:center; text-align:center; }
 .brand-aura { display:grid; place-items:center; padding:16px; border-radius:50%; will-change:transform; }
 .logo { display:block; }
-.motto { margin:12px 0 0; color:var(--text); font-size:17px; line-height:1.6; font-weight:750; letter-spacing:.04em; }
+.motto { margin:12px 0 0; color:var(--text); font-family:var(--font-ui); font-size:17px; line-height:1.6; font-weight:750; letter-spacing:.04em; }
+.motto-guofeng { line-height:0; }
+.motto-art { display:block; width:min(236px, calc(100vw - 84px)); aspect-ratio:1722 / 210; background:var(--text); -webkit-mask:url('/brand/motto-calligraphy.png') center / contain no-repeat; mask:url('/brand/motto-calligraphy.png') center / contain no-repeat; }
 .sub { margin-top:8px; color:var(--text-3); font-size:13px; }
 .suggestions-toggle { display: grid; place-items: center; width: 44px; height: 36px; margin-top: 14px; padding: 0; border: 0; border-radius: 18px; background: transparent; color: var(--text-3); }
 .suggestions-toggle:active, .suggestions-toggle:focus-visible { background: var(--fill); color: var(--blue); }

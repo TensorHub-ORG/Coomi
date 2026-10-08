@@ -35,6 +35,7 @@ import CoomiIcon from '@/components/CoomiIcon.vue'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import { chatScroll } from '@/stores/viewState'
 
+const composerModesOpen = ref(false)
 const router = useRouter()
 const session = useSessionStore()
 const sessions = useSessionsStore()
@@ -251,8 +252,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
           <span class="life-pill-preview">{{ session.lifeUnread[0].text }}</span>
         </button>
       </Transition>
-      <StatusBar />
-      <Composer />
+      <StatusBar v-if="!composerModesOpen" />
+      <Composer @modes-open="composerModesOpen = $event" />
     </div>
 
     <SideDrawer :open="drawerOpen" @close="closeDrawer" />

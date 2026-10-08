@@ -32,6 +32,17 @@
                 <View style="@style/Coomi.Divider"/><LinearLayout android:id="@+id/btn_appearance_celadon" style="@style/Coomi.Row" android:clickable="true" android:focusable="true"><RadioButton android:id="@+id/radio_appearance_celadon" android:layout_width="wrap_content" android:layout_height="wrap_content" android:buttonTint="?attr/coomiBlue" android:clickable="false"/><TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="@string/coomi_dash_theme_celadon"/></LinearLayout>
                 <View style="@style/Coomi.Divider"/><LinearLayout android:id="@+id/btn_appearance_linen" style="@style/Coomi.Row" android:clickable="true" android:focusable="true"><RadioButton android:id="@+id/radio_appearance_linen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:buttonTint="?attr/coomiBlue" android:clickable="false"/><TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="@string/coomi_dash_theme_linen"/></LinearLayout>
             </LinearLayout>
+            <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/coomi_space_l" android:text="会话标语" />
+            <LinearLayout style="@style/Coomi.Card">
+                <LinearLayout android:id="@+id/row_motto_font" style="@style/Coomi.Row" android:clickable="true" android:focusable="true">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                        <TextView style="@style/Coomi.Text.Body" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="初始会话界面标语字体" />
+                        <TextView style="@style/Coomi.Text.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="默认无衬线字体，国风书法艺术字" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/txt_motto_font" style="@style/Coomi.Text.Caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:text="默认" />
+                    <ImageView android:layout_width="@dimen/coomi_icon_s" android:layout_height="@dimen/coomi_icon_s" android:layout_marginStart="8dp" android:src="@drawable/coomi_ic_chevron_right" android:tint="?attr/coomiText3" android:contentDescription="@null" />
+                </LinearLayout>
+            </LinearLayout>
             <LinearLayout android:id="@+id/section_saved_palettes" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                 <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/coomi_space_l" android:text="已保存配色" />
                 <LinearLayout android:id="@+id/container_saved_palettes" style="@style/Coomi.Card" />

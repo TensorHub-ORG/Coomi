@@ -737,6 +737,15 @@ public final class CoomiChatSession extends ContextWrapper {
             return CoomiTheme.appearanceJson(CoomiChatSession.this);
         }
 
+        @JavascriptInterface
+        public void setMottoFont(String font) {
+            CoomiTheme.setMottoFont(CoomiChatSession.this, font);
+            runOnUiThread(() -> {
+                applyThemeToWebView();
+                sendBroadcast(new Intent(CoomiTheme.ACTION_THEME_CHANGED).setPackage(getPackageName()));
+            });
+        }
+
         /** 前端设置页切换主题档位：持久化 + 刷新 Web 主题与原生状态栏。 */
         @JavascriptInterface
         public void setThemeMode(String mode) {
@@ -1150,7 +1159,7 @@ public final class CoomiChatSession extends ContextWrapper {
             });
         }
 
-        /** 收起成小球 / 重新展开。 */
+        /** 收起为全宽窄条带 / 重新展开操作面板。 */
         @JavascriptInterface
         public void setControlFloatCollapsed(boolean collapsed) {
             CoomiFloatService.setCollapsed(CoomiChatSession.this, collapsed);

@@ -14,6 +14,7 @@ export interface ToolCard {
   access?: ToolAccess
   riskSummary?: string
   expanded?: boolean
+  manualOpen?: boolean
   /** 工具产生的图片（data URL），瀑布流渲染用。 */
   images?: string[]
   /** show_image 历史恢复但图片数据不可用（如已被上下文压缩清理）。 */

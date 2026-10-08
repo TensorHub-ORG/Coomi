@@ -126,7 +126,7 @@ setQuickCommands:value=>{localStorage.setItem("test.nativeQuickCommands",value);
         assert page.locator('.permission-defaults button').count() == 4
         page.screenshot(path=str(OUTPUT / 'settings-chat.png'))
         page.locator('.tabs button').filter(has_text='连接').click()
-        assert page.get_by_text('狂暴模型', exact=True).is_visible()
+        assert page.get_by_text('超载模型', exact=True).is_visible()
         assert page.get_by_role('spinbutton', name='WebSocket 重连次数', exact=True).get_attribute('max') == '100'
         page.screenshot(path=str(OUTPUT / 'settings-connection.png'))
         page.locator('.tabs button').filter(has_text='应用').click()

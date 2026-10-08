@@ -35,6 +35,7 @@ watch(activeTab, async (tab, previous) => {
 onMounted(async () => {
   await nextTick()
   if (body.value) body.value.scrollTop = settingsScroll.get(activeTab.value) ?? 0
+  if (router.currentRoute.value.hash === '#overload-model') document.getElementById('overload-model')?.scrollIntoView({ block:'start' })
 })
 onBeforeUnmount(() => {
   if (body.value) settingsScroll.set(activeTab.value, body.value.scrollTop)
@@ -374,7 +375,7 @@ onMounted(async () => {
 </template>
 
 <template v-if="activeTab === 'link'">
-      <p class="sec-label">狂暴模型</p>
+      <p id="overload-model" class="sec-label">超载模型</p>
       <div class="group model-list">
         <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先配置 Provider。</p>
         <button v-for="r in modelRows" :key="'bk-' + r.key" class="row" @click="config.setBerserkModel(r.providerId + ':' + r.model)">
@@ -385,7 +386,7 @@ onMounted(async () => {
           <CoomiIcon v-if="config.berserkModel === r.providerId + ':' + r.model" name="check" :size="17" class="tick" />
         </button>
       </div>
-      <p class="option-note">{{ config.berserkModel ? '狂暴模式将使用 ' + config.berserkModel + ' 检查并继续任务' : '未设置狂暴模型：切换狂暴模式时会提示先配置' }}</p>
+      <p class="option-note">{{ config.berserkModel ? '超载模式将使用 ' + config.berserkModel + ' 检查并继续任务' : '未设置超载模型：切换超载模式时会提示先配置' }}</p>
 
       <p class="sec-label">模型</p>
       <div class="group model-list">

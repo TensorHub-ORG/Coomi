@@ -1,10 +1,15 @@
+<script lang="ts">
+import { reactive } from 'vue'
+const groupManual = reactive(new Map<string, boolean>())
+</script>
+
 <script setup lang="ts">
 /**
  * 连续工具调用的分组容器。
- * 单个调用不套壳；两个以上折成一组，跑的时候自动展开、全部结束后自动收起，
+ * 单个调用不套壳；两个以上折成一组，执行时与完成后均默认收起，
  * 用户手动点过之后就听用户的。长任务几十次调用不会把时间线冲成卡片墙。
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { ToolCard } from '@/stores/viewModel'
 import { useConfigStore } from '@/stores/config'
 import CoomiIcon from './CoomiIcon.vue'
@@ -13,23 +18,29 @@ import ToolCardItem from './ToolCardItem.vue'
 const props = defineProps<{ cards: ToolCard[] }>()
 const config = useConfigStore()
 
-const manual = ref<boolean | null>(null)
+const groupKey = computed(() => props.cards[0]?.callId ?? '')
+function toggleGroup() {
+  if (groupManual.size > 1500) groupManual.delete(groupManual.keys().next().value!)
+  groupManual.set(groupKey.value, !open.value)
+}
 
 const active = computed(() =>
   props.cards.some(c => c.status === 'running' || c.status === 'starting' || c.status === 'awaiting_approval'),
 )
-const open = computed(() => manual.value ?? active.value)
+const open = computed(() => groupManual.get(groupKey.value) ?? false)
 const finished = computed(() => props.cards.filter(c => c.status !== 'running' && c.status !== 'starting' && c.status !== 'awaiting_approval').length)
 const failed = computed(() => props.cards.filter(c => c.status === 'error').length)
 const elapsed = computed(() => props.cards.reduce((s, c) => s + (c.elapsed ?? 0), 0))
 
 const summary = computed(() => {
+  if (props.cards.some(c => c.status === 'awaiting_approval')) return '待确认'
   if (active.value) return `进行中 ${finished.value}/${props.cards.length}`
   if (failed.value) return `${failed.value} 个失败`
   return '全部完成'
 })
 const cls = computed(() => (active.value ? 'run' : failed.value ? 'err' : 'ok'))
 const miniLabel = computed(() => {
+  if (props.cards.some(c => c.status === 'awaiting_approval')) return `工具 × ${props.cards.length} · 待确认`
   if (props.cards.length === 1) return `${props.cards[0].toolName}${active.value ? '…' : ''}`
   if (active.value) return `工具 × ${props.cards.length} · 进行中 ${finished.value}/${props.cards.length}`
   return `工具 × ${props.cards.length} · ${summary.value}`
@@ -42,7 +53,7 @@ const miniLabel = computed(() => {
   <div class="tg" :class="cards.length === 1 ? 'tg-single' : ['group', cls]">
     <!-- 极简模式：所有调用合一枚小方框，点开才看详情。 -->
     <template v-if="config.minimalUi">
-      <button class="mini-tool" :class="cls" @click="manual = !open">
+      <button class="mini-tool" :class="cls" @click="toggleGroup()">
         <span class="mini-ic" :class="cls"><CoomiIcon name="wrench" :size="13" /></span>
         <span class="mini-txt">{{ miniLabel }}</span>
         <span v-if="active" class="mini-live" aria-label="运行中" />
@@ -59,7 +70,7 @@ const miniLabel = computed(() => {
     </template>
 
     <template v-else>
-      <button class="ghead" @click="manual = !open">
+      <button class="ghead" @click="toggleGroup()">
         <span class="gicon" :class="cls"><CoomiIcon name="wrench" :size="16" /></span>
         <span class="gtitle">工具调用 · {{ cards.length }}</span>
         <span class="gsum" :class="cls">{{ summary }}</span>
@@ -89,14 +100,14 @@ const miniLabel = computed(() => {
 
 .ghead {
   display: flex; align-items: center; gap: 9px;
-  width: 100%; min-height: 44px; padding: 7px 11px;
+  width: 100%; min-height: 36px; padding: 5px 9px;
   border: 0; background: none; text-align: left;
 }
 .ghead:active { background: var(--fill-press); }
 
 .gicon {
   display: grid; place-items: center; flex-shrink: 0;
-  width: 27px; height: 27px; border-radius: 8px;
+  width: 22px; height: 22px; border-radius: 8px;
   background: var(--bg); color: var(--text-2);
 }
 .gicon.run { color: var(--blue); }
@@ -125,7 +136,7 @@ const miniLabel = computed(() => {
 /* ── 极简界面模式：工具调用折叠成一小块方框 ── */
 .mini-tool {
   display: flex; align-items: center; gap: 7px;
-  width: 100%; min-height: 34px; padding: 5px 10px;
+  width: 100%; min-height: 30px; padding: 4px 9px;
   border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--fill); text-align: left;
 }
@@ -140,7 +151,7 @@ const miniLabel = computed(() => {
 .mini-ic.err { color: var(--danger); }
 .mini-txt {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 12px; color: var(--text-2);
+  font-size: 11.5px; color: var(--text-2);
 }
 .mini-live {
   flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;

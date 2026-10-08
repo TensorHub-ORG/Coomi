@@ -42,6 +42,7 @@ pub async fn terminate_all_managed() {
 
 #[derive(Clone)]
 pub struct ProcessManager {
+    owned: Arc<Mutex<HashMap<String, Arc<AsyncMutex<ManagedProcess>>>>>,
     runtime_limit: Duration,
     output_limit: usize,
     memory_limit: u64,
@@ -52,6 +53,7 @@ pub struct ProcessManager {
 impl Default for ProcessManager {
     fn default() -> Self {
         Self {
+            owned: Arc::new(Mutex::new(HashMap::new())),
             runtime_limit: Duration::from_secs(30 * 60),
             output_limit: 16 * 1024 * 1024,
             memory_limit: 512 * 1024 * 1024,
@@ -94,7 +96,25 @@ async fn kill_managed(process: &Arc<AsyncMutex<ManagedProcess>>) {
             .arg(format!("-{pgid}"))
             .status();
     }
+    #[cfg(windows)]
+    {
+        let pid = process.lock().await.child.id();
+        if let Some(pid) = pid { let _ = std::process::Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output(); }
+    }
     let _ = process.lock().await.child.kill().await;
+}
+
+/// Cancelling a shell future must also stop its descendants.
+pub(crate) struct ShellProcessGroup(pub Option<u32>);
+impl Drop for ShellProcessGroup {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0 {
+            #[cfg(unix)]
+            { let _ = std::process::Command::new("kill").arg("-9").arg(format!("-{pid}")).output(); }
+            #[cfg(windows)]
+            { let _ = std::process::Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output(); }
+        }
+    }
 }
 
 impl ProcessManager {
@@ -236,18 +256,25 @@ impl ProcessManager {
             memory_limit: self.memory_limit,
             limit_error,
         }));
+        {
+            let mut owned = self.owned.lock().expect("owned process lock");
+            owned.retain(|_, process| process.try_lock().map(|mut p| p.child.try_wait().ok().flatten().is_none()).unwrap_or(true));
+            owned.insert(session_id.clone(), Arc::clone(&managed));
+        }
         if yield_time_ms > 0 {
             let deadline = tokio::time::Instant::now() + Duration::from_millis(yield_time_ms);
             loop {
                 {
                     let mut process = managed.lock().await;
                     if let Some(error) = enforce_limits(&mut process).await {
+                        self.owned.lock().expect("owned process lock").remove(&session_id);
                         return ToolResult::error(error);
                     }
                     match process.child.try_wait() {
                         Ok(Some(status)) => {
                             tokio::time::sleep(Duration::from_millis(20)).await;
                             let output = read_delta(&mut process).await;
+                            self.owned.lock().expect("owned process lock").remove(&session_id);
                             return if status.success() {
                                 ToolResult::success(format!("{output}\nexit: {status}"))
                             } else {
@@ -256,6 +283,7 @@ impl ProcessManager {
                         }
                         Ok(None) => {}
                         Err(error) => {
+                            self.owned.lock().expect("owned process lock").remove(&session_id);
                             return ToolResult::error(format!("failed to query process: {error}"));
                         }
                     }
@@ -352,6 +380,7 @@ impl ProcessManager {
                     let output = read_delta(&mut process).await;
                     drop(process);
                     registry().lock().expect("process registry lock").remove(id);
+                    self.owned.lock().expect("owned process lock").remove(id);
                     return if status.success() {
                         ToolResult::success(format!("{output}\nexit: {status}"))
                     } else {
@@ -378,6 +407,7 @@ impl ProcessManager {
             return ToolResult::error("missing string argument: session_id");
         };
         let process = registry().lock().expect("process registry lock").remove(id);
+        self.owned.lock().expect("owned process lock").remove(id);
         let Some(process) = process else {
             return ToolResult::error(format!("unknown process session: {id}"));
         };
@@ -389,6 +419,15 @@ impl ProcessManager {
     /// shell keeps running after the agent stopped.
     pub async fn terminate_all(&self) {
         terminate_all_managed().await;
+    }
+
+    /// Stop only this owner's tools, preserving other sessions and studios.
+    pub async fn terminate_owned(&self) {
+        let owned = std::mem::take(&mut *self.owned.lock().expect("owned process lock"));
+        for (id, process) in owned {
+            registry().lock().expect("process registry lock").remove(&id);
+            kill_managed(&process).await;
+        }
     }
 
     fn lookup(&self, id: &str) -> Option<Arc<AsyncMutex<ManagedProcess>>> {
@@ -487,6 +526,45 @@ fn platform_shell(command: &str) -> Command {
     let mut process = Command::new("powershell.exe");
     process.args(["-NoLogo", "-NoProfile", "-Command", command]);
     process
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    use serde_json::json;
+    #[tokio::test]
+    async fn completed_commands_release_owned_output_buffers() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ProcessManager::default();
+        #[cfg(windows)]
+        let command = "Write-Output OK";
+        #[cfg(not(windows))]
+        let command = "printf OK";
+        let result = manager.execute(dir.path(), &json!({"command":command,"yield_time_ms":10000,"environment":"host"})).await;
+        assert!(result.success, "{}", result.output);
+        assert!(manager.owned.lock().unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn scoped_stop_kills_only_its_own_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = ProcessManager::default();
+        let second = ProcessManager::default();
+        #[cfg(windows)]
+        let command = "Start-Sleep -Seconds 10";
+        #[cfg(not(windows))]
+        let command = "sleep 10";
+        for manager in [&first, &second] {
+            let result = manager.execute(dir.path(), &json!({"command":command,"yield_time_ms":0,"environment":"host"})).await;
+            assert!(result.success, "{}", result.output);
+        }
+        let owned = first.owned.lock().unwrap().values().next().unwrap().clone();
+        let other = second.owned.lock().unwrap().values().next().unwrap().clone();
+        first.terminate_owned().await;
+        assert!(owned.lock().await.child.try_wait().unwrap().is_some());
+        assert!(other.lock().await.child.try_wait().unwrap().is_none());
+        second.terminate_owned().await;
+        assert!(other.lock().await.child.try_wait().unwrap().is_some());
+    }
 }
 
 #[cfg(not(windows))]

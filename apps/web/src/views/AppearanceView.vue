@@ -8,6 +8,10 @@ import { goBack } from '@/bridge/navigation'
 
 const router = useRouter()
 const config = useConfigStore()
+const mottoFonts = [
+  { value: 'default', label: '默认', desc: '简洁的无衬线字体' },
+  { value: 'guofeng', label: '国风', desc: '小幅书法艺术字' },
+] as const
 const customAppearanceEnabled = ref(document.documentElement.dataset.customAppearance === 'true')
 
 function syncCustomAppearance() {
@@ -36,6 +40,14 @@ onBeforeUnmount(() => window.removeEventListener('coomi:appearance-changed', syn
         </button>
       </div>
       <p v-if="customAppearanceEnabled" class="note">当前由系统或原生外观配置接管主题选择。</p>
+      <p class="sec-label motto-label">初始会话界面标语字体</p>
+      <div class="group" role="radiogroup" aria-label="初始会话界面标语字体">
+        <button v-for="font in mottoFonts" :key="font.value" class="row" role="radio"
+          :aria-checked="config.mottoFont === font.value" @click="config.setMottoFont(font.value)">
+          <span class="rt"><span class="rmain">{{ font.label }}</span><span class="rsub">{{ font.desc }}</span></span>
+          <CoomiIcon v-if="config.mottoFont === font.value" name="check" :size="17" class="tick" />
+        </button>
+      </div>
     </main>
   </div>
 </template>
@@ -44,6 +56,7 @@ onBeforeUnmount(() => window.removeEventListener('coomi:appearance-changed', syn
 .page { display: flex; flex-direction: column; height: 100%; background: var(--page); }
 .body { flex: 1; overflow-y: auto; padding: 14px 12px calc(var(--safe-bottom) + 24px); }
 .sec-label { margin: 2px 0 0; }
+.motto-label { margin-top: 20px; }
 .group { border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
 .row { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 56px; padding: 11px 13px; text-align: left; background: var(--bg); }
 .row + .row { border-top: 1px solid var(--border); }

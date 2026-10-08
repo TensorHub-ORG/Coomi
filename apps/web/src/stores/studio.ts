@@ -44,7 +44,7 @@ export interface StudioMessage {
 
 export interface StudioToolCard {
   callId: string; memberId: string; memberName: string; toolName: string
-  arguments?: unknown; status: 'running' | 'approval' | 'success' | 'error'
+  arguments?: unknown; status: 'running' | 'approval' | 'success' | 'error' | 'stopped'
   resultPreview?: string; images?: string[]; riskSummary?: string
 }
 
@@ -69,6 +69,9 @@ export interface StudioListItem {
 }
 
 export const useStudioStore = defineStore('studio', () => {
+  let generation = 0
+  let streamAbort: AbortController | null = null
+  let stopPromise: Promise<void> | null = null
   const studios = ref<StudioListItem[]>([])
   const currentStudio = ref<Studio | null>(null)
   const messages = ref<StudioMessage[]>([])
@@ -102,10 +105,12 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function fetchStudio(id: string) {
+    const ticket = ++generation
     loading.value = true
     error.value = ''
     try {
       const data = await apiGet<{ studio: Studio; messages?: StudioMessage[]; workItems?: WorkItem[] }>(`/api/studios/${encodeURIComponent(id)}`)
+      if (ticket !== generation) return
       currentStudio.value = data.studio
       messages.value = data.messages ?? []
       workItems.value = data.workItems ?? []
@@ -234,10 +239,13 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function fetchMessages() {
-    if (!currentStudio.value) return
+    const id = currentStudio.value?.id
+    const ticket = generation
+    if (!id) return
     error.value = ''
     try {
-      const data = await apiGet<{ messages: StudioMessage[] }>(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/messages`)
+      const data = await apiGet<{ messages: StudioMessage[] }>(`/api/studios/${encodeURIComponent(id)}/messages`)
+      if (ticket !== generation || currentStudio.value?.id !== id) return
       messages.value = data.messages ?? []
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -245,9 +253,12 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function fetchStatus() {
-    if (!currentStudio.value) return false
+    const id = currentStudio.value?.id
+    const ticket = generation
+    if (!id) return false
     try {
-      const data = await apiGet<{ running: boolean; phase?: string; memberId?: string; detail?: string }>(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/status`)
+      const data = await apiGet<{ running: boolean; phase?: string; memberId?: string; detail?: string }>(`/api/studios/${encodeURIComponent(id)}/status`)
+      if (ticket !== generation || currentStudio.value?.id !== id) return
       running.value = Boolean(data.running)
       if (data.running && data.memberId) {
         const status = data.phase === 'thinking' ? 'thinking' : 'executing'
@@ -258,33 +269,47 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function sendMessage(content: string, onEvent?: (event: Record<string, any>) => void) {
-    if (!currentStudio.value) return null
+    const id = currentStudio.value?.id
+    if (!id || running.value || stopPromise) return null
+    const ticket = ++generation
+    const controller = new AbortController()
+    streamAbort = controller
+    running.value = true
     error.value = ''
+    const active = () => ticket === generation && currentStudio.value?.id === id && !controller.signal.aborted
     try {
-      const response = await authedFetch(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/messages`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify({ content }),
+      const response = await authedFetch(`/api/studios/${encodeURIComponent(id)}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({ content }), signal: controller.signal,
       })
       if (!response.ok || !response.body) throw new Error(`POST studio message → ${response.status}`)
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue
-          try { const event = JSON.parse(line.slice(5).trim()); onEvent?.(event); if (event.event_type === 'studio_message') onMessage(event.message) } catch { /* 忽略不完整事件 */ }
-        }
+      const dispatch = (line: string) => {
+        if (!active() || !line.startsWith('data:')) return
+        let event: Record<string, any>
+        try { event = JSON.parse(line.slice(5).trim()) } catch { return }
+        onEvent?.(event)
+        if ((event.event_type === 'studio_message' || event.event_type === 'studio_user_message') && event.message) onMessage(event.message)
       }
-      await fetchMessages()
-      await fetchStatus()
-      return true
+      try {
+        while (active()) {
+          const { value, done } = await reader.read()
+          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
+          lines.forEach(dispatch)
+          if (done) { dispatch(buffer); break }
+        }
+      } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+      if (active()) { await fetchMessages(); await fetchStatus() }
+      return active() ? true : null
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      if (active()) error.value = e instanceof Error ? e.message : String(e)
       return null
+    } finally {
+      if (streamAbort === controller) streamAbort = null
+      if (ticket === generation) running.value = false
     }
   }
 
@@ -326,8 +351,23 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function stopRun() {
-    if (!currentStudio.value) return
-    await apiSend(`/api/studios/${encodeURIComponent(currentStudio.value.id)}/stop`, 'POST')
+    if (stopPromise) return stopPromise
+    const id = currentStudio.value?.id
+    if (!id) return
+    ++generation
+    streamAbort?.abort()
+    streamAbort = null
+    running.value = false
+    streamingMembers.value = {}
+    for (const card of toolCards.value) if (card.status === 'running' || card.status === 'approval') card.status = 'stopped'
+    for (const member of members.value) if (['thinking', 'executing', 'waiting'].includes(member.status)) member.status = 'idle'
+    const ticket = generation
+    stopPromise = (async () => {
+      try { await apiSend(`/api/studios/${encodeURIComponent(id)}/stop`, 'POST') }
+      catch (e) { if (ticket === generation) error.value = `停止未确认：${e instanceof Error ? e.message : String(e)}`; throw e }
+      finally { stopPromise = null }
+    })()
+    return stopPromise
   }
 
   function onWorkItem(item: WorkItem) {
@@ -337,6 +377,9 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   function reset() {
+    ++generation
+    streamAbort?.abort()
+    streamAbort = null
     currentStudio.value = null
     messages.value = []
     workItems.value = []

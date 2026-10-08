@@ -77,6 +77,7 @@ public class CoomiAppearanceActivity extends Activity {
         bindCustomColors();
         bindSavedPalettes();
         bindDisplayScale();
+        bindMottoFont();
         bindBackgrounds();
         findViewById(R.id.btn_reset_appearance).setOnClickListener(v -> confirmReset());
         CoomiTheme.applyPageSystemBars(this);
@@ -101,6 +102,24 @@ public class CoomiAppearanceActivity extends Activity {
             radio.setEnabled(!customEnabled);
             radio.setChecked(!customEnabled && modes[index].equals(selected));
         }
+    }
+
+    private void bindMottoFont() {
+        TextView value = findViewById(R.id.txt_motto_font);
+        value.setText("guofeng".equals(CoomiTheme.getMottoFont(this)) ? "国风" : "默认");
+        findViewById(R.id.row_motto_font).setOnClickListener(v ->
+            new AlertDialog.Builder(this)
+                .setTitle("初始会话界面标语字体")
+                .setSingleChoiceItems(new String[]{"默认", "国风"},
+                    "guofeng".equals(CoomiTheme.getMottoFont(this)) ? 1 : 0,
+                    (dialog, which) -> {
+                        CoomiTheme.setMottoFont(this, which == 1 ? "guofeng" : "default");
+                        value.setText(which == 1 ? "国风" : "默认");
+                        notifyAppearanceChanged();
+                        dialog.dismiss();
+                    })
+                .setNegativeButton("取消", null)
+                .show());
     }
 
     private void bindDisplayScale() {
@@ -547,7 +566,7 @@ public class CoomiAppearanceActivity extends Activity {
     private void confirmReset() {
         new AlertDialog.Builder(this)
             .setTitle("恢复默认外观")
-            .setMessage("将关闭自定义配色并移除两张背景图，主题风格保持不变。")
+            .setMessage("将关闭自定义配色、移除两张背景图，并恢复默认显示比例和标语字体，主题风格保持不变。")
             .setNegativeButton("取消", null)
             .setPositiveButton("恢复", (dialog, which) -> {
                 CoomiTheme.resetAppearance(this);

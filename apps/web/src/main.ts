@@ -106,7 +106,7 @@ function applyAppearance(config: AppearanceConfig) {
       : 'none',
   )
   window.dispatchEvent(new CustomEvent('coomi:appearance-changed', {
-    detail: { customEnabled: customAppearanceEnabled },
+    detail: { customEnabled: customAppearanceEnabled, mottoFont: config.mottoFont },
   }))
 }
 

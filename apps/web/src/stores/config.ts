@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onScopeDispose } from 'vue'
 import type { PermissionMode, ReasoningEffort } from '@/protocol/commands'
 import { apiGet, apiSend } from '@/bridge/http'
 
@@ -162,6 +162,19 @@ export function readThemeMode(): ThemeMode {
   return THEME_VALUES.includes(saved as ThemeMode) ? saved as ThemeMode : 'system'
 }
 
+export type MottoFont = 'default' | 'guofeng'
+
+function readMottoFont(): MottoFont {
+  try {
+    const bridge = window.CoomiAndroid
+    if (bridge?.getAppearanceConfig) {
+      const appearance = JSON.parse(bridge.getAppearanceConfig())
+      return appearance.mottoFont === 'guofeng' ? 'guofeng' : 'default'
+    }
+  } catch { /* 原生桥未就绪时使用本地缓存 */ }
+  return localStorage.getItem('coomi.mottoFont') === 'guofeng' ? 'guofeng' : 'default'
+}
+
 /** 写入 <html data-theme>，前端 global.css 据此切换暗色主题。 */
 export function applyTheme(mode: ThemeMode) {
   const dark = mode === 'dark'
@@ -210,6 +223,19 @@ export const useConfigStore = defineStore('config', () => {
   /** 极简界面模式：工具调用折叠成一小块方框（点开才看详情），文字缩小。 */
   const minimalUi = ref(localStorage.getItem('coomi.minimalUi') !== '0')
   const themeMode = ref<ThemeMode>(readThemeMode())
+  const mottoFont = ref<MottoFont>(readMottoFont())
+  function syncMottoFont(event: Event) {
+    const value = (event as CustomEvent<AppearanceConfig>).detail?.mottoFont
+    mottoFont.value = value === undefined ? readMottoFont() : value === 'guofeng' ? 'guofeng' : 'default'
+    localStorage.setItem('coomi.mottoFont', mottoFont.value)
+  }
+  window.addEventListener('coomi:appearance-changed', syncMottoFont)
+  onScopeDispose(() => window.removeEventListener('coomi:appearance-changed', syncMottoFont))
+  function setMottoFont(value: MottoFont) {
+    mottoFont.value = value === 'guofeng' ? 'guofeng' : 'default'
+    localStorage.setItem('coomi.mottoFont', mottoFont.value)
+    try { window.CoomiAndroid?.setMottoFont?.(mottoFont.value) } catch { /* 本地选择仍可用 */ }
+  }
   const savedEffort = localStorage.getItem('coomi.reasoningEffort') as ReasoningEffort | null
   const reasoningEffort = ref<ReasoningEffort>(REASONING_EFFORTS.some(item => item.value === savedEffort) ? savedEffort! : 'auto')
   const savedRounds = Number(localStorage.getItem('coomi.maxToolRounds'))
@@ -667,6 +693,7 @@ export const useConfigStore = defineStore('config', () => {
 
   return {
     ttsAutoRead, ttsRate, setTtsAutoRead, setTtsRate,
+    mottoFont, setMottoFont,
     permissionMode, defaultPermissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, productionMode, setProductionMode, berserkModel, setBerserkModel, sendMorphAnimation, setSendMorphAnimation, minimalUi, setMinimalUi, providers, activeId, loading, usingMock, lastError, subAgentSettings,
     currentProviderId, currentModel, currentProvider, mergedProviders,
     fetchProviders, selectModel, syncDisplayModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, setDefaultPermissionMode, togglePlanMode,

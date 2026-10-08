@@ -20,7 +20,6 @@ const config = useConfigStore()
 /** 大字段单独成块，不塞进参数表。 */
 const BIG = new Set(['content', 'old_string', 'new_string', 'prompt'])
 
-const manual = ref<boolean | null>(null)
 /** 收回动画未完成时保持元素可见（否则 v-show 会立即隐藏，动画看不到）。 */
 const collapsing = ref(false)
 const full = ref(false)
@@ -219,10 +218,10 @@ const diffLines = computed(() => {
 })
 
 const hasBody = computed(() => argRows.value.length > 0 || Boolean(contentArg.value) || isDiff.value || Boolean(output.value) || Boolean(props.card.riskSummary) || (props.card.images?.length ?? 0) > 0 || Boolean(props.card.imageMissing))
-const open = computed(() => manual.value ?? props.card.expanded ?? false)
+const open = computed({ get: () => props.card.manualOpen ?? false, set: value => { props.card.manualOpen = value } })
 const long = computed(() => output.value.length > 700 || output.value.split('\n').length > 14)
 
-function toggle() { if (hasBody.value) manual.value = !open.value }
+function toggle() { if (hasBody.value) open.value = !open.value }
 
 /**
  * 展开 / 收起用 GSAP 做一次高度补间。
@@ -293,7 +292,7 @@ onBeforeUnmount(() => {
       <CoomiIcon v-if="hasBody" name="chevronRight" :size="14" class="chev" :class="{ open }" />
     </button>
 
-    <div v-if="card.status === 'awaiting_approval'" class="risk">
+    <div v-if="open && card.status === 'awaiting_approval'" class="risk">
       <CoomiIcon name="alert" :size="15" />
       <span>{{ card.riskSummary || '需要你授权后才会执行' }}<template v-if="card.access"> · {{ card.access }}</template></span>
     </div>
@@ -399,14 +398,14 @@ onBeforeUnmount(() => {
 
 .head {
   display: flex; align-items: center; gap: 10px;
-  width: 100%; min-height: 46px; padding: 8px 11px;
+  width: 100%; min-height: 36px; padding: 5px 9px;
   border: 0; background: none; text-align: left;
 }
 .head.tapable:active { background: var(--fill); }
 
 .tile {
   position: relative; display: grid; place-items: center; flex-shrink: 0;
-  width: 30px; height: 30px; border-radius: 9px;
+  width: 24px; height: 24px; border-radius: 9px;
   background: var(--fill-strong); color: var(--text-2);
 }
 .tile.run { background: var(--blue-soft); color: var(--blue); }

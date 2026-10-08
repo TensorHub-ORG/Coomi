@@ -191,7 +191,7 @@ struct AppState {
     /// AI 工作室工具确认：call_id -> 等待用户决定的通道。
     studio_approvals: Arc<StdMutex<HashMap<String, oneshot::Sender<bool>>>>,
     /// AI 工作室正在运行的任务；用于停止生成。
-    studio_runs: Arc<StdMutex<HashMap<String, AbortHandle>>>,
+    studio_runs: Arc<StdMutex<HashMap<String, StudioRun>>>,
     /// 工作室任务事件缓存，断开或重进后可补发最近状态。
     studio_events: Arc<StdMutex<HashMap<String, Vec<Value>>>>,
     /// 参考包迁入：群聊房间与协同任务的后台执行句柄。
@@ -2045,21 +2045,66 @@ async fn studio_events(
     Json(json!({ "events": events, "next_seq": next_seq }))
 }
 
+struct StudioRun {
+    id: String,
+    cancel: tokio::sync::watch::Sender<bool>,
+    done: tokio::sync::watch::Receiver<bool>,
+}
+
+async fn finish_studio_wave(handles: &mut tokio::task::JoinSet<()>, cancel: &mut tokio::sync::watch::Receiver<bool>) -> bool {
+    while !handles.is_empty() {
+        if *cancel.borrow() { handles.shutdown().await; return true; }
+        tokio::select! {
+            biased;
+            _ = cancel.changed() => { handles.shutdown().await; return true; }
+            _ = handles.join_next() => {}
+        }
+    }
+    false
+}
+
+struct StudioRunGuard {
+    registry: Arc<StdMutex<HashMap<String, StudioRun>>>,
+    studio_id: String,
+    run_id: String,
+    done: tokio::sync::watch::Sender<bool>,
+}
+impl Drop for StudioRunGuard {
+    fn drop(&mut self) {
+        let mut runs = self.registry.lock().unwrap_or_else(|p| p.into_inner());
+        if runs.get(&self.studio_id).is_some_and(|run| run.id == self.run_id) { runs.remove(&self.studio_id); }
+        let _ = self.done.send(true);
+    }
+}
+
+struct StudioApprovalGuard {
+    registry: Arc<StdMutex<HashMap<String, oneshot::Sender<bool>>>>,
+    key: String,
+}
+impl Drop for StudioApprovalGuard {
+    fn drop(&mut self) { self.registry.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.key); }
+}
+
 async fn studio_stop(
     State(state): State<AppState>, AxumPath(id): AxumPath<String>,
 ) -> Json<Value> {
-    if let Some(handle) = state.studio_runs.lock().unwrap_or_else(|p| p.into_inner()).remove(&id) {
-        handle.abort();
+    let stopping = {
+        let runs = state.studio_runs.lock().unwrap_or_else(|p| p.into_inner());
+        runs.get(&id).map(|run| (run.cancel.clone(), run.done.clone()))
+    };
+    if let Some((cancel, mut done)) = stopping {
+        let _ = cancel.send(true);
+        if !*done.borrow() { let _ = done.changed().await; }
     }
     Json(json!({"ok": true}))
 }
 
 async fn studio_approve(
-    State(state): State<AppState>, AxumPath(_id): AxumPath<String>, Json(body): Json<Value>,
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     let call_id = body.get("callId").and_then(Value::as_str).unwrap_or_default();
     let allow = body.get("decision").and_then(Value::as_str).is_some_and(|v| matches!(v, "allow" | "always"));
-    let sender = state.studio_approvals.lock().unwrap_or_else(|p| p.into_inner()).remove(call_id)
+    let sender = state.studio_approvals.lock().unwrap_or_else(|p| p.into_inner()).remove(&format!("{id}:{call_id}"))
         .ok_or_else(|| ApiError::not_found("approval request not found"))?;
     let _ = sender.send(allow);
     Ok(Json(json!({"ok": true})))
@@ -2088,12 +2133,15 @@ async fn studio_send_message(
     if text.is_empty() { return Err(ApiError::bad_request("message is required")); }
     let store = StudioStore::new(state.home.join("studios"));
     let studio = store.load(&id).map_err(|e| ApiError::not_found(format!("studio not found: {e}")))?;
-    let route = record_user_message(&store, &studio, &text)
-        .map_err(|e| ApiError::bad_request(format!("route message: {e}")))?;
     let registry = Arc::new(
         ProviderRegistry::load(&providers_path(&state.home))
             .map_err(|e| ApiError::bad_request(format!("provider unavailable: {e}")))?,
     );
+    let workspace = resolve_studio_workspace(&state, &studio.shared_dir)?;
+    let mut runs = state.studio_runs.lock().unwrap_or_else(|p| p.into_inner());
+    if runs.contains_key(&id) { return Err(ApiError::conflict("该工作室已有成员正在运行")); }
+    let route = record_user_message(&store, &studio, &text)
+        .map_err(|e| ApiError::bad_request(format!("route message: {e}")))?;
     let studio_store_root = state.home.join("studios");
     let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
     let event_registry_initial = Arc::clone(&state.studio_events);
@@ -2102,23 +2150,24 @@ async fn studio_send_message(
         publish_studio_event(&event_registry_initial, &studio_id_initial, &event);
         let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event))));
     };
-    emit_now(json!({"event_type":"studio_user_message","content":text}));
+    emit_now(json!({"event_type":"studio_user_message","content":text,"message":store.messages(&id).ok().and_then(|mut messages| messages.pop())}));
     emit_now(json!({"event_type":"studio_start","member_ids":route.member_ids,"direct":route.direct}));
     let members = studio.members.clone();
     let targets = route.member_ids.into_iter().take(4).collect::<Vec<_>>();
     let approvals = Arc::clone(&state.studio_approvals);
     let home = state.home.clone();
     let studio_id = studio.id.clone();
-    let workspace = resolve_studio_workspace(&state, &studio.shared_dir)?;
     let host_id = studio.host_id.clone();
-    let run_key = studio_id.clone();
     let run_registry = Arc::clone(&state.studio_runs);
     let event_registry = Arc::clone(&state.studio_events);
-    if state.studio_runs.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&id) {
-        return Err(ApiError::conflict("该工作室已有成员正在运行"));
-    }
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+    let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+    let guard = StudioRunGuard { registry: run_registry, studio_id: studio_id.clone(), run_id: run_id.clone(), done: done_tx };
     write_studio_run_state(&home, &studio_id, "queued", None, None);
-    let spawned = tokio::spawn(async move {
+    tokio::spawn(async move {
+        let _guard = guard;
+        let process_managers = Arc::new(StdMutex::new(Vec::<Arc<ProcessManager>>::new()));
         let prior = Arc::new(StdMutex::new(String::new()));
         // 成员清单注入：每个成员都能感知其他成员的存在（角色/职责）。
         let members = Arc::new(members);
@@ -2127,7 +2176,9 @@ async fn studio_send_message(
         let mut dispatch_count = HashMap::<String, usize>::new();
         // 按波次并发：同一波的 @成员并行，成员回复中的新 @ 进入下一波。
         // 每个成员单次用户请求最多执行两次，总深度最多四层，避免互相 @ 死循环。
+        let mut cancelled = false;
         for _depth in 0..4 {
+            if *cancel_rx.borrow() { cancelled = true; break; }
             let wave = pending
                 .drain(..)
                 .filter(|member_id| {
@@ -2141,7 +2192,7 @@ async fn studio_send_message(
             if wave.is_empty() { break; }
             let wave_context = prior.lock().unwrap_or_else(|p| p.into_inner()).clone();
             let followups = Arc::new(StdMutex::new(Vec::<String>::new()));
-            let mut handles = Vec::new();
+            let mut handles = tokio::task::JoinSet::new();
             for target_id in &wave {
             let Some(member) = members.iter().find(|m| &m.id == target_id).cloned() else { continue };
             let members = Arc::clone(&members);
@@ -2158,7 +2209,8 @@ async fn studio_send_message(
             let text = text.clone();
             let roster = roster.clone();
             let wave_context = wave_context.clone();
-            handles.push(tokio::spawn(async move {
+            let process_managers = Arc::clone(&process_managers);
+            handles.spawn(async move {
                 let emit = |event: Value| {
                     publish_studio_event(&event_registry, &studio_id, &event);
                     let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event))));
@@ -2202,11 +2254,13 @@ async fn studio_send_message(
                     }
                 };
                 agent_prompt.push_str("\n\n"); agent_prompt.push_str(&system);
+                agent_prompt.push_str("\n\n"); agent_prompt.push_str(coomi_services::studio::STUDIO_REPLY_STYLE);
                 let mcp_runtime = match tokio::time::timeout(Duration::from_secs(15), McpRuntime::load(&home)).await {
                     Ok(runtime) => Arc::new(runtime),
                     Err(_) => Arc::new(McpRuntime::default()),
                 };
                 let tools = CoreTools::new(cwd.clone(), policy).with_skills_directory(home.join("skills")).with_config_home(home.clone()).with_mcp_runtime(mcp_runtime).with_memory(Arc::new(MemoryManager::new(&home, &cwd)));
+                process_managers.lock().unwrap_or_else(|p| p.into_inner()).push(tools.process_manager());
                 let mut session = Session::new(member.provider_id.clone(), member.model.clone(), cwd);
                 let observer = StudioAgentObserver {
                     sender: tx.clone(),
@@ -2214,17 +2268,18 @@ async fn studio_send_message(
                     studio_id: studio_id.clone(),
                     member_id: member.id.clone(),
                 };
-                let approval = StudioApproval { sender: tx.clone(), approvals: Arc::clone(&approvals), member_id: member.id.clone(), member_name: member.name.clone(), permission: member.tool_permission };
-                let result = tokio::time::timeout(Duration::from_secs(150), Agent::new(agent_prompt).with_max_tool_rounds(64).with_reasoning_effort("medium").run_turn(&mut session, user, &provider, &tools, &approval, &observer)).await;
+                let approval = StudioApproval { studio_id: studio_id.clone(), sender: tx.clone(), approvals: Arc::clone(&approvals), member_id: member.id.clone(), member_name: member.name.clone(), permission: member.tool_permission };
+                let result = tokio::time::timeout(Duration::from_secs(150), Agent::new(agent_prompt).with_max_tool_rounds(64).with_reasoning_effort("high").run_turn(&mut session, user, &provider, &tools, &approval, &observer)).await;
                 match result {
                     Ok(Ok(response)) => {
-                        let mentions = members.iter().filter(|other| other.id != member.id && (response.contains(&format!("@{}", other.name)) || response.contains(&format!("@{}", other.id)))).map(|other|other.id.clone()).collect::<Vec<_>>();
+                        let response = coomi_services::studio::compact_studio_reply(&response);
+                        let mentions = members.iter().filter(|other| other.id != member.id && (coomi_services::studio::mentions_member(&response, &other.name) || coomi_services::studio::mentions_member(&response, &other.id))).map(|other|other.id.clone()).collect::<Vec<_>>();
                         let reply = StudioMessage::new(member.id.clone(), member.name.clone(), response.clone(), mentions.clone());
                         if let Err(error) = StudioStore::new(studio_store_root.clone()).append_message(&studio_id, &reply) { emit(json!({"event_type":"studio_error","message":format!("保存成员回复失败：{error}")})); }
                         else {
                             let mut prior = prior.lock().unwrap_or_else(|p| p.into_inner());
                             prior.push_str(&format!("{}：{}\n", member.name, response));
-                            emit(json!({"event_type":"studio_message","message":reply}));
+                            emit(json!({"event_type":"studio_message","member_id":member.id,"message":reply}));
                             if !mentions.is_empty() {
                                 followups.lock().unwrap_or_else(|p| p.into_inner()).extend(mentions.clone());
                                 emit(json!({"event_type":"studio_mentions","member_id":member.id,"mentions":mentions}));
@@ -2235,18 +2290,21 @@ async fn studio_send_message(
                     Ok(Err(error)) => { let detail = format!("成员回复失败：{error:#}"); write_studio_run_state(&home, &studio_id, "failed", Some(&member.id), Some(&detail)); emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","member_id":member.id,"message":detail})); }
                     Err(_) => { let detail = "成员响应超时（150 秒），已停止本轮执行".to_string(); write_studio_run_state(&home, &studio_id, "failed", Some(&member.id), Some(&detail)); emit(json!({"event_type":"studio_member_status","member_id":member.id,"status":"failed"})); emit(json!({"event_type":"studio_error","member_id":member.id,"message":detail})); }
                 }
-                }));
+                });
             }
-            for handle in handles { let _ = handle.await; }
+            cancelled = finish_studio_wave(&mut handles, &mut cancel_rx).await;
+            if cancelled { break; }
             pending = std::mem::take(&mut *followups.lock().unwrap_or_else(|p| p.into_inner()));
             pending.sort();
             pending.dedup();
         }
-        let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", json!({"event_type":"studio_end"})))));
-        write_studio_run_state(&home, &studio_id, "completed", None, None);
-        run_registry.lock().unwrap_or_else(|p| p.into_inner()).remove(&run_key);
+        let managers = std::mem::take(&mut *process_managers.lock().unwrap_or_else(|p| p.into_inner()));
+        for manager in managers { manager.terminate_owned().await; }
+        let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", json!({"event_type":"studio_end","cancelled":cancelled})))));
+        write_studio_run_state(&home, &studio_id, if cancelled { "cancelled" } else { "completed" }, None, None);
     });
-    state.studio_runs.lock().unwrap_or_else(|p| p.into_inner()).insert(id, spawned.abort_handle());
+    runs.insert(id, StudioRun { id: run_id, cancel: cancel_tx, done: done_rx });
+    drop(runs);
     let body = Body::from_stream(stream::unfold(rx, |mut receiver| async { receiver.recv().await.map(|item| (item, receiver)) }));
     Response::builder().status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
@@ -2278,6 +2336,7 @@ impl AgentObserver for StudioAgentObserver {
 }
 
 struct StudioApproval {
+    studio_id: String,
     sender: mpsc::UnboundedSender<Result<Bytes, Infallible>>,
     approvals: Arc<StdMutex<HashMap<String, oneshot::Sender<bool>>>>,
     member_id: String,
@@ -2291,7 +2350,9 @@ impl ApprovalHandler for StudioApproval {
         if self.permission == ToolPermission::Full
             || (self.permission == ToolPermission::Auto && !reason.to_ascii_lowercase().contains("delete")) { return true; }
         let (sender, receiver) = oneshot::channel();
-        self.approvals.lock().unwrap_or_else(|p|p.into_inner()).insert(call.id.clone(), sender);
+        let key = format!("{}:{}", self.studio_id, call.id);
+        self.approvals.lock().unwrap_or_else(|p|p.into_inner()).insert(key.clone(), sender);
+        let _guard = StudioApprovalGuard { registry: Arc::clone(&self.approvals), key };
         let payload = json!({"event_type":"studio_tool_approval","member_id":self.member_id,"member_name":self.member_name,"call_id":call.id,"tool_name":call.name,"arguments":call.arguments,"risk_summary":reason});
         let _ = self.sender.send(Ok(Bytes::from(format!("data: {}\n\n", payload))));
         tokio::time::timeout(Duration::from_secs(300), receiver).await.ok().and_then(Result::ok).unwrap_or(false)
@@ -11694,4 +11755,33 @@ async fn experience_list(State(state): State<AppState>) -> Result<Json<Value>, A
         "enabled": coomi_experience::enabled(&state.home),
         "lessons": coomi_experience::load_lessons(&state.home),
     })))
+}
+
+#[cfg(test)] mod studio_cancel_tests {
+    use super::*;
+    #[tokio::test] async fn stop_awaits_every_child_and_clears_pending_approvals() {
+        let approvals = Arc::new(StdMutex::new(HashMap::new()));
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        let mut tasks = tokio::task::JoinSet::new();
+        let (ready, mut ready_rx) = mpsc::unbounded_channel();
+        for n in 0..3 {
+            let approvals = Arc::clone(&approvals); let ready = ready.clone();
+            tasks.spawn(async move {
+                let key = format!("studio:{n}"); let (sender, receiver) = oneshot::channel();
+                approvals.lock().unwrap().insert(key.clone(), sender);
+                let _guard = StudioApprovalGuard { registry: approvals, key };
+                ready.send(()).unwrap(); let _ = receiver.await;
+                panic!("cancelled member must never resume tool execution");
+            });
+        }
+        for _ in 0..3 { ready_rx.recv().await.unwrap(); }
+        tx.send(true).unwrap();
+        assert!(finish_studio_wave(&mut tasks, &mut rx).await);
+        assert!(tasks.is_empty()); assert!(approvals.lock().unwrap().is_empty());
+    }
+    #[tokio::test] async fn completed_wave_is_not_cancelled() {
+        let (_tx, mut rx) = tokio::sync::watch::channel(false);
+        let mut tasks = tokio::task::JoinSet::new(); tasks.spawn(async {});
+        assert!(!finish_studio_wave(&mut tasks, &mut rx).await);
+    }
 }

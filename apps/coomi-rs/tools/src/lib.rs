@@ -2047,10 +2047,17 @@ impl CoreTools {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), process.output())
+        #[cfg(unix)]
+        process.process_group(0);
+        let child = match process.spawn() {
+            Ok(child) => child,
+            Err(error) => return ToolResult::error(format!("failed to start shell: {error}")),
+        };
+        let mut group = processes::ShellProcessGroup(child.id());
+        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait_with_output())
             .await
         {
-            Ok(Ok(output)) => output,
+            Ok(Ok(output)) => { group.0 = None; output },
             Ok(Err(error)) => return ToolResult::error(format!("failed to start shell: {error}")),
             Err(_) => return ToolResult::error(format!("shell timed out after {timeout_ms} ms")),
         };

@@ -38,7 +38,7 @@ import android.widget.Toast;
  * <ol>
  *   <li><b>输入框就在悬浮窗里</b>。控制模式的目标是操作别的 App，让用户为了打一句话
  *       先切回 Coomi 再切回去，是很别扭的。展开态会临时申请焦点（输入法才能弹出来），
- *       收起成小球时立刻放弃焦点，避免挡住目标 App 的输入。</li>
+ *       收起为窄条带时立刻放弃焦点，避免挡住目标 App 的输入。</li>
  *   <li><b>思考过程持续可见</b>。模型的推理片段与工具调用由
  *       {@link #pushTrace} 追加进滚动区，切到微信/QQ 之后也能看到它进度到哪了。</li>
  *   <li><b>常驻但很轻</b>。只占屏幕顶部一条，其余区域全部留给目标 App。</li>
@@ -86,6 +86,52 @@ public final class CoomiFloatService extends Service {
     private float touchDownRawY;
     private boolean dragging;
 
+    private int surface, fill, border, text, muted, accent;
+    private final android.content.BroadcastReceiver themeReceiver = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) { handler.post(() -> { applyPalette(); resizeOverlay(); }); }
+    };
+
+    private void readPalette() {
+        surface = CoomiTheme.overlayColor(this, "surface", com.termux.R.attr.coomiCard);
+        fill = CoomiTheme.overlayColor(this, "fill", com.termux.R.attr.coomiFill);
+        border = CoomiTheme.overlayColor(this, "border", com.termux.R.attr.coomiBorder);
+        text = CoomiTheme.overlayColor(this, "text", com.termux.R.attr.coomiText);
+        muted = CoomiTheme.overlayColor(this, "text_muted", com.termux.R.attr.coomiText3);
+        accent = CoomiTheme.overlayColor(this, "accent", com.termux.R.attr.coomiBlue);
+    }
+    private void applyPalette() {
+        readPalette();
+        if (root == null) return;
+        recolor(root);
+        card.setBackground(rounded(surface, 14, border));
+        ballView.setBackground(rounded(surface, 0, border));
+        traceScroll.setBackground(rounded(fill, 9, 0));
+        input.setBackground(rounded(fill, 10, border));
+        input.setHintTextColor(muted);
+    }
+    private void recolor(View view) {
+        String tag = String.valueOf(view.getTag());
+        if (view instanceof TextView) {
+            ((TextView) view).setTextColor("accent".equals(tag) ? accent : "muted".equals(tag) ? muted : text);
+            if ("action".equals(tag)) view.setBackground(rounded(fill, 9, border));
+            if ("send".equals(tag)) { view.setBackground(rounded(accent, 10, 0)); ((TextView)view).setTextColor(Color.WHITE); }
+        }
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup)view;
+            for (int i=0;i<group.getChildCount();i++) recolor(group.getChildAt(i));
+        }
+    }
+    private void resizeOverlay() {
+        if (params == null) return;
+        params.width = WindowManager.LayoutParams.MATCH_PARENT;
+        params.x = 0;
+        params.y = Math.max(0, Math.min(params.y, getResources().getDisplayMetrics().heightPixels - Math.max(dp(48), root == null ? 0 : root.getHeight())));
+        updateParams();
+    }
+    @Override public void onConfigurationChanged(android.content.res.Configuration config) {
+        super.onConfigurationChanged(config); applyPalette(); resizeOverlay();
+    }
+
     public static boolean isRunning() {
         return instance != null;
     }
@@ -101,7 +147,12 @@ public final class CoomiFloatService extends Service {
 
     /** 只更新顶部状态文字，不动思考区。 */
     public static void pushStatus(Context context, String status) {
-        pushTrace(context, status, null);
+        if (instance == null) return;
+        instance.handler.post(() -> {
+            if (instance == null) return;
+            if (instance.statusView != null) instance.statusView.setText(status);
+            if (instance.ballView != null) instance.ballView.setText("控制模式 · " + status + "    展开⌃");
+        });
     }
 
     public static void setCollapsed(Context context, boolean value) {
@@ -131,6 +182,10 @@ public final class CoomiFloatService extends Service {
         super.onCreate();
         instance = this;
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        readPalette();
+        android.content.IntentFilter filter = new android.content.IntentFilter(CoomiTheme.ACTION_THEME_CHANGED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(themeReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(themeReceiver, filter);
         startForegroundSafely();
         handler.post(this::buildOverlay);
     }
@@ -164,6 +219,7 @@ public final class CoomiFloatService extends Service {
     @Override
     public void onDestroy() {
         if (instance == this) instance = null;
+        try { unregisterReceiver(themeReceiver); } catch (IllegalArgumentException ignored) {}
         handler.removeCallbacksAndMessages(null);
         detach();
         super.onDestroy();
@@ -217,11 +273,13 @@ public final class CoomiFloatService extends Service {
     private void buildOverlay() {
         if (root != null) return;
         root = new FrameLayout(this);
+        root.setFocusableInTouchMode(true);
 
         card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(9), dp(12), dp(10));
-        card.setBackground(rounded(0xF21A1D24, 16, 0x33FFFFFF));
+        card.setBackground(rounded(surface, 14, border));
+        card.setLayoutParams(new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
         card.setElevation(dp(8));
 
         // ── 顶栏：状态 + 收起 ──
@@ -231,7 +289,8 @@ public final class CoomiFloatService extends Service {
 
         TextView dotView = new TextView(this);
         dotView.setText("●");
-        dotView.setTextColor(0xFF4C7CF7);
+        dotView.setTag("accent");
+        dotView.setTextColor(accent);
         dotView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f);
         header.addView(dotView);
 
@@ -244,7 +303,7 @@ public final class CoomiFloatService extends Service {
 
         titleView = new TextView(this);
         titleView.setText("控制模式");
-        titleView.setTextColor(0xFFF2F4F8);
+        titleView.setTextColor(text);
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         titleView.setSingleLine(true);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
@@ -252,7 +311,8 @@ public final class CoomiFloatService extends Service {
 
         statusView = new TextView(this);
         statusView.setText("就绪");
-        statusView.setTextColor(0xFF8FA3C8);
+        statusView.setTag("muted");
+        statusView.setTextColor(muted);
         statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
         statusView.setSingleLine(true);
         statusView.setEllipsize(TextUtils.TruncateAt.END);
@@ -262,11 +322,16 @@ public final class CoomiFloatService extends Service {
 
         TextView collapse = new TextView(this);
         collapse.setText("收起");
-        collapse.setTextColor(0xFF7FA8FF);
+        collapse.setTag("accent");
+        collapse.setTextColor(accent);
         collapse.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         collapse.setPadding(dp(10), dp(4), 0, dp(4));
         collapse.setOnClickListener(v -> setCollapsedInternal(true));
         header.addView(collapse);
+        TextView exit = new TextView(this);
+        exit.setText("退出"); exit.setTag("muted"); exit.setTextColor(muted);
+        exit.setTextSize(12f); exit.setPadding(dp(14),dp(8),dp(2),dp(8));
+        exit.setOnClickListener(v -> stopSelf()); header.addView(exit);
         card.addView(header);
 
         // ── 思考过程：滚动区，持续追加 ──
@@ -281,6 +346,17 @@ public final class CoomiFloatService extends Service {
         traceBox = new LinearLayout(this);
         traceBox.setOrientation(LinearLayout.VERTICAL);
         traceScroll.addView(traceBox);
+        traceScroll.setVisibility(View.GONE);
+        TextView traceToggle = new TextView(this);
+        traceToggle.setText("执行记录  ⌄"); traceToggle.setTag("muted"); traceToggle.setTextColor(muted);
+        traceToggle.setTextSize(11f); traceToggle.setPadding(0,dp(8),0,dp(2));
+        traceToggle.setOnClickListener(v -> {
+            boolean open = traceScroll.getVisibility() != View.VISIBLE;
+            traceScroll.setVisibility(open ? View.VISIBLE : View.GONE);
+            traceToggle.setText(open ? "收起执行记录  ⌃" : "执行记录  ⌄");
+            handler.post(this::resizeOverlay);
+        });
+        card.addView(traceToggle);
         card.addView(traceScroll);
 
         // ── 输入框：就在悬浮窗里，不用切回应用 ──
@@ -294,12 +370,12 @@ public final class CoomiFloatService extends Service {
 
         input = new EditText(this);
         input.setHint("输入要发送的内容…");
-        input.setHintTextColor(0xFF6E7A90);
-        input.setTextColor(0xFFF2F4F8);
+        input.setHintTextColor(muted);
+        input.setTextColor(text);
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         input.setSingleLine(true);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
-        input.setBackground(rounded(0xFF252A34, 10, 0x33FFFFFF));
+        input.setBackground(rounded(fill, 10, border));
         input.setPadding(dp(10), dp(7), dp(10), dp(7));
         LinearLayout.LayoutParams inputParams =
             new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
@@ -318,8 +394,9 @@ public final class CoomiFloatService extends Service {
         send.setText("填入并发送");
         send.setAllCaps(false);
         send.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        send.setTag("send");
         send.setTextColor(Color.WHITE);
-        send.setBackground(rounded(0xFF2F6BD8, 10, 0));
+        send.setBackground(rounded(accent, 10, 0));
         LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, dp(36));
         sendParams.leftMargin = dp(7);
@@ -345,13 +422,16 @@ public final class CoomiFloatService extends Service {
         root.addView(card);
 
         ballView = new TextView(this);
-        ballView.setText("控");
+        ballView.setText("控制模式 · 就绪    展开⌃");
+        ballView.setSingleLine(true);
+        ballView.setEllipsize(TextUtils.TruncateAt.END);
+        ballView.setPadding(dp(16), 0, dp(16), 0);
         ballView.setGravity(Gravity.CENTER);
-        ballView.setTextColor(Color.WHITE);
+        ballView.setTextColor(text);
         ballView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-        ballView.setBackground(rounded(0xF21A1D24, 24, 0x44FFFFFF));
+        ballView.setBackground(rounded(surface, 0, border));
         ballView.setElevation(dp(8));
-        ballView.setLayoutParams(new FrameLayout.LayoutParams(dp(46), dp(46)));
+        ballView.setLayoutParams(new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(42)));
         ballView.setOnClickListener(v -> setCollapsedInternal(false));
         root.addView(ballView);
 
@@ -369,8 +449,8 @@ public final class CoomiFloatService extends Service {
                     float dy = event.getRawY() - touchDownRawY;
                     if (!dragging && Math.hypot(dx, dy) < dp(6)) return false;
                     dragging = true;
-                    params.x = Math.max(0, touchStartX + (int) dx);
-                    params.y = Math.max(0, touchStartY + (int) dy);
+                    params.x = 0;
+                    params.y = Math.max(0, Math.min(touchStartY + (int) dy, getResources().getDisplayMetrics().heightPixels - root.getHeight()));
                     lastX = params.x;
                     lastY = params.y;
                     updateParams();
@@ -402,8 +482,8 @@ public final class CoomiFloatService extends Service {
                         float dy = event.getRawY() - touchDownRawY;
                         if (!dragging && Math.hypot(dx, dy) < dp(6)) return true;
                         dragging = true;
-                        params.x = Math.max(0, touchStartX + (int) dx);
-                        params.y = Math.max(0, touchStartY + (int) dy);
+                        params.x = 0;
+                        params.y = Math.max(0, Math.min(touchStartY + (int) dy, getResources().getDisplayMetrics().heightPixels - root.getHeight()));
                         lastX = params.x;
                         lastY = params.y;
                         updateParams();
@@ -417,16 +497,18 @@ public final class CoomiFloatService extends Service {
 
         attach();
         setCollapsedInternal(collapsed);
-        appendTrace("控制模式已启动", "悬浮窗可以拖动；点击「收起」变成小球。");
+        applyPalette();
+        appendTrace("控制模式已启动", "上下拖动调整位置；收起为窄条带。");
     }
 
     private TextView quickAction(String label, Runnable action) {
         TextView view = new TextView(this);
         view.setText(label);
-        view.setTextColor(0xFFAFC4E8);
+        view.setTag("action");
+        view.setTextColor(text);
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         view.setGravity(Gravity.CENTER);
-        view.setBackground(rounded(0x2EFFFFFF, 9, 0));
+        view.setBackground(rounded(fill, 9, border));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(32), 1f);
         params.rightMargin = dp(6);
         view.setLayoutParams(params);
@@ -444,7 +526,8 @@ public final class CoomiFloatService extends Service {
             return;
         }
         input.setText("");
-        fillAndSend(text);
+        setCollapsedInternal(true);
+        handler.postDelayed(() -> fillAndSend(text), 180);
     }
 
     private void fillOnly() {
@@ -459,8 +542,12 @@ public final class CoomiFloatService extends Service {
             appendTrace(null, "无障碍未开启，无法操作屏幕");
             return;
         }
-        boolean ok = CoomiAccessibilityService.get().inputText(text);
-        appendTrace(null, ok ? "已填入输入框（未发送）" : "没找到可输入的输入框");
+        setCollapsedInternal(true);
+        handler.postDelayed(() -> {
+            if (!CoomiAccessibilityService.isReady()) return;
+            boolean ok = CoomiAccessibilityService.get().inputText(text);
+            appendTrace(null, ok ? "已填入输入框（未发送）" : "没找到可输入的输入框");
+        }, 180);
     }
 
     private void fillAndSend(String text) {
@@ -514,11 +601,12 @@ public final class CoomiFloatService extends Service {
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
             params.gravity = Gravity.TOP | Gravity.START;
-            params.x = lastX >= 0 ? lastX : dp(10);
-            params.y = lastY >= 0 ? lastY : dp(40);
+            params.x = 0;
+            params.y = lastY >= 0 ? lastY : Math.max(dp(40), getResources().getDisplayMetrics().heightPixels - dp(270));
+            params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
         }
         try {
             if (root.getParent() == null) windowManager.addView(root, params);
@@ -551,7 +639,7 @@ public final class CoomiFloatService extends Service {
      * 展开 / 收起。
      *
      * <p>展开时必须去掉 FLAG_NOT_FOCUSABLE，否则输入框拿不到焦点、输入法弹不出来 ——
-     * 这正是「悬浮窗里打不了字」的原因。收起成小球后立刻加回该标志，把焦点还给目标 App。</p>
+     * 这正是「悬浮窗里打不了字」的原因。收起为窄条带后立刻加回该标志，把焦点还给目标 App。</p>
      */
     private void setCollapsedInternal(boolean value) {
         collapsed = value;
@@ -566,28 +654,15 @@ public final class CoomiFloatService extends Service {
                 hideKeyboard();
             } else {
                 params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-                // ALT_FOCUSABLE_IM 让输入法可以正常作用于悬浮窗内的输入框。
-                params.flags |= WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+                params.flags &= ~WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
             }
-            // 展开态固定宽度：太宽会盖住目标 App 的内容，太窄输入框没法用。
-            params.width = value
-                ? WindowManager.LayoutParams.WRAP_CONTENT
-                : Math.min(dp(300), getResources().getDisplayMetrics().widthPixels - dp(28));
-            updateParams();
+            params.width = WindowManager.LayoutParams.MATCH_PARENT;
+            params.x = 0;
+            resizeOverlay();
         }
-        if (!value && input != null) {
-            input.setVisibility(View.VISIBLE);
-            // 展开时主动把焦点交给输入框并唤起输入法：
-            // 悬浮球本身不是输入框，光去掉 NOT_FOCUSABLE 并不会自动弹输入法。
-            input.requestFocus();
-            handler.postDelayed(() -> showKeyboard(input), 120);
-            // 部分 ROM 在悬浮窗刚变焦时输入法抢焦点失败，延迟再试一次。
-            handler.postDelayed(() -> {
-                if (!collapsed && input != null && input.isFocused()) {
-                    showKeyboard(input);
-                }
-            }, 420);
-        }
+        if (value && input != null) input.clearFocus();
+        if (!value && root != null) root.requestFocus();
+        handler.post(this::resizeOverlay);
     }
 
     private void hideKeyboard() {
@@ -624,6 +699,7 @@ public final class CoomiFloatService extends Service {
         // 顶栏状态：只取一句，保持醒目不刷屏
         if (title != null && !title.isEmpty() && statusView != null) {
             statusView.setText(title);
+            if (ballView != null) ballView.setText("控制模式 · " + title + "    展开⌃");
             if (titleView != null && titleView.getText().length() == 0) titleView.setText("控制模式");
         }
 
@@ -634,7 +710,8 @@ public final class CoomiFloatService extends Service {
 
         TextView row = new TextView(this);
         row.setText("· " + line);
-        row.setTextColor(0xFFC2CDE0);
+        row.setTag("muted");
+        row.setTextColor(muted);
         row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
         row.setLineSpacing(dp(1), 1f);
         traceBox.addView(row);

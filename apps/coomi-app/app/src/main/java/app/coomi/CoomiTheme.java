@@ -82,6 +82,7 @@ public final class CoomiTheme {
     private static final String PREF_SAVED_PALETTES = "coomi.appearance.saved_palettes";
     private static final String PREF_ACTIVE_PALETTE = "coomi.appearance.active_palette";
     private static final String PREF_DISPLAY_SCALE = "coomi.appearance.display_scale";
+    private static final String PREF_MOTTO_FONT = "coomi.appearance.motto_font";
     public static final int MAX_SAVED_PALETTES = 3;
     private static final String[] COLOR_KEYS = {
         "page", "surface", "fill", "border", "text", "text_secondary", "text_muted",
@@ -341,6 +342,7 @@ public final class CoomiTheme {
             .remove(PREF_BACKGROUND_URI_PREFIX + SURFACE_CONSOLE)
             .remove(PREF_BACKGROUND_URI_PREFIX + SURFACE_CHAT)
             .remove(PREF_DISPLAY_SCALE)
+            .remove(PREF_MOTTO_FONT)
             .remove(PREF_ACTIVE_PALETTE);
         for (String key : COLOR_KEYS) editor.remove(PREF_COLOR_PREFIX + key);
         editor.apply();
@@ -402,6 +404,16 @@ public final class CoomiTheme {
         preferences(context).edit().putInt(PREF_DISPLAY_SCALE, Math.max(75, Math.min(110, percent))).apply();
     }
 
+    public static String getMottoFont(Context context) {
+        return "guofeng".equals(preferences(context).getString(PREF_MOTTO_FONT, "default"))
+            ? "guofeng" : "default";
+    }
+
+    public static void setMottoFont(Context context, String font) {
+        preferences(context).edit().putString(PREF_MOTTO_FONT,
+            "guofeng".equals(font) ? "guofeng" : "default").apply();
+    }
+
     public static void setBackgroundMask(Context context, String surface, int value) {
         preferences(context).edit().putInt(PREF_MASK_PREFIX + surface, Math.max(0, Math.min(95, value))).apply();
     }
@@ -416,6 +428,7 @@ public final class CoomiTheme {
             root.put("chatBackground", hasBackground(context, SURFACE_CHAT));
             root.put("chatMask", getBackgroundMask(context, SURFACE_CHAT));
             root.put("displayScale", getDisplayScale(context) / 100d);
+            root.put("mottoFont", getMottoFont(context));
             File background = backgroundFile(context, SURFACE_CHAT);
             Uri source = getBackgroundUri(context, SURFACE_CHAT);
             root.put("revision", background.exists() ? background.lastModified()
@@ -665,6 +678,14 @@ public final class CoomiTheme {
     private static int mapColor(Map<Integer, Integer> colors, int original) {
         Integer replacement = colors.get(original);
         return replacement == null ? original : replacement;
+    }
+
+    /** Shared native palette for overlays, including saved custom themes. */
+    public static int overlayColor(Context context, String key, int attribute) {
+        if (isCustomEnabled(context)) return getCustomColor(context, key);
+        Context themed = new android.view.ContextThemeWrapper(context,
+            themeResource(getMode(context), isDark(context), false, false));
+        return resolveThemeColor(themed, attribute);
     }
 
     private static int resolveThemeColor(Context context, int attribute) {
