@@ -19,6 +19,7 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Arrays;
@@ -856,7 +857,7 @@ public class CoomiService extends Service {
             if (status >= 200 && status < 300) return null;
             String message = "任务提交失败 HTTP " + status;
             InputStream err = connection.getErrorStream();
-            if (err != null) try (BufferedReader reader = new BufferedReader(new InputStreamReader(err))) {
+            if (err != null) try (BufferedReader reader = new BufferedReader(new InputStreamReader(err, java.nio.charset.StandardCharsets.UTF_8))) {
                 String line = reader.readLine(); if (line != null) message = new org.json.JSONObject(line).optString("error", message);
             }
             return message;
