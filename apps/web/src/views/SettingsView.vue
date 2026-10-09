@@ -301,6 +301,22 @@ onMounted(async () => {
           <span class="rt"><span class="rmain">外观</span><span class="rsub">主题、颜色、背景与显示比例</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
+        <button class="row" @click="config.setAllAnimationsOff(!config.allAnimationsOff)">
+          <span class="ri" :class="{ on: !config.allAnimationsOff }"><CoomiIcon name="play" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">关闭所有动画</span>
+            <span class="rsub">关闭后禁用全部 CSS/GSAP/Morphicons/Web Animations，包括发送与工具展开动画</span>
+          </span>
+          <span class="sw" :class="{ on: config.allAnimationsOff }" />
+        </button>
+        <button class="row" @click="config.setSendMorphAnimation(!config.sendMorphAnimation)" :disabled="config.allAnimationsOff" :class="{ 'row-disabled': config.allAnimationsOff }">
+          <span class="ri" :class="{ on: config.sendMorphAnimation && !config.allAnimationsOff }"><CoomiIcon name="sparkle" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">发送与工具动画</span>
+            <span class="rsub">发送时显示按键光效，并控制工具卡展开与收回动画</span>
+          </span>
+          <span class="sw" :class="{ on: config.sendMorphAnimation && !config.allAnimationsOff }" />
+        </button>
         <button class="row" @click="config.setMinimalUi(!config.minimalUi)">
           <span class="ri" :class="{ on: config.minimalUi }"><CoomiIcon name="terminal" :size="17" /></span>
           <span class="rt">
@@ -485,7 +501,9 @@ onMounted(async () => {
   text-align: left; background: var(--bg);
 }
 .row + .row { border-top: 1px solid var(--border); }
-.row:active { background: var(--fill); }
+:root:not([data-all-animations-off]) .row:active { background: var(--fill); }
+.row-disabled { opacity: .45; pointer-events: none; }
+.row-disabled:active { background: var(--bg) !important; }
 .theme-options.disabled { opacity: .42; }
 .theme-options .row:disabled { color: inherit; cursor: default; }
 .theme-options .row:disabled:active { background: var(--bg); }

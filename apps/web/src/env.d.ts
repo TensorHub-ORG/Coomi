@@ -5,6 +5,7 @@ interface Window {
   __coomiApplyAppearance?: (config: AppearanceConfig) => void
   CoomiAndroid?: {
     openDashboard(): void
+    setControlSession?(sessionId: string, providerId: string, model: string): void
     importFiles?(): void
     importFilesForRequest?(requestId: string): void
     authorizeFolder?(): void

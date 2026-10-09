@@ -5,14 +5,14 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'build/studio-fix/ui'
+OUT = ROOT / 'build/fix5/ui/studio'
 MEMBERS = [{'id': mid, 'name': name, 'model': 'test-model', 'providerId': 'test', 'role': name, 'status': 'idle', 'toolPermission': 'ask'} for mid, name in [('host', '主持'), ('coder', '程序员')]]
 STUDIO = {'id': 'fixture', 'name': '设计工作室', 'hostId': 'host', 'members': MEMBERS}
-PROVIDER = {'id': 'test', 'name': 'UI Test', 'baseUrl': 'https://example.invalid/v1', 'type': 'openai-compatible', 'models': ['test-model'], 'model': 'test-model'}
+PROVIDER = {'id': 'test', 'name': 'UI Test', 'hasKey': True, 'baseUrl': 'https://example.invalid/v1', 'type': 'openai-compatible', 'models': ['test-model'], 'model': 'test-model'}
 
 def mock(route):
     path = urlparse(route.request.url).path
-    data = {'sessions': [], 'tasks': [], 'studios': [], 'messages': [], 'workItems': [], 'providers': [PROVIDER], 'active': 'test', 'running': False}
+    data = {'sessions': [], 'tasks': [], 'studios': [], 'messages': [], 'workItems': [], 'providers': [PROVIDER, {**PROVIDER, 'id': 'openai', 'name': 'Configured fixture'}], 'active': 'test', 'running': False}
     if path == '/api/studios/fixture': data = {'studio': STUDIO, 'messages': [], 'workItems': []}
     if path.endswith('/stop'): data = {'ok': True}
     if path == '/api/studios/fixture/messages' and route.request.method == 'POST':
@@ -41,14 +41,17 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     passed=[]
     with sync_playwright() as p:
-        browser=p.chromium.launch(channel='chrome', headless=True)
+        browser=p.chromium.launch(channel='chrome', headless=True, args=['--disable-gpu', '--disable-renderer-backgrounding'])
         context=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         context.add_init_script('''window.__float=false;window.CoomiAndroid={openDashboard(){},closeHostActivity(){},getQuickCommands:()=>'',isAccessibilityEnabled:()=>true,isOverlayGranted:()=>true,isControlFloatRunning:()=>window.__float,startControlFloat:()=>{window.__float=true},stopControlFloat:()=>{window.__float=false},pushControlFloat(){},pushControlStatus(){}};''')
         context.route('**/api/**',mock)
         page=context.new_page(); errors=[]
         page.on('pageerror',lambda e:errors.append(str(e)))
         page.goto(args.url + '/?demo=1&autoplay=0')
-        page.locator('.composer').wait_for()
+        try: page.locator('.composer').wait_for()
+        except Exception:
+            print(json.dumps({'errors': errors, 'body': page.locator('body').inner_text()}, ensure_ascii=False), flush=True)
+            raise
         navigate(page,'/collab/new')
         for width,height in [(320,640),(390,844),(430,844),(390,470)]:
             page.set_viewport_size({'width':width,'height':height})
@@ -108,6 +111,11 @@ def main():
         navigate(page,'/')
         page.locator('.bar-toggle').click()
         page.locator('.mode-pop').wait_for()
+        card=page.locator('.mode-pop').bounding_box()
+        page.wait_for_timeout(300)
+        card=page.locator('.mode-pop').bounding_box()
+        composer=page.locator('.composer .field').bounding_box()
+        assert composer['y']-(card['y']+card['height']) >= 7.5, (card, composer)
         assert page.locator('.mode-pop .pill').count()==4
         assert page.locator('.mode-pop').evaluate('e=>getComputedStyle(e).backgroundColor')!='rgba(0, 0, 0, 0)'
         assert page.locator('.mode-pop').evaluate('e=>getComputedStyle(e).boxShadow')!='none'
@@ -144,6 +152,21 @@ def main():
         assert page.locator('.control-float').count()==0
         page.screenshot(path=str(OUT/'control-native-only.png'))
         passed.append('native control mode owns the controls; duplicate web panel is removed')
+        navigate(page,'/providers')
+        page.locator('.status.current').wait_for()
+        for theme in ['light', 'dark', 'book', 'orange', 'ink', 'abyss', 'ember', 'celadon', 'linen']:
+            page.evaluate('(theme)=>document.documentElement.dataset.theme=theme', theme)
+            colors=page.evaluate('''()=>{
+              const probe=document.createElement('span');probe.style.background='var(--blue)';document.body.append(probe);
+              const blue=getComputedStyle(probe).backgroundColor;probe.remove();
+              return {blue,current:getComputedStyle(document.querySelector('.status.current')).backgroundColor,
+                configured:getComputedStyle(document.querySelector('.status.configured')).backgroundColor,
+                tile:getComputedStyle(document.querySelector('.tile.on')).backgroundColor};
+            }''')
+            assert colors['current']==colors['blue']==colors['tile'], (theme, colors)
+            assert colors['configured']!=colors['blue'], (theme, colors)
+            page.screenshot(path=str(OUT/f'providers-{theme}.png'))
+        passed.append('current provider uses theme accent while configured is subdued in all nine palettes')
         assert not errors,errors
         (OUT/'report.json').write_text(json.dumps({'passed':passed,'pageErrors':errors},ensure_ascii=False,indent=2),encoding='utf-8')
         print(json.dumps({'passed':passed,'pageErrors':errors},ensure_ascii=False))

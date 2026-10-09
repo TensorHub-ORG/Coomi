@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import BillingDetails from './BillingDetails.vue'
 import { useSessionStore } from '@/stores/session'
 defineProps<{ runtimeInfo: unknown; envBadgeClass: string; envBadgeLabel: string; envDetail: string }>()
 defineEmits<{ path: [] }>()
@@ -64,6 +65,7 @@ function formatDuration(value: number | null | undefined): string {
           <small v-if="envDetail" class="env-detail">{{ envDetail }}</small>
         </span>
       </div>
+<BillingDetails />
 </div></template>
 <style scoped>
 .usage-details { min-height:0; overflow:auto; }

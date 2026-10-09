@@ -11,13 +11,13 @@ test('auxiliary sockets, model selection, timeline and active main session stay 
   globalThis.window = { location: { search: '' } }
   const mocks = {
     '@/bridge': `export const sockets = []; export function createTransport(id) { const t = { id, alive: true, sent: [], send(v) { this.sent.push(v) }, onStateChange(cb) { this.state = cb }, onMessage(cb) { this.message = cb }, connect() { this.state({ state: 'open' }) }, close() { this.alive = false } }; sockets.push(t); return t }`,
-    '@/bridge/http': `export const remote = []; export async function authedFetch(url) { return { ok: true, json: async () => url === '/api/sessions' ? { sessions: remote } : { messages: [] } } } export async function apiGet() { return {} } export async function apiSend(url) { const parent = url.split('/')[3]; const id = crypto.randomUUID(); remote.push({ id, parent_session_id: parent, title: '辅助对话', provider_id: 'main-provider', model: 'main-model', updated_at: new Date().toISOString(), created_at: new Date().toISOString() }); return { id } }`,
+    '@/bridge/http': `export const remote = []; export async function authedFetch(url) { return { ok: true, json: async () => url === '/api/sessions' ? { sessions: remote } : { messages: [] } } } export async function apiGet() { return {} } export async function apiSend(url) { const parent = url.split('/')[3]; const id = crypto.randomUUID(); const now = new Date().toISOString(); if (!remote.some(s => s.id === parent)) remote.push({ id: parent, title: '主会话', updated_at: now, created_at: now }); remote.push({ id, parent_session_id: parent, title: '辅助对话', provider_id: 'main-provider', model: 'main-model', updated_at: now, created_at: now }); return { id } }`,
     '@/bridge/demoMode': `export const isDemoMode = () => false`,
     '@/bridge/life': `export const GLOBAL_SESSION_ID = 'global'; export const isGlobalSession = id => id === GLOBAL_SESSION_ID`,
     '@/bridge/feedback': `export const reportErrorToNative = () => {}; export const sendFeedbackViaBridge = async () => ({})`,
     '@/bridge/tts': `export const speak = () => {}`,
     '@/router': `export const router = { push() {} }`,
-    './config': `export const config = { permissionMode: 'ask', currentProviderId: 'main-provider', currentModel: 'main-model', reasoningEffort: 'medium', maxToolRounds: 192, validateAndSelectModel() { throw Error('must not mutate global model') } }; export const useConfigStore = () => config`,
+    './config': `export const config = { permissionMode: 'ask', currentProviderId: 'main-provider', currentModel: 'main-model', reasoningEffort: 'medium', maxToolRounds: 192, async syncStartupPermission() {}, validateAndSelectModel() { throw Error('must not mutate global model') } }; export const useConfigStore = () => config`,
   }
   const result = await build({
     absWorkingDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'),
@@ -72,6 +72,9 @@ test('auxiliary sockets, model selection, timeline and active main session stay 
   assert.equal(sessions.find(created).parentSessionId, mainId, 'creation must survive its immediate engine sync')
   await sessions.syncFromEngine()
   assert.equal(sessions.childrenOf(mainId).some(s => s.id === created), true, 'later refresh must retain the child')
-  assert.equal(sessions.filtered.some(s => s.id === created), true, 'auxiliary sessions are visible in history')
+  assert.equal(sessions.filtered.some(s => s.id === created), false, 'auxiliary sessions remain attached to their parent')
+  assert.equal(sessions.filtered.some(s => s.id === mainId), true)
+  sessions.query = sessions.find(created).title
+  assert.equal(sessions.filtered.some(s => s.id === mainId), true, 'searching a child retains its parent')
   for (const store of [main, child, second]) { store.flushPersistence(); store.disconnect() }
 })

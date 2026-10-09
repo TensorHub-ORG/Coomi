@@ -1,6 +1,7 @@
 mod agents;
 mod patch;
 mod processes;
+mod shizuku;
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -504,6 +505,26 @@ impl CoreTools {
 
     async fn local_shell(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
         let action = string_arg(&call.arguments, "action").unwrap_or("exec");
+        let env = string_arg(&call.arguments, "environment").unwrap_or("auto");
+        let shizuku_session = string_arg(&call.arguments, "session_id").is_some_and(|id| id.starts_with("shizuku:"));
+        if env == "shizuku" || shizuku_session {
+            if action == "exec" {
+                let Some(command) = string_arg(&call.arguments, "command") else {
+                    return ToolResult::error("missing string argument: command");
+                };
+                match self.policy.assess_shell(command) {
+                    Decision::Allow => {},
+                    Decision::Deny(reason) => return ToolResult::error(reason),
+                    Decision::Ask(reason) => if !approval.approve(call, &reason).await {
+                        return ToolResult::error("shell command was not approved");
+                    },
+                }
+            }
+            let Some(home) = self.config_home.as_ref() else {
+                return ToolResult::error("Shizuku environment unavailable: engine home not configured");
+            };
+            return shizuku::local_shell(home.clone(), call.arguments.clone()).await;
+        }
         if action == "exec" {
             let Some(command) = string_arg(&call.arguments, "command") else {
                 return ToolResult::error("missing string argument: command");
@@ -1243,7 +1264,7 @@ impl CoreTools {
     }
 
     /// 通过无障碍服务执行一个控制命令，返回 (是否成功, 输出)。
-    fn run_control_command(&self, command: serde_json::Value, timeout: Duration) -> (bool, String) {
+    fn run_control_command(&self, mut command: serde_json::Value, timeout: Duration) -> (bool, String) {
         let Some(dir) = self.control_queue_dir() else {
             return (false, "控制模式不可用：未找到 Coomi 配置目录".to_string());
         };
@@ -1262,7 +1283,9 @@ impl CoreTools {
         );
         let command_path = dir.join(format!("{id}.cmd.json"));
         let result_path = dir.join(format!("{id}.result.json"));
-        if let Err(error) = std::fs::write(&command_path, command.to_string()) {
+        command["deadlineMs"] = json!((stamp + timeout.as_millis()) as u64);
+        let temp = dir.join(format!("{id}.cmd.tmp"));
+        if let Err(error) = std::fs::write(&temp, command.to_string()).and_then(|_| std::fs::rename(&temp, &command_path)) {
             return (false, format!("写入控制命令失败: {error}"));
         }
 
@@ -1356,18 +1379,22 @@ impl CoreTools {
             "swipe" => format!("input swipe {x} {y} {} {}", arguments.get("x2").and_then(Value::as_u64).unwrap_or(x), arguments.get("y2").and_then(Value::as_u64).unwrap_or(y)),
             "text" => format!("input text {}", Self::shell_escape(text)),
             "key" => format!("input keyevent {}", arguments.get("keycode").and_then(Value::as_u64).unwrap_or(4)),
-            "screenshot" => "screencap -p /sdcard/coomi-ui.png".to_string(),
+            "screenshot" => {
+                let path = string_arg(arguments, "path").unwrap_or("/sdcard/coomi-ui.png");
+                if !path.starts_with("/sdcard/") && !path.starts_with("/storage/emulated/0/") {
+                    return ToolResult::error("screenshot path must be under shared storage");
+                }
+                format!("screencap -p {} && ls -l {}", Self::shell_escape(path), Self::shell_escape(path))
+            },
             other => return ToolResult::error(format!(
                 "unknown ui_automation action: {other}（无障碍服务也未响应，请确认控制模式已开启无障碍权限）"
             )),
         };
-        let output = self.run_simple_cmd(&cmd);
-        if output.contains("Permission denied") || output.contains("not found") || output.trim().is_empty() {
-            return ToolResult::error(format!(
-                "[ui_automation::{action}] 执行失败：{output}（请开启控制模式的无障碍权限）"
-            ));
-        }
-        ToolResult::success(format!("[ui_automation::{action}] {output}"))
+        let Some(home) = self.config_home.as_ref() else {
+            return ToolResult::error("Android shell not configured; enable Accessibility or authorize Shizuku");
+        };
+        // Android input commands cannot run with the Linux guest's permissions.
+        shizuku::shell(home.clone(), cmd, 10_000).await
     }
     fn command_exists(&self, name: &str) -> bool {
         std::process::Command::new("which")
@@ -2031,6 +2058,12 @@ impl CoreTools {
             .unwrap_or(DEFAULT_TIMEOUT_MS)
             .clamp(1_000, 300_000);
         let environment = call.arguments.get("environment").and_then(Value::as_str);
+        if environment == Some("shizuku") {
+            let Some(home) = self.config_home.as_ref() else {
+                return ToolResult::error("Shizuku environment unavailable: engine home not configured");
+            };
+            return shizuku::shell(home.clone(), command.to_owned(), timeout_ms).await;
+        }
         let mut process = match self
             .processes
             .runtime_shell(&self.cwd, command, environment)
@@ -2189,7 +2222,7 @@ impl ToolRuntime for CoreTools {
                     "type": "object",
                     "properties": {
                         "command": {"type": "string"},
-                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot"]},
+                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot", "shizuku"]},
                         "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 300000}
                     },
                     "required": ["command"],
@@ -2231,7 +2264,7 @@ impl ToolRuntime for CoreTools {
                     "properties": {
                         "action": {"type": "string", "enum": ["exec", "write", "wait", "terminate"]},
                         "command": {"type": "string"},
-                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot"]},
+                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot", "shizuku"]},
                         "session_id": {"type": "string"},
                         "input": {"type": "string"},
                         "close_stdin": {"type": "boolean"},

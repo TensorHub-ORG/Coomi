@@ -5,7 +5,7 @@
  * 列表来自引擎磁盘会话（/api/sessions 为权威源），本地 localStorage 保存标题/置顶等
  * 元数据与最近对话正文；删除会话会同时删除引擎磁盘记录与本地记录。
  */
-import { onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { goBack } from '@/bridge/navigation'
 import { useSessionStore } from '@/stores/session'
@@ -13,10 +13,14 @@ import { useSessionsStore, formatSessionTime, type SessionMeta } from '@/stores/
 import { authedFetch } from '@/bridge/http'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
+import AuxiliarySessionList from '@/components/AuxiliarySessionList.vue'
+import { GLOBAL_SESSION_ID } from '@/bridge/life'
 
 const router = useRouter()
 const session = useSessionStore()
 const sessions = useSessionsStore()
+const globalChildren = computed(() => sessions.childrenOf(GLOBAL_SESSION_ID))
+const globalTitle = computed(() => sessions.find(GLOBAL_SESSION_ID)?.title || '全局对话')
 
 const menuFor = ref<SessionMeta | null>(null)
 const askDelete = ref<SessionMeta | null>(null)
@@ -216,16 +220,23 @@ onBeforeUnmount(() => {
     </div>
 
     <main class="body">
+      <div v-if="globalChildren.length" class="group session-entry">
+        <div class="row">
+          <button class="rmain" @click="open(GLOBAL_SESSION_ID)"><span class="rtitle">{{ globalTitle }}</span></button>
+        </div>
+        <AuxiliarySessionList :parent-id="GLOBAL_SESSION_ID" @select="open" @more="menuFor = $event" />
+      </div>
       <!-- 历史会话列表始终可见；「全局会话记忆」开关只控制模型能否读取这些记录。 -->
       <p v-if="sessions.metas.length === 0" class="empty">
         还没有历史会话。回到对话随便说点什么，标题会用你的第一句话。
       </p>
-      <p v-else-if="sessions.filtered.length === 0" class="empty">没有匹配「{{ sessions.query }}」的会话。</p>
+      <p v-else-if="sessions.filtered.length === 0 && !globalChildren.length" class="empty">没有匹配「{{ sessions.query }}」的会话。</p>
 
         <template v-for="g in sessions.groups" :key="g.label">
           <p class="sec-label">{{ g.label }}</p>
           <div class="group">
-            <div v-for="m in g.items" :key="m.id" class="row" :class="{ cur: m.id === session.sessionId }">
+            <div v-for="m in g.items" :key="m.id" class="session-entry">
+            <div class="row" :class="{ cur: m.id === session.sessionId }">
               <button class="rmain" @click="open(m.id)">
                 <span class="rtitle">
                   <CoomiIcon v-if="m.pinned" name="pin" :size="13" class="pin" />
@@ -239,6 +250,8 @@ onBeforeUnmount(() => {
                 </span>
               </button>
               <button class="more" aria-label="更多" @click="menuFor = m"><CoomiIcon name="more" :size="18" /></button>
+            </div>
+            <AuxiliarySessionList :parent-id="m.id" @select="open" @more="menuFor = $event" />
             </div>
           </div>
         </template>
@@ -340,7 +353,7 @@ onBeforeUnmount(() => {
 
 .group { border-radius: var(--r-card); background: var(--bg); box-shadow: var(--shadow-1); overflow: hidden; }
 .row { display: flex; align-items: stretch; }
-.row + .row { border-top: 1px solid var(--border); }
+.session-entry + .session-entry { border-top: 1px solid var(--border); }
 .row.cur { background: var(--blue-soft); }
 .rmain { flex: 1; min-width: 0; padding: 12px 4px 12px 14px; text-align: left; }
 .rmain:active { background: var(--fill); }

@@ -43,16 +43,13 @@ function sendControl() {
   const t = controlText.value.trim()
   if (!t) return
   controlText.value = ''
-  const bridge = nativeBridge()
   if (!accessibilityReady.value && !overlayReady.value) {
     controlThinking.value = '还没有屏幕操控权限，请先点上方「开启无障碍」'
     return
   }
   controlThinking.value = `已发送：${t}`
   pushFloat('控制模式 · 正在发送', t)
-  if (bridge?.controlSendText) {
-    try { bridge.controlSendText(t) } catch { /* 原生桥不可用时保持提示 */ }
-  }
+  session.sendMessage(`控制模式任务：先用 ui_automation read_screen 查看当前手机界面，再按控件文字或返回坐标操作，每次操作后读取界面验证。\n\n${t}`)
 }
 const sendButton = ref<HTMLButtonElement | null>(null)
 const sendRipples = ref<number[]>([])
@@ -94,7 +91,7 @@ watch(barOpen, (open) => {
   const panel = modePopEl.value
   if (!panel) return
   const buttons = Array.from(panel.querySelectorAll<HTMLElement>('.pill'))
-  if (prefersReducedMotion() || !config.sendMorphAnimation) return
+  if (prefersReducedMotion() || !config.sendMorphAnimation || config.allAnimationsOff) return
   if (open) {
     gsap.killTweensOf(buttons)
     gsap.fromTo(buttons,
@@ -138,7 +135,7 @@ async function submit() {
   }
   const visibleText = text.value.trim()
   const messageId = session.sendMessage(visibleText, visibleText, false, [...attachments.value])
-  if (messageId && config.sendMorphAnimation && !prefersReducedMotion()) {
+  if (messageId && config.sendMorphAnimation && !config.allAnimationsOff && !prefersReducedMotion()) {
     sendRipples.value = [++rippleSequence]
   }
   text.value = ''
@@ -323,6 +320,10 @@ watch([accessibilityReady, overlayReady, controlMode], ([accessible, overlay, ac
   pushFloat('控制模式已就绪', accessible ? '无障碍已开启，可以直接操作屏幕' : '悬浮窗已开启，屏幕操控仍需要无障碍')
 })
 
+watch([() => session.sessionId, () => config.currentProviderId, () => config.currentModel], () => {
+  if (controlMode.value) setControlModeActive(true)
+})
+
 /** 思考/动作变化时同步到悬浮层，让切到别的 App 后也能看到进度。 */
 watch(controlThinking, value => {
   if (!controlMode.value) return
@@ -501,7 +502,7 @@ watch(attachments, () => {
               :size="15"
               stroke-width="2"
               :spring="{ stiffness: 300, damping: 22 }"
-              :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+              :reduced-motion="(config.sendMorphAnimation && !config.allAnimationsOff) ? 'never' : 'always'"
             />
             <span>模式</span>
           </button>
@@ -514,7 +515,7 @@ watch(attachments, () => {
               :size="21"
               stroke-width="2"
               :spring="{ stiffness: 320, damping: 24 }"
-              :reduced-motion="config.sendMorphAnimation ? 'never' : 'always'"
+              :reduced-motion="(config.sendMorphAnimation && !config.allAnimationsOff) ? 'never' : 'always'"
             />
           </button>
 
@@ -730,7 +731,7 @@ watch(attachments, () => {
 .spacer { flex: 1 1 auto; min-width: 4px; }
 /* 模式按钮浮在输入框上方，保留展开动画。 */
 .mode-pop {
-  position: absolute; z-index: 30; left: 10px; right: 10px; bottom: calc(100% - 4px);
+  position: absolute; z-index: 30; left: 10px; right: 10px; bottom: calc(100% + 10px);
   display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
   flex-wrap: wrap; gap: 6px;
   /* 紧凑底部卡片随内容换行。 */
@@ -742,7 +743,7 @@ watch(attachments, () => {
   min-height: 0; width: auto;
 }
 .mode-pop-enter-active, .mode-pop-leave-active { transition: opacity .18s ease, transform .22s cubic-bezier(.22,.9,.28,1.1); }
-.mode-pop-enter-from, .mode-pop-leave-to { opacity: 0; transform: translateY(12px) scale(.97); }
+.mode-pop-enter-from, .mode-pop-leave-to { opacity: 0; transform: translateY(4px) scale(.97); }
 .bar-toggle { flex-shrink: 0; }
 .bar-toggle.on { color: var(--blue); background: var(--blue-soft); }
 .production-pill.on { color: #ff3b30; background: rgba(255, 59, 48, 0.12); }

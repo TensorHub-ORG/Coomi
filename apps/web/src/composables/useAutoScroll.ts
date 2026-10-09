@@ -61,7 +61,9 @@ export function useAutoScroll(target: Ref<HTMLElement | null>) {
     if (!el) return
     following.value = true
     suppressUntil = performance.now() + SMOOTH_MS
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    const noMotion = document.documentElement.dataset.allAnimationsOff === '1'
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollTo({ top: el.scrollHeight, behavior: noMotion ? 'auto' : 'smooth' })
   }
 
   onMounted(() => {

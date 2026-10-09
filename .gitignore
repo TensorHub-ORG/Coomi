@@ -35,6 +35,9 @@ apps/web/dist/
 
 # ---- Local configuration ----
 local.properties
+*.keystore
+*.jks
+*.key
 
 # ---- IDE ----
 .idea/

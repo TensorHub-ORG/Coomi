@@ -18,6 +18,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
+
 /**
  * 控制模式的屏幕操控后端（无障碍）。
  *
@@ -168,7 +169,12 @@ public final class CoomiAccessibilityService extends AccessibilityService {
         String output;
         try {
             JSONObject command = new JSONObject(raw);
+            if (command.optLong("deadlineMs", Long.MAX_VALUE) < System.currentTimeMillis()) {
+                writeResult(base, false, "命令已经超时，未执行屏幕操作");
+                return;
+            }
             String action = command.optString("action", "");
+            CoomiFloatService.releaseForAutomation();
             switch (action) {
                 case "tap":
                     ok = tap((float) command.optDouble("x", 0), (float) command.optDouble("y", 0));
@@ -211,7 +217,7 @@ public final class CoomiAccessibilityService extends AccessibilityService {
                     break;
                 case "read_screen":
                     output = describeScreen();
-                    ok = true;
+                    ok = !output.contains("无法读取当前窗口");
                     break;
                 case "input_text":
                     ok = true;
@@ -231,7 +237,7 @@ public final class CoomiAccessibilityService extends AccessibilityService {
     private void writeResult(String id, boolean ok, String output) {
         File dir = controlQueueDir();
         if (dir == null) return;
-        File target = new File(dir, id + ".result.json");
+        File target = new File(dir, id + ".result.tmp");
         try (FileOutputStream out = new FileOutputStream(target)) {
             JSONObject result = new JSONObject();
             result.put("id", id);
@@ -239,11 +245,13 @@ public final class CoomiAccessibilityService extends AccessibilityService {
             result.put("output", output == null ? "" : output);
             result.put("at", System.currentTimeMillis());
             out.write(result.toString().getBytes(StandardCharsets.UTF_8));
-            out.flush();
+            out.getFD().sync();
+            target.renameTo(new File(dir, id + ".result.json"));
         } catch (Throwable ignored) {
             // 写不进去时引擎侧会超时，属于可接受的降级
         }
     }
+
 
     /**
      * 把当前屏幕上的可见文字读出来，供模型判断「现在在哪个界面、能点什么」。
@@ -254,6 +262,8 @@ public final class CoomiAccessibilityService extends AccessibilityService {
     public String describeScreen() {
         StringBuilder builder = new StringBuilder();
         builder.append("前台应用: ").append(currentPackage()).append('\n');
+        builder.append("屏幕尺寸(px): ").append(getResources().getDisplayMetrics().widthPixels)
+            .append(" × ").append(getResources().getDisplayMetrics().heightPixels).append('\n');
         AccessibilityNodeInfo root = activeRoot();
         if (root == null) {
             builder.append("(无法读取当前窗口，可能无障碍未授权或界面受保护)");
@@ -285,7 +295,10 @@ public final class CoomiAccessibilityService extends AccessibilityService {
                     String kind = node.isEditable() ? "输入框"
                         : (node.isClickable() ? "按钮" : node.getClassName() == null ? "文本"
                             : simpleClassName(node.getClassName().toString()));
-                    out.append("- [").append(kind).append("] ")
+                    android.graphics.Rect bounds = new android.graphics.Rect();
+                    node.getBoundsInScreen(bounds);
+                    out.append("- [").append(kind).append("] (x=").append(bounds.centerX())
+                        .append(", y=").append(bounds.centerY()).append(") ")
                         .append(label.length() > 80 ? label.substring(0, 80) + "…" : label)
                         .append('\n');
                 }
@@ -311,6 +324,7 @@ public final class CoomiAccessibilityService extends AccessibilityService {
         CharSequence pkg = event.getPackageName();
         if (TextUtils.isEmpty(pkg)) return;
         String name = pkg.toString();
+        if (name.equals(getPackageName())) return;
         if (name.equals(foregroundPackage)) return;
         foregroundPackage = name;
         foregroundUpdatedAt = System.currentTimeMillis();
@@ -374,7 +388,7 @@ public final class CoomiAccessibilityService extends AccessibilityService {
             for (android.view.accessibility.AccessibilityWindowInfo window : windows) {
                 if (window == null || window.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo root = window.getRoot();
-                if (root == null) continue;
+                if (root == null || isOurOverlay(root)) continue;
                 CharSequence pkg = root.getPackageName();
                 if (!TextUtils.isEmpty(pkg)) {
                     foregroundPackage = pkg.toString();
@@ -391,26 +405,26 @@ public final class CoomiAccessibilityService extends AccessibilityService {
 
     /** 当前活动窗口的根节点；取不到返回 null。 */
     private AccessibilityNodeInfo activeRoot() {
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null) return root;
-        } catch (Throwable ignored) {
-            // 落回窗口列表
-        }
+        // Focusable overlays and input methods may become active; choose application windows first.
         try {
             List<android.view.accessibility.AccessibilityWindowInfo> windows = getWindows();
-            if (windows != null) {
-                for (android.view.accessibility.AccessibilityWindowInfo window : windows) {
-                    if (window != null && window.getType() == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) {
-                        AccessibilityNodeInfo root = window.getRoot();
-                        if (root != null) return root;
-                    }
-                }
+            if (windows != null) for (android.view.accessibility.AccessibilityWindowInfo window : windows) {
+                if (window == null || window.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo root = window.getRoot();
+                if (root != null && !isOurOverlay(root)) return root;
             }
-        } catch (Throwable ignored) {
-            // 忽略
-        }
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && !isOurOverlay(root) && root.getPackageName() != null
+                && !root.getPackageName().toString().contains("inputmethod")) return root;
+        } catch (Throwable error) { android.util.Log.w("CoomiControl", "read root failed", error); }
         return null;
+    }
+
+    /** 判断节点是否来自我们的悬浮窗（避免读到自己）。 */
+    private boolean isOurOverlay(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        CharSequence pkg = node.getPackageName();
+        return pkg != null && pkg.toString().equals(getPackageName());
     }
 
     /** 收集树中所有可编辑输入框，按深度优先顺序（屏幕上的先后基本一致）。 */
@@ -560,7 +574,7 @@ public final class CoomiAccessibilityService extends AccessibilityService {
         GestureDescription gesture = new GestureDescription.Builder()
             .addStroke(new GestureDescription.StrokeDescription(path, 0, 60))
             .build();
-        return dispatchGesture(gesture, null, null);
+        return dispatchAndWait(gesture);
     }
 
     /** 直线滑动（用于聊天列表滚动、翻页）。 */
@@ -572,7 +586,28 @@ public final class CoomiAccessibilityService extends AccessibilityService {
         GestureDescription gesture = new GestureDescription.Builder()
             .addStroke(new GestureDescription.StrokeDescription(path, 0, duration))
             .build();
-        return dispatchGesture(gesture, null, null);
+        return dispatchAndWait(gesture);
+    }
+
+
+    /** Never block Android's main looper waiting for its own gesture callback. */
+    private boolean dispatchAndWait(GestureDescription gesture) {
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return dispatchGesture(gesture, null, main);
+        CoomiFloatService.releaseForAutomation();
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean(false);
+        main.post(() -> {
+            try {
+                boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
+                    @Override public void onCompleted(GestureDescription g) { completed.set(true); latch.countDown(); }
+                    @Override public void onCancelled(GestureDescription g) { latch.countDown(); }
+                }, main);
+                if (!accepted) latch.countDown();
+            } catch (Throwable error) { latch.countDown(); }
+        });
+        try { return latch.await(5000, java.util.concurrent.TimeUnit.MILLISECONDS) && completed.get(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
     }
 
     /** 长按。 */
@@ -580,9 +615,9 @@ public final class CoomiAccessibilityService extends AccessibilityService {
         Path path = new Path();
         path.moveTo(x, y);
         GestureDescription gesture = new GestureDescription.Builder()
-            .addStroke(new GestureDescription.StrokeDescription(path, 0, Math.max(600L, durationMs)))
+            .addStroke(new GestureDescription.StrokeDescription(path, 0, Math.max(600L, Math.min(3000L, durationMs))))
             .build();
-        return dispatchGesture(gesture, null, null);
+        return dispatchAndWait(gesture);
     }
 
     /** 全局动作：back / home / recents / notifications。 */

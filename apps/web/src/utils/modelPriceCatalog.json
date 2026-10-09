@@ -1,0 +1,2294 @@
+{
+  "gpt-5.4": {
+    "in": 2.5,
+    "out": 15,
+    "cached": 0.25,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834501+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-5.4-pro": {
+    "in": 30,
+    "out": 180,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834569+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-3.5-turbo": {
+    "in": 0.5,
+    "out": 1.5,
+    "cached": 0,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834581+00:00"
+  },
+  "gpt-5.5-pro": {
+    "in": 30,
+    "out": 180,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834587+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "text-embedding-3-small": {
+    "in": 0.02,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834593+00:00"
+  },
+  "gpt-5.4-nano": {
+    "in": 0.2,
+    "out": 1.25,
+    "cached": 0.02,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834599+00:00"
+  },
+  "gpt-realtime-2.1": {
+    "in": 4,
+    "out": 24,
+    "cached": 0.4,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834605+00:00"
+  },
+  "gpt-4o-2024-05-13": {
+    "in": 5,
+    "out": 15,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834610+00:00"
+  },
+  "gpt-4o": {
+    "in": 2.5,
+    "out": 10,
+    "cached": 1.25,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834615+00:00"
+  },
+  "gpt-5-mini": {
+    "in": 0.25,
+    "out": 2,
+    "cached": 0.025,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834621+00:00"
+  },
+  "gpt-image-2": {
+    "in": 5,
+    "out": 30,
+    "cached": 1.25,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834626+00:00"
+  },
+  "gpt-5.2-pro": {
+    "in": 21,
+    "out": 168,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834632+00:00"
+  },
+  "o4-mini": {
+    "in": 1.1,
+    "out": 4.4,
+    "cached": 0.275,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834637+00:00"
+  },
+  "o3-mini": {
+    "in": 1.1,
+    "out": 4.4,
+    "cached": 0.55,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834642+00:00"
+  },
+  "text-embedding-ada-002": {
+    "in": 0.1,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834660+00:00"
+  },
+  "gpt-4": {
+    "in": 30,
+    "out": 60,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834666+00:00"
+  },
+  "gpt-5.3-codex": {
+    "in": 1.75,
+    "out": 14,
+    "cached": 0.175,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834671+00:00"
+  },
+  "gpt-4.1-nano": {
+    "in": 0.1,
+    "out": 0.4,
+    "cached": 0.025,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834676+00:00"
+  },
+  "gpt-5-nano": {
+    "in": 0.05,
+    "out": 0.4,
+    "cached": 0.005,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834684+00:00"
+  },
+  "gpt-5.6": {
+    "in": 4,
+    "out": 20,
+    "cached": 0.4,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834690+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-5.2-chat-latest": {
+    "in": 1.75,
+    "out": 14,
+    "cached": 0.175,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834698+00:00"
+  },
+  "o1": {
+    "in": 15,
+    "out": 60,
+    "cached": 7.5,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834703+00:00"
+  },
+  "gpt-5-pro": {
+    "in": 15,
+    "out": 120,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834710+00:00"
+  },
+  "gpt-5.3-codex-spark": {
+    "in": 1.75,
+    "out": 14,
+    "cached": 0.175,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834715+00:00"
+  },
+  "gpt-6.1-sol": {
+    "in": 2,
+    "out": 10,
+    "cached": 0.1,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834720+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "text-embedding-3-large": {
+    "in": 0.13,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834725+00:00"
+  },
+  "gpt-4o-2024-08-06": {
+    "in": 2.5,
+    "out": 10,
+    "cached": 1.25,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834730+00:00"
+  },
+  "gpt-6-astra": {
+    "in": 10,
+    "out": 50,
+    "cached": 1,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834735+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-5.1": {
+    "in": 1.25,
+    "out": 10,
+    "cached": 0.125,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834740+00:00"
+  },
+  "gpt-4o-mini": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834745+00:00"
+  },
+  "o3-pro": {
+    "in": 20,
+    "out": 80,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834749+00:00"
+  },
+  "gpt-daybreak-blue-latest": {
+    "in": 4,
+    "out": 20,
+    "cached": 0.4,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834755+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-5.4-mini": {
+    "in": 0.75,
+    "out": 4.5,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834760+00:00"
+  },
+  "gpt-5.6-luna": {
+    "in": 0.2,
+    "out": 1.2,
+    "cached": 0.02,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834765+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-5.2": {
+    "in": 1.75,
+    "out": 14,
+    "cached": 0.175,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834770+00:00"
+  },
+  "gpt-5.5": {
+    "in": 5,
+    "out": 30,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834778+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-4.1": {
+    "in": 2,
+    "out": 8,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834784+00:00"
+  },
+  "gpt-4o-2024-11-20": {
+    "in": 2.5,
+    "out": 10,
+    "cached": 1.25,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834789+00:00"
+  },
+  "gpt-4.1-mini": {
+    "in": 0.4,
+    "out": 1.6,
+    "cached": 0.1,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834794+00:00"
+  },
+  "gpt-6-luna": {
+    "in": 0.1,
+    "out": 0.5,
+    "cached": 0.01,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834802+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-5.3-chat-latest": {
+    "in": 1.75,
+    "out": 14,
+    "cached": 0.175,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834807+00:00"
+  },
+  "gpt-5.6-terra": {
+    "in": 2,
+    "out": 12,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834814+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-4-turbo": {
+    "in": 10,
+    "out": 30,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834819+00:00"
+  },
+  "gpt-daybreak-red-latest": {
+    "in": 12.5,
+    "out": 75,
+    "cached": 1.25,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834826+00:00"
+  },
+  "o3": {
+    "in": 2,
+    "out": 8,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834831+00:00"
+  },
+  "gpt-5": {
+    "in": 1.25,
+    "out": 10,
+    "cached": 0.125,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834836+00:00"
+  },
+  "gpt-5.6-sol": {
+    "in": 4,
+    "out": 20,
+    "cached": 0.4,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834841+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gpt-6-sol": {
+    "in": 2,
+    "out": 10,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834846+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "o1-pro": {
+    "in": 150,
+    "out": 600,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/openai",
+    "url": "https://platform.openai.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834850+00:00"
+  },
+  "claude-haiku-4-5": {
+    "in": 1,
+    "out": 5,
+    "cached": 0.1,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834861+00:00"
+  },
+  "claude-opus-4-5": {
+    "in": 5,
+    "out": 25,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834866+00:00"
+  },
+  "claude-sonnet-4-5": {
+    "in": 3,
+    "out": 15,
+    "cached": 0.3,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834870+00:00"
+  },
+  "claude-opus-5-5": {
+    "in": 4,
+    "out": 20,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834875+00:00"
+  },
+  "claude-fable-5-1": {
+    "in": 10,
+    "out": 50,
+    "cached": 0.25,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834880+00:00"
+  },
+  "claude-opus-4-5-20251101": {
+    "in": 5,
+    "out": 25,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834885+00:00"
+  },
+  "claude-opus-5": {
+    "in": 5,
+    "out": 25,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834889+00:00"
+  },
+  "claude-fable-5": {
+    "in": 10,
+    "out": 50,
+    "cached": 1,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834897+00:00"
+  },
+  "claude-opus-4-8": {
+    "in": 5,
+    "out": 25,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834903+00:00"
+  },
+  "claude-sonnet-4-5-20250929": {
+    "in": 3,
+    "out": 15,
+    "cached": 0.3,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834908+00:00"
+  },
+  "claude-sonnet-5": {
+    "in": 2,
+    "out": 10,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834916+00:00"
+  },
+  "claude-opus-4-6": {
+    "in": 5,
+    "out": 25,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834921+00:00"
+  },
+  "claude-haiku-4-5-20251001": {
+    "in": 1,
+    "out": 5,
+    "cached": 0.1,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834925+00:00"
+  },
+  "claude-sonnet-4-6": {
+    "in": 3,
+    "out": 15,
+    "cached": 0.3,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834930+00:00"
+  },
+  "claude-sonnet-5-5": {
+    "in": 2,
+    "out": 10,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834934+00:00"
+  },
+  "claude-opus-4-7": {
+    "in": 5,
+    "out": 25,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/anthropic",
+    "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "retrievedAt": "2026-10-07T15:21:03.834938+00:00"
+  },
+  "gemini-flash-latest": {
+    "in": 0.75,
+    "out": 3.75,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834946+00:00"
+  },
+  "gemini-omni-flash-preview": {
+    "in": 1.5,
+    "out": 17.5,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834953+00:00"
+  },
+  "gemini-3.1-flash-image-preview": {
+    "in": 0.5,
+    "out": 60,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834958+00:00"
+  },
+  "lyria-3-pro-preview": {
+    "in": 0,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834963+00:00"
+  },
+  "gemini-3.1-flash-tts-preview": {
+    "in": 1,
+    "out": 20,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834970+00:00"
+  },
+  "gemini-2.5-flash-image": {
+    "in": 0.3,
+    "out": 30,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834976+00:00"
+  },
+  "gemini-flash-lite-latest": {
+    "in": 0.3,
+    "out": 2.5,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834981+00:00"
+  },
+  "gemini-embedding-2": {
+    "in": 0.2,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834985+00:00"
+  },
+  "gemini-3.6-flash": {
+    "in": 0.75,
+    "out": 3.75,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834990+00:00"
+  },
+  "gemini-3-pro-image-preview": {
+    "in": 2,
+    "out": 120,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.834996+00:00"
+  },
+  "gemini-2.5-pro-preview-tts": {
+    "in": 1,
+    "out": 20,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835001+00:00"
+  },
+  "gemini-3.5-flash-lite": {
+    "in": 0.3,
+    "out": 2.5,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835005+00:00"
+  },
+  "gemini-3.1-flash-image": {
+    "in": 0.5,
+    "out": 60,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835010+00:00"
+  },
+  "lyria-3-clip-preview": {
+    "in": 0,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835019+00:00"
+  },
+  "gemini-3.1-pro-preview": {
+    "in": 2,
+    "out": 12,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835025+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gemini-2.5-computer-use-preview-10-2025": {
+    "in": 1.25,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835030+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gemini-3.5-flash": {
+    "in": 1.5,
+    "out": 9,
+    "cached": 0.15,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835035+00:00"
+  },
+  "gemini-2.5-pro": {
+    "in": 1.25,
+    "out": 10,
+    "cached": 0.125,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835040+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gemini-3-pro-image": {
+    "in": 2,
+    "out": 120,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835045+00:00"
+  },
+  "gemini-2.5-flash": {
+    "in": 0.3,
+    "out": 2.5,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835049+00:00"
+  },
+  "gemini-2.5-flash-preview-tts": {
+    "in": 0.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835054+00:00"
+  },
+  "gemini-3.1-flash-lite-image": {
+    "in": 0.25,
+    "out": 30,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835064+00:00"
+  },
+  "deep-research-preview-04-2026": {
+    "in": 2,
+    "out": 12,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835070+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "deep-research-max-preview-04-2026": {
+    "in": 2,
+    "out": 12,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835074+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gemini-3.7-flash": {
+    "in": 0.75,
+    "out": 3.75,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835080+00:00"
+  },
+  "gemini-3.1-pro-preview-customtools": {
+    "in": 2,
+    "out": 12,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835086+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "gemini-3-flash-preview": {
+    "in": 0.5,
+    "out": 3,
+    "cached": 0.05,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835090+00:00"
+  },
+  "gemini-3.8-flash": {
+    "in": 0.75,
+    "out": 3.75,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835096+00:00"
+  },
+  "gemini-3.5-live-translate-preview": {
+    "in": 3.5,
+    "out": 21,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835100+00:00"
+  },
+  "gemini-2.5-flash-lite": {
+    "in": 0.1,
+    "out": 0.4,
+    "cached": 0.01,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835105+00:00"
+  },
+  "gemini-embedding-001": {
+    "in": 0.15,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835110+00:00"
+  },
+  "gemini-3.1-flash-lite-preview": {
+    "in": 0.25,
+    "out": 1.5,
+    "cached": 0.025,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835115+00:00"
+  },
+  "gemini-3.1-flash-live-preview": {
+    "in": 0.75,
+    "out": 4.5,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835120+00:00"
+  },
+  "gemini-3.1-flash-lite": {
+    "in": 0.25,
+    "out": 1.5,
+    "cached": 0.025,
+    "currency": "USD",
+    "source": "models.dev/google",
+    "url": "https://ai.google.dev/gemini-api/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835128+00:00"
+  },
+  "deepseek-v4-flash-vision-exp": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.003,
+    "currency": "USD",
+    "source": "models.dev/deepseek",
+    "url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835140+00:00"
+  },
+  "deepseek-flash": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.003,
+    "currency": "USD",
+    "source": "models.dev/deepseek",
+    "url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835146+00:00"
+  },
+  "deepseek-v4-pro": {
+    "in": 0.66,
+    "out": 1.98,
+    "cached": 0.022,
+    "currency": "USD",
+    "source": "models.dev/deepseek",
+    "url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835151+00:00"
+  },
+  "deepseek-v4-flash": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.003,
+    "currency": "USD",
+    "source": "models.dev/deepseek",
+    "url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835156+00:00"
+  },
+  "kimi-k3": {
+    "in": 3,
+    "out": 15,
+    "cached": 0.3,
+    "currency": "USD",
+    "source": "models.dev/moonshotai",
+    "url": "https://platform.moonshot.ai/docs/api/chat",
+    "retrievedAt": "2026-10-07T15:21:03.835162+00:00"
+  },
+  "kimi-k2.7-code-highspeed": {
+    "in": 1.9,
+    "out": 8,
+    "cached": 0.38,
+    "currency": "USD",
+    "source": "models.dev/moonshotai",
+    "url": "https://platform.moonshot.ai/docs/api/chat",
+    "retrievedAt": "2026-10-07T15:21:03.835167+00:00"
+  },
+  "kimi-k2.6": {
+    "in": 0.95,
+    "out": 4,
+    "cached": 0.16,
+    "currency": "USD",
+    "source": "models.dev/moonshotai",
+    "url": "https://platform.moonshot.ai/docs/api/chat",
+    "retrievedAt": "2026-10-07T15:21:03.835172+00:00"
+  },
+  "kimi-k2.7-code": {
+    "in": 0.95,
+    "out": 4,
+    "cached": 0.19,
+    "currency": "USD",
+    "source": "models.dev/moonshotai",
+    "url": "https://platform.moonshot.ai/docs/api/chat",
+    "retrievedAt": "2026-10-07T15:21:03.835177+00:00"
+  },
+  "qwen-flash": {
+    "in": 0.05,
+    "out": 0.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835184+00:00"
+  },
+  "qwen3.5-flash": {
+    "in": 0.1,
+    "out": 0.4,
+    "cached": 0.01,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835189+00:00"
+  },
+  "qwen3.7-max": {
+    "in": 2.5,
+    "out": 7.5,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835193+00:00"
+  },
+  "qwen2-5-32b-instruct": {
+    "in": 0.7,
+    "out": 2.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835198+00:00"
+  },
+  "qwq-plus": {
+    "in": 0.8,
+    "out": 2.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835202+00:00"
+  },
+  "qwen2-5-vl-72b-instruct": {
+    "in": 2.8,
+    "out": 8.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835207+00:00"
+  },
+  "qwen3-vl-plus": {
+    "in": 0.2,
+    "out": 1.6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835211+00:00"
+  },
+  "qwen3.5-27b": {
+    "in": 0.3,
+    "out": 2.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835216+00:00"
+  },
+  "deepseek-v4-flash-0731": {
+    "in": 0.2,
+    "out": 0.4,
+    "cached": 0.04,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835220+00:00"
+  },
+  "qwen-max": {
+    "in": 1.6,
+    "out": 6.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835225+00:00"
+  },
+  "qwen3-next-80b-a3b-thinking": {
+    "in": 0.5,
+    "out": 6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835232+00:00"
+  },
+  "qwen3.8-max": {
+    "in": 2,
+    "out": 6,
+    "cached": 0.25,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835237+00:00"
+  },
+  "qwen-plus-character-ja": {
+    "in": 0.5,
+    "out": 1.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835249+00:00"
+  },
+  "qwen3.5-plus": {
+    "in": 0.4,
+    "out": 2.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835261+00:00"
+  },
+  "qwen3-livetranslate-flash-realtime": {
+    "in": 10,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835267+00:00"
+  },
+  "qwen2-5-72b-instruct": {
+    "in": 1.4,
+    "out": 5.6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835273+00:00"
+  },
+  "qwen3-32b": {
+    "in": 0.7,
+    "out": 2.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835278+00:00"
+  },
+  "qwen-plus": {
+    "in": 0.4,
+    "out": 1.2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835282+00:00"
+  },
+  "qwen3.7-flash": {
+    "in": 0.03,
+    "out": 0.13,
+    "cached": 0.003,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835287+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "qwen3-max": {
+    "in": 1.2,
+    "out": 6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835292+00:00"
+  },
+  "qwen-omni-turbo-realtime": {
+    "in": 0.27,
+    "out": 1.07,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835297+00:00"
+  },
+  "qwen3-coder-480b-a35b-instruct": {
+    "in": 1.5,
+    "out": 7.5,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835302+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "qwen-turbo": {
+    "in": 0.05,
+    "out": 0.2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835307+00:00"
+  },
+  "qwen3-coder-30b-a3b-instruct": {
+    "in": 0.45,
+    "out": 2.25,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835312+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "qwen3.8-omni-flash": {
+    "in": 0.15,
+    "out": 0.47,
+    "cached": 0.016,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835317+00:00"
+  },
+  "qvq-max": {
+    "in": 1.2,
+    "out": 4.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835322+00:00"
+  },
+  "qwen2-5-7b-instruct": {
+    "in": 0.175,
+    "out": 0.7,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835327+00:00"
+  },
+  "qwen3-omni-flash": {
+    "in": 0.43,
+    "out": 1.66,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835331+00:00"
+  },
+  "qwen-vl-max": {
+    "in": 0.8,
+    "out": 3.2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835336+00:00"
+  },
+  "qwen3-235b-a22b": {
+    "in": 0.7,
+    "out": 2.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835341+00:00"
+  },
+  "qwen3-vl-30b-a3b": {
+    "in": 0.2,
+    "out": 0.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835349+00:00"
+  },
+  "qwen3.5-122b-a10b": {
+    "in": 0.4,
+    "out": 3.2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835354+00:00"
+  },
+  "qwen3.6-35b-a3b": {
+    "in": 0.248,
+    "out": 1.485,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835359+00:00"
+  },
+  "qwen3-next-80b-a3b-instruct": {
+    "in": 0.5,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835365+00:00"
+  },
+  "qwen-vl-plus": {
+    "in": 0.21,
+    "out": 0.63,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835371+00:00"
+  },
+  "qwen3.6-flash": {
+    "in": 0.1875,
+    "out": 1.125,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835377+00:00"
+  },
+  "qwen3-coder-flash": {
+    "in": 0.3,
+    "out": 1.5,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835381+00:00"
+  },
+  "qwen2-5-omni-7b": {
+    "in": 0.1,
+    "out": 0.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835386+00:00"
+  },
+  "qwen-mt-plus": {
+    "in": 2.46,
+    "out": 7.37,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835390+00:00"
+  },
+  "qwen3-vl-235b-a22b": {
+    "in": 0.7,
+    "out": 2.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835396+00:00"
+  },
+  "qwen3-coder-plus": {
+    "in": 1,
+    "out": 5,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835400+00:00"
+  },
+  "qwen2-5-14b-instruct": {
+    "in": 0.35,
+    "out": 1.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835405+00:00"
+  },
+  "qwen3.8-flash": {
+    "in": 0.15,
+    "out": 0.47,
+    "cached": 0.016,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835410+00:00"
+  },
+  "qwen2-5-vl-7b-instruct": {
+    "in": 0.35,
+    "out": 1.05,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835414+00:00"
+  },
+  "qwen3.5-35b-a3b": {
+    "in": 0.25,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835419+00:00"
+  },
+  "qwen3.6-max-preview": {
+    "in": 1.3,
+    "out": 7.8,
+    "cached": 0.13,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835424+00:00"
+  },
+  "qwen-mt-turbo": {
+    "in": 0.16,
+    "out": 0.49,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835428+00:00"
+  },
+  "qwen3.5-397b-a17b": {
+    "in": 0.6,
+    "out": 3.6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835433+00:00"
+  },
+  "qwen3-8b": {
+    "in": 0.18,
+    "out": 0.7,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835437+00:00"
+  },
+  "glm-5.2": {
+    "in": 1.4,
+    "out": 4.4,
+    "cached": 0.28,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835444+00:00"
+  },
+  "qwen-omni-turbo": {
+    "in": 0.07,
+    "out": 0.27,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835450+00:00"
+  },
+  "qwen3-omni-flash-realtime": {
+    "in": 0.52,
+    "out": 1.99,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835455+00:00"
+  },
+  "qwen3-asr-flash": {
+    "in": 0.035,
+    "out": 0.035,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835460+00:00"
+  },
+  "qwen3.6-27b": {
+    "in": 0.6,
+    "out": 3.6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835465+00:00"
+  },
+  "qwen3.6-plus": {
+    "in": 0.5,
+    "out": 3,
+    "cached": 0.05,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835469+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "qwen3-14b": {
+    "in": 0.35,
+    "out": 1.4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835474+00:00"
+  },
+  "qwen3.7-plus": {
+    "in": 0.4,
+    "out": 1.6,
+    "cached": 0.04,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835481+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "qwen-vl-ocr": {
+    "in": 0.72,
+    "out": 0.72,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/alibaba",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "retrievedAt": "2026-10-07T15:21:03.835486+00:00"
+  },
+  "glm-4.6v": {
+    "in": 0.3,
+    "out": 0.9,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835494+00:00"
+  },
+  "glm-4.5": {
+    "in": 0.6,
+    "out": 2.2,
+    "cached": 0.11,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835499+00:00"
+  },
+  "glm-5v-turbo": {
+    "in": 1.2,
+    "out": 4,
+    "cached": 0.24,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835504+00:00"
+  },
+  "glm-5.3-flash": {
+    "in": 0.15,
+    "out": 0.5,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835508+00:00"
+  },
+  "glm-4.6": {
+    "in": 0.6,
+    "out": 2.2,
+    "cached": 0.11,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835513+00:00"
+  },
+  "glm-5": {
+    "in": 1,
+    "out": 3.2,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835518+00:00"
+  },
+  "glm-4.6v-flash": {
+    "in": 0,
+    "out": 0,
+    "cached": 0,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835532+00:00"
+  },
+  "glm-4.5v": {
+    "in": 0.6,
+    "out": 1.8,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835538+00:00"
+  },
+  "glm-5.3-flashx": {
+    "in": 0.37,
+    "out": 1.25,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835543+00:00"
+  },
+  "glm-4.7-flash": {
+    "in": 0,
+    "out": 0,
+    "cached": 0,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835548+00:00"
+  },
+  "glm-4.7": {
+    "in": 0.6,
+    "out": 2.2,
+    "cached": 0.11,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835552+00:00"
+  },
+  "glm-4.5-flash": {
+    "in": 0,
+    "out": 0,
+    "cached": 0,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835560+00:00"
+  },
+  "glm-5.1": {
+    "in": 1.4,
+    "out": 4.4,
+    "cached": 0.26,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835570+00:00"
+  },
+  "glm-4.7-flashx": {
+    "in": 0.07,
+    "out": 0.4,
+    "cached": 0.01,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835575+00:00"
+  },
+  "glm-5-turbo": {
+    "in": 1.2,
+    "out": 4,
+    "cached": 0.24,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835580+00:00"
+  },
+  "glm-4.5-air": {
+    "in": 0.2,
+    "out": 1.1,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835585+00:00"
+  },
+  "glm-5.3": {
+    "in": 1.4,
+    "out": 4.4,
+    "cached": 0.26,
+    "currency": "USD",
+    "source": "models.dev/zai",
+    "url": "https://docs.z.ai/guides/overview/pricing",
+    "retrievedAt": "2026-10-07T15:21:03.835589+00:00"
+  },
+  "grok-4.7": {
+    "in": 2,
+    "out": 6,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835596+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-4.3": {
+    "in": 1.25,
+    "out": 2.5,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835604+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-4.20-0309-reasoning": {
+    "in": 1.25,
+    "out": 2.5,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835612+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-4.5": {
+    "in": 2,
+    "out": 6,
+    "cached": 0.3,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835618+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-4.20-0309-non-reasoning": {
+    "in": 1.25,
+    "out": 2.5,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835623+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-build-0.1": {
+    "in": 1,
+    "out": 2,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835629+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-4.20-multi-agent-0309": {
+    "in": 1.25,
+    "out": 2.5,
+    "cached": 0.2,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835634+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "grok-4.6": {
+    "in": 2,
+    "out": 6,
+    "cached": 0.5,
+    "currency": "USD",
+    "source": "models.dev/xai",
+    "url": "https://docs.x.ai/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835639+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "open-mistral-nemo": {
+    "in": 0.15,
+    "out": 0.15,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835646+00:00"
+  },
+  "codestral-latest": {
+    "in": 0.3,
+    "out": 0.9,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835651+00:00"
+  },
+  "mistral-large-2411": {
+    "in": 2,
+    "out": 6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835655+00:00"
+  },
+  "mistral-nemo": {
+    "in": 0.15,
+    "out": 0.15,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835660+00:00"
+  },
+  "mistral-medium-2508": {
+    "in": 0.4,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835665+00:00"
+  },
+  "mistral-large-latest": {
+    "in": 0.5,
+    "out": 1.5,
+    "cached": 0.05,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835673+00:00"
+  },
+  "mistral-small-latest": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.015,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835678+00:00"
+  },
+  "zai-glm-5-2": {
+    "in": 1.4,
+    "out": 4.4,
+    "cached": 0.14,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835682+00:00"
+  },
+  "ministral-8b-latest": {
+    "in": 0.1,
+    "out": 0.1,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835687+00:00"
+  },
+  "devstral-medium-latest": {
+    "in": 0.4,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835691+00:00"
+  },
+  "mistral-large-4": {
+    "in": 0.68,
+    "out": 2.09,
+    "cached": 0.07,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835696+00:00"
+  },
+  "open-mixtral-8x22b": {
+    "in": 2,
+    "out": 6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835701+00:00"
+  },
+  "devstral-2512": {
+    "in": 0.4,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835705+00:00"
+  },
+  "mistral-medium-2505": {
+    "in": 0.4,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835710+00:00"
+  },
+  "magistral-medium-latest": {
+    "in": 2,
+    "out": 5,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835715+00:00"
+  },
+  "pixtral-12b": {
+    "in": 0.15,
+    "out": 0.15,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835720+00:00"
+  },
+  "mistral-embed": {
+    "in": 0.1,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835727+00:00"
+  },
+  "devstral-small-2505": {
+    "in": 0.1,
+    "out": 0.3,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835733+00:00"
+  },
+  "mistral-small-2603": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.015,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835738+00:00"
+  },
+  "devstral-medium-2507": {
+    "in": 0.4,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835742+00:00"
+  },
+  "labs-devstral-small-2512": {
+    "in": 0,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835747+00:00"
+  },
+  "mistral-large-2512": {
+    "in": 0.5,
+    "out": 1.5,
+    "cached": 0.05,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835752+00:00"
+  },
+  "devstral-latest": {
+    "in": 0.4,
+    "out": 2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835757+00:00"
+  },
+  "devstral-small-2507": {
+    "in": 0.1,
+    "out": 0.3,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835762+00:00"
+  },
+  "pixtral-large-latest": {
+    "in": 2,
+    "out": 6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835766+00:00"
+  },
+  "voxtral-small-latest": {
+    "in": 0.1,
+    "out": 0.3,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835773+00:00"
+  },
+  "open-mixtral-8x7b": {
+    "in": 0.7,
+    "out": 0.7,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835778+00:00"
+  },
+  "mistral-small-2506": {
+    "in": 0.1,
+    "out": 0.3,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835783+00:00"
+  },
+  "zai-glm-5-3": {
+    "in": 1.4,
+    "out": 4.4,
+    "cached": 0.14,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835787+00:00"
+  },
+  "mistral-medium-2604": {
+    "in": 1.5,
+    "out": 7.5,
+    "cached": 0.15,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835792+00:00"
+  },
+  "open-mistral-7b": {
+    "in": 0.25,
+    "out": 0.25,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835796+00:00"
+  },
+  "ministral-3b-latest": {
+    "in": 0.04,
+    "out": 0.04,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835801+00:00"
+  },
+  "mistral-medium-latest": {
+    "in": 1.5,
+    "out": 7.5,
+    "cached": 0.15,
+    "currency": "USD",
+    "source": "models.dev/mistral",
+    "url": "https://docs.mistral.ai/getting-started/models/",
+    "retrievedAt": "2026-10-07T15:21:03.835808+00:00"
+  },
+  "MiniMax-M3": {
+    "in": 0.3,
+    "out": 1.2,
+    "cached": 0.06,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835814+00:00",
+    "note": "长上下文/分层计费可能更高"
+  },
+  "MiniMax-M2.1": {
+    "in": 0.3,
+    "out": 1.2,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835820+00:00"
+  },
+  "MiniMax-M2.5": {
+    "in": 0.3,
+    "out": 1.2,
+    "cached": 0.03,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835825+00:00"
+  },
+  "MiniMax-M2.7": {
+    "in": 0.3,
+    "out": 1.2,
+    "cached": 0.06,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835829+00:00"
+  },
+  "MiniMax-M2.7-highspeed": {
+    "in": 0.6,
+    "out": 2.4,
+    "cached": 0.06,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835834+00:00"
+  },
+  "MiniMax-M2": {
+    "in": 0.3,
+    "out": 1.2,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835841+00:00"
+  },
+  "MiniMax-M2.5-highspeed": {
+    "in": 0.6,
+    "out": 2.4,
+    "cached": 0.06,
+    "currency": "USD",
+    "source": "models.dev/minimax",
+    "url": "https://platform.minimax.io/docs/guides/quickstart",
+    "retrievedAt": "2026-10-07T15:21:03.835846+00:00"
+  },
+  "command-r-08-2024": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835852+00:00"
+  },
+  "north-mini-code-1-0": {
+    "in": 0,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835857+00:00"
+  },
+  "command-a-translate-08-2025": {
+    "in": 2.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835862+00:00"
+  },
+  "command-r7b-arabic-02-2025": {
+    "in": 0.0375,
+    "out": 0.15,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835868+00:00"
+  },
+  "command-a-plus-05-2026": {
+    "in": 2.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835876+00:00"
+  },
+  "command-a-03-2025": {
+    "in": 2.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835881+00:00"
+  },
+  "north-small-translate-09-2026": {
+    "in": 0,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835887+00:00"
+  },
+  "command-r7b-12-2024": {
+    "in": 0.0375,
+    "out": 0.15,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835892+00:00"
+  },
+  "command-r-plus-08-2024": {
+    "in": 2.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835897+00:00"
+  },
+  "command-a-vision-07-2025": {
+    "in": 2.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835901+00:00"
+  },
+  "command-a-reasoning-08-2025": {
+    "in": 2.5,
+    "out": 10,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/cohere",
+    "url": "https://docs.cohere.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835907+00:00"
+  },
+  "llama-3.3-70b-versatile": {
+    "in": 0.59,
+    "out": 0.79,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835915+00:00"
+  },
+  "allam-2-7b": {
+    "in": 0,
+    "out": 0,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835920+00:00"
+  },
+  "llama-3.1-8b-instant": {
+    "in": 0.05,
+    "out": 0.08,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835925+00:00"
+  },
+  "meta-llama/llama-prompt-guard-2-86m": {
+    "in": 0.04,
+    "out": 0.04,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835932+00:00"
+  },
+  "meta-llama/llama-prompt-guard-2-22m": {
+    "in": 0.03,
+    "out": 0.03,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835936+00:00"
+  },
+  "qwen/qwen3.8-27b": {
+    "in": 0.8,
+    "out": 4,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835943+00:00"
+  },
+  "qwen/qwen3.6-27b": {
+    "in": 0.6,
+    "out": 3,
+    "cached": 0.3,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835948+00:00"
+  },
+  "openai/gpt-oss-20b": {
+    "in": 0.075,
+    "out": 0.3,
+    "cached": 0.0375,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835953+00:00"
+  },
+  "openai/gpt-oss-safeguard-20b": {
+    "in": 0.075,
+    "out": 0.3,
+    "cached": null,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835960+00:00"
+  },
+  "openai/gpt-oss-120b": {
+    "in": 0.15,
+    "out": 0.6,
+    "cached": 0.075,
+    "currency": "USD",
+    "source": "models.dev/groq",
+    "url": "https://console.groq.com/docs/models",
+    "retrievedAt": "2026-10-07T15:21:03.835965+00:00"
+  }
+}

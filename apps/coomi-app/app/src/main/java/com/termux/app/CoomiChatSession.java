@@ -1111,6 +1111,11 @@ public final class CoomiChatSession extends ContextWrapper {
 
         /** 显示桌面悬浮层（展开态卡片）。 */
         @JavascriptInterface
+        public void setControlSession(String sessionId, String providerId, String model) {
+            CoomiFloatService.setSession(sessionId, providerId, model);
+        }
+
+        @JavascriptInterface
         public void startControlFloat() {
             if (!canDrawOverlays()) {
                 runOnUiThread(() -> Toast.makeText(CoomiChatSession.this,

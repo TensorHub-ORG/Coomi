@@ -60,9 +60,9 @@ const miniLabel = computed(() => {
         <span v-else-if="failed" class="mini-err">{{ failed }} 失败</span>
         <CoomiIcon name="chevronRight" :size="12" class="gchev" :class="{ open }" />
       </button>
-      <div v-if="open" class="mini-list">
+      <Transition name="tg-collapse"><div v-if="open" class="mini-list">
         <ToolCardItem v-for="c in cards" :key="c.callId" :card="c" />
-      </div>
+      </div></Transition>
     </template>
 
     <template v-else-if="cards.length === 1">
@@ -78,14 +78,16 @@ const miniLabel = computed(() => {
         <CoomiIcon name="chevronRight" :size="14" class="gchev" :class="{ open }" />
       </button>
 
-      <div v-if="!open" class="peek">
-        <code v-for="c in cards.slice(0, 3)" :key="c.callId" class="pchip">{{ c.toolName }}</code>
-        <span v-if="cards.length > 3" class="pmore">+{{ cards.length - 3 }}</span>
-      </div>
+      <Transition name="tg-collapse" mode="out-in">
+        <div v-if="!open" key="peek" class="peek">
+          <code v-for="c in cards.slice(0, 3)" :key="c.callId" class="pchip">{{ c.toolName }}</code>
+          <span v-if="cards.length > 3" class="pmore">+{{ cards.length - 3 }}</span>
+        </div>
 
-      <div v-else class="glist">
-        <ToolCardItem v-for="c in cards" :key="c.callId" :card="c" />
-      </div>
+        <div v-else key="glist" class="glist">
+          <ToolCardItem v-for="c in cards" :key="c.callId" :card="c" />
+        </div>
+      </Transition>
     </template>
   </div>
 </template>
@@ -159,5 +161,23 @@ const miniLabel = computed(() => {
 }
 .mini-err { flex-shrink: 0; font-size: 10.5px; font-weight: 650; color: var(--danger); }
 .mini-list { margin-top: 6px; display: flex; flex-direction: column; }
+
+/* ── 分组展开/收起过渡 ── */
+.tg-collapse-enter-active,
+.tg-collapse-leave-active {
+  transition: opacity .18s ease, transform .18s ease;
+}
+.tg-collapse-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.tg-collapse-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.tg-collapse-leave-active {
+  position: absolute;
+  width: 100%;
+}
 </style>
 

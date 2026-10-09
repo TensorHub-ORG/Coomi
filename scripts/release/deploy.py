@@ -28,7 +28,7 @@ def replace_once(pattern, replacement, content):
 def update_website(website, manifest):
     channel = manifest["channel"]
     label = "稳定" if channel == "stable" else "测试"
-    heading = f"v{manifest['version']} 更新说明【{label}】"
+    heading = manifest.get("websiteHeading") or f"v{manifest['version']} 更新说明【{label}】"
     if heading in website:
         raise ValueError("Website already contains this version")
     notes = [line.strip() for line in manifest["notes"].splitlines()

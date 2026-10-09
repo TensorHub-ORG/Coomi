@@ -36,6 +36,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod life;
+mod billing;
 mod terminal_ui;
 mod web;
 mod workflow;

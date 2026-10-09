@@ -94,6 +94,7 @@ async function switchModel() {
 }
 
 async function passwordLogin() {
+  if (logging.value) return
   if (!account.value.trim() || !password.value) { error.value = '请输入邮箱/手机号和密码'; return }
   logging.value = true; error.value = ''; message.value = ''
   try {
@@ -106,6 +107,7 @@ async function passwordLogin() {
 }
 
 async function sendCode() {
+  if (sendingCode.value || countdown.value > 0) return
   const number = mobile.value.replace(/\D/g, '')
   if (!number) { error.value = '请输入手机号'; return }
   sendingCode.value = true; error.value = ''; message.value = ''
@@ -118,6 +120,7 @@ async function sendCode() {
 }
 
 async function smsLogin() {
+  if (logging.value) return
   const number = mobile.value.replace(/\D/g, '')
   if (!number || !code.value.trim()) { error.value = '请输入手机号和验证码'; return }
   logging.value = true; error.value = ''; message.value = ''

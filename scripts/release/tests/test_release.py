@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import shlex
 import sys
@@ -15,7 +16,7 @@ import package
 
 
 def manifest(channel="stable"):
-    version = "1.4.9" if channel == "stable" else "1.4.9-test.1"
+    version = "2.0.0" if channel == "stable" else "2.0.0-test.1"
     return {**package.release_identity(version, 76, f"v{version}", "release"),
             "date": "2026-10-05", "notes": "# 更新说明\n\n- 修复 <界面> & 流式输出",
             "sourceCommit": "a" * 40}
@@ -93,6 +94,7 @@ class ReleaseTests(unittest.TestCase):
     def test_stable_and_test_channels(self):
         self.assertEqual(package.release_identity("2.0.0", 100, "v2.0.0", "release")["channel"], "stable")
         self.assertEqual(package.release_identity("2.0.0-test.1", 101, "v2.0.0-test.1", "release")["channel"], "test")
+        self.assertEqual(package.release_identity("1.4.9-fix.5", 88, "v1.4.9-fix.5", "release")["channel"], "stable")
 
     def test_preview_has_independent_package_and_artifact(self):
         identity = package.release_identity("2.0.0", 100, "v2.0.0", "preview")
@@ -129,23 +131,34 @@ class ReleaseTests(unittest.TestCase):
 
     def test_stable_site_updates_download_and_folds_history(self):
         result = deploy.update_website(self.website, manifest())
-        self.assertIn('id="versionValue" class="compatibility-value">1.4.9<', result)
-        self.assertIn('Android 1.4.9</div>', result)
-        self.assertIn('android/Coomi-Android-arm64-v1.4.9.apk', result)
+        self.assertIn('id="versionValue" class="compatibility-value">2.0.0<', result)
+        self.assertIn('Android 2.0.0</div>', result)
+        self.assertIn('android/Coomi-Android-arm64-v2.0.0.apk', result)
         self.assertIn('修复 &lt;界面&gt; &amp; 流式输出', result)
-        latest = result.index("v1.4.9 更新说明【稳定】")
+        latest = result.index("v2.0.0 更新说明【稳定】")
         fold = result.index("<summary>展开全部更新记录</summary>", latest)
-        previous = result.index("v1.4.8 更新说明【稳定】", latest)
+        old_panel = self.website.split('<div data-channel-panel="stable">')[1]
+        previous_heading = re.search(r'<h2 class="changelog-title">(.*?)</h2>', old_panel).group(1)
+        previous = result.index(previous_heading, latest)
         self.assertLess(latest, fold)
         self.assertLess(fold, previous)
-        self.assertIn('android_test/Coomi-Android-arm64-v1.4.8-test.8.apk', result)
+        test_panel = '<div data-channel-panel="test"'
+        self.assertEqual(self.website.split(test_panel)[1], result.split(test_panel)[1])
+
+    def test_custom_heading_is_kept_and_history_stays_closed(self):
+        release = {**manifest(), "websiteHeading": "v2.0.0 -fix.5更新说明【稳定】"}
+        result = deploy.update_website(self.website, release)
+        self.assertIn('<h2 class="changelog-title">v2.0.0 -fix.5更新说明【稳定】</h2>', result)
+        self.assertNotIn('<details class="changelog-history" open', result)
+        with self.assertRaisesRegex(ValueError, "already contains"):
+            deploy.update_website(result, release)
 
     def test_test_site_preserves_stable_panel(self):
         result = deploy.update_website(self.website, manifest("test"))
         stable = '<div data-channel-panel="stable">'
         test = '<div data-channel-panel="test"'
         self.assertEqual(self.website.split(stable)[1].split(test)[0], result.split(stable)[1].split(test)[0])
-        self.assertIn('android_test/Coomi-Android-arm64-v1.4.9-test.1.apk', result)
+        self.assertIn('android_test/Coomi-Android-arm64-v2.0.0-test.1.apk', result)
 
     def test_unknown_site_markup_stops_deployment(self):
         with self.assertRaises(ValueError):
@@ -192,7 +205,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(json.loads(files[root + "/versions.json"])["versions"][0]["file"], release["file"])
             self.assertEqual(files[root + "/" + release["file"]], (directory / release["file"]).read_bytes())
             self.assertEqual(files[other_path], original_other)
-            self.assertIn("v1.4.9 更新说明【稳定】", files[deploy.SITE_PATH].decode())
+            self.assertIn("v2.0.0 更新说明【稳定】", files[deploy.SITE_PATH].decode())
 
     def test_failed_site_publish_restores_update_metadata(self):
         with tempfile.TemporaryDirectory() as temp:

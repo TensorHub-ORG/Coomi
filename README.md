@@ -53,6 +53,7 @@ Coomi 是一个在 Android 设备上运行的本地优先智能体工作环境�
   <a href="docs/assets/show_004.jpg"><img src="docs/assets/show_004.jpg" alt="API 配置" width="23%" /></a>
 </p>
 
+
 ## 业务能力
 
 - **本地智能体引擎**：内置 Rust 引擎（`coomi`），对话、工具执行、会话存储全部在设备本地完成，仅模型请求发往你配置的 Provider。

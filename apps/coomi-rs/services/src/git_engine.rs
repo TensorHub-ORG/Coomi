@@ -1530,6 +1530,13 @@ mod tests {
             .await
             .expect("git init");
         assert!(init.status.success());
+        let line_endings = Command::new("git")
+            .args(["config", "core.autocrlf", "false"])
+            .current_dir(&root)
+            .output()
+            .await
+            .expect("disable checkout newline conversion");
+        assert!(line_endings.status.success());
         let identity = Command::new("git")
             .args(["config", "user.name", "Test"])
             .current_dir(&root)
@@ -1914,8 +1921,18 @@ diff --git a/nope.txt b/nope.txt
     /// `switchingBranch` 守卫永久锁死，表现为「无法切换、列表不刷新」）。
     #[tokio::test]
     async fn child_timeout_returns_error_without_hanging() -> Result<()> {
-        let mut command = tokio::process::Command::new("sh");
-        command.arg("-c").arg("sleep 30");
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("powershell.exe");
+            command.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = tokio::process::Command::new("sleep");
+            command.arg("30");
+            command
+        };
         let started = std::time::Instant::now();
         let error = run_child_limited_with_timeout(&mut command, "hanging child", Duration::from_millis(500))
             .await

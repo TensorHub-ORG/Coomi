@@ -29,7 +29,7 @@ def release_identity(version, code, tag, mode):
     preview = mode == "preview"
     return {"version": version, "versionCode": int(code), "tag": tag, "mode": mode,
             "applicationId": "com.coomidev.android" if preview else "com.coomi.android",
-            "channel": "preview" if preview else ("test" if "-" in version else "stable"),
+            "channel": "preview" if preview else ("test" if re.search(r"-(?:test|preview|alpha|beta|rc)(?:[.-]|$)", version) else "stable"),
             "file": f"{'CoomiDev' if preview else 'Coomi'}-Android-arm64-{tag}.apk"}
 
 
@@ -45,15 +45,17 @@ def source_identity(tag, mode):
 
 
 def verify_identity(apk, metadata, sdk):
-    tools = sdk / "build-tools/36.0.0"
+    tools = sdk / ("build-tools/" + os.environ.get("COOMI_BUILD_TOOLS", "36.0.0"))
+    signer_tool = "apksigner.bat" if os.name == "nt" else "apksigner"
+    aapt_tool = "aapt.exe" if os.name == "nt" else "aapt"
     signature = subprocess.check_output(
-        [str(tools / "apksigner"), "verify", "--verbose", "--print-certs", str(apk)], text=True)
+        [str(tools / signer_tool), "verify", "--verbose", "--print-certs", str(apk)], text=True)
     signer = re.search(r"Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)", signature)
     if signer is None:
         raise ValueError("APK has no signing certificate")
     if metadata["mode"] == "release" and signer.group(1).lower() != SIGNER_SHA256:
         raise ValueError("APK certificate does not match the official Coomi signer")
-    badging = subprocess.check_output([str(tools / "aapt"), "dump", "badging", str(apk)], text=True)
+    badging = subprocess.check_output([str(tools / aapt_tool), "dump", "badging", str(apk)], text=True)
     package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'",
                         badging, re.MULTILINE)
     if package is None or package.groups() != (
@@ -83,6 +85,9 @@ def package_release(identity, sdk, output):
                 "date": now.date().isoformat(), "publishedAt": now.isoformat().replace("+00:00", "Z"),
                 "size": target.stat().st_size, "sha256": digest, "notes": notes,
                 "sourceCommit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()}
+    heading = re.search(r"^#\s+(.+更新说明【(?:稳定|测试)】)\s*$", notes, re.MULTILINE)
+    if heading:
+        manifest["websiteHeading"] = heading.group(1)
     (output / "latest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (output / f"{target.name}.sha256").write_text(f"{digest}  {target.name}\n", encoding="utf-8")
     shutil.copyfile(notes_path, output / "release-notes.md")

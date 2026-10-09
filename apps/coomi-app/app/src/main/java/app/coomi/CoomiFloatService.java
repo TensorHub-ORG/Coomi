@@ -80,6 +80,24 @@ public final class CoomiFloatService extends Service {
 
     private int lastX = -1;
     private int lastY = -1;
+    private static volatile String controlSessionId = "", controlProviderId = "", controlModel = "";
+    public static void setSession(String id, String provider, String model) {
+        controlSessionId = id == null ? "" : id;
+        controlProviderId = provider == null ? "" : provider;
+        controlModel = model == null ? "" : model;
+    }
+    public static void releaseForAutomation() {
+        CoomiFloatService service = instance;
+        if (service == null) return;
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        Runnable release = () -> { service.setCollapsedInternal(true); latch.countDown(); };
+        if (Looper.myLooper() == Looper.getMainLooper()) release.run();
+        else {
+            service.handler.post(release);
+            try { latch.await(800, java.util.concurrent.TimeUnit.MILLISECONDS); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+    }
     private int touchStartX;
     private int touchStartY;
     private float touchDownRawX;
@@ -369,7 +387,9 @@ public final class CoomiFloatService extends Service {
         inputRow.setLayoutParams(inputRowParams);
 
         input = new EditText(this);
-        input.setHint("输入要发送的内容…");
+        input.setHint("输入要执行的任务…");
+        input.setFocusableInTouchMode(true);
+        input.setOnClickListener(v -> showKeyboard(input));
         input.setHintTextColor(muted);
         input.setTextColor(text);
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
@@ -391,7 +411,7 @@ public final class CoomiFloatService extends Service {
         inputRow.addView(input);
 
         Button send = new Button(this);
-        send.setText("填入并发送");
+        send.setText("发送任务");
         send.setAllCaps(false);
         send.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         send.setTag("send");
@@ -525,9 +545,20 @@ public final class CoomiFloatService extends Service {
             appendTrace(null, "输入为空，先写点内容");
             return;
         }
-        input.setText("");
+        CoomiService service = CoomiService.current();
+        if (service == null || controlSessionId.isEmpty()) {
+            appendTrace(null, "引擎或控制会话未就绪，请先在应用里开启控制模式");
+            return;
+        }
         setCollapsedInternal(true);
-        handler.postDelayed(() -> fillAndSend(text), 180);
+        final String session = controlSessionId, provider = controlProviderId, model = controlModel;
+        new Thread(() -> {
+            String error = service.submitControlTask(session, provider, model, text);
+            handler.post(() -> {
+                if (error == null) { input.setText(""); appendTrace("任务已提交", text); }
+                else { appendTrace("任务未提交", error); toast(error); }
+            });
+        }, "coomi-control-submit").start();
     }
 
     private void fillOnly() {
@@ -600,8 +631,8 @@ public final class CoomiFloatService extends Service {
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
             params.gravity = Gravity.TOP | Gravity.START;
             params.x = 0;
@@ -651,10 +682,16 @@ public final class CoomiFloatService extends Service {
         if (params != null) {
             if (value) {
                 params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                params.flags &= ~WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
                 hideKeyboard();
             } else {
+                // 展开时：去掉 NOT_FOCUSABLE 让输入框能拿到焦点、弹输入法。
+                // 同时去掉 ALT_FOCUSABLE_IM，否则 IME 输入无法到达窗口。
                 params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
                 params.flags &= ~WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+                params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+                params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE;
             }
             params.width = WindowManager.LayoutParams.MATCH_PARENT;
             params.x = 0;

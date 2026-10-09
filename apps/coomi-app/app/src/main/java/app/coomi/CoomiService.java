@@ -51,6 +51,9 @@ public class CoomiService extends Service {
     /** Cancels health/install callbacks when the service is torn down. */
     private volatile boolean mDestroyed;
     private volatile Thread mRuntimeInstallThread;
+    private ShizukuShellBridge mShizukuShellBridge;
+    private static volatile CoomiService current;
+    public static CoomiService current() { return current; }
 
     private static String prefix() { return TermuxConstants.TERMUX_PREFIX_DIR_PATH; }
     private static String home() { return TermuxConstants.TERMUX_HOME_DIR_PATH; }
@@ -117,7 +120,11 @@ public class CoomiService extends Service {
     }
 
     @Override public IBinder onBind(Intent intent) { return mBinder; }
-    @Override public void onCreate() {
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        current = this;
+        mShizukuShellBridge = new ShizukuShellBridge();
         Logger.logInfo(LOG_TAG, "Native service created");
         mExecutor.execute(() -> {
             try {
@@ -135,6 +142,8 @@ public class CoomiService extends Service {
     @Override
     public void onDestroy() {
         mDestroyed = true;
+        if (current == this) current = null;
+        if (mShizukuShellBridge != null) mShizukuShellBridge.close();
         Thread installThread = mRuntimeInstallThread;
         if (installThread != null) installThread.interrupt();
         stopEngineSync();
@@ -830,6 +839,30 @@ public class CoomiService extends Service {
     }
 
     public String getEngineToken() { return mEngineToken; }
+
+    /** Loopback authenticated submit; does not require the Activity/WebView to remain foreground. */
+    public String submitControlTask(String session, String provider, String model, String text) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL("http://127.0.0.1:" + mEnginePort + "/api/control/tasks").openConnection();
+            connection.setConnectTimeout(3000); connection.setReadTimeout(10000);
+            connection.setRequestMethod("POST"); connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization", "Bearer " + mEngineToken);
+            connection.setRequestProperty("Content-Type", "application/json");
+            org.json.JSONObject body = new org.json.JSONObject().put("session_id", session)
+                .put("provider_id", provider).put("model", model).put("text", text);
+            try (java.io.OutputStream out = connection.getOutputStream()) { out.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+            int status = connection.getResponseCode();
+            if (status >= 200 && status < 300) return null;
+            String message = "任务提交失败 HTTP " + status;
+            InputStream err = connection.getErrorStream();
+            if (err != null) try (BufferedReader reader = new BufferedReader(new InputStreamReader(err))) {
+                String line = reader.readLine(); if (line != null) message = new org.json.JSONObject(line).optString("error", message);
+            }
+            return message;
+        } catch (Exception error) { return "引擎连接失败：" + error.getMessage(); }
+        finally { if (connection != null) connection.disconnect(); }
+    }
 
     private boolean checkHealth(int port) {
         try {

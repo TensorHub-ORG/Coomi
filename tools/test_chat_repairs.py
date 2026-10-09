@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, expect
 from test_mobile_test2 import mock_api
 
-OUT = Path(__file__).resolve().parents[1] / 'build/chat-fix4/ui'
+OUT = Path(__file__).resolve().parents[1] / 'build/fix5/ui/chat'
 OUT.mkdir(parents=True, exist_ok=True)
 PARENT = '11111111-1111-4111-8111-111111111111'
 CHILD = '22222222-2222-4222-8222-222222222222'
@@ -38,9 +38,11 @@ with sync_playwright() as playwright:
     page.goto('http://127.0.0.1:4173/?demo=1&autoplay=0')
     page.locator('.composer').wait_for()
     page.get_by_role('button', name='会话历史', exact=True).click()
-    child = page.locator('.drawer-root .row').filter(has_text='辅助任务')
+    child = page.locator('.drawer-root .aux-row').filter(has_text='辅助任务')
     expect(child).to_be_visible()
     expect(child).to_contain_text('辅助')
+    expect(child.locator('xpath=ancestor::div[contains(@class,"session-entry")]')).to_contain_text('主任务')
+    expect(page.locator('.drawer-root .row').filter(has_text='辅助任务')).to_have_count(0)
     child.click()
     panel = page.locator('.auxiliary-chat')
     expect(panel.get_by_label('辅助会话', exact=True)).to_have_value(CHILD)
@@ -85,6 +87,11 @@ with sync_playwright() as playwright:
     expect(page.locator('.to-bottom')).to_have_count(0)
     expect(page.locator('.sbar')).to_have_count(0)
     assert page.locator('.mode-pop').bounding_box()['height'] <= 90
+    card=page.locator('.mode-pop').bounding_box()
+    page.wait_for_timeout(300)
+    card=page.locator('.mode-pop').bounding_box()
+    composer=page.locator('.composer .field').bounding_box()
+    assert composer['y']-(card['y']+card['height']) >= 7.5, (card, composer)
     page.screenshot(path=str(OUT / 'compact-modes.png'))
     assert not errors, errors
     report = {'passed': ['auxiliary history selection preserves parent', '20 long replies scroll without shrinking',

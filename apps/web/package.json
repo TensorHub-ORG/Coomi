@@ -8,7 +8,7 @@
     "type-check": "vue-tsc --noEmit",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test tests/attachments.test.ts tests/marketSearch.test.ts tests/chatTimeline.test.ts tests/backNavigation.test.ts tests/quickCommands.test.ts tests/auxiliarySessions.test.mjs tests/studioLifecycle.test.mjs"
+    "test": "node --experimental-strip-types --test tests/attachments.test.ts tests/marketSearch.test.ts tests/chatTimeline.test.ts tests/backNavigation.test.ts tests/quickCommands.test.ts tests/auxiliarySessions.test.mjs tests/studioLifecycle.test.mjs tests/o3-regressions.test.mjs"
   },
   "dependencies": {
     "gsap": "^3.13.0",

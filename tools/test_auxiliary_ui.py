@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, expect
 from test_mobile_test2 import mock_api
 
-OUT = Path(__file__).resolve().parents[1] / 'build/release-v149/ui'
+OUT = Path(__file__).resolve().parents[1] / 'build/fix5/ui/auxiliary'
 OUT.mkdir(parents=True, exist_ok=True)
 sessions = []
 
@@ -32,7 +32,7 @@ def api(route):
 
 
 with sync_playwright() as playwright:
-    browser = playwright.chromium.launch(channel='chrome', headless=True)
+    browser = playwright.chromium.launch(channel='chrome', headless=True, args=['--disable-gpu', '--disable-renderer-backgrounding'])
     context = browser.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, reduced_motion='reduce')
     context.add_init_script('window.CoomiAndroid={openDashboard:()=>{},closeHostActivity:()=>{},getQuickCommands:()=>""};')
     context.route('**/api/**', api)

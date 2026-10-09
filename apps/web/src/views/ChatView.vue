@@ -289,8 +289,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
 .shell {
   position: relative;
   display: flex; flex-direction: column; height: 100%; min-height: 0;
-  background: transparent;
-  transform-origin: left center;
+  background: var(--bg);
+  transform-origin: right center;
   /* 只保留 transform 动画：Android WebView 里 transform+border-radius 同时
      过渡会反复重建合成层，表现为打开侧边栏时主内容文字闪烁。
      will-change 让合成层常驻，避免动画开始/结束时闪一下。 */
@@ -298,9 +298,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   will-change: transform;
 }
 .shell.pushed {
-  /* origin 为 left center 时，scale(.94) 使右边缘内缩 6%；
-     translateX(6%) 精确抵消，保证右侧始终贴住屏幕右缘（不会右侧被裁）。 */
-  transform: translateX(6%) scale(.94);
+  /* 右侧原点固定边缘，只缩放一次，不再叠加百分比平移露出 WebView 背景。 */
+  transform: scale(.94);
   border-radius: 20px;
   overflow: hidden;
 }

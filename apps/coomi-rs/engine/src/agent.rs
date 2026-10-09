@@ -715,7 +715,10 @@ impl Agent {
         observer.on_event(&AgentEvent::CompactionStarted { automatic });
         let capabilities = provider.capabilities();
         // 压缩前备份完整历史：压缩后磁盘仍保留可恢复的完整会话记录。
-        session.archive = session.messages.clone();
+        let mut archived_ids = HashSet::new();
+        session.archive = session.archive.iter().chain(session.messages.iter())
+            .filter(|message| !message.compaction_summary && archived_ids.insert(message.id.clone()))
+            .cloned().collect();
         let mut normalized = normalize_history(&session.messages);
         // Compaction endpoints are commonly text-only even when normal chat supports
         // vision. Keep the textual tool result while never replaying image payloads.
@@ -1417,6 +1420,28 @@ mod tests {
         assert!(is_transient_provider_error(&anyhow::anyhow!(
             "provider stream failed: connection reset"
         )));
+    }
+
+    #[tokio::test]
+    async fn repeated_compaction_preserves_full_archive_across_reload() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::SessionStore::new(home.path());
+        let mut session = Session::new("mock", "tiny", PathBuf::from("."));
+        let first = ChatMessage::assistant("original result", Vec::new());
+        session.messages = vec![ChatMessage::user("original task"), first.clone()];
+        let provider = CompactingProvider { calls: Mutex::new(0) };
+        let agent = Agent::new("test");
+        agent.compact_session(&mut session, &provider, &EchoTool, &NoopObserver).await.unwrap();
+        let next = ChatMessage::user("second task");
+        session.messages.push(next.clone());
+        agent.compact_session(&mut session, &provider, &EchoTool, &NoopObserver).await.unwrap();
+        store.save(&session).unwrap();
+        let loaded = store.load(session.id).unwrap();
+        assert!(loaded.archive.iter().any(|m| m.id == first.id));
+        assert!(loaded.archive.iter().any(|m| m.id == next.id));
+        let ids: HashSet<_> = loaded.archive.iter().map(|m| &m.id).collect();
+        assert_eq!(ids.len(), loaded.archive.len());
+        assert!(!loaded.archive.iter().any(|m| m.compaction_summary));
     }
 
     struct CountingTool {

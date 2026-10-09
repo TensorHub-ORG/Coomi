@@ -1279,6 +1279,14 @@ mod tests {
             joined.contains("PATH=/opt/coomi-dev/current/bin:/opt/coomi-dev/bin:/usr/local/sbin")
         );
         assert!(command.environment.contains_key("PROOT_TMP_DIR"));
-        assert!(!joined.contains("/storage/emulated"));
+        let mounts: Vec<_> = command.arguments.windows(2)
+            .filter(|args| args[0] == "-b")
+            .map(|args| args[1].as_str()).collect();
+        let storage: Vec<_> = mounts.iter().copied()
+            .filter(|mount| mount.starts_with("/storage") || mount.starts_with("/sdcard"))
+            .collect();
+        assert_eq!(storage, ["/storage/emulated/0:/storage/emulated/0", "/sdcard:/sdcard", "/storage/emulated/0:/sdcard"]);
+        assert!(!mounts.contains(&"/"));
+        assert!(!mounts.contains(&"/storage:/storage"));
     }
 }

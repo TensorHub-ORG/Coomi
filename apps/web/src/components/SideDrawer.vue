@@ -11,6 +11,7 @@ import { useConfigStore } from '@/stores/config'
 import { formatSessionTime, useSessionsStore, type SessionMeta } from '@/stores/sessions'
 import { GLOBAL_SESSION_ID } from '@/bridge/life'
 import CoomiIcon from './CoomiIcon.vue'
+import AuxiliarySessionList from './AuxiliarySessionList.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -164,14 +165,14 @@ function openDashboard() {
             <CoomiIcon name="more" :size="17" />
           </button>
         </div>
+        <AuxiliarySessionList :parent-id="GLOBAL_SESSION_ID" @select="pick" @more="menuFor = $event" />
         <p v-if="isEmpty" class="empty">
           还没有历史会话。<br />随便说点什么，标题会用你的第一句话。
         </p>
         <template v-for="g in sessions.groups" :key="g.label">
           <p class="sec-label">{{ g.label }}</p>
+          <div v-for="m in g.items" :key="m.id" class="session-entry">
           <div
-            v-for="m in g.items"
-            :key="m.id"
             class="row"
             :class="{ cur: m.id === session.sessionId }"
             @click="pick(m.id)"
@@ -199,6 +200,8 @@ function openDashboard() {
             <button class="rmore" aria-label="更多" @click.stop="menuFor = m">
               <CoomiIcon name="more" :size="17" />
             </button>
+          </div>
+          <AuxiliarySessionList :parent-id="m.id" @select="pick" @more="menuFor = $event" />
           </div>
         </template>
       </div>

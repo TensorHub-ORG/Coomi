@@ -190,7 +190,7 @@ const MOCK_PROVIDERS: ProviderConfig[] = [
 
 export function displayModelName(name: string): string {
   if (!name) return name
-  const cleaned = name.replace(/[ --​-‏‪-‮⁦-⁩︀-️ﹰ-﻿￰-￿]/g, '')
+  const cleaned = name.replace(/[\0--​-‏‪-‮⁦-⁩︀-️ﹰ-﻿￰-￿]/g, '')
   return cleaned || name
 }
 
@@ -212,14 +212,21 @@ export const useConfigStore = defineStore('config', () => {
     ttsRate.value = clamped
     localStorage.setItem('coomi.ttsRate', String(clamped))
   }
-  
-  const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
+
+  const savedStartupPermission = localStorage.getItem('coomi.defaultPermissionMode') as PermissionMode | null
+  const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedStartupPermission ?? '') ? savedStartupPermission! : ['ask', 'auto', 'full', 'minimal'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
   const planMode = ref(false)
   const savedProduction = (localStorage.getItem('coomi.productionMode') || 'normal') as 'normal' | 'overload' | 'berserk'
   const productionMode = ref<'normal' | 'overload' | 'berserk'>(['normal','overload','berserk'].includes(savedProduction) ? savedProduction : 'normal')
   const savedDefaultMode = localStorage.getItem('coomi.defaultPermissionMode') as PermissionMode | null
   const defaultPermissionMode = ref<PermissionMode>(['ask', 'auto', 'full', 'minimal'].includes(savedDefaultMode ?? '') ? savedDefaultMode! : permissionMode.value)
   const sendMorphAnimation = ref(localStorage.getItem('coomi.sendMorphAnimation') !== '0')
+  /** 关闭所有动画：总开关。关闭后禁用全部 CSS/GSAP/Morphicons/Web Animations，并强制关闭液滴动画。 */
+  const allAnimationsOff = ref(localStorage.getItem('coomi.allAnimationsOff') === '1')
+  if (allAnimationsOff.value) {
+    sendMorphAnimation.value = false
+    localStorage.setItem('coomi.sendMorphAnimation', '0')
+  }
   /** 极简界面模式：工具调用折叠成一小块方框（点开才看详情），文字缩小。 */
   const minimalUi = ref(localStorage.getItem('coomi.minimalUi') !== '0')
   const themeMode = ref<ThemeMode>(readThemeMode())
@@ -393,13 +400,55 @@ export const useConfigStore = defineStore('config', () => {
     void apiSend('/api/settings/berserk-model', 'POST', { model }).catch(() => undefined)
   }
   function setDefaultPermissionMode(mode: PermissionMode) {
+    startupPermissionRead = true
     defaultPermissionMode.value = mode
     localStorage.setItem('coomi.defaultPermissionMode', mode)
     setPermissionMode(mode)
+    void apiSend('/api/settings/permission', 'PUT', { defaultPermissionMode: mode })
+      .catch((e) => { lastError.value = `默认权限未同步到引擎：${String(e)}` })
+  }
+  let startupPermissionRead = false
+  async function syncStartupPermission() {
+    if (startupPermissionRead) return
+    try {
+      const value = await apiGet<{ defaultPermissionMode: PermissionMode | null }>('/api/settings/permission')
+      if (startupPermissionRead) return // 不覆盖获取过程中用户刚刚改动的设置
+      if (value.defaultPermissionMode === null) {
+        // 迁移旧版：引擎尚未记录启动默认值时，保留用户已选的本地默认值。
+        await apiSend('/api/settings/permission', 'PUT', { defaultPermissionMode: defaultPermissionMode.value })
+        // 迁移成功后立即更新 UI，避免下次启动前显示错误默认值
+        if (!['ask', 'auto', 'full', 'minimal'].includes(defaultPermissionMode.value)) return
+        localStorage.setItem('coomi.defaultPermissionMode', defaultPermissionMode.value)
+        setPermissionMode(defaultPermissionMode.value)
+        startupPermissionRead = true
+        return
+      }
+      if (!['ask', 'auto', 'full', 'minimal'].includes(value.defaultPermissionMode)) return
+      defaultPermissionMode.value = value.defaultPermissionMode
+      localStorage.setItem('coomi.defaultPermissionMode', value.defaultPermissionMode)
+      setPermissionMode(value.defaultPermissionMode)
+      startupPermissionRead = true
+    } catch { /* 引擎未就绪时保留本地默认，并在下次连接时重试 */ }
   }
   function setSendMorphAnimation(value: boolean) {
     sendMorphAnimation.value = value
     localStorage.setItem('coomi.sendMorphAnimation', value ? '1' : '0')
+    // 打开液滴动画时，自动解除「关闭所有动画」总开关（互斥语义）。
+    if (value && allAnimationsOff.value) {
+      allAnimationsOff.value = false
+      localStorage.removeItem('coomi.allAnimationsOff')
+    }
+  }
+  /** 关闭全部动画：强制关闭液滴动画并注入全局无动画类名 / CSS 变量。 */
+  function setAllAnimationsOff(value: boolean) {
+    allAnimationsOff.value = value
+    if (value) {
+      localStorage.setItem('coomi.allAnimationsOff', '1')
+      sendMorphAnimation.value = false
+      localStorage.setItem('coomi.sendMorphAnimation', '0')
+    } else {
+      localStorage.removeItem('coomi.allAnimationsOff')
+    }
   }
   function setMinimalUi(value: boolean) {
     minimalUi.value = value
@@ -694,9 +743,9 @@ export const useConfigStore = defineStore('config', () => {
   return {
     ttsAutoRead, ttsRate, setTtsAutoRead, setTtsRate,
     mottoFont, setMottoFont,
-    permissionMode, defaultPermissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, productionMode, setProductionMode, berserkModel, setBerserkModel, sendMorphAnimation, setSendMorphAnimation, minimalUi, setMinimalUi, providers, activeId, loading, usingMock, lastError, subAgentSettings,
+    permissionMode, defaultPermissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, digitalLifeEnabled, lifeGlobalMode, setLifeGlobalMode, customPrompt, productionMode, setProductionMode, berserkModel, setBerserkModel, sendMorphAnimation, setSendMorphAnimation, allAnimationsOff, setAllAnimationsOff, minimalUi, setMinimalUi, providers, activeId, loading, usingMock, lastError, subAgentSettings,
     currentProviderId, currentModel, currentProvider, mergedProviders,
-    fetchProviders, selectModel, syncDisplayModel, validateAndSelectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, setDefaultPermissionMode, togglePlanMode,
+    fetchProviders, selectModel, syncDisplayModel, validateAndSelectModel, setPermissionMode, syncStartupPermission, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, setDefaultPermissionMode, togglePlanMode,
     toggleGlobalMemory, syncGlobalMemoryFromEngine, setDigitalLifeEnabled, syncDigitalLifeEnabled, fetchCustomPrompt, saveCustomPrompt,
     upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels, fetchSubAgentSettings, saveSubAgentSettings,
   }
