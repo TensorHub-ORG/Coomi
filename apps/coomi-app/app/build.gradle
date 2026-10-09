@@ -412,11 +412,13 @@ tasks.named("preBuild").configure {
 tasks.register("validateCoomiReleaseSigning") {
     onlyIf { !coomiDevBuild }
     doLast {
-        ["COOMI_SIGNING_STORE_FILE", "COOMI_SIGNING_KEY_ALIAS",
-         "COOMI_SIGNING_STORE_PASSWORD", "COOMI_SIGNING_KEY_PASSWORD"].each { name ->
-            if (!System.getenv(name)) throw new GradleException("Missing release signing variable: ${name}")
+        // Validate the resolved config so both CI environment variables and
+        // the existing local.properties signing credentials are supported.
+        def signing = android.signingConfigs.coomiRelease
+        ["keyAlias", "storePassword", "keyPassword"].each { name ->
+            if (!signing."${name}") throw new GradleException("Missing release signing setting: ${name}")
         }
-        if (!android.signingConfigs.coomiRelease.storeFile.isFile()) {
+        if (signing.storeFile == null || !signing.storeFile.isFile()) {
             throw new GradleException("Release signing keystore does not exist")
         }
     }
