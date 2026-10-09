@@ -1,0 +1,222 @@
+name: Android Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Preview uses automatic debug signing; release requires official signing secrets
+        type: choice
+        options: [preview, release]
+        default: preview
+      runtime_repository:
+        description: Repository hosting the pinned runtime (empty uses this repository or COOMI_RUNTIME_REPOSITORY)
+        type: string
+        default: ''
+      publish:
+        description: Publish a GitHub Release in this repository
+        type: boolean
+        default: false
+      sync_website:
+        description: Also sync the production website/App update source (requires publish)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      channel: ${{ steps.metadata.outputs.channel }}
+      mode: ${{ steps.metadata.outputs.mode }}
+      sync_website: ${{ steps.secrets.outputs.sync_website }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate release version and notes
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          RELEASE_MODE: ${{ github.event_name == 'push' && (vars.COOMI_RELEASE_MODE || 'preview') || inputs.mode }}
+        run: python3 scripts/release/package.py metadata --tag "$RELEASE_TAG" --mode "$RELEASE_MODE"
+      - name: Check required secrets
+        id: secrets
+        env:
+          RELEASE_MODE: ${{ steps.metadata.outputs.mode }}
+          COOMI_SIGNING_KEYSTORE_BASE64: ${{ secrets.COOMI_SIGNING_KEYSTORE_BASE64 }}
+          COOMI_SIGNING_KEY_ALIAS: ${{ secrets.COOMI_SIGNING_KEY_ALIAS }}
+          COOMI_SIGNING_STORE_PASSWORD: ${{ secrets.COOMI_SIGNING_STORE_PASSWORD }}
+          COOMI_SIGNING_KEY_PASSWORD: ${{ secrets.COOMI_SIGNING_KEY_PASSWORD }}
+          SYNC_WEBSITE: ${{ (github.event_name == 'push' && vars.COOMI_SYNC_WEBSITE == 'true') || (inputs.publish && inputs.sync_website) }}
+          COOMI_DEPLOY_HOST: ${{ secrets.COOMI_DEPLOY_HOST }}
+          COOMI_DEPLOY_USER: ${{ secrets.COOMI_DEPLOY_USER }}
+          COOMI_DEPLOY_SSH_KEY: ${{ secrets.COOMI_DEPLOY_SSH_KEY }}
+          COOMI_DEPLOY_KNOWN_HOSTS: ${{ secrets.COOMI_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          python3 - <<'PY'
+          import os
+          names = []
+          if os.environ['RELEASE_MODE'] == 'release':
+              names = ['COOMI_SIGNING_KEYSTORE_BASE64', 'COOMI_SIGNING_KEY_ALIAS',
+                       'COOMI_SIGNING_STORE_PASSWORD', 'COOMI_SIGNING_KEY_PASSWORD']
+          if os.environ['SYNC_WEBSITE'] == 'true':
+              if os.environ['RELEASE_MODE'] != 'release':
+                  raise SystemExit('Website sync requires official release mode')
+              names += ['COOMI_DEPLOY_HOST', 'COOMI_DEPLOY_USER',
+                        'COOMI_DEPLOY_SSH_KEY', 'COOMI_DEPLOY_KNOWN_HOSTS']
+          missing = [name for name in names if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing repository secrets: ' + ', '.join(missing))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('sync_website=' + os.environ['SYNC_WEBSITE'] + '\n')
+          PY
+
+  build:
+    needs: [checks, metadata]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      RUNTIME_REPOSITORY: ${{ inputs.runtime_repository || vars.COOMI_RUNTIME_REPOSITORY || github.repository }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.0'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install Android SDK/NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973'
+      - name: Install Rust toolchain
+        working-directory: apps/coomi-rs
+        run: rustup show active-toolchain
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('apps/coomi-rs/Cargo.lock', 'apps/coomi-rs/rust-toolchain.toml') }}
+      - run: npm ci
+        working-directory: apps/web
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: runtime-v2-dist
+          key: runtime-v2-${{ env.RUNTIME_REPOSITORY }}-${{ hashFiles('apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json') }}
+      - name: Download and verify pinned runtime
+        run: python3 scripts/runtime-v2/download.py --repository "$RUNTIME_REPOSITORY"
+      - name: Bundle generated runtime manifest
+        run: cp runtime-v2-dist/runtime-v2-manifest.json apps/coomi-app/app/src/main/assets/runtime-v2-manifest.json
+      - name: Build preview APK with automatic debug signing
+        if: needs.metadata.outputs.mode == 'preview'
+        env:
+          COOMI_DEV_BUILD: '1'
+        run: ./gradlew --no-daemon --max-workers=2 :app:printVersionInfo :app:assembleRelease
+      - name: Build officially signed release APK
+        if: needs.metadata.outputs.mode == 'release'
+        env:
+          COOMI_SIGNING_KEYSTORE_BASE64: ${{ secrets.COOMI_SIGNING_KEYSTORE_BASE64 }}
+          COOMI_SIGNING_STORE_FILE: ${{ runner.temp }}/coomi-release.jks
+          COOMI_SIGNING_KEY_ALIAS: ${{ secrets.COOMI_SIGNING_KEY_ALIAS }}
+          COOMI_SIGNING_STORE_PASSWORD: ${{ secrets.COOMI_SIGNING_STORE_PASSWORD }}
+          COOMI_SIGNING_KEY_PASSWORD: ${{ secrets.COOMI_SIGNING_KEY_PASSWORD }}
+        run: |
+          trap 'rm -f "$COOMI_SIGNING_STORE_FILE"' EXIT
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          key = Path(os.environ['COOMI_SIGNING_STORE_FILE'])
+          key.write_bytes(base64.b64decode(os.environ['COOMI_SIGNING_KEYSTORE_BASE64'], validate=True))
+          key.chmod(0o600)
+          PY
+          ./gradlew --no-daemon --max-workers=2 :app:printVersionInfo :app:assembleRelease
+      - name: Verify signature, identity and offline payload; prepare update metadata
+        env:
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          RELEASE_MODE: ${{ needs.metadata.outputs.mode }}
+        run: python3 scripts/release/package.py package --tag "$RELEASE_TAG" --mode "$RELEASE_MODE"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-release
+          path: release-dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: android-release
+          path: release-dist
+      - name: Create GitHub release with verified assets
+        env:
+          CHANNEL: ${{ needs.metadata.outputs.channel }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          flags=()
+          if [ "$CHANNEL" != stable ]; then flags+=(--prerelease --latest=false); fi
+          gh release create "$RELEASE_TAG" release-dist/*.apk release-dist/*.sha256 \
+            release-dist/latest.json release-dist/runtime-v2-manifest.json \
+            --draft --target "$SOURCE_COMMIT" --title "Coomi Android $RELEASE_TAG" \
+            --notes-file release-dist/release-notes.md "${flags[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"
+      - name: Install SSH deployment dependency
+        if: needs.metadata.outputs.sync_website == 'true'
+        run: python3 -m pip install 'paramiko==4.0.0'
+      - name: Sync website and App update source
+        if: needs.metadata.outputs.sync_website == 'true'
+        env:
+          COOMI_DEPLOY_HOST: ${{ secrets.COOMI_DEPLOY_HOST }}
+          COOMI_DEPLOY_PORT: ${{ secrets.COOMI_DEPLOY_PORT }}
+          COOMI_DEPLOY_USER: ${{ secrets.COOMI_DEPLOY_USER }}
+          COOMI_DEPLOY_SSH_KEY: ${{ secrets.COOMI_DEPLOY_SSH_KEY }}
+          COOMI_DEPLOY_KNOWN_HOSTS: ${{ secrets.COOMI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_KEY_PATH: ${{ runner.temp }}/coomi-deploy-key
+          DEPLOY_HOSTS_PATH: ${{ runner.temp }}/coomi-deploy-hosts
+        run: |
+          trap 'rm -f "$DEPLOY_KEY_PATH" "$DEPLOY_HOSTS_PATH"' EXIT
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          for name, target in [('COOMI_DEPLOY_SSH_KEY', 'DEPLOY_KEY_PATH'),
+                               ('COOMI_DEPLOY_KNOWN_HOSTS', 'DEPLOY_HOSTS_PATH')]:
+              path = Path(os.environ[target])
+              path.write_text(os.environ[name] + '\n', encoding='utf-8')
+              path.chmod(0o600)
+          PY
+          python3 scripts/release/deploy.py release-dist --key "$DEPLOY_KEY_PATH" --known-hosts "$DEPLOY_HOSTS_PATH"

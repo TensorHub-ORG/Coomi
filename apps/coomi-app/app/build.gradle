@@ -124,24 +124,22 @@ android {
     }
 
     signingConfigs {
-        debug {
-            // 签名口令从 local.properties 读取（不入库）；缺失时明确报错，禁止明文回退。
+        coomiRelease {
+            // CI credentials take precedence; local builds retain the installed app signer.
             def signingProps = new Properties()
             def signingPropsFile = rootProject.file('local.properties')
             if (signingPropsFile.exists()) {
                 signingPropsFile.withInputStream { signingProps.load(it) }
             }
-            storePassword signingProps.getProperty('coomi.signing.storePassword')
-            keyPassword signingProps.getProperty('coomi.signing.keyPassword')
-            storeFile file(signingProps.getProperty('coomi.signing.storeFile', 'testkey_untrusted.jks'))
-            keyAlias signingProps.getProperty('coomi.signing.keyAlias', 'alias')
-            if (!storePassword || !keyPassword) {
-                throw new GradleException(
-                    '签名口令缺失：请在 local.properties 配置 coomi.signing.storePassword 与 coomi.signing.keyPassword')
+            def signingFile = System.getenv("COOMI_SIGNING_STORE_FILE")
+            if (signingFile) storeFile rootProject.file(signingFile)
+            else if (signingProps.getProperty('coomi.signing.storePassword')) {
+                storeFile file(signingProps.getProperty('coomi.signing.storeFile', 'testkey_untrusted.jks'))
             }
-            // 双保险：同时启用 v1/v2 签名。
-            // v1 让 UpdateChecker 的 GET_SIGNATURES 回退路径在低版本 Android 上可用；
-            // v2/v3 是 AGP 8 默认，UpdateChecker 在 API 28+ 用 getSigningInfo 读取。
+            keyAlias System.getenv("COOMI_SIGNING_KEY_ALIAS") ?: signingProps.getProperty('coomi.signing.keyAlias', 'alias')
+            storePassword System.getenv("COOMI_SIGNING_STORE_PASSWORD") ?: signingProps.getProperty('coomi.signing.storePassword')
+            keyPassword System.getenv("COOMI_SIGNING_KEY_PASSWORD") ?: signingProps.getProperty('coomi.signing.keyPassword')
+
             v1SigningEnabled true
             v2SigningEnabled true
         }
@@ -154,7 +152,7 @@ android {
             // are copied explicitly and are not affected by this pass.
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug
+            signingConfig coomiDevBuild ? signingConfigs.debug : signingConfigs.coomiRelease
         }
 
         debug {
@@ -282,6 +280,7 @@ def coomiRustup = System.getenv("COOMI_RUSTUP") ?: "rustup"
 tasks.register("installCoomiRustAndroidTarget", Exec) {
     group = "coomi build"
     description = "Install the Rust ARM64 Android standard library."
+    workingDir coomiRustRoot
     commandLine coomiRustup, "target", "add", coomiRustTarget
 }
 
@@ -407,7 +406,24 @@ if (coomiDevBuild) {
 }
 
 tasks.named("preBuild").configure {
-    dependsOn "stageCoomiWeb", "stageCoomiRustAndroid", "stageCoomiRuntimeV2", "stageCoomiDevIcon"
+    dependsOn "stageCoomiWeb", "stageCoomiRustAndroid", "stageCoomiRuntimeV2", "stageCoomiDevIcon", "stageBootstraps"
+}
+
+tasks.register("validateCoomiReleaseSigning") {
+    onlyIf { !coomiDevBuild }
+    doLast {
+        ["COOMI_SIGNING_STORE_FILE", "COOMI_SIGNING_KEY_ALIAS",
+         "COOMI_SIGNING_STORE_PASSWORD", "COOMI_SIGNING_KEY_PASSWORD"].each { name ->
+            if (!System.getenv(name)) throw new GradleException("Missing release signing variable: ${name}")
+        }
+        if (!android.signingConfigs.coomiRelease.storeFile.isFile()) {
+            throw new GradleException("Release signing keystore does not exist")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") dependsOn "validateCoomiReleaseSigning"
 }
 
 task versionName {
@@ -434,57 +450,13 @@ def validateVersionName(String versionName) {
         throw new GradleException("The versionName '"  + versionName + "' is not a valid version as per semantic version '2.0.0' spec in the format 'major.minor.patch(-prerelease)(+buildmetadata)'. https://semver.org/spec/v2.0.0.html.")
 }
 
-/**
- * Stage the bootstrap zip that gets embedded into the APK via the libtermux-bootstrap NDK module.
- *
- * We use the official Termux bootstrap from references/termux-bootstrap/ rather than downloading
- * a custom one (see defaultConfig above for the package-name caveat).
- */
-def stageBootstrap(String arch) {
-    def target = new File(projectDir, "src/main/cpp/bootstrap-" + arch + ".zip")
-    if (target.exists() && target.length() > 0) {
-        logger.quiet("bootstrap-" + arch + ".zip already staged, skipping")
-        return
-    }
-
-    def referenceDir = new File(rootProject.projectDir, "references/termux-bootstrap")
-    def candidates = referenceDir.exists() ?
-        referenceDir.listFiles({ f -> f.name.startsWith("bootstrap-" + arch) && f.name.endsWith(".zip") } as FileFilter) : null
-
-    if (candidates == null || candidates.length == 0) {
-        throw new GradleException("No local bootstrap found for " + arch + " in " + referenceDir +
-            "\nExpected a file named bootstrap-" + arch + "*.zip")
-    }
-
-    // Prefer the newest by filename (they are date-stamped).
-    candidates.sort { a, b -> b.name <=> a.name }
-    def source = candidates[0]
-
-    target.parentFile.mkdirs()
-    copy {
-        from source
-        into target.parentFile
-        rename { target.name }
-    }
-    logger.quiet("Staged bootstrap from " + source.name + " (" + target.length() + " bytes)")
-}
-
-clean {
+// The ARM64 bootstrap is a checked-in build input, including after `clean`.
+tasks.register("stageBootstraps") {
+    inputs.file(file("src/main/cpp/bootstrap-aarch64.zip"))
     doLast {
-        def tree = fileTree(new File(projectDir, 'src/main/cpp'))
-        tree.include 'bootstrap-*.zip'
-        tree.each { it.delete() }
-    }
-}
-
-task stageBootstraps() {
-    doLast {
-        stageBootstrap("aarch64")
-    }
-}
-
-afterEvaluate {
-    android.applicationVariants.all { variant ->
-        variant.javaCompileProvider.get().dependsOn(stageBootstraps)
+        def bootstrap = file("src/main/cpp/bootstrap-aarch64.zip")
+        if (!bootstrap.isFile() || bootstrap.length() == 0) {
+            throw new GradleException("Missing checked-in ARM64 Termux bootstrap")
+        }
     }
 }

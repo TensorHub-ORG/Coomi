@@ -45,6 +45,7 @@ local.properties
 .coomi/
 .runtime-v2-work/
 runtime-v2-dist/
+release-dist/
 
 # ---- OS ----
 .DS_Store

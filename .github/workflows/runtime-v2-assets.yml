@@ -3,17 +3,50 @@ name: Runtime V2 assets
 on:
   workflow_dispatch:
     inputs:
-      release_base_url:
-        description: Immutable URL prefix where the three generated assets will be published
+      release_tag:
+        description: New immutable runtime release tag (runtime-v2-...)
+        required: true
+        type: string
+      runtime_version:
+        description: Unique runtime version for these archives
         required: true
         type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: runtime-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
 jobs:
-  proot-host:
+  metadata:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate immutable runtime version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if not re.fullmatch(r'runtime-v2-[A-Za-z0-9][A-Za-z0-9._-]*', os.environ['RELEASE_TAG']):
+              raise SystemExit('Runtime release tag must begin with runtime-v2-')
+          if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', os.environ['RUNTIME_VERSION']):
+              raise SystemExit('Invalid runtime version')
+          PY
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Runtime release already exists; choose a new version' >&2
+            exit 1
+          fi
+
+  proot-host:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Build pinned ARM64 PRoot host
@@ -23,36 +56,47 @@ jobs:
           name: proot-host
           path: runtime-v2-dist/proot-host-arm64.tar.gz
           if-no-files-found: error
-  debian-rootfs:
+          compression-level: 0
+  ubuntu-rootfs:
+    needs: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Install pinned-rootfs tooling
+      - name: Install Ubuntu rootfs tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y mmdebstrap qemu-user-static binfmt-support debian-archive-keyring
+          sudo apt-get install -y mmdebstrap qemu-user-static binfmt-support ubuntu-keyring
           sudo update-binfmts --enable qemu-aarch64
-      - name: Build Debian snapshot rootfs
+      - name: Build Ubuntu ARM64 rootfs
         run: sudo --preserve-env=RUNTIME_V2_OUTPUT scripts/runtime-v2/build-rootfs.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: debian-rootfs
+          name: ubuntu-rootfs
           path: runtime-v2-dist/ubuntu-noble-arm64.tar.gz
           if-no-files-found: error
+          compression-level: 0
 
-  manifest:
-    needs: [proot-host, debian-rootfs]
+  publish:
+    needs: [proot-host, ubuntu-rootfs]
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: '*'
+          name: ubuntu-rootfs
           path: runtime-v2-dist
-          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: proot-host
+          path: runtime-v2-dist
       - name: Generate checksummed manifest
         env:
-          RUNTIME_V2_BASE_URL: ${{ inputs.release_base_url }}
+          RUNTIME_V2_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ inputs.release_tag }}
+          RUNTIME_V2_VERSION: ${{ inputs.runtime_version }}
         run: scripts/runtime-v2/create-manifest.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -62,3 +106,16 @@ jobs:
             runtime-v2-dist/ubuntu-noble-arm64.tar.gz
             runtime-v2-dist/runtime-v2-manifest.json
           if-no-files-found: error
+          compression-level: 0
+      - name: Publish immutable runtime assets
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" runtime-v2-dist/*.tar.gz runtime-v2-dist/runtime-v2-manifest.json \
+            --draft --latest=false --target "$SOURCE_COMMIT" --title "Coomi Runtime $RUNTIME_VERSION" \
+            --notes "Pinned ARM64 PRoot host and Ubuntu rootfs. Checksums and sizes are recorded in runtime-v2-manifest.json."
+          gh release edit "$RELEASE_TAG" --draft=false --latest=false
