@@ -36,7 +36,15 @@ ok('A2 retrying 状态有类型与初值', session.includes('retrying: { attempt
 ok('A3 内容回来/轮结束会清掉重试提示', session.includes('set({ streaming: true, retrying: null })'))
 ok('A4 引擎的 interruption 事件带机器可读字段', engine.includes('"reason": if round_limit_reached') && engine.includes('"resumable": true'))
 ok('A5 引擎记住上一轮输入与连接上下文', engine.includes('last_prompt: StdMutex<Option<QueuedPrompt>>') && engine.includes('last_context: StdMutex<Option<Arc<ConnectionContext>>>'))
-ok('A5 任务中心重试真的重新起一轮', /"retry" => \{[\s\S]{0,1400}spawn_turn_worker\(/.test(engine))
+/* 「重试真的重新起一轮」的判据必须落在**重试分支体内**。
+   旧写法用 {0,1400} 的字符窗口：分支里补几行注释就会被判失败（窗口量的是距离，不是归属），
+   于是这条断言会在代码正确时报警 —— 2026-10-06 实测该分支已长到 2632 字符。
+   现在按代码语义取界：起点＝匹配臂，终点＝该分支独有的收尾调用。两个标记任一消失，
+   取到的就是空串并如实报失败 —— 「无法证明」比「假通过」安全。 */
+const retryAt = engine.indexOf('"retry" => {')
+const retryEnd = retryAt < 0 ? -1 : engine.indexOf('state.task_manager.retry(&task_id)', retryAt)
+const retryBody = retryAt >= 0 && retryEnd > retryAt ? engine.slice(retryAt, retryEnd) : ''
+ok('A5 任务中心重试真的重新起一轮', retryBody.includes('spawn_turn_worker('))
 
 /* ── B. 厂商：新建可拉模型 + 保存后广播 ── */
 ok('B1 引擎有无状态预览端点', engine.includes('async fn discover_models_preview') && engine.includes('"/api/providers/discover-models-preview"'))

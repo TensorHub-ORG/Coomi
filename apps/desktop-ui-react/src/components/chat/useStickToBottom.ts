@@ -85,12 +85,19 @@ export function useStickToBottom(options: StickToBottomOptions): void {
     scrollToBottom()
   }, [itemCount, historyReady, searching, sessionId, scrollToBottom])
 
-  /** 内容增长：ResizeObserver 观察内容包装（正文在长 / 折叠块开合 / 回读换内容都算）。 */
+  /** 内容增长：ResizeObserver 观察内容包装（正文在长 / 折叠块开合 / 回读换内容都算）。
+   *
+   *  **折叠窗口内不吸附**（html[data-msg-collapse]，由 markCollapseMotion 挂 220ms）。
+   *  为什么必须让路：折叠体在答案**上方**，用户点开时内容在头部下面长高；
+   *  如果这时还钉在底部，增长的空间只能从上方「借」—— 头部被顶上去，
+   *  看起来就是「点展开，它向上展开」。手动开合期间位置由折叠头自己锚定
+   *  （见 ProcessBlock 的补偿），这里必须收手。 */
   useEffect(() => {
     const el = contentRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
       if (!historyReady || searching) return
+      if (document.documentElement.dataset.msgCollapse === '1') return
       if (!stick.current) return
       scrollToBottom()
     })

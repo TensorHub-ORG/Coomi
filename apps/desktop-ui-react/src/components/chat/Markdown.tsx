@@ -18,7 +18,7 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown'
 import { cn } from '../../lib/cn'
-import { isPlainTooLong, isStreaming } from './streamText'
+import { hasSettledTable, isPlainTooLong, isStreaming } from './streamText'
 import { FileChipEnabled, FileLinkAnchor } from './FileChip'
 import { ReactMarkdown, markdownComponents, remarkGfm } from './markdownComponents'
 import { filePathFromHref, remarkFilePaths } from '../richtext/fileLink'
@@ -54,7 +54,9 @@ export function Markdown({ text, streaming, className }: { text: string; streami
   const deferred = useDeferredValue(text)
 
   // 流式中一律纯文本；非流式只有超长正文继续纯文本（不解析、不高亮）。
-  const plain = streaming ? isStreaming() : isPlainTooLong(text)
+  // 流式期间默认纯文本（砍 O(长度²) 重解析），但**已写完的表格**例外：
+  // 表格行到齐后再等就是「先代码框、后表格」的闪烁，而解析一张定型的表不随长度变贵。
+  const plain = streaming ? (isStreaming() && !hasSettledTable(text)) : isPlainTooLong(text)
   const shown = plain ? text : deferred
   /* 首部空行折叠（2026-09-28「工具卡与正文之间有奇怪空行」的根因）：
      模型在工具调用前后输出的 \n\n 在 pre-wrap 纯文本下会**按字面**渲染成空行；
@@ -63,8 +65,10 @@ export function Markdown({ text, streaming, className }: { text: string; streami
      所以在这里一刀切掉；**尾部保留**：流式光标挂在最后一个文本节点行尾。 */
   const body = shown.replace(/^[ \t]*\n+/, '')
 
+  // 光标（caret-pulse）在 .md-body 的 ::after 上：属性挂不到伪元素，所以标记本体，
+  // base.css 用 html[data-nav-busy] [data-loop-anim] > :last-child::after 这一条停它。
   return (
-    <div data-caret={caret} className={cn('md-body selectable text-13 text-ink', className)}>
+    <div data-caret={caret} data-loop-anim className={cn('md-body selectable text-13 text-ink', className)}>
       {plain
         // 纯文本：pre-wrap 保住换行与缩进（选中复制拿到的是原文），光标由 .md-body[data-caret] 的伪元素挂在最后一个子节点行尾。
         ? <div className='whitespace-pre-wrap break-words'>{body}</div>

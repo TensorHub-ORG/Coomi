@@ -56,6 +56,7 @@ pub use mirrors::merge_into_settings;
 pub use mirrors::mirror_env;
 pub use mirrors::normalize_mirrors;
 pub use provider::HttpModelProvider;
+pub use provider::reasoning_parameter_status;
 pub use runtime::*;
 pub use runtime_paths::*;
 pub use skill_router::*;

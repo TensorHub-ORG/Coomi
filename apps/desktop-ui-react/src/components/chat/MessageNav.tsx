@@ -21,25 +21,34 @@
  *     压行距（空隙 10 → 8 → 6 → 5 → 4，即行距 12 → 10 → 8 → 7 → 6）→ 降聚合预算（按窗口能放下多少行算）
  *     → 最后才让轨道自己滚。左缘留 6px 给位置指示条，刻度线因此不被指示条压住。
  *
- * 悬停（120ms 展开 / 140ms 收回，曲线 --ease-spring）
+ * 悬停（**0ms 展开** / 140ms 收回，曲线 --ease-spring）
  *   · 该行两条线一起变主色并各自伸展到本侧最长（22px / 10px），**其余行统一降到 opacity .25**（聚光灯），
- *     右侧弹出预览卡（细体小标签 + 时间 + 摘要最多 5 行尾部渐隐 + 浅色「点击跳转」一行），上下按可视区夹取。
+ *     右侧弹出预览卡：**上段＝用户问题（大号）/ 细分割线 / 下段＝AI 回复摘要**，上下按可视区夹取。
+ *   · 展开**不等待**（HOVER_IN_MS = 0）：导航条是一列 12px 高的细线，误触成本极低，
+ *     120ms 的防抖换来的只是「放上去卡一下」的观感。移出方向仍留 140ms（划过一行不算选中）。
+ *   · 悬停左线 / 右线**不再切换内容**：问与答一次讲全，半边只决定「高亮哪一段」（data-nav-focus）。
  *   · 事件一律 pointerenter / pointerleave（不用 mousemove）：进出一行各一次，不做逐点命中测试。
- *   · 几何只算一次：进入一行时量「该行 + 导航条」各一个 rect；预览的真实高度只量它自己那一个元素。
+ *   · 几何只算一次：进入一行时量「该行 + 导航条」各一个 rect；预览浮层**宽度定死 340**，
+ *     高度先按 estimatePreviewHeight() 估、再由 useLayoutEffect 在**绘制之前**同步量正 ——
+ *     首帧即终位，不会「先小后大」跳一下。
  *   · **展开只动刻度线自己的 width**（从 var(--ai-w) / var(--user-w) 变到本侧上限，+2px 那一档用 calc 写在
  *     class 里）：外层一格布局都不动，所以悬停不引起任何重排；淡化只写 opacity。
  *   · 状态本身只是给行**翻一个 data 属性**（data-hot / data-dim），视觉全部交给 CSS
  *     （长度、颜色、淡化的过渡都写在 class 里），JS 一行样式都不写。
+ *   · 尾部渐隐**条件挂载**：某一段真的超出行数上限（scrollHeight > clientHeight）才挂（82% → 100%），
+ *     不超限的那一段 style 里连 mask 字段都没有 —— 短文本的下沿不会被切掉。
  *
- * 刻度长度：**轮结束时全量重算，生成中只增量追加**（这一版修掉「生成时导航条不动」）
- *   · 结构签名在流式期间**不含任何随 token 变化的东西**（会话 + "live"）：
- *     正文一个 token 一个 token 地长，这条导航条一次都不重渲染，刻度一像素都不动。
+ * 刻度长度：**轮结束时全量重算，流式期间按 400ms 做廉价增量**（这一版修掉「生成时导航条不动」）
+ *   · 结构签名在流式期间只有一个会话 id：不含条数、不含任何随 token 变化的东西 ——
+ *     正文一个 token 一个 token 地长，这条导航条一次都不重渲染。
+ *   · 流式期间的增量走一个 **400ms 的心跳**：只读一个廉价指纹（**刻度数量** + 这一轮有没有开始回），
+ *     指纹变了才重算整表；这一份只改 DOM 属性 / 数量（data-nav-*、轨道高度、刻度数），
+ *     **不量任何 rect、不碰预览摘要**，所以不会强制同步布局、不引起掉帧。
  *   · 轮结束时 streaming 翻回 false（签名变成 done:<轮数>:<历史条数>），这时才回读这一轮的体量、
  *     整表重算一次刻度长度（这一份是权威的）。正在跑的那一轮固定按**基线 10px** 画。
- *   · **生成中不做整表重算**：新出现的条目（新的用户消息 / 新的助手段落）由增量追加补一个点 ——
- *     追加的点长度一律取基线、带 data-nav-live（主色脉冲），已有点的对象与长度一个都不动，
- *     所以 React 只写新那一行的 DOM。追加走 rAF 合并，且只有点数真的变了才写一次 state。
- *   · 追加**不动高亮**：用户正上翻时新点不抢焦点、不自动高亮（高亮仍由可见区间说了算）。
+ *   · 追加的点长度一律取基线、带 data-nav-live（主色脉冲）；追加的路上不动高亮 ——
+ *     用户正上翻时新点不抢焦点（高亮仍由可见区间说了算，流式期间整条让路，
+ *     翻回 false 时 useLayoutEffect([plan]) 与滚动停稳那一次各补一次）。
  *   · 滚动只在 rAF 里合并，并且**只在可见区间变化时**才量 rect（那一步只改高亮）；
  *     刻度不参与滚动期的任何重算。
  *
@@ -69,8 +78,8 @@
  *     滚动一帧只读一次位置、预览没挂着就不写状态；DOM 变化只在「换根 / 新条目长在根外面」时才排帧，
  *     其余时候只把新增的条目挂给 IO（流式期间整表不重扫）。量完不再排下一帧，没有任何自续的帧循环。
  *   · 只在可见区间变化时（或滚动停稳那一次）才量 rect。
- *   · 流式输出期间刻度列不重建（结构签名没变就直接返回上一份），整条导航条用 memo 包住，
- *     父组件每个 token 的重渲染不会传导进来。
+ *   · 流式输出期间刻度列只在 400ms 心跳的指纹真的变了时才重建一次（且只重建增量），
+ *     整条导航条用 memo 包住，父组件每个 token 的重渲染不会传导进来。
  *   · 切页过渡期间（html[data-nav-busy]）一次都不量：那一拍的主线程留给过渡。
  *   · 缓动统一取 token（--ease-spring）。
  *
@@ -138,19 +147,35 @@ const NAV_PAD = 4
 const SPACINGS = [10, 8, 6, 5, 4]
 /** 最小行距（＝最后一档）：聚合预算的分母与自滚档的行距都用它。 */
 const MIN_PITCH = TICK_H + SPACINGS[SPACINGS.length - 1]
-/** 悬停多久展开并弹出预览。 */
-const HOVER_IN_MS = 120
+/** 悬停多久展开并弹出预览：**0 ＝ 悬停即弹**。
+    这一档原本是 120ms 的「防误触」防抖，观感却是「放上去卡一下才出来」（用户反馈的「不实时」）。
+    导航条是一列 12px 高的细线、误触成本极低，不值得拿延迟换稳定。
+    移出方向的 HOVER_OUT_MS 保留：划过一行、光标从线缝里扫出去都不该被当成「选中」。 */
+const HOVER_IN_MS = 0
 /** 移开多久收回（展开与预览共用同一个时长）。 */
 const HOVER_OUT_MS = 140
 /** 跳转后 / 滚动期间，多少毫秒内不跟随改高亮。 */
 const FOLLOW_LOCK_MS = 200
-/** 预览摘要：最多 5 行（字符数按行数上限估，超出由行高上限 + 尾部渐隐收口）。 */
-const PREVIEW_LINES = 5
+/** 预览摘要的字符上限（两段共用一份口径）。 */
 const PREVIEW_CHARS = 240
-/** 预览浮层：宽 300 定死，高度只用于首次摆放（渲染后按真实高度再夹一次）。 */
-const PREVIEW_W = 300
-const PREVIEW_H = 150
+/** 预览浮层：**宽度定死 340**（给长问题多留 40px 的排版空间）。
+    高度不写死 —— 首次摆放用 estimatePreviewHeight() 估一个（高度只影响它上下夹取的位置），
+    真实高度由 useLayoutEffect 在浏览器**绘制之前**同步量正，见 previewBoxRef 那一段。 */
+const PREVIEW_W = 340
 const PREVIEW_GAP = 10
+/** 两段各自的行数上限：**只有真的超出上限才挂尾部渐隐**（判定见 previewOverflow）。
+    用户问题（大号）压 3 行，AI 摘要（正文号）给 5 行 —— 卡片再高就该点进去看了。 */
+const PREVIEW_USER_LINES = 3
+const PREVIEW_AI_LINES = 5
+/** 两段的行高倍数：与下面两个 <p> 的 leading-[1.54] / leading-[1.55] 是同一份数，
+    行数上限换算成 maxHeight 就靠它（em 是相对各自字号，所以两段可以各写各的）。 */
+const PREVIEW_USER_LH = 1.54
+const PREVIEW_AI_LH = 1.55
+/** 尾部渐隐：**条件挂载**，而且渐变从 82% 才开始（旧版无条件挂、62% 就开始淡，
+    短文本的下沿也被抹掉一行 —— 用户说的「AI 回复虚化」主因就在这里）。 */
+const PREVIEW_FADE = 'linear-gradient(to bottom, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 100%)'
+/** 流式期间增量心跳的间隔（毫秒）：只重算「刻度数量 + 高度比例」这一个廉价指纹。 */
+const STREAM_TICK_MS = 400
 /** 可见判定用的中段：上下各收 30% ＝中间 40%。 */
 const BAND_MARGIN = '-30% 0px -30% 0px'
 /** 位置指示条：宽 2px，高度按行距夹（最小 4px，最大 ＝ 命中高度 12px）。 */
@@ -171,9 +196,9 @@ interface NavPoint {
   itemIndex: number
   /** **左线**（AI 回复）的跳转目标：这一轮的第一条助手消息，-1 = 还没有回复。 */
   aiIndex: number
-  /** 段内首条：预览浮层的角色 / 时间 / 摘要都取自它。 */
+  /** 段内首条（右侧刻度的长度与 aria-label 用它；预览两段由 pickPreview 在 from..to 里自己挑）。 */
   head: ChatItem
-  /** 这一轮那条助手消息（没有回复时为 undefined）。 */
+  /** 这一轮的**第一条**助手消息（没有回复时为 undefined）：左线画不画、跳哪一条都由它定。 */
   aiHead?: ChatItem
   /** 这一段覆盖的条目下标闭区间（可见区间 → 刻度 的映射靠它）。 */
   from: number
@@ -217,17 +242,27 @@ interface NavPlan {
   threshold: number
 }
 
-/** 预览要讲的那一条：角色 / 条目下标 / 摘要。 */
-interface PreviewPick {
-  role: 'user' | 'ai'
+/** 预览里的一段：问与答各占一段，段内只有「取自哪条 / 讲什么 / 什么时候」。 */
+interface PreviewSegment {
+  /** 来源条目下标（用户段＝这一轮的 user 条目；AI 段＝这一轮最后一条 assistant 条目）。 */
   index: number
   text: string
   at?: number
 }
 
+/** 预览要讲的两段：上＝用户问题（大号），下＝AI 回复摘要。
+    某一段取不到就是 undefined —— 那一段**不渲染、不留空行**（见 pickPreview）。 */
+interface PreviewPick {
+  user?: PreviewSegment
+  ai?: PreviewSegment
+}
+
 interface PreviewState extends PreviewPick {
-  /** 归属的行下标：同一行内换半边时只换内容，几何一次都不重量。 */
+  /** 归属的行下标：同一行内换半边时几何一次都不重量。 */
   point: number
+  /** 悬停的是哪半边：上段（用户）还是下段（AI）被高亮。
+      两段的内容不再跟着半边切换，半边只剩这一个作用 —— 悬停哪一侧的信息因此不丢。 */
+  focus: 'user' | 'ai'
   left: number
   top: number
   /** 真实高度量过并摆正了吗（量之前先以 opacity 0 挂着，摆正后才淡入）。 */
@@ -308,8 +343,9 @@ function turnShape(items: ChatItem[], from: number, to: number): { vol: number; 
       }
       continue
     }
-    // 提问卡不计入回合体量（它既不是正文也不是错误）：刻度该讲「这轮说了多少」。
-    if (item.kind === 'ask') continue
+    // 提问卡与引擎注入的提醒都不计入回合体量（既不是正文也不是错误）：
+    // 刻度该讲「这轮说了多少」。
+    if (item.kind === 'ask' || item.kind === 'reminder') continue
     if (item.tone === 'error') error = true
   }
   const vol = text + toolVol
@@ -471,21 +507,42 @@ function planNav(items: ChatItem[], cap: number, live: boolean): NavPlan {
   }
 }
 
-/** 结构签名：会话 +（**流式期间带上消息条数**）。
-    流式期间每多一条消息（新用户消息 / 新助手段落 / 提示条 / 提问卡）就重算一次整表 ——
-    条数是这条导航条能收到的**最便宜**的「有新内容」信号，一个 token 都不会惊动它。
-    轮结束时 streaming 翻回 false，签名变成 done:<轮数>:<消息条数>，这时才回读这一轮的体量、
-    把整表重算一次（这一份是权威的）。
+/** 结构签名：会话 +（**流式期间一个数都不带**）。
+    流式期间正文一个 token 一个 token 地长、工具段一条一条地加，消息条数每秒能跳好几次；
+    把它写进签名等于流式期间反复重算整表（每次都要 buildPoints + 重渲染整列刻度）。
+    所以流式期间这里只认会话 id：**刻度数量与高度比例的增量由 400ms 的心跳补**
+    （见 liveShapeSignature 与组件里的那个 useEffect），轮结束才回读体量做权威的整表重算。
+    轮结束时 streaming 翻回 false，签名变成 done:<轮数>:<消息条数>，这时全量补齐一次。
     循环跑在 s.messages 上（条目级），代价可以忽略。 */
 function structureSignature(state: {
   sessionId: string
   messages: ChatItem[]
   streaming: boolean
 }): string {
-  if (state.streaming) return state.sessionId + '|live:' + state.messages.length
+  if (state.streaming) return state.sessionId + '|live'
   let turns = 0
   for (const item of state.messages) if (item.kind === 'user' && !item.queued) turns += 1
   return state.sessionId + '|done:' + turns + ':' + state.messages.length
+}
+
+/** 流式期间的**廉价指纹**：只看两件事 ——
+    ① 刻度数量（＝轮数，与 buildTurns 同一口径：第一条消息之前的提示条自成一段）；
+    ② 最后那一轮里有没有出现助手条目（左线要不要画出来）。
+    为什么只看得下这两样：流式期间刻度长度一律按基线画（体量不算），轨道的**高度比例**
+    只由刻度数量决定（height = 数量 × 行距），预览摘要不在这里碰 —— 所以指纹相同就真的无事可做，
+    一个 state 都不用写、一个 rect 都不用量。 */
+function liveShapeSignature(messages: ChatItem[]): string {
+  let turns = 0
+  let open = false
+  let lastTurnStart = 0
+  messages.forEach((item, index) => {
+    if (item.kind === 'user' || !open) { turns += 1; open = true; lastTurnStart = index }
+  })
+  let answered = false
+  for (let at = lastTurnStart; at < messages.length; at += 1) {
+    if (messages[at] && messages[at].kind === 'assistant') { answered = true; break }
+  }
+  return turns + ':' + (answered ? '1' : '0')
 }
 
 /** 可见区间（刻度下标集合的升序串）：集合没变就不重量 —— 高亮的「只在区间变化时重算」。 */
@@ -549,27 +606,32 @@ function markerHeight(plan: NavPlan): number {
 }
 
 /** 预览浮层摆位：导航条在内容列左边，所以预览一律**翻到右侧**（贴着导航条右缘起算）。
-    上下按可视区夹取。**一次悬停只调它一次**：这里量的是「该行」与「导航条」各一个 rect，
-    预览自己的真实高度由渲染后的那次夹取负责。 */
+    上下按可视区夹取。**一次悬停只调它一次**：这里量的是「该行」与「导航条」各一个 rect。
+    height 是**调用方估出来的**高度（estimatePreviewHeight）：宽度定死，所以高度只影响上下夹取，
+    估偏了也不会看到跳动 —— 渲染后的 useLayoutEffect 会在绘制之前按真实高度再摆正一次。 */
 function placePreview(
   anchor: HTMLElement,
   nav: HTMLElement,
   box: { width: number; height: number },
+  height: number,
 ): { left: number; top: number } {
   const navRect = nav.getBoundingClientRect()
   const rect = anchor.getBoundingClientRect()
   const maxLeft = Math.max(4, box.width - PREVIEW_W - 8)
   const left = clamp(navRect.right - navRect.left + PREVIEW_GAP, 4, maxLeft)
   const top = clamp(
-    rect.top - navRect.top + rect.height / 2 - PREVIEW_H / 2,
+    rect.top - navRect.top + rect.height / 2 - height / 2,
     4,
-    Math.max(4, box.height - PREVIEW_H - 4),
+    Math.max(4, box.height - height - 4),
   )
   return { left, top }
 }
 
-/** **流式冻结开关**：正文还在一个 token 一个 token 地长的时候，这条导航条的重算与预览一律让路 ——
-    刻度长度按轮算、高亮要量 rect、预览摘要取自还在变的条目，这三件事在流式期间都是白做的活。
+/** **流式冻结开关**：正文还在一个 token 一个 token 地长的时候，两件重活让路 ——
+    ① 高亮要量 rect（每次可见区间变一次，流式期间区间还在被新内容推着走）；
+    ② 预览摘要取自还在变的条目（取到的只是半截）。
+    但**刻度不再跟着一起冻**：刻度数量与高度比例由 400ms 的心跳做廉价增量
+    （见 liveShapeSignature + 组件里那段 useEffect），所以这一版不会出现「生成时导航条不动」。
     轮结束那一帧会自动补齐：streaming 翻回 false 使结构签名与 plan 一起换新，
     useLayoutEffect([plan]) 与滚动停稳那一次重算各补一次，高亮 / 刻度不会停在旧位置上。
     做法与 navBusy 完全一致：判据只此一处，读 store 的权威值（不订阅 —— 订阅会跟着每个 chunk 重渲染）。 */
@@ -577,7 +639,11 @@ function navFrozen(): boolean {
   return useSession.getState().streaming === true
 }
 
-/** 交给过渡的那一拍别来量（App 在切页时写 html[data-nav-busy]）：主线程要留给过渡本身。 */
+/** 交给过渡的那一拍别来量（App 在切页时写 html[data-nav-busy]）：主线程要留给过渡本身。
+    **这个窗口现在偏保守**：App 侧 markNavPause() 开的是固定 320ms（PANE_ENTER_MS + 80ms 余量，
+    见 shell/navPause.tsx），而真正需要让路的只有「进场动画 + 正文挂载」那一拍。
+    App 什么时候把它收窄到实测时长，这里不用改一个字就自动受益 —— 所以此处**不改逻辑**，
+    只留这条注释，免得后来的人以为 320 是这条导航条自己选的数。 */
 function navBusy(): boolean {
   return document.documentElement.dataset.navBusy === '1'
 }
@@ -589,17 +655,44 @@ function hoverPart(target: EventTarget | null): 'user' | 'ai' {
   return el && el.dataset.navDot === 'user' ? 'user' : 'ai'
 }
 
-/** 悬停位置 → 预览内容：右线讲用户那条，左线讲 AI 那条（还没有回复就退回用户那条）。 */
-function pickPreview(hot: Hot, point: NavPoint, items: ChatItem[]): PreviewPick {
-  const ai = hot.part === 'ai' && point.aiIndex >= 0
-  const index = ai ? point.aiIndex : point.itemIndex
-  const item = items[index]
-  return {
-    role: ai ? 'ai' : 'user',
-    index,
-    text: itemText(item),
-    at: item ? timeOf(item) : undefined,
+/** 悬停哪一行 → 预览内容（**两段一次取齐**）。
+    不再按「悬停的是哪半边」切内容：半边只决定高亮哪一段（PreviewState.focus），
+    问与答始终成对出现 —— 用户想知道的就是「这一轮我问了什么、它答了什么」。
+    用户段取这一轮第一条 user 条目；AI 段取这一轮**最后一条** assistant 条目
+    （一轮里可能有好几条助手条目，最后那条才是结论）。取不到的那一段就是 undefined。 */
+function pickPreview(point: NavPoint, items: ChatItem[]): PreviewPick {
+  const from = clamp(point.from, 0, items.length - 1)
+  const to = clamp(point.to, from, items.length - 1)
+  let user: PreviewSegment | undefined
+  let ai: PreviewSegment | undefined
+  for (let at = from; at <= to; at += 1) {
+    const item = items[at]
+    if (!item) continue
+    if (item.kind === 'user') {
+      if (!user) user = { index: at, text: itemText(item), at: timeOf(item) }
+      continue
+    }
+    // 助手条目一路覆盖：循环走完留下的就是最后那一条。
+    if (item.kind === 'assistant') ai = { index: at, text: itemText(item), at: timeOf(item) }
   }
+  return { user, ai }
+}
+
+/** 首次摆放用的高度估值（px）：宽度定死 340 之后，行数只由字数决定。
+    口径故意偏保守（按汉字宽度算行），估高一点只会让卡片先靠上放，随后的同步量测会摆正。
+    真实高度由 useLayoutEffect 在绘制之前量，所以这里估偏一两行也看不出来。 */
+function estimatePreviewHeight(userText: string, aiText: string): number {
+  const inner = PREVIEW_W - 28
+  const userLines = userText ? clamp(Math.ceil(userText.length / Math.max(6, Math.floor(inner / 13))), 1, PREVIEW_USER_LINES) : 0
+  const aiLines = aiText ? clamp(Math.ceil(aiText.length / Math.max(6, Math.floor(inner / 12))), 1, PREVIEW_AI_LINES) : 0
+  // 固定开销：卡片上下 padding + 两段表头 + 分割线 + 底部「点击跳转」那一行。
+  const chrome = 24 + 14 + (aiText ? 14 + 9 : 0) + 18
+  return Math.round(chrome + userLines * 13 * PREVIEW_USER_LH + aiLines * 12 * PREVIEW_AI_LH)
+}
+
+/** 超限时才挂的尾部渐隐：不超限返回空对象 —— 短文本一个像素都不淡。 */
+function fadeStyle(on: boolean): CSSProperties {
+  return on ? { maskImage: PREVIEW_FADE, WebkitMaskImage: PREVIEW_FADE } : {}
 }
 
 /* ── 一键到底 ──
@@ -676,11 +769,14 @@ export function useChatAtBottom(): { atBottom: boolean; pulse: number } {
 export const MessageNav = memo(function MessageNav() {
   const view = useUi((s) => s.view)
   const viewport = useViewportWidth()
-  /** 结构签名订阅（选择器返回字符串）：会话 + 轮数 + 流式与否。
-      正文流式增长这三样一个都不变，所以这条导航条在流式期间一次都不重渲染，
-      刻度长度自然也就一像素都不动（这正是「只在轮结束时算」的落地点）。
+  /** 结构签名订阅（选择器返回字符串）：非流式＝会话 + 轮数 + 条数；流式＝只有会话。
+      正文一个 token 一个 token 地长时签名一个字符都不变，所以这条导航条不会跟着 token 重渲染；
+      流式期间真正必要的两次重算由下面那个 400ms 心跳按廉价指纹给。
       会话 id 必须进签名：两个会话的轮数撞车时，不重建就等于把上一份刻度挂在新会话上。 */
   const signature = useSession((s) => structureSignature(s))
+  /** 流式与否：只用来开关那 400ms 的增量心跳。
+      **不订阅 messages** —— 每个 token 都改一次的那个数组才是这条导航条重渲染的源头。 */
+  const streaming = useSession((s) => s.streaming)
   const visible = view === 'chat' && viewport >= NAV_MIN_VIEWPORT
 
   /** 轨道能用的上限：先按 70vh/520 估，挂载后再按消息区真实高度夹一次。 */
@@ -689,21 +785,53 @@ export const MessageNav = memo(function MessageNav() {
       高十几像素（实测 14px 上下）。刻度是拿眼睛对位的，对窗口中线更稳，所以在这里补一次差。
       机制仍然是 top:50% + translateY(-50%)，只是基准从「消息区」挪到「窗口」。 */
   const [nudge, setNudge] = useState(0)
-  /** **整表重算**的那一份：只在签名（会话 / 轮结束 / 流式期间条数变了）时重建
-      （顺带把这一份条目留给跳转与预览用）。条目**直接读 messages**（单一事实来源），
+  /** **流式增量指纹**：流式期间由下面那 400ms 的心跳写入，非流式恒为 ''（那时整表重算交给 done 签名）。 */
+  const [liveShape, setLiveShape] = useState('')
+
+  /* ── 流式期间的**低频增量**（原来这里是「一个 token 都不动」）────────────────────────────
+     每 STREAM_TICK_MS 只读一次那个廉价指纹：刻度数量 + 高度比例（＝这一轮之后的轮数）。
+     为什么用定时器而不是订阅 messages：订阅会跟着每个 token / 每个工具段重渲染整条导航条，
+     而流式期间真正会变的只有「多了一轮没有」「这一轮有没有开始回」这两件事。
+     这一拍**只改 DOM 属性与数量**（plan 换新 → data-nav-count / data-nav-pitch / 轨道高度），
+     不量任何 rect（高亮仍由 navFrozen 让路），也不碰预览摘要 —— 不会强制同步布局。 ── */
+  useEffect(() => {
+    if (!streaming) {
+      // 流式结束：指纹清空（值本来就是 '' 时 React 直接 bail out，一次都不多渲染）。
+      setLiveShape((prev) => (prev === '' ? prev : ''))
+      return
+    }
+    const read = (): void => {
+      const next = liveShapeSignature(useSession.getState().messages)
+      // 指纹没变就一个 state 都不写：不重渲染、不重排、不重绘。
+      setLiveShape((prev) => (prev === next ? prev : next))
+    }
+    read() // 第一拍立刻读一次：生成刚开始时就得把「这一轮开始回复了」反映出来，不等 400ms。
+    const timer = window.setInterval(read, STREAM_TICK_MS)
+    return () => window.clearInterval(timer)
+  }, [streaming])
+
+  /** **整表重算**的那一份：非流式由签名（会话 / 轮结束 / 条数变化）驱动，
+      流式期间签名是常量，改由上面的增量指纹驱动。条目**直接读 messages**（单一事实来源），
       不走订阅 —— 订阅会在每个 token 上重渲染。
       streaming 交给 planNav：还在跑的最后一轮，左线固定按基线画。 */
+  const liveDep = streaming ? liveShape : ''
   const { plan, items } = useMemo(() => {
     const state = useSession.getState()
     return { plan: planNav(state.messages, cap, state.streaming), items: state.messages }
-  }, [signature, cap])
+  }, [signature, cap, liveDep])
 
   const [preview, setPreview] = useState<PreviewState | null>(null)
+  /** 两段各自「真的超出行数上限了吗」：**只有 true 才挂尾部渐隐**，false 时 style 里一个 mask 字段都没有。 */
+  const [previewOverflow, setPreviewOverflow] = useState({ user: false, ai: false })
 
   const navRef = useRef<HTMLElement | null>(null)
   const trackRef = useRef<HTMLDivElement | null>(null)
   const markerRef = useRef<HTMLSpanElement | null>(null)
   const previewBoxRef = useRef<HTMLDivElement | null>(null)
+  /** 预览两段的 <p>：尾部渐隐的判定（scrollHeight > clientHeight）落在它们身上。
+      用 ref 而不是 state：这两个元素只在这一处被读，读完就把结论写进 previewOverflow。 */
+  const previewUserRef = useRef<HTMLParagraphElement | null>(null)
+  const previewAiRef = useRef<HTMLParagraphElement | null>(null)
   /** 主内容列（[data-chat-col]）：条目与滚动容器都从它里面找，挂载后就不再变。 */
   const hostRef = useRef<HTMLElement | null>(null)
   /** 消息滚动容器。虚拟列表要等条目渲染出来才找得到，所以它是**懒解析**的（见 attach）。 */
@@ -885,21 +1013,31 @@ export const MessageNav = memo(function MessageNav() {
     }, HOVER_OUT_MS)
   }, [])
 
-  /** 出预览：**一次悬停只算一次几何**（该行一个 rect + 导航条一个 rect）。 */
+  /** 出预览：内容一次取齐（**上下两段：问 + 答**），几何同样只算一次（该行一个 rect + 导航条一个 rect）。
+      高度先用估值（estimatePreviewHeight）—— 真实高度由渲染后的 useLayoutEffect 在绘制之前同步量正，
+      所以用户看到的第一帧就落在最终位置上，不会「先小后大」跳一下。 */
   const openPreview = useCallback((hot: Hot) => {
     const nav = navRef.current
     const row = rowRefs.current[hot.row]
     const point = planRef.current.points[hot.row]
     if (!nav || !row || !point) return
+    const pick = pickPreview(point, itemsRef.current)
+    // 两段都取不到（这一段里既没有用户消息也没有回复，例如只有提示条的一段）：没有内容可讲，宁可不弹。
+    if (!pick.user && !pick.ai) return
     if (previewExitRef.current !== null) { window.clearTimeout(previewExitRef.current); previewExitRef.current = null }
     const host = nav.parentElement
     const box = host
       ? { width: host.clientWidth, height: host.clientHeight }
       : { width: window.innerWidth, height: window.innerHeight }
-    const spot = placePreview(row, nav, box)
+    const estimate = estimatePreviewHeight(
+      pick.user ? summarize(pick.user.text) : '',
+      pick.ai ? summarize(pick.ai.text) : '',
+    )
+    const spot = placePreview(row, nav, box, estimate)
     setPreview({
-      ...pickPreview(hot, point, itemsRef.current),
+      ...pick,
       point: hot.row,
+      focus: hot.part,
       left: spot.left,
       top: spot.top,
       ready: false,
@@ -907,21 +1045,23 @@ export const MessageNav = memo(function MessageNav() {
     })
   }, [])
 
-  /** 同一行内换半边（左线 ↔ 右线）：只换内容，几何（left / top）原样留着，一次 rect 都不重量。 */
+  /** 同一行内换半边（左线 ↔ 右线）：**内容不再切**（问与答一次讲全），只换「哪一段被高亮」。
+      几何（left / top）与内容一个字都不动，所以一次 rect 都不重量、一次摘要都不重算。 */
   const swapPreview = useCallback((hot: Hot) => {
-    const point = planRef.current.points[hot.row]
-    if (!point) return
     setPreview((prev) => (
-      prev && prev.point === hot.row ? { ...prev, ...pickPreview(hot, point, itemsRef.current) } : prev
+      prev && prev.point === hot.row && prev.focus !== hot.part ? { ...prev, focus: hot.part } : prev
     ))
   }, [])
 
   /** 展开这一行：该行两条线变主色并各自伸展到本侧最长、其余行淡化到 0.25 —— 全是 CSS。 */
   const enterHot = useCallback((hot: Hot) => {
-    if (navFrozen()) return
+    // **流式期间也允许展开**（原来这里直接 return）。
+    // 用户正是在生成过程中回头确认「我刚问了什么」—— 那一刻导航条没反应，就是"不实时"。
+    // 代价只有两次 rect 读取（用户触发，不是每帧）；真正昂贵的整表重算（recompute）
+    // 在流式期间仍然让路，见上面 navFrozen 的说明 —— 两者不要混为一谈。
     const previous = hotRef.current
     if (previous && previous.row === hot.row) {
-      // 同一行里换半边：只换预览内容（预览被滚动收掉过就重新摆一次，几何还是那两个 rect）。
+      // 同一行里换半边：**只换高亮的那一段**（预览被滚动收掉过就整个重开一次，几何仍是那两个 rect）。
       if (previewRef.current && previewRef.current.point === hot.row) swapPreview(hot)
       else openPreview(hot)
     } else {
@@ -931,7 +1071,8 @@ export const MessageNav = memo(function MessageNav() {
     hotRef.current = hot
   }, [markHot, openPreview, swapPreview])
 
-  /** 光标进到某一行 / 某半边（行内换半边不重新计时；换行才重新计时）。 */
+  /** 光标进到某一行 / 某半边（同一行内换半边不再走这一条；换到新行才走一次进入路径）。
+      HOVER_IN_MS = 0 时这一步就是**同步展开**，连定时器都不排。 */
   const scheduleHot = useCallback((row: number, part: 'user' | 'ai') => {
     const pending = pendingRef.current
     const sameRow = !!pending && pending.row === row
@@ -940,6 +1081,14 @@ export const MessageNav = memo(function MessageNav() {
     if (hotRef.current && hotRef.current.row === row) { enterHot({ row, part }); return }
     if (sameRow && hoverInRef.current !== null) return
     if (hoverInRef.current !== null) window.clearTimeout(hoverInRef.current)
+    // HOVER_IN_MS = 0 时**不绕定时器**：指针落下就在当前这一拍展开并弹预览。
+    // （setTimeout(…, 0) 虽然也是「本帧内」，但主线程被流式内容占着时会顺延到下一拍，
+    //   而这一档的全部意义就是「没有等待」—— 见常量处的说明。）
+    if (HOVER_IN_MS <= 0) {
+      hoverInRef.current = null
+      enterHot({ row, part })
+      return
+    }
     hoverInRef.current = window.setTimeout(() => {
       hoverInRef.current = null
       const next = pendingRef.current
@@ -1169,8 +1318,13 @@ export const MessageNav = memo(function MessageNav() {
     if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current)
   }, [])
 
-  /* 预览浮层：首次摆放用的是估值高度，渲染后按真实高度再夹一次，别顶出可视区；
-     量完（ready）才淡入 —— 位置与透明度分两拍，看得见的时候它已经在正确的位置上了。 */
+  /* 预览浮层的首帧定位 + 溢出判定，**全在浏览器绘制之前同步完成**：
+     ① 宽度定死（PREVIEW_W），所以内容变化只影响高度；这里量一次真实高度（offsetHeight），
+        按可视区夹一次 top —— 位置一次到位。
+     ② ready 与这一次量测写在**同一拍**里：上一版把 ready 放到 rAF 里，于是第一帧用的是估值高度、
+        第二帧才摆正，视觉上就是「先小后大」地跳一下（尤其两段式之后高度差得更远）。
+     ③ 顺手量两段的溢出（scrollHeight > clientHeight）：**只有真的超出**才把 mask 挂上去。
+        没有这一步，短文本的下沿也会被那层无条件渐隐抹掉一截 —— 就是用户说的「AI 回复虚化」。 */
   useLayoutEffect(() => {
     const box = previewBoxRef.current
     const nav = navRef.current
@@ -1178,15 +1332,20 @@ export const MessageNav = memo(function MessageNav() {
     const host = nav.parentElement
     const max = Math.max(4, (host?.clientHeight ?? window.innerHeight) - box.offsetHeight - 4)
     const top = clamp(preview.top, 4, max)
-    // 已经在场（同一行内换了半边、内容高度跟着变了）：只把它摆正，不再走一次淡入。
+    // 溢出判定：+1 是给次像素行高留的余量（差不到一行就不算超）。
+    const userEl = previewUserRef.current
+    const aiEl = previewAiRef.current
+    const userOver = !!userEl && userEl.scrollHeight > userEl.clientHeight + 1
+    const aiOver = !!aiEl && aiEl.scrollHeight > aiEl.clientHeight + 1
+    // 只在结论翻转时才写这个 state（写一次多一遍渲染；mask 不改变布局，所以不会再触发下一拍）。
+    setPreviewOverflow((prev) => (prev.user === userOver && prev.ai === aiOver ? prev : { user: userOver, ai: aiOver }))
+    // 已经在场（同一行内换了半边）：内容没变，量到的 top 也不会变，这里基本是空转一次。
     if (preview.ready) {
       if (top !== preview.top) setPreview((prev) => (prev ? { ...prev, top } : prev))
       return
     }
-    const frame = window.requestAnimationFrame(() => {
-      setPreview((prev) => (prev && !prev.ready ? { ...prev, top, ready: true } : prev))
-    })
-    return () => window.cancelAnimationFrame(frame)
+    // 同步翻 ready：React 会在绘制前把这一笔补上，用户看到的第一帧就已经在最终位置上，然后才淡入。
+    setPreview((prev) => (prev && !prev.ready ? { ...prev, top, ready: true } : prev))
   }, [preview])
 
   /* 刻度列换了（点数 / 尺寸 / 行距变了）：高亮清空、位置条按新排布重摆一次。
@@ -1210,12 +1369,17 @@ export const MessageNav = memo(function MessageNav() {
   const activeIndex = activeRef.current
   const previewPoint = preview ? points[preview.point] : undefined
   const previewShown = !!preview && preview.open && preview.ready
-  const previewText = preview ? summarize(preview.text) : ''
-  /** 摘要的尾部渐隐：渐变的**尺寸按 5 行的上限**画（maskSize），所以只有真的写满
-      5 行时下沿才会淡出；两三行的短摘要整段都是实的，不会被糊掉一行。 */
-  const previewFade = 'linear-gradient(to bottom, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)'
-  const previewMaxH = PREVIEW_LINES * 1.55 + 'em'
   const previewTransition = 'opacity var(--motion-base) var(--ease-spring), transform var(--motion-base) var(--ease-spring)'
+  /** 两段：上＝用户问题（大号），下＝AI 回复摘要。取不到的那一段是 undefined —— 不渲染、不留空行。 */
+  const userSeg = preview ? preview.user : undefined
+  const aiSeg = preview ? preview.ai : undefined
+  /** 悬停的是哪半边 → 高亮哪一段（两段的内容不再跟着半边切换）。 */
+  const focus = preview ? preview.focus : 'user'
+  /** 两段的行数上限（em 是相对各自字号，所以两段各写各的）：超限才由 previewOverflow 挂渐隐。 */
+  const userMaxH = PREVIEW_USER_LINES * PREVIEW_USER_LH + 'em'
+  const aiMaxH = PREVIEW_AI_LINES * PREVIEW_AI_LH + 'em'
+  /** 轮次范围：跟着第一段走（只有 AI 段时才落到下段），少一段也不丢这条信息。 */
+  const rangeLabel = previewPoint ? turnRangeLabel(previewPoint.turnFrom, previewPoint.turnTo) : ''
   /** 轨道的宽 ＝ 导航条本体宽：两条车道都画在里面，不必再往外留余量。 */
   const trackWidth = NAV_W
 
@@ -1366,6 +1530,7 @@ export const MessageNav = memo(function MessageNav() {
                   {/* 主段：这一轮的长度减去末段那几像素（没有工具调用时末段为 0，整根都是它） */}
                   <span
                     aria-hidden='true'
+                    data-loop-anim={point.live ? '' : undefined}
                     className={cn(
                       TICK_SHAPE,
                       /* 生成中：**主色脉冲**（长度仍是基线 10px）—— 「还在长」只在这一个状态上表达，
@@ -1415,6 +1580,7 @@ export const MessageNav = memo(function MessageNav() {
                 >
                   <span
                     aria-hidden='true'
+                    data-loop-anim={point.live ? '' : undefined}
                     className={cn(
                       TICK_SHAPE,
                       // 右线同理：生成中的点（正在跑的那一轮 / 刚追加的那一条）是半透明主色 + 脉冲。
@@ -1430,14 +1596,22 @@ export const MessageNav = memo(function MessageNav() {
         })}
       </div>
 
-      {/* 预览浮层：细体角色小标签 · 时间 · 摘要（最多 5 行，尾部渐隐）+ 浅色「点击跳转」一行。
+      {/* 预览浮层：**问 + 答两段式**。
+          上段＝用户问题（text-13 / text-ink / font-medium，最大号），
+          中间一条 border-line 细分割线，
+          下段＝AI 回复摘要（text-12 / text-ink-2，比旧版提一号字，**不虚化**）。
+          悬停左线 / 右线不再切换内容，只高亮对应那一段（淡主色底，两段都不降透明度）。
+          尾部渐隐改为条件挂载：只有真的超出行数上限的那一段才挂（见 previewOverflow）。
           导航条在左，所以一律翻到右侧；进场 / 退场只动 opacity 与 translate，不碰布局。 */}
       {preview && previewPoint ? (
         <div
           ref={previewBoxRef}
           data-nav-preview
           data-side='right'
-          data-nav-role={preview.role}
+          /* 两个属性都写「悬停的是哪一半」：半边信息不再用来切内容，但绝不能丢。
+             data-nav-role 沿用旧名（外部自检脚本读的就是它），data-nav-focus 是它的语义化别名。 */
+          data-nav-role={focus}
+          data-nav-focus={focus}
           style={{
             left: preview.left,
             top: preview.top,
@@ -1448,32 +1622,63 @@ export const MessageNav = memo(function MessageNav() {
           }}
           className='pointer-events-none absolute z-30 rounded-[12px] border border-line bg-overlay px-3.5 py-3 shadow-elev-2'
         >
-          <div className='flex items-center gap-1.5'>
-            <span className={cn(
-              'text-10 font-normal tracking-[0.02em]',
-              preview.role === 'user' ? 'text-primary' : 'text-ink-3',
-            )}>
-              {pickLabel(preview.role)}
-            </span>
-            {preview.at ? <span className='text-10 text-ink-4'>{fmtTime(preview.at)}</span> : null}
-            <span className='ml-auto shrink-0 text-10 text-ink-4'>{turnRangeLabel(previewPoint.turnFrom, previewPoint.turnTo)}</span>
-          </div>
-          <p
-            className='mt-2 overflow-hidden text-11 leading-[1.55] text-ink-2'
-            style={{
-              maxHeight: previewMaxH,
-              maskImage: previewFade,
-              maskSize: '100% ' + previewMaxH,
-              maskRepeat: 'no-repeat',
-              maskPosition: 'top left',
-              WebkitMaskImage: previewFade,
-              WebkitMaskSize: '100% ' + previewMaxH,
-              WebkitMaskRepeat: 'no-repeat',
-              WebkitMaskPosition: 'top left',
-            }}
-          >
-            {previewText || '（无文本内容）'}
-          </p>
+          {userSeg ? (
+            <div
+              data-nav-seg='user'
+              data-nav-seg-at={userSeg.index}
+              /* 高亮只加一层很淡的主色底：**不压字号、不降透明度** ——
+                 两段的可读性始终一样，只是被指到的那一段更显眼。 */
+              className={cn(
+                '-mx-1.5 rounded-[8px] px-1.5 py-1 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
+                focus === 'user' ? 'bg-primary-soft' : 'bg-transparent',
+              )}
+            >
+              <div className='flex items-center gap-1.5'>
+                <span className={cn('text-10 font-normal tracking-[0.02em]', focus === 'user' ? 'text-primary' : 'text-ink-3')}>
+                  {pickLabel('user')}
+                </span>
+                {userSeg.at ? <span className='text-10 text-ink-4'>{fmtTime(userSeg.at)}</span> : null}
+                <span className='ml-auto shrink-0 text-10 text-ink-4'>{rangeLabel}</span>
+              </div>
+              <p
+                ref={previewUserRef}
+                className='mt-1 overflow-hidden text-13 font-medium leading-[1.54] text-ink'
+                style={{ maxHeight: userMaxH, ...fadeStyle(previewOverflow.user) }}
+              >
+                {summarize(userSeg.text) || '（无文本内容）'}
+              </p>
+            </div>
+          ) : null}
+          {/* 两段之间那条细分割线：只在两段都在场时才画（只剩一段时它既没意义又多一条横线）。
+              用的是现成的 border-line 令牌，不引入新的视觉语言。 */}
+          {userSeg && aiSeg ? <div className='my-2 border-t border-line' aria-hidden='true' /> : null}
+          {aiSeg ? (
+            <div
+              data-nav-seg='ai'
+              data-nav-seg-at={aiSeg.index}
+              className={cn(
+                '-mx-1.5 rounded-[8px] px-1.5 py-1 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
+                focus === 'ai' ? 'bg-primary-soft' : 'bg-transparent',
+              )}
+            >
+              <div className='flex items-center gap-1.5'>
+                {/* AI 角色标签从 ink-3 提到 ink-2：它不该比正文还淡。 */}
+                <span className={cn('text-10 font-normal tracking-[0.02em]', focus === 'ai' ? 'text-primary' : 'text-ink-2')}>
+                  {pickLabel('ai')}
+                </span>
+                {aiSeg.at ? <span className='text-10 text-ink-4'>{fmtTime(aiSeg.at)}</span> : null}
+                {/* 这一轮没有用户段（例如只有回复）时，轮次范围落到下段来，免得整条信息丢掉。 */}
+                {!userSeg ? <span className='ml-auto shrink-0 text-10 text-ink-4'>{rangeLabel}</span> : null}
+              </div>
+              <p
+                ref={previewAiRef}
+                className='mt-1 overflow-hidden text-12 leading-[1.55] text-ink-2'
+                style={{ maxHeight: aiMaxH, ...fadeStyle(previewOverflow.ai) }}
+              >
+                {summarize(aiSeg.text) || '（无文本内容）'}
+              </p>
+            </div>
+          ) : null}
           <div className='mt-2 flex items-center gap-1 text-10 text-ink-4'>
             <MousePointerClick size={10} className='shrink-0' />
             <span>点击跳转</span>

@@ -2,14 +2,14 @@ import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, Brain, Check, ChevronRight, ChevronUp, Clock3, Copy, FileText, FolderOpen, GitBranch, Globe,
-  MoreHorizontal, Pencil, Play, Quote, RefreshCw, RotateCcw, Save, Search, Sparkles, ThumbsDown, ThumbsUp, Wrench,
+  AlertTriangle, Check, ChevronRight, ChevronUp, Clock3, Copy, FileText, FolderOpen, GitBranch, Globe,
+  MoreHorizontal, Pencil, Play, Quote, RefreshCw, RotateCcw, Save, Search, Slash, Sparkles, ThumbsDown, ThumbsUp, Wrench,
 } from 'lucide-react'
-import { m, type MotionProps, type Transition } from 'motion/react'
+import { m, type MotionProps } from 'motion/react'
 import { cn } from '../../lib/cn'
 import { fmtDuration, fmtTime, fmtTokens } from '../../lib/format'
 import { motionOn, staggerSeconds } from '../../lib/motionPref'
-import { EASE_OUT_QUINT, SEC_BASE, SPRING_POP, SPRING_SNAP } from '../ui/motion'
+import { EASE_OUT_QUINT, SEC_BASE, SPRING_POP } from '../ui/motion'
 import { useChatItems, useSession, type RenderItem, type UserChatItem } from '../../stores/session'
 import { useEngine } from '../../stores/engine'
 import { registerSearchController, useChatSearch, type SearchController } from '../../stores/chatSearch'
@@ -19,14 +19,14 @@ import { promptText } from '../../stores/dialogs'
 import { showContextMenu, type CtxItem } from '../../stores/contextMenu'
 import { ipc } from '../../lib/ipc'
 import { useUi } from '../../stores/ui'
-import { chatWindowTail, markGroupSeen, markItemsSeen, toolSeenKey, type ChatItem, type ToolCall } from '../../lib/chat'
+import { chatWindowTail, friendlyErrorText, markGroupSeen, markItemsSeen, splitProcessAnswer, toolSeenKey, type ChatItem, type ToolCall } from '../../lib/chat'
 // 吸底唯一入口：新消息 / 内容增长 / turn_end / 强制贴底都收在它里面。
 import { useStickToBottom } from './useStickToBottom'
 import { ArtifactList } from './ArtifactCard'
 // AI 提问卡：对话流里的一条普通条目（答完留在原地，见组件顶部说明）。
 import { AskUserCard } from './AskUserCard'
-// 工具调用折叠列表：一轮多个工具收成一行摘要；行本身仍由本文件的 ToolRow 渲染。
-import { ToolCallList } from './ToolCallList'
+import { ProcessBlock } from './ProcessBlock'
+import { markCollapseMotion, toggleTransition } from './collapseMotion'
 // 生成中的三点跳动：只要还在流式就挂在内容末尾，替代原来的「正在思考…」。
 import { TypingDots } from './TypingDots'
 import { type TurnArtifact } from '../../stores/artifacts'
@@ -42,10 +42,37 @@ import { Menu, type MenuEntry } from '../ui/Menu'
 // 插件主题 parts（v1.7）：消息气泡的圆角 / 阴影经它订阅。
 import { useThemeParts } from '../plugins/PluginThemeEngine'
 
-/* ── 窗口化 ──
-   对话主列表不再用虚拟列表（react-virtuoso 已从本组件移除）：直接渲染最后
-   WINDOW_STEP 条（默认 60），顶部「加载更早」按钮每次 +60。长会话的 DOM 体量
-   因此与「看得到的部分」成正比，而不再与整条会话成正比。 */
+/* ── 窗口化（本组件**不用**虚拟列表，这是有意为之，勿贸然恢复）──
+   做法：直接渲染最后 WINDOW_STEP 条（默认 60），顶部「加载更早」按钮每次 +60。
+   长会话的 DOM 体量因此与「看得到的部分」成正比，而不再与整条会话成正比。
+
+   ── 为什么 react-virtuoso 被移除（2026-10 复查结论）──
+   仓库只有一个基线提交，两份发布源码包（1.0.0 / 1.0.2）里的本文件也**已经是移除之后**的版本，
+   所以拿不到「移除前」的源码逐行对比；下面是代码里**白纸黑字写着的**移除理由，
+   逐条都能在别处对上号：
+     ① 「测量节点 contain: layout 量出 0」
+        —— base.css 渲染隔离那一段至今留着这条警告：虚拟列表的 item wrapper 一旦被
+        contain: layout 裁成布局根，量出来的高度就是 0。而本项目为了性能到处在加 contain，
+        这条与虚拟化是直接冲突的。
+     ② 「流式期间逐帧重量」
+        —— 本组件整套「冻结测量窗口」（html[data-msg-collapse] / [data-msg-freeze]，
+        见下面 markCollapseMotion）就是为这件事写的：流式正文与折叠块在动画期间逐帧变高，
+        虚拟列表每一帧都要照着新高度重量一次，长会话里表现就是「一边流式一边滚，整屏在抖」。
+     ③ 「跳位」
+        —— 视口上方的行一旦被量高，整段内容会往下平移。技能中心那条自己写的窗口化
+        （components/skills/useVirtualList.ts 顶部）专门为此写了 pendingAnchor 锚点校正，
+        它自己就两百行以内；对话列表要补齐这套还得额外处理吸底、搜索跳转与折叠块联动。
+   另有一条同族的坑：给消息行加 content-visibility:auto **试过并失败**（2026-09-27 真机取证：
+   视口内的整行被判成「与用户无关」而永久跳过绘制，用户看到「我发的消息消失了」），
+   回归断言 tests/check-msg-visibility.mjs 从源码层面拦住它被加回来。
+
+   ── 因此的处置 ──
+   **不恢复**虚拟化。理由是上面三条坑都还在，且恢复虚拟化会让聊天列表的观感与交互
+   （吸底 / 会话内搜索跳转 / 折叠块 / 划选浮条）重新进入「可能跳位」的区间。
+   真要恢复，属于需要用户明确拍板的改动（是否接受「跳位」与「流式期间重量」这两个坑），
+   不能由性能优化单方面做主。
+   侧栏收放卡顿改用 contain: layout 止血（见 base.css 的「侧栏收放卡顿的止血」一段）：
+   它不改变 DOM 体量，也不引入跳位；代价是「每行重新断行」这笔开销仍在。 */
 
 /** 入场动效：8px 的 rise。时长/缓动取 components/ui/motion.ts 里的令牌值
     （= CSS 的 --motion-base + --ease-out-quint），两套动画的手感必须同一个来源。
@@ -73,12 +100,6 @@ function enterProps(fresh: boolean, delay = 0): MotionProps {
   return (fresh ? riseProps(delay) : null) ?? NO_ENTER
 }
 
-/** 可交互元素的动效一律走 spring，不写固定 ms：折叠箭头这类「一点就有反应」的地方，
-    被打断时 spring 从当前速度接着走，连点也不会「卡一下再重来」（tween 只会从头补时间）。
-    关掉动效时给 0 —— 与 CSS 那套令牌归零同一件事，两种口径必须一致。 */
-function toggleTransition(): Transition {
-  return motionOn() ? SPRING_SNAP : { duration: 0 }
-}
 
 /* ── 冻结测量：滚动流畅度与虚拟列表共用的一道闸门 ──
    行高在两种时候是逐帧变的：**流式正文在长**、**折叠块在开合**。虚拟列表每一帧都会照着
@@ -90,26 +111,11 @@ function toggleTransition(): Transition {
    CSS 读的是同两个属性（base.css 的「滚动流畅度」那段把折叠块换成固定高度占位），
    JS 与 CSS 因此不会各判一套。 */
 
-/** 折叠窗口（ms）：= --motion-base(200) + 一拍余量，与 base.css 那段同口径。 */
-const COLLAPSE_FREEZE_MS = 220
 
 /** 瞬时滚动：程序化滚动里除「跳转」以外**全部**用它（贴底、恢复位置、校正）。 */
 const INSTANT: ScrollBehavior = 'instant'
 
-let collapseFreezeTimer: number | null = null
 
-/** 折叠块被点开/收起时调一次：把折叠动画窗口挂上 220ms。
-    窗口里 CSS 把折叠块换成固定高度占位（高度一次落定、只给透明度）；
-    折叠后内容高度变了，吸底由 useStickToBottom 的 ResizeObserver 收口。 */
-function markCollapseMotion(): void {
-  if (typeof document === 'undefined') return
-  document.documentElement.dataset.msgCollapse = '1'
-  if (collapseFreezeTimer !== null) window.clearTimeout(collapseFreezeTimer)
-  collapseFreezeTimer = window.setTimeout(() => {
-    collapseFreezeTimer = null
-    delete document.documentElement.dataset.msgCollapse
-  }, COLLAPSE_FREEZE_MS)
-}
 
 /** 程序化滚动的行为：**只有「跳转」才平滑**，其余一律瞬时。
     流式期间连跳转也不平滑 —— 一边在长内容一边滑过去，落点永远追不上，看起来就是「一直在飘」；
@@ -118,80 +124,10 @@ function jumpBehavior(smooth: boolean): ScrollBehavior {
   return smooth && motionOn() ? 'smooth' : INSTANT
 }
 
-/** 思考框底部渐隐的 mask：底边 1.5rem 内由不透明过渡到透明。
-    用 mask 而不是盖一层底色 —— 浅色 / 深色主题不必各写一份背景色。 */
-const REASONING_FADE = 'linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent)'
 
 /* ── 思考链：默认折叠，点了才展开 ──
    展开后必须给高度上限：思考可以很长，不封顶会一路把正文顶出屏幕。
    框内自己滚，流式中自动贴底；用户一旦手动上滚就停止跟随（否则没法回看已经想过的部分）。 */
-function Reasoning({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(false)
-  const steps = text.split(/\n{2,}/).filter(Boolean).length
-  const box = useRef<HTMLDivElement | null>(null)
-  /// 还要不要继续自动贴底：用户手动上滚 = false，滚回底部自动恢复 true。
-  const follow = useRef(true)
-  /// 框底渐隐只在「下面确实还有」时出现；贴底时不该继续遮住最后一行。
-  const [atBottom, setAtBottom] = useState(true)
-
-  /** 量一次「是不是贴着底」：follow 决定后续自动跟随，atBottom 决定要不要挂渐隐。 */
-  const syncFollow = useCallback((): void => {
-    const el = box.current
-    if (!el) return
-    /// 4px 容差：像素取整 / 缩放会留一两像素的缝，严格 === 0 会永远判不到底。
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 4
-    follow.current = bottom
-    setAtBottom((prev) => (prev === bottom ? prev : bottom))
-  }, [])
-
-  useEffect(() => {
-    const el = box.current
-    if (!el || !open) return
-    /// 流式中且用户没上滚：内容每长一截就贴到底。
-    if (streaming && follow.current) el.scrollTop = el.scrollHeight
-    syncFollow()
-  }, [text, streaming, open, syncFollow])
-
-  // 这里的 streaming 是「思考是否还在产出」，不是「整条消息是否还在流」：
-  // 正文一开始，思考就已经定型，圈圈必须停下来。
-  return (
-    <div className='mb-2'>
-      <button
-        type='button'
-        onClick={() => { markCollapseMotion(); setOpen((v) => !v) }}
-        className='flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-12 text-ink-3 transition-colors duration-[var(--motion-hover)] ease-[var(--ease-spring)] hover:bg-hover hover:text-ink-2'
-      >
-        {/* 思考中 = reasoning 的点阵（环在转 + 相位尾迹）；思考结束换回静态的大脑图标 */}
-        {streaming ? <AgentState state='reasoning' size='xs' tone='primary' /> : <Brain size={12} />}
-        <span>{streaming ? '思考中' : '已思考'} · {steps} 段</span>
-        {/* 箭头旋转走 spring（不是 CSS 的固定时长）：连点开合时从当前角度接着转 */}
-        <m.span className='inline-flex shrink-0' initial={false} animate={{ rotate: open ? 90 : 0 }} transition={toggleTransition()}>
-          <ChevronRight size={12} />
-        </m.span>
-      </button>
-      {/* 折叠统一走 .collapse：高度与透明度同时收放，关闭态同时退出可见性与命中 */}
-      <div className='collapse' data-open={open}>
-        {/* 直接子元素保持无内外边距：间距必须留在下一层，否则折叠态收不到 0 */}
-        <div>
-          {/* max-height + overflow：思考再长也只占一屏的一部分，超出在框里滚。
-              字号 text-12 → text-13：思考是要读的内容，不是元信息。 */}
-          <div
-            ref={box}
-            onScroll={syncFollow}
-            className='mt-2 overflow-y-auto border-l-2 border-line-strong pl-3 text-13 leading-[1.7] whitespace-pre-wrap text-ink-3'
-            style={{
-              maxHeight: 'min(40vh, 320px)',
-              maskImage: atBottom ? undefined : REASONING_FADE,
-              WebkitMaskImage: atBottom ? undefined : REASONING_FADE,
-            }}
-          >
-            {text}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 const DOT: Record<ToolCall['status'], string> = {
   queued: 'bg-ink-4',
@@ -566,7 +502,7 @@ function UserMessage({ item }: { item: UserChatItem }) {
 
   return (
     <div
-      className='group/msg mx-auto flex w-full max-w-[var(--content-w)] flex-col items-end py-3 pl-4 pr-2'
+      className='workbench-msg workbench-msg-user group/msg mx-auto flex w-full max-w-[var(--content-w)] flex-col items-end py-3 pl-4 pr-2'
       onContextMenu={(e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, userMenu()) }}
     >
       {/* 引用 → 正文 → 附件：与发送时的语义顺序一致，气泡本身还是原来那一个。 */}
@@ -634,6 +570,31 @@ function UserMessage({ item }: { item: UserChatItem }) {
     </div>
   )
 }
+/* ── 助手消息尾部的运行态小标记（三态，对标 DSH 的回复状态）──
+   · 流式中 —— 呼吸点：与左侧会话列表的「运行中」同一套（animate-pulse + bg-primary +
+     data-loop-anim），不新写 keyframes；动效关 / 系统减少动态时 base.css 把它停成静态点，
+     「还在生成」的信息仍在（与 TypingDots 同一降级口径）；
+   · 落定 —— 什么都不画（spec 允许「对勾/无」：对勾留给 ToolMark 那种单次状态，
+     历史消息每行挂对勾是噪音）；
+   · 中断 —— 斜杠（Slash，warn 色）：比底部那条「已中断」提示条更早被扫到，且不占那行的位置。
+   中断是全局本轮态（stores/session.ts 的 interrupted），只该出现在**最后一条**助手消息上，
+   所以调用方传 interrupted && isLast。 */
+function RunStateMark({ streaming, interrupted }: { streaming: boolean; interrupted: boolean }) {
+  if (!streaming && !interrupted) return null
+  if (streaming) {
+    return (
+      <span aria-hidden title='生成中' className='inline-flex shrink-0'>
+        <span className='h-1.5 w-1.5 animate-pulse rounded-full bg-primary' data-loop-anim />
+      </span>
+    )
+  }
+  return (
+    <span aria-hidden title='已中断' className='inline-flex shrink-0 items-center'>
+      <Slash size={11} className='text-warn' />
+    </span>
+  )
+}
+
 function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifacts }: {
   item: Extract<ChatItem, { kind: 'assistant' }>
   /** 本轮产出的文件（turn_end 的 artifacts 字段，见 stores/artifacts）：
@@ -660,6 +621,14 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
   // 只有出现真正的正文才挂元信息/操作；流式期间常见「只有空白字符」的片段，
   // 那时它就会错挂到「已思考」那一行下面。
   const hasText = item.text.trim().length > 0
+  /* ── 过程 / 答案分离（照搬 DSH 的 Turn process 模型）──
+     **最后一段正文 = 答案**，它之前的一切（思考 / 叙述 / 工具）= 过程。
+     答案独立在后、永不参与折叠，所以生成中途从「纯思考」变成「思考 + 正文」时位置不翻转；
+     用了工具的轮次也不会再把思考整段吞掉（旧实现走的是另一条分支，思考直接不渲染）。
+     判据放在 lib/chat.ts 的 splitProcessAnswer —— 纯逻辑，node 可以单跑（tests/check-*.mjs）。 */
+  const { answer, members } = splitProcessAnswer(item)
+  const hasAnswer = answer.trim().length > 0
+  const hasProcess = members.length > 0 || item.reasoning.trim().length > 0 || item.tools.length > 0
   /// 元信息行的时间：本条的落库时间；最后一条还没落库时用本轮的结束时间。
   const atMs = item.at ?? (isLast && turnMeta ? turnMeta.endedAt : undefined)
   /// 模型名**永不隐藏**：宽度不够时只截断（title 给全名），不折行、也不整段消失。
@@ -675,60 +644,13 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
     ...(item.msgId ? [{ label: '从这里分支', onSelect: () => void branchFrom(item.msgId as string).catch(() => {}) }] : []),
   ]
 
-  /** 一个工具组（顺序段里的一段，或没有顺序段时的整条工具列表）。
-      摘要 / 折叠逻辑在 ToolCallList；工具行仍由上面的 ToolRow 渲染（renderToolRow 注入）。
-      enter / spring / onToggle 全部取自本文件既有那一套动效，不另起一套。 */
-  /** 顺序段渲染。**折叠按整条消息的工具总数判定**，不按单个工具段：
-      模型常常一步只调一个工具，若按段判定，每段都 ≤3 就永远折不起来
-      （用户反馈"工具没有折叠成可展开的列表"就是这么来的）。
-      折叠时，整条消息的所有工具只在**第一个工具段的位置**渲染一次，其余工具段让位。 */
-  const renderSegments = (item: Extract<ChatItem, { kind: 'assistant' }>): React.ReactNode => {
-    const segments = item.segments ?? []
-    const collapseAll = item.tools.length > 3
-    let toolListRendered = false
-    return segments.map((seg, index) => {
-      if (seg.kind === 'text') {
-        if (!seg.text.trim()) return null
-        return (
-          <div key={'t' + index} className='min-w-0 max-w-[var(--reading-w)]'>
-            <Markdown text={seg.text} streaming={!!item.streaming && index === segments.length - 1} />
-          </div>
-        )
-      }
-      if (collapseAll && toolListRendered) return null
-      const nodes = renderToolGroup(
-        collapseAll
-          ? item.tools
-          : seg.callIds
-              .map((id) => item.tools.find((t) => t.callId === id))
-              .filter((t): t is ToolCall => !!t),
-      )
-      toolListRendered = true
-      return (
-        <div key={'x' + index} className='min-w-0'>
-          {nodes}
-        </div>
-      )
-    })
-  }
-
-  const renderToolGroup = (tools: ToolCall[]): React.ReactNode => (
-    tools.length ? (
-      <ToolCallList
-        tools={tools}
-        streaming={!!item.streaming}
-        toolFresh={toolFresh}
-        renderTool={renderToolRow}
-        onToggle={markCollapseMotion}
-        enter={enterProps(tools.some((t) => toolFresh(t.callId)))}
-        spring={toggleTransition()}
-      />
-    ) : null
-  )
+  /* 顺序段的渲染搬进了 ProcessBlock：过程成员（叙述 / 工具组）在那里按事件先后铺开，
+     **顺序仍然就是事件顺序**，只是整块折在答案上方。
+     这里不再自己拼 segments —— 两份实现会让「段的位置」与「折叠归属」再次分叉。 */
 
   return (
     <div
-      className='group/msg mx-auto flex w-full max-w-[var(--content-w)] flex-col py-3 pl-2 pr-4'
+      className='workbench-msg workbench-msg-assistant group/msg mx-auto flex w-full max-w-[var(--content-w)] flex-col py-3 pl-2 pr-4'
       onContextMenu={(e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, assistantMenu()) }}
     >
       <div className='flex min-w-0 items-start gap-2.5'>
@@ -739,13 +661,27 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
           src={assistantAvatar}
           alt=''
           draggable={false}
-          className='mt-[3px] h-6 w-6 shrink-0 rounded-full bg-line/40 object-contain p-[3px]'
+          className='workbench-avatar mt-[3px] h-6 w-6 shrink-0 rounded-full bg-line/40 object-contain p-[3px]'
         />
         <div className='min-w-0 flex-1'>
-        {item.reasoning ? <Reasoning text={item.reasoning} streaming={!!item.reasoningStreaming} /> : null}
-        {/* 正文限制在阅读宽度（--reading-w），一行不至于长到读不下去；
-            代码块在 Markdown 内部自行放宽到 --content-wide-w。 */}
-        {hasText && !(item.segments && item.segments.some((s) => s.kind === 'tools')) ? (
+        {/* ── 顺序固定为：过程（思考 + 叙述 + 工具）→ 答案 → 生成物 → 元信息 ──
+            ① 过程在前：它整块折在答案**上方**（对标 DSH 的 Turn process）。
+               旧实现把这一块挂在正文下方，与本文件早先写下的顺序注释正好相反。 */}
+        {hasProcess ? (
+          <ProcessBlock
+            reasoning={item.reasoning}
+            reasoningStreaming={!!item.reasoningStreaming}
+            tools={item.tools}
+            members={members}
+            live={item.streaming}
+            toolFresh={toolFresh}
+            renderTool={renderToolRow}
+            enter={enterProps(item.tools.some((t) => toolFresh(t.callId)))}
+          />
+        ) : null}
+        {/* ② 答案：最后一段正文。**始终可见** —— 它不是过程成员，折叠开合动不了它。
+            正文限制在阅读宽度（--reading-w），代码块在 Markdown 内部自行放宽到 --content-wide-w。 */}
+        {hasAnswer ? (
           <div
             className='min-w-0 max-w-[var(--reading-w)]'
             style={assistantBubble ? {
@@ -753,9 +689,26 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
               boxShadow: assistantBubble.shadow ?? undefined,
             } : undefined}
           >
-            <Markdown text={item.text} streaming={item.streaming} />
+            <Markdown text={answer} streaming={item.streaming} />
           </div>
         ) : null}
+        {/* 生成物卡片：**最后一条有正文的回复**下面列出本轮产出的文件（入口在下面工具行之后，
+            与正文 + 元信息行同一条阅读动线）。artifacts 为空时这一块只做一次判断，
+            ArtifactList 返回 null —— 不画空态、不留占位，上下间距与以前完全一样。 */}
+        {hasText && artifacts?.length ? <ArtifactList items={artifacts} /> : null}
+        {/* 生成中的存活信号：只要这条还在流式，三点就挂在**内容末尾**。
+            有正文 = 正文 + 三点；没正文也没工具 = 三点单独顶着（不再另写「正在思考…」，
+            否则同一个存活信号会在同一处出现两遍）。reduced-motion 下三点退化为静态，信息仍在。 */}
+        {item.streaming ? (
+          <m.div className={cn('flex items-center gap-2 text-12 text-ink-3', hasText && 'mt-1')} {...enterProps(fresh)}>
+            <TypingDots />
+          </m.div>
+        ) : null}
+        {/* 元信息行搬到了这条消息的**最后**：原来是「思考 → 元信息 → 正文」，
+            模型名 / 耗时 / 操作条夹在思考内容与答案中间（用户报的 bug）。
+            顺序固定为：思考 → 正文 → 工具 → 生成物卡片 → 元信息 + 操作。
+            只挪位置：宽度参照物（外层 min-w-0 flex-1）没变，@container 的列宽语义
+            与「tok → tok/s → 耗时 → ⋯」的优先级收纳规则全部照旧。 */}
         {/* 元信息与操作只跟随「回复正文」：没有正文（纯工具调用）时不显示，
             避免出现「工具卡下面挂着模型名和复制按钮」的错位感。 */}
         {/* ── 元信息行：**永远单行** ──
@@ -770,6 +723,8 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
           <div className='@container mt-1 w-full'>
             <div data-msg-meta className='flex w-full flex-nowrap items-center gap-2'>
               <div className='flex min-w-0 flex-nowrap items-center gap-2 text-11 text-ink-4'>
+                {/* 三态运行标记（见 RunStateMark）：流式中＝呼吸点；落定＝不渲染；中断＝斜杠。 */}
+                <RunStateMark streaming={item.streaming} interrupted={interrupted && isLast} />
                 {/* 时间：永不隐藏、绝不折行；tabular-nums 让秒数跳动时这一行不左右抖。 */}
                 {atMs ? <span data-msg-time className='shrink-0 whitespace-nowrap tabular-nums'>{fmtTime(atMs)}</span> : null}
                 {/* 模型名：永不隐藏。max-w-[12rem] + truncate，全名在 title 里。 */}
@@ -802,23 +757,6 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
             </div>
           </div>
         ) : null}
-        {/* 顺序段渲染：正文与工具按**事件先后**交替（工具不再一律沉到正文下面）。
-            没有 segments 的条目（历史回读）继续走下面那行的老画法。 */}
-        {item.segments && item.segments.some((s) => s.kind === 'tools')
-          ? renderSegments(item)
-          : renderToolGroup(item.tools)}
-        {/* 生成物卡片：**最后一条有正文的回复**下面列出本轮产出的文件（入口在下面工具行之后，
-            与正文 + 元信息行同一条阅读动线）。artifacts 为空时这一块只做一次判断，
-            ArtifactList 返回 null —— 不画空态、不留占位，上下间距与以前完全一样。 */}
-        {hasText && artifacts?.length ? <ArtifactList items={artifacts} /> : null}
-        {/* 生成中的存活信号：只要这条还在流式，三点就挂在**内容末尾**。
-            有正文 = 正文 + 三点；没正文也没工具 = 三点单独顶着（不再另写「正在思考…」，
-            否则同一个存活信号会在同一处出现两遍）。reduced-motion 下三点退化为静态，信息仍在。 */}
-        {item.streaming ? (
-          <m.div className={cn('flex items-center gap-2 text-12 text-ink-3', hasText && 'mt-1')} {...enterProps(fresh)}>
-            <TypingDots />
-          </m.div>
-        ) : null}
         </div>
       </div>
       {/* 中断提示条：rise 入场，别突然冒出来 */}
@@ -839,25 +777,132 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
     </div>
   )
 }
-function Notice({ item, live, fresh }: { item: Extract<ChatItem, { kind: 'notice' }>; live?: boolean; fresh: boolean }) {
+/* ── 重试倒计时（对标 DSH 的 ModelRetryItem）──
+   渲染时锚定：组件挂载 / key（新的 attempt 或 delayMs）变化那一刻定死 deadline = Date.now() + delayMs，
+   之后每秒减一次，纯本地读数、**不触发任何请求**。
+   为什么不能每帧都重算 Date.now() + delayMs：任何一次无关重渲染（tick 触发的 setState 也是）
+   都会把 deadline 往后挪，倒计时就永远走不完 —— 所以 deadline 只在 key 变化时由 effect 重锚。 */
+/** 引擎给的重试上限：255 表示「无限」（引擎 provider_retry_count 哨兵语义），显示成 ∞。 */
+function retryMaxLabel(maxAttempts: number): string {
+  return maxAttempts === 255 ? '∞' : String(maxAttempts)
+}
+
+function useRetryCountdown(delayMs: number | null, key: string): number {
+  const [remaining, setRemaining] = useState(delayMs == null ? 0 : Math.max(0, Math.ceil(delayMs / 1000)))
+  useEffect(() => {
+    if (delayMs == null) { setRemaining(0); return }
+    // key 变 = 新的等待窗口（connection_retry 每来一次就是一次新退避）：重新锚定再从头减。
+    const deadline = Date.now() + delayMs
+    const tick = (): void => {
+      setRemaining((prev) => {
+        const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+        return prev === left ? prev : left
+      })
+    }
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [delayMs, key])
+  return remaining
+}
+
+function Notice({ item, live, fresh, lastErrorNoticeId }: {
+  item: Extract<ChatItem, { kind: 'notice' }>
+  live?: boolean
+  fresh: boolean
+  /** 列表里最新那条错误条的 **id**（'' ＝ 一条都没有）：重试倒计时的兜底只挂在这条上。 */
+  lastErrorNoticeId: string
+}) {
   const retryLast = useSession((s) => s.retryLast)
   const error = item.tone === 'error'
+  /// 数据层同事新增的字段，这里**只消费、不在 lib/chat.ts 定义**：
+  /// resolved —— 本轮后续成功吸收了该错误（渲染降级，但条目保留、可追溯）；
+  /// rateLimited —— 上游 429 / 限流（错误条内加提示与重试建议）。
+  /// 字段还没进类型定义，用局部窄化读取；同事合入类型后这几行原样可留。
+  const resolved = Boolean((item as { resolved?: boolean }).resolved)
+  const rateLimited = Boolean((item as { rateLimited?: boolean }).rateLimited)
+  /// 重试倒计时数据源：retryInfo（chat.ts 挂的 per-card 数据）优先；兜底会话层 retrying ——
+  /// stores/session.ts 的 connection_retry 分支只写全局态、不把事件送进消息管线（连接层不动，
+  /// 由并行同事维护），所以生产环境里倒计时实际从 retrying 读；全局态一次只属于**最新那条**
+  /// 错误条（lastErrorNoticeId 由列表层算好传下来），历史错误卡不挂倒计时。
+  const retrying = useSession((s) => s.retrying)
+  const retrySource = item.retryInfo
+    ? { attempt: item.retryInfo.attempt, maxAttempts: item.retryInfo.maxAttempts, delayMs: item.retryInfo.delayMs ?? null }
+    : retrying && error && !resolved && item.id === lastErrorNoticeId
+      // delayMs 用 ?? 而不是 ||：0 是「立刻重试」（倒计时直接显示「正在重试…」），
+      // 不是「缺失」——与上面 retryInfo 那条路径的 ?? null 同一口径。
+      ? { attempt: retrying.attempt, maxAttempts: retrying.max, delayMs: retrying.delayMs ?? null }
+      : null
+  /// key 换新（新的 attempt / delayMs）＝新的等待窗口，重新锚定再从头减（见 useRetryCountdown）。
+  const retryRemaining = useRetryCountdown(
+    retrySource?.delayMs ?? null,
+    retrySource ? retrySource.attempt + ':' + (retrySource.delayMs ?? 0) : 'none',
+  )
+  /// 已恢复的错误卡默认只露一行摘要，点开看完整文案。
+  const [detailsOpen, setDetailsOpen] = useState(false)
   /// 压缩卡：引擎只在压缩真的发生时给一条 notice（没有「开始压缩」事件），
   /// 所以点阵只在它刚出现、本轮还在跑的时候收拢，之后落成一个静态点。
   const compacted = !error && item.text.startsWith('上下文已压缩')
   return (
     <div className='mx-auto w-full max-w-[var(--content-w)] px-6 py-2'>
-      {/* 提示卡 / 错误卡入场：8px 的 rise，不闪不跳 */}
-      <m.div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-12', error ? 'border-danger/30 bg-danger-soft text-danger' : 'border-line bg-muted text-ink-3')} {...enterProps(fresh)}>
-        {compacted ? (
+      {/* 提示卡 / 错误卡入场：8px 的 rise，不闪不跳。
+          已恢复的错误走**降级样式**：muted 色调 + 小一号字，不用错误红（错误已被本轮吸收）。 */}
+      <m.div
+        className={cn(
+          'flex items-start gap-2 rounded-lg border px-3 py-2',
+          resolved ? 'border-line bg-muted text-11 text-ink-3'
+            : error ? 'border-danger/30 bg-danger-soft text-12 text-danger'
+              : 'border-line bg-muted text-12 text-ink-3',
+        )}
+        {...enterProps(fresh)}
+      >
+        {resolved ? (
+          /* 已恢复用对勾示意「这一关过了」：muted 色，不抢注意力。 */
+          <Check size={13} className='mt-0.5 shrink-0 text-ink-4' />
+        ) : compacted ? (
           <AgentState state={live ? 'compacting' : 'idle'} size='xs' tone='primary' className='mt-0.5' />
         ) : error ? (
           <AlertTriangle size={13} className='mt-0.5 shrink-0' />
         ) : (
           <Sparkles size={13} className='mt-0.5 shrink-0' />
         )}
-        <span className='sel-text flex-1'>{item.text}</span>
-        {error ? (
+        {resolved ? (
+          /* 可点击展开详情：默认一行摘要（line-clamp-1），点开看完整文案。
+             错误真实发生过，不从列表移除，留痕可追溯。 */
+          <button
+            type='button'
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen(!detailsOpen)}
+            className={cn('sel-text min-w-0 flex-1 text-left', detailsOpen ? '' : 'line-clamp-1')}
+          >
+            <span className='text-ink-4'>（已恢复）</span> {item.text}
+            {rateLimited ? <RateLimitedTag muted /> : null}
+          </button>
+        ) : (
+          <span className='sel-text min-w-0 flex-1'>
+            <span className='flex items-start gap-1'>
+              {friendlyErrorText(item)}
+              {rateLimited ? <RateLimitedTag /> : null}
+            </span>
+            {/* 限流建议：文案说明即可；重试按钮照旧可点。倒计时在场时用倒计时替掉它（两者同义）。 */}
+            {rateLimited && !retrySource ? (
+              <span className='mt-1 block text-11 text-ink-4'>建议等待后重试</span>
+            ) : null}
+            {/* 重试倒计时：数据源与锚定见 useRetryCountdown / retrySource 的说明。
+                引擎没给 delay（retry_confirmation 的 delay_ms 可缺）时不倒数、只显示第 X/Y 次；
+                倒计时走到 0 显示「正在重试…」，不假装还在倒数。 */}
+            {retrySource ? (
+              <span className='mt-1 block text-11 text-ink-4'>
+                {retrySource.delayMs == null
+                  ? '自动重试中（第 ' + retrySource.attempt + '/' + retryMaxLabel(retrySource.maxAttempts) + ' 次）'
+                  : retryRemaining > 0
+                    ? <>将在 <span className='font-medium tabular-nums'>{retryRemaining}</span> 秒后自动重试（第 {retrySource.attempt}/{retryMaxLabel(retrySource.maxAttempts)} 次）</>
+                    : '正在重试…'}
+              </span>
+            ) : null}
+          </span>
+        )}
+        {error && !resolved ? (
           <div className='flex shrink-0 items-center gap-1'>
             {/* 「继续这一轮」：本轮是被上游中断/工具轮次用尽打断的（不是用户停的），
                 点它就把「继续」作为新一轮发出去，接着原任务往下跑。 */}
@@ -881,6 +926,14 @@ function Notice({ item, live, fresh }: { item: Extract<ChatItem, { kind: 'notice
       </m.div>
     </div>
   )
+}
+
+/** 「上游限流」小角标：错误条内的小提示，不改变卡片底色。
+ *  错误卡 = danger 色；已恢复卡（muted 色调）用中性色，避免红色角标抢注意力。 */
+function RateLimitedTag({ muted }: { muted?: boolean }) {
+  return muted
+    ? <span className='shrink-0 rounded bg-sunken px-1 py-px text-10 text-ink-4'>上游限流</span>
+    : <span className='shrink-0 rounded bg-danger/10 px-1 py-px text-10 font-medium'>上游限流</span>
 }
 
 /* ── 拖选文字后的浮条：引用 / 提问 / 复制 ──
@@ -1028,6 +1081,7 @@ function SelectionToolbar() {
 /** 一条消息的全部可搜文本：命中数在数据层统计（窗口里可能没有全部命中）。 */
 function searchableText(item: ChatItem): string[] {
   if (item.kind === 'user') return [item.text]
+  if (item.kind === 'reminder') return [item.text]
   if (item.kind === 'notice') return [item.text]
   // 提问卡：问题正文 + 你当时选了什么，都该被搜到。
   if (item.kind === 'ask') return [item.prompt, ...item.questions.map((q) => q.question)]
@@ -1041,13 +1095,50 @@ function attrValue(id: string): string {
   return id.replace(/["\\]/g, '\\$&')
 }
 
+/** 引擎注入的**目标复述**：不是用户消息，画成一条安静的系统细线。
+ *
+ *  为什么要有这个东西：引擎每 6 轮把「原始目标 + 未完成的计划步骤」推回上下文尾部（防止长任务跑偏）。
+ *  它带的是 user 角色，前端以前不认识内部的 `internal` / `reminder` 标记，就当成用户消息画了出来 ——
+ *  表现是对话里突然冒出一条「用户：<goal-reminder> 原始目标……」的气泡，像用户自己发了条控制台指令。
+ *  现在按机器可读标记渲染成系统行，默认只占一行（每 6 轮来一次，全展开会把对话冲乱）。
+ *  发给模型的上下文一个字节都没改。 */
+function ReminderNote({ item }: { item: Extract<ChatItem, { kind: 'reminder' }> }) {
+  const [open, setOpen] = useState(false)
+  const label = item.label === 'goal' ? '目标提醒' : item.label
+  return (
+    <div data-reminder={item.label} className='mx-auto flex w-full max-w-[var(--content-w)] flex-col py-1 pl-2 pr-4'>
+      <button
+        type='button'
+        onClick={() => { markCollapseMotion(); setOpen((v) => !v) }}
+        aria-expanded={open}
+        className='flex w-fit items-center gap-1.5 rounded-md px-1.5 py-0.5 text-11 text-ink-4 transition-colors hover:text-ink-3'
+      >
+        <Sparkles size={11} className='shrink-0' />
+        <span>{label} · 引擎自动注入</span>
+        <m.span className='inline-flex shrink-0' initial={false} animate={{ rotate: open ? 90 : 0 }} transition={toggleTransition()}>
+          <ChevronRight size={11} />
+        </m.span>
+      </button>
+      <div className='collapse' data-open={open}>
+        <div>
+          <div className='mt-1 max-h-[30vh] overflow-y-auto border-l border-line pl-2.5 text-11 leading-[1.7] whitespace-pre-wrap break-words text-ink-4'>
+            {item.text}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** 单条消息：index 写在 data-msg-index 上，会话内搜索跳转后要靠它找回这一条的 DOM 挂高亮。 */
-function ChatRow({ item, index, fromEnd, lastAssistantId, modelLabel, streaming, fresh, toolFresh, artifacts }: {
+function ChatRow({ item, index, fromEnd, lastAssistantId, lastErrorNoticeId, modelLabel, streaming, fresh, toolFresh, artifacts }: {
   item: RenderItem
   index: number
   fromEnd: number
   /** 列表里最后那条助手条目的 **id**（'' ＝ 一条都还没有）。见 AssistantMessage 的同名说明。 */
   lastAssistantId: string
+  /** 列表里最新那条错误条的 **id**（'' ＝ 一条都还没有）：Notice 的倒计时兜底只认它。 */
+  lastErrorNoticeId: string
   modelLabel: string
   streaming: boolean
   /** 本次渲染才首次出现的条目：只有它值得播入场。 */
@@ -1060,16 +1151,17 @@ function ChatRow({ item, index, fromEnd, lastAssistantId, modelLabel, streaming,
 }) {
   const body =
     item.kind === 'user' ? <UserMessage item={item} />
+      : item.kind === 'reminder' ? <ReminderNote item={item} />
       : item.kind === 'assistant' ? <AssistantMessage item={item} isLast={item.id === lastAssistantId} modelLabel={modelLabel} fresh={fresh} toolFresh={toolFresh} artifacts={artifacts} />
         : item.kind === 'ask' ? <AskUserCard item={item} />
-          : <Notice item={item} live={fromEnd === 0 && streaming} fresh={fresh} />
+          : <Notice item={item} live={fromEnd === 0 && streaming} fresh={fresh} lastErrorNoticeId={lastErrorNoticeId} />
 
   // 入场只给「新到的末尾三条」：历史回读整屏挂载时不会一屏消息依次冒出来。
   // 元素类型只由全局动效开关决定，**不由 fresh 决定**：fresh 在新条目挂载后的下一帧
   // 就会变成 false，那时若换成普通 div，整棵子树会被重挂（工具行的入场会重播一遍）。
   // data-msg-id：消息导航条按 msgId 找 DOM（窗口外的目标先扩窗再找）；
   // notice 没有 msgId，属性自动省略。
-  const msgId = item.kind === 'notice' || item.kind === 'ask' ? undefined : item.msgId
+  const msgId = item.kind === 'notice' || item.kind === 'ask' || item.kind === 'reminder' ? undefined : item.msgId
   if (!motionOn()) return <div data-msg-index={index} data-msg-id={msgId}>{body}</div>
   const enter = fresh && fromEnd < 3 ? riseProps(fromEnd * staggerSeconds(0.03)) : null
   return <m.div data-msg-index={index} data-msg-id={msgId} {...(enter ?? NO_ENTER)}>{body}</m.div>
@@ -1084,7 +1176,23 @@ function sameItem(a: RenderItem, b: RenderItem): boolean {
   if (a === b) return true
   if (a.kind !== b.kind || a.id !== b.id) return false
   if (a.kind === 'notice' && b.kind === 'notice') {
+    // resolved / rateLimited 是数据层新字段：不参与比较的话字段一变不会触发重渲染，
+    // 错误条会一直停在旧样式上。字段尚未进类型定义，用局部窄化读取（只消费、不定义）。
+    const aResolved = Boolean((a as { resolved?: boolean }).resolved)
+    const bResolved = Boolean((b as { resolved?: boolean }).resolved)
+    const aRl = Boolean((a as { rateLimited?: boolean }).rateLimited)
+    const bRl = Boolean((b as { rateLimited?: boolean }).rateLimited)
+    // retryInfo 同样要参与比较：connection_retry 每来一次（attempt / delayMs 变）都必须重渲染，
+    // 否则倒计时永远停在第一次的数值上（memo 会把它当成「没变化」直接跳过）。
+    const aRI = a.retryInfo
+    const bRI = b.retryInfo
+    const riSame = aRI === bRI || (!!aRI && !!bRI && aRI.attempt === bRI.attempt
+      && aRI.maxAttempts === bRI.maxAttempts && aRI.delayMs === bRI.delayMs)
     return a.text === b.text && a.tone === b.tone && a.retryable === b.retryable
+      && aResolved === bResolved && aRl === bRl && riSame
+  }
+  if (a.kind === 'reminder' && b.kind === 'reminder') {
+    return a.text === b.text && a.label === b.label && a.at === b.at
   }
   if (a.kind === 'user' && b.kind === 'user') {
     return a.text === b.text && a.at === b.at && a.msgId === b.msgId && a.queued === b.queued
@@ -1099,6 +1207,24 @@ function sameItem(a: RenderItem, b: RenderItem): boolean {
     if (a.text !== b.text || a.reasoning !== b.reasoning) return false
     if (a.at !== b.at || a.msgId !== b.msgId) return false
     if (a.streaming !== b.streaming || a.reasoningStreaming !== b.reasoningStreaming) return false
+    // segments 现在决定「哪一段是答案」，必须参与比较：
+    // 只比 text/tools 会漏掉「段边界变了但拼接后的正文没变」那种提交，
+    // 结果就是过程/答案的切分停在旧位置上（症状：折叠栏下面的正文少一段）。
+    const aSeg = a.segments ?? []
+    const bSeg = b.segments ?? []
+    if (aSeg.length !== bSeg.length) return false
+    for (let i = 0; i < aSeg.length; i += 1) {
+      const left = aSeg[i]
+      const right = bSeg[i]
+      if (left.kind !== right.kind) return false
+      if (left.kind === 'text' && right.kind === 'text' && left.text !== right.text) return false
+      if (left.kind === 'tools' && right.kind === 'tools') {
+        if (left.callIds.length !== right.callIds.length) return false
+        for (let k = 0; k < left.callIds.length; k += 1) {
+          if (left.callIds[k] !== right.callIds[k]) return false
+        }
+      }
+    }
     if (a.tools.length !== b.tools.length) return false
     for (let i = 0; i < a.tools.length; i += 1) {
       const left = a.tools[i]
@@ -1123,6 +1249,7 @@ const ChatRowMemo = memo(ChatRow, (prev, next) => (
   prev.index === next.index
   && prev.fromEnd === next.fromEnd
   && prev.lastAssistantId === next.lastAssistantId
+  && prev.lastErrorNoticeId === next.lastErrorNoticeId
   && prev.modelLabel === next.modelLabel
   && prev.streaming === next.streaming
   && prev.fresh === next.fresh
@@ -1395,7 +1522,7 @@ export function MessageList() {
   /// 目标不在窗口里（窗口化）先扩窗，等它渲染出来再平滑滚过去。
   useEffect(() => {
     const jump = (msgId: string): void => {
-      const index = items.findIndex((it) => it.kind !== 'notice' && it.kind !== 'ask' && it.msgId === msgId)
+      const index = items.findIndex((it) => it.kind !== 'notice' && it.kind !== 'ask' && it.kind !== 'reminder' && it.msgId === msgId)
       if (index < 0) return
       /// 跳转是**唯一**允许平滑的一族：其余（贴底 / 恢复位置 / 量高补正）全是瞬时。
       /// 流式期间连跳转都不平滑，见 jumpBehavior。
@@ -1444,6 +1571,15 @@ export function MessageList() {
     }
     return ''
   }, [items])
+  /// 最新那条错误条的 **id**（同上只取 id，不取对象）：重试倒计时的兜底（全局 retrying）
+  /// 一次只属于一条卡 —— 只给最新那条，历史错误卡不挂倒计时（见 Notice 的说明）。
+  const lastErrorNoticeId = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'notice' && it.tone === 'error') return it.id
+    }
+    return ''
+  }, [items])
 
   /** 本轮产出：turn_end 的 artifacts 字段（stores/session 解析后存在 state 里）。
       showArtifacts 关掉就是「没有」——用户明确不要这排卡片。
@@ -1459,6 +1595,7 @@ export function MessageList() {
       index={index}
       fromEnd={items.length - 1 - index}
       lastAssistantId={lastAssistantId}
+      lastErrorNoticeId={lastErrorNoticeId}
       modelLabel={modelLabel}
       streaming={streaming}
       fresh={fresh(it.id)}

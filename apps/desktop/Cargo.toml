@@ -2,7 +2,7 @@
 name = "coomi-desktop"
 # 版本单一来源：tauri.conf.json 不再写 version，构建时从这里继承；
 # 壳的 app_version 与「检查更新」都用 package_info()，因此这里就是唯一真相。
-version = "1.0.2"
+version = "1.0.0-rc50"
 edition = "2024"
 
 [build-dependencies]

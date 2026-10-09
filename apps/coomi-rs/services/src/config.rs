@@ -235,6 +235,7 @@ impl ProviderRegistry {
                 .get(&provider.model)
                 .copied()
                 .unwrap_or(provider.supports_vision);
+            let model_overrides = provider.extra.get("capabilityOverrides").and_then(Value::as_object).cloned().unwrap_or_default();
             // 压缩判定拿到的必须是真实窗口：按 probe → config → default 的优先级取。
             let (context_window, context_window_source) = resolve_context_window(
                 &provider.model,
@@ -275,7 +276,7 @@ impl ProviderRegistry {
             providers.insert(
                 id.clone(),
                 ProviderConfig {
-                    id,
+                    id: id.clone(),
                     kind,
                     display,
                     api_key: provider.api_key,
@@ -309,6 +310,13 @@ impl ProviderRegistry {
                     remote_compaction_mode: provider.remote_compaction_mode,
                 },
             );
+            if let Some(config) = providers.get_mut(&id) {
+                for (model, overrides) in model_overrides {
+                    let parameters = config.model_parameters.entry(model).or_insert_with(|| serde_json::json!({}));
+                    if let Some(object) = parameters.as_object_mut() { object.insert("_capabilityOverrides".into(), overrides); }
+                }
+                apply_model_context_window(config);
+            }
         }
         if providers.is_empty() {
             anyhow::bail!("provider file contains no providers")
@@ -454,6 +462,11 @@ fn resolve_context_window(
 }
 
 fn apply_model_context_window(provider: &mut ProviderConfig) {
+    if let Some(overrides) = provider.model_parameters.get(&provider.model).and_then(|p| p.get("_capabilityOverrides")) {
+        if let Some(value) = overrides.get("tools").and_then(Value::as_bool) { provider.capabilities.supports_native_tools = value; }
+        if let Some(value) = overrides.get("webSearch").and_then(Value::as_bool) { provider.capabilities.supports_web_search = value; }
+        if let Some(value) = overrides.get("parallelTools").and_then(Value::as_bool) { provider.capabilities.supports_parallel_tool_calls = value; }
+    }
     if let Some(window) = provider.model_context_windows.get(&provider.model) {
         provider.capabilities.context_window = *window;
         // 模型表命中：探测标记保留 probe，否则是配置值。

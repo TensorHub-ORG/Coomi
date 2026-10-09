@@ -375,6 +375,7 @@ pub fn resolve_reasoning_effort(
     supported: &BTreeSet<String>,
     prompt_chars: usize,
 ) -> Option<String> {
+    // Unknown capability is not evidence of support. Keep rc45 conservative wire behavior.
     if supported.is_empty() {
         return None;
     }
@@ -409,6 +410,9 @@ pub fn prune_unsupported_fields(payload: &mut Value, profile: &ModelCapabilityPr
     if !profile.parallel_tools.state.supported() {
         object.remove("parallel_tool_calls");
     }
+    // Do not serialize unconfirmed reasoning fields. Capability discovery and UI
+    // feedback must distinguish unknown from unsupported; neither permits guessing.
+    // The earlier regression attribution was not established by request traces.
     if profile.reasoning_efforts.is_empty() {
         object.remove("reasoning");
         object.remove("reasoning_effort");

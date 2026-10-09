@@ -89,7 +89,7 @@ export function clearTransportHint(): void {
  *  排查「引擎活着、界面说断线」这类只在别人机器上出现的问题时，这一段就够了。 */
 export async function runTransportSelfCheck(ctx: { port: number; token: string; version: string }): Promise<string> {
   const lines: string[] = []
-  lines.push('== Coomi 传输自检 ==')
+  lines.push('== CoomiPlus 传输自检 ==')
   lines.push('时间: ' + new Date().toISOString())
   lines.push('应用版本: ' + (ctx.version || '(未知)'))
   lines.push('引擎端口: ' + ctx.port + ' 令牌: ' + (ctx.token ? '有' : '无'))
@@ -132,6 +132,19 @@ export function rememberIpcTransport(): void {
   remember('ipc')
 }
 
+/** 发送前的桥健康查询（session.send 用）：
+ *   直连模式没有桥 → null（调用方照旧按 readyState 判断）；
+ *   桥模式 → 「桥是否真正开过（收到过 engine:ws-open）」。
+ *   为什么查它：readyState 是 shim 转发的，而桥一旦投递失败会被 failBridge 摘出
+ *   sockets 表（fireClose 里 delete）—— 这里在**发送前**就能读到「桥其实已死」，
+ *   消息就不会再静默发进死桥里（「发两次 AI 才动」的另一面）；直连模式下 sockets
+ *   表是空的，必须返回 null 让调用方只按 readyState 判断。 */
+export function bridgeOpenState(sessionId: string): boolean | null {
+  if (currentTransport() !== 'ipc') return null
+  const s = sockets.get(sessionId)
+  return s ? s.isOpened : false
+}
+
 /// 注册去重：注册还没回来时，后来者复用同一个 Promise，保证并发调用只注册一次。
 let listenersPending: Promise<void> | null = null
 
@@ -164,12 +177,23 @@ class IpcSocket {
   onerror: (() => void) | null = null
   onclose: (() => void) | null = null
   readyState = 0
+  /** 桥侧第一手的「开过」信号（收到 engine:ws-open 才 true）。
+      readyState 与它同步，但这里不经过 shim 转发 —— 发送前校验读它，
+      投递失败被 failBridge 摘出 sockets 表后这里就是 false，调用方不会再往死桥里发。 */
+  get isOpened(): boolean { return this.opened }
   private opened = false
   private closed = false
   private queued: string[] = []
   private watchdog: number | null = null
 
-  constructor(private readonly port: number, private readonly token: string, private readonly sessionId: string) {}
+  constructor(
+    private readonly port: number,
+    private readonly token: string,
+    private readonly sessionId: string,
+    /** 启动失败回调：把原因交给上层（写 linkError）。以前只 console.warn，
+     *  用户看到的就是"引擎活得好好的，界面却永远已断开"而没有任何线索。 */
+    private readonly onTransportError?: (message: string) => void,
+  ) {}
 
   async start(): Promise<void> {
     // 监听注册失败（listen 被 ACL 拒）同样要走 onerror：以前它抛在 try 外面，
@@ -179,8 +203,10 @@ class IpcSocket {
       // 按会话登记：同一会话重连时新 socket 直接接管。
       sockets.set(this.sessionId, this)
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       console.warn('[transport] ipc bridge failed:', error)
-      lastTransportError = error instanceof Error ? error.message : String(error)
+      lastTransportError = message
+      this.onTransportError?.('传输桥启动失败（监听注册）：' + message)
       this.failBridge()
       return
     }
@@ -190,6 +216,7 @@ class IpcSocket {
       if (!this.opened && !this.closed) {
         lastTransportError = 'bridge opened but no engine:ws-open event'
         console.warn('[transport] ' + lastTransportError)
+        this.onTransportError?.('引擎连接异常：壳的桥已建立，但 3 秒内没有收到引擎回话（engine:ws-open）')
         this.failBridge()
       }
     }, 3_000)
@@ -197,8 +224,10 @@ class IpcSocket {
       await ipc('engine_ws_open', { port: this.port, token: this.token, session: this.sessionId })
     } catch (error) {
       window.clearTimeout(this.watchdog)
+      const message = error instanceof Error ? error.message : String(error)
       console.warn('[transport] ipc bridge failed:', error)
-      lastTransportError = error instanceof Error ? error.message : String(error)
+      lastTransportError = message
+      this.onTransportError?.('引擎拒绝传输桥：' + message)
       this.failBridge()
     }
   }
@@ -238,8 +267,20 @@ class IpcSocket {
     try {
       await ipc('engine_ws_send', { frame, session: this.sessionId })
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       console.warn('[transport] ipc send failed:', error)
-      this.onerror?.()
+      // 已收尾过（closed）：同一批帧里后续失败不再重复触发（防重连风暴）。
+      if (this.closed) return
+      lastTransportError = message
+      // 投递失败 = 壳侧桥已死：这条帧**静默丢了**（「发两次 AI 才动」的根因之一）。
+      // 为什么不能只 onerror：session 的 ws.onerror 只写 linkError、不重连（静默点②），
+      // 桥不会自己好，界面会永久停在「已断开」。这里复用 failBridge（onerror + fireClose）：
+      //  fireClose → shim.onclose → session 的 ws.onclose → scheduleReconnect（带退避），
+      //  上层拿到完整重连，且不依赖 session 侧手动调 reconnect；
+      //  closed 标记 + session 侧的重连去重保证一次断线只排一个重连，
+      //  重连频率上限 = scheduleReconnect 的退避，不会「每次失败都炸一轮」。
+      this.onTransportError?.('引擎连接异常：消息投递失败（' + message + '）')
+      this.failBridge()
     }
   }
 
@@ -270,9 +311,11 @@ export function createEngineSocket(options: {
   token: string
   /** 首连强制走桥（自检用）。 */
   forceIpc?: boolean
+  /** 桥接失败时回调（把原因带给上层：写进 linkError，让"静默断开"变得可见）。 */
+  onTransportError?: (message: string) => void
 }): WebSocket {
   const preferIpc = options.forceIpc || currentTransport() === 'ipc'
-  const ipc = new IpcSocket(options.port, options.token, options.sessionId)
+  const ipc = new IpcSocket(options.port, options.token, options.sessionId, options.onTransportError)
   const shim = {
     readyState: 0,
     onopen: null as null | (() => void),

@@ -80,12 +80,12 @@ const button = cva(
       size: {
         /* 高度跟着 --ui-font-scale 走（见 theme.css 的字号令牌）：字号放大而盒子不动时，
            文字会贴边甚至被裁 —— 「大 / 特大」档看上去就是「错位」。 */
-        sm: 'h[calc(1.75rem*var(--ui-font-scale))] px-3 text-12 [&_svg]:size-3.5',
-        md: 'h[calc(2rem*var(--ui-font-scale))] px-3 text-13 [&_svg]:size-4',
-        lg: 'h[calc(2.25rem*var(--ui-font-scale))] px-4 text-14 [&_svg]:size-4',
-        icon: 'h[calc(2rem*var(--ui-font-scale))] w[calc(2rem*var(--ui-font-scale))] p-0 [&_svg]:size-4',
-        'icon-sm': 'h[calc(1.75rem*var(--ui-font-scale))] w[calc(1.75rem*var(--ui-font-scale))] p-0 [&_svg]:size-3.5',
-        'icon-lg': 'h[calc(2.25rem*var(--ui-font-scale))] w[calc(2.25rem*var(--ui-font-scale))] p-0 [&_svg]:size-[18px]',
+        sm: 'h-[calc(1.75rem*var(--ui-font-scale))] px-3 text-12 [&_svg]:size-3.5',
+        md: 'h-[calc(2rem*var(--ui-font-scale))] px-3 text-13 [&_svg]:size-4',
+        lg: 'h-[calc(2.25rem*var(--ui-font-scale))] px-4 text-14 [&_svg]:size-4',
+        icon: 'h-[calc(2rem*var(--ui-font-scale))] w-[calc(2rem*var(--ui-font-scale))] p-0 [&_svg]:size-4',
+        'icon-sm': 'h-[calc(1.75rem*var(--ui-font-scale))] w-[calc(1.75rem*var(--ui-font-scale))] p-0 [&_svg]:size-3.5',
+        'icon-lg': 'h-[calc(2.25rem*var(--ui-font-scale))] w-[calc(2.25rem*var(--ui-font-scale))] p-0 [&_svg]:size-[18px]',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },
@@ -99,7 +99,7 @@ function ButtonSpinner() {
       aria-hidden
       className='pointer-events-none absolute inset-0 grid place-items-center motion-safe:animate-[fade-in_var(--motion-fast)_var(--ease-out-quint)]'
     >
-      <span className='inline-block size-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent opacity-80' />
+      <span className='inline-block size-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent opacity-80' data-loop-anim />
     </span>
   )
 }

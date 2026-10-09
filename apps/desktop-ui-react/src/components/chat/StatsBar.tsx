@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { useSession, type RunState } from '../../stores/session'
 import { AgentState, type AgentStateKind } from '../ai/AgentState'
 import {
@@ -20,7 +21,22 @@ const RUN_STATE: Record<Exclude<RunState, 'idle'>, { state: AgentStateKind; text
  *  传给库的秒数在 AnimatedSeconds 里先量化到 0.1s：上游是每帧都在长的毫秒数，
  *  不量化的话每秒几十次补间，看着反而毛躁。 */
 export function StatsBar() {
+  // 补间开关：只有「同一个会话内的数值在长」才滚动。
+  // 换会话 / 换工作目录时 stats 会整体换成另一份（从 A 会话的数跳到 B 会话的数），
+  // 那是「换了组数」而不是「这个数在长」，补间既无意义又会把输入栏宽度抖一下。
+  // 用 stats 对象的身份变化来判定：换会话必然换对象。
   const stats = useSession((s) => s.stats)
+  const statsKeyRef = useRef(stats)
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    // stats 换了对象 = 换会话：不补间；同一个对象 = 同一会话内增长：补间
+    if (statsKeyRef.current !== stats) {
+      statsKeyRef.current = stats
+      setSettled(false)
+    } else if (!settled) {
+      setSettled(true)
+    }
+  }, [stats, settled])
   const turnMeta = useSession((s) => s.turnMeta)
   const runState = useSession((s) => s.runState)
   // 上游抖动、引擎在自动重试：这段时间没有任何内容产出，必须明说，
@@ -34,32 +50,35 @@ export function StatsBar() {
   const active = runState === 'idle' ? null : RUN_STATE[runState]
 
   const item = (label: string, value: React.ReactNode, tone?: string) => (
-    <span key={label} className='flex items-center gap-1 whitespace-nowrap tabular-nums'>
+    // items-baseline 而不是 items-center：数字是 inline-block 盒子，
+    // 按盒子中心对齐会让它比旁边的文字基线高一点，看着不平。
+    <span key={label} className='flex items-baseline gap-1 whitespace-nowrap tabular-nums'>
       <span className='text-ink-4'>{label}</span>
       <span className={tone ?? 'text-ink-2'}>{value}</span>
     </span>
   )
 
   return (
-    <div className='flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-11 text-ink-3'>
+    // min-h 固定：数字换行/位数变化时不撑高输入区（输入栏闪动的另一半原因）
+    <div className='flex min-h-[16px] flex-wrap items-center gap-x-3 gap-y-1 px-1 text-11 text-ink-3'>
       {stats.turns || stats.steps ? (
-        <span className='flex items-center gap-1 whitespace-nowrap tabular-nums'>
-          <AnimatedCount value={stats.turns} />
+        <span className='flex items-baseline gap-1 whitespace-nowrap tabular-nums'>
+          <AnimatedCount value={stats.turns} animate={settled} />
           <span className='text-ink-4'>轮</span>
           <span className='text-ink-4'>·</span>
-          <AnimatedCount value={stats.steps} />
+          <AnimatedCount value={stats.steps} animate={settled} />
           <span className='text-ink-4'>步</span>
         </span>
       ) : null}
-      {llmSeconds != null ? item('LLM', <AnimatedSeconds seconds={llmSeconds} />) : null}
-      {toolSeconds != null ? item('工具', <AnimatedSeconds seconds={toolSeconds} />) : null}
-      {firstTokenSeconds != null ? item('首 token', <AnimatedSeconds seconds={firstTokenSeconds} />) : null}
+      {llmSeconds != null ? item('LLM', <AnimatedSeconds seconds={llmSeconds} animate={settled} />) : null}
+      {toolSeconds != null ? item('工具', <AnimatedSeconds seconds={toolSeconds} animate={settled} />) : null}
+      {firstTokenSeconds != null ? item('首 token', <AnimatedSeconds seconds={firstTokenSeconds} animate={settled} />) : null}
       {speed != null ? item('速度', <AnimatedNumber value={speed} format={{ maximumFractionDigits: 0 }} suffix=' tok/s' />) : null}
       {stats.cacheHitRate != null
-        ? item('缓存', <AnimatedPercent ratio={stats.cacheHitRate} />, stats.cacheHitRate > 0.5 ? 'text-ok' : 'text-ink-2')
+        ? item('缓存', <AnimatedPercent ratio={stats.cacheHitRate} animate={settled} />, stats.cacheHitRate > 0.5 ? 'text-ok' : 'text-ink-2')
         : null}
-      {stats.inputTokens ? item('输入', <AnimatedTokens value={stats.inputTokens} />) : null}
-      {stats.outputTokens ? item('输出', <AnimatedTokens value={stats.outputTokens} />) : null}
+      {stats.inputTokens ? item('输入', <AnimatedTokens value={stats.inputTokens} animate={settled} />) : null}
+      {stats.outputTokens ? item('输出', <AnimatedTokens value={stats.outputTokens} animate={settled} />) : null}
       {!stats.turns && !stats.inputTokens ? <span className='text-ink-4'>这个会话还没有用量</span> : null}
       <span className='flex-1' />
       {/* 本轮的「首 token 延迟」与「生成耗时」分开给：合成一个数字说不清

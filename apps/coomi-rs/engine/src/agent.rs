@@ -37,6 +37,8 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::Semaphore;
+use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct ToolFailureState {
@@ -136,7 +138,19 @@ fn goal_recitation(session: &crate::Session) -> Option<String> {
 pub struct Agent {
     system_prompt: String,
     max_tool_rounds: usize,
+    /// 提供商重试次数（u8 哨兵编码）：
+    /// - 0：关闭自动重试（可重试错误也立即失败返回）；
+    /// - 1..=254：非零失败后最多自动重试 N 次；
+    /// - 255：无限重试（直到成功或遇到不可重试错误）。
+    ///
+    /// 注意：这里的值只在 Agent 构造时固化，只作为「默认 / 实时读取失败时的回落
+    /// 基值」。装了实时读取源（with_live_provider_retry_count）后，每次失败的
+    /// 「是否继续重试」决策都以当时的实际配置为准（见 current_provider_retry_count）。
     provider_retry_count: u8,
+    /// 重试次数实时读取源：每次失败做重试决策时调用（读取当前 settings.json 的
+    /// provider_retry_count）。为 None 时退回构造时固化的 provider_retry_count，
+    /// terminal / CLI / 单测不装源也保持旧行为不变。
+    retry_count_source: Option<Arc<dyn Fn() -> u8 + Send + Sync>>,
     reconnect_initial_delay_ms: u64,
     reconnect_max_delay_ms: u64,
     max_parallel_tools: usize,
@@ -310,6 +324,14 @@ fn push_final_assistant(
     reasoning: &str,
     draft: Option<&DraftState>,
 ) {
+    // 防空：正文、工具调用、思考文本全为空时，这条 assistant 消息对 provider 毫无价值
+    // （OpenAI 兼容契约要求 content 或 tool_calls 至少设置其一，否则必 400），直接不
+    // 落库，避免在产生处就埋下「下一轮 normalize_history 才能清掉」的废消息。
+    // 只思考没输出的轮次（reasoning 非空）仍会落库保留思考文本（前端可展示思考框），
+    // 发送前由 normalize_history 统一把「空正文」的 assistant 消息丢弃。
+    if content.trim().is_empty() && tool_calls.is_empty() && reasoning.trim().is_empty() {
+        return;
+    }
     let mut message = ChatMessage::assistant(content, tool_calls);
     // 思考文本随正式回复一起落库：一轮结束后前端回读历史时思考框不会消失。
     let reasoning = crate::types::sanitize_long_encoded_data(reasoning);
@@ -339,6 +361,7 @@ impl Agent {
             system_prompt: system_prompt.into(),
             max_tool_rounds: 192,
             provider_retry_count: 2,
+            retry_count_source: None,
             reconnect_initial_delay_ms: 1_000,
             reconnect_max_delay_ms: 10_000,
             max_parallel_tools: 5,
@@ -419,20 +442,57 @@ impl Agent {
         self
     }
 
-    /// Configure retries for transient provider failures. A count of zero disables
-    /// automatic replay. Non-retryable protocol/auth/argument failures still fail fast.
+    /// 配置提供商临时故障的重试策略（u8 哨兵语义）：
+    /// - 0：关闭自动重试；可重试错误也立即失败返回；
+    /// - 1..=254：最多自动重试 N 次；
+    /// - 255：无限重试（直到成功或遇到不可重试错误）。
+    /// 不可重试的协议 / 鉴权 / 参数错误仍然快速失败，不参与重试。
+    ///
+    /// 这里固化的是「构造时的默认 / 实时读取失败时的回落基值」；
+    /// 调用 with_live_provider_retry_count 装上实时读取源后，每次失败的重试
+    /// 决策都会重新读取当前配置（改设置对运行中的轮也立即生效）。
     pub fn with_provider_retry_policy(
         mut self,
         retry_count: u8,
         initial_delay_ms: u64,
         max_delay_ms: u64,
     ) -> Self {
-        self.provider_retry_count = retry_count.min(10);
+        // u8 本身已封顶 255（255=无限哨兵），不再像旧版那样 min(10) 截断上限。
+        self.provider_retry_count = retry_count;
         self.reconnect_initial_delay_ms = initial_delay_ms.clamp(500, 60_000);
         self.reconnect_max_delay_ms = max_delay_ms
             .clamp(1_000, 120_000)
             .max(self.reconnect_initial_delay_ms);
         self
+    }
+
+    /// 装上「重试次数实时读取源」：每次失败做重试决策时读取 home/config/settings.json
+    /// 的 provider_retry_count（设置页 PUT 后，对当前正在运行的任务轮也立即生效，
+    /// 不需要等下一轮重建 Agent）。
+    /// 注意构建顺序：应在 with_provider_retry_policy 之后调用——回落基值取自调用
+    /// 时已存在的 provider_retry_count，先装源再设策略会把回落基值钉在默认 2。
+    ///
+    /// 读取失败（文件缺失 / 损坏 / 键缺失 / 非 u8）一律回落构造时固化值
+    /// provider_retry_count（默认 2），绝不 panic。为什么回落基值取「构造时的值」
+    /// 而不是固定 255：磁盘瞬时读故障（写了一半 / IO 抖动）不应把策略静默切成无限
+    /// 重试——那会把一次配置读取故障放大成持续的重试风暴；保持「最后一次已知配置」
+    /// 最稳，也让没配过键的用户（settings.json 里无此键）行为与旧版完全一致。
+    pub fn with_live_provider_retry_count(mut self, home: impl Into<PathBuf>) -> Self {
+        let home = home.into();
+        let fallback = self.provider_retry_count;
+        self.retry_count_source = Some(Arc::new(move || {
+            live_provider_retry_count(&home).unwrap_or(fallback)
+        }));
+        self
+    }
+
+    /// 当前生效的重试次数：有实时源就用实时的（每次失败各调一次，改动即时生效）；
+    /// 没有就退回构造时固化的值（默认 2，terminal / CLI / 单测行为不变）。
+    fn current_provider_retry_count(&self) -> u8 {
+        match &self.retry_count_source {
+            Some(source) => source(),
+            None => self.provider_retry_count,
+        }
     }
 
     pub fn with_max_parallel_tools(mut self, max_parallel_tools: usize) -> Self {
@@ -703,7 +763,10 @@ impl Agent {
                 session
                     .messages
                     .retain(|message| !message.content.starts_with(GOAL_RECITE_MARK));
-                session.messages.push(ChatMessage::internal_user(reminder));
+                // 带机器可读标记：前端据此渲染成系统行，而不是用户气泡。
+                session
+                    .messages
+                    .push(ChatMessage::internal_reminder(reminder, "goal"));
             }
             session
                 .context
@@ -848,10 +911,24 @@ impl Agent {
                         });
                     }
                     StreamAttempt::Done(Err(error))
-                        if retry_attempt < self.provider_retry_count
-                            && is_transient_provider_error(&error) =>
+                        if is_transient_provider_error(&error) =>
                     {
-                        retry_attempt += 1;
+                        // 实时重试策略：每次失败都重新读取当前配置（设置页改完，
+                        // 正在运行中的轮也立即生效，不用等下一轮重建 Agent）；
+                        // 读取失败 / 未配实时源时回落构造时默认。
+                        let retry_count = self.current_provider_retry_count();
+                        // 达到本次配置的轮次上限（或 0 = 关闭重试）且不是无限哨兵
+                        // （255）：按「不再重试」收尾，把已生成内容定稿落盘后失败返回。
+                        // 为什么复制下方兜底分支而不是透传：match 守卫已命中本分支，
+                        // 后面的 Done(Err(_)) 兜底不会再被执行，只能在这里显式收尾。
+                        if retry_attempt >= retry_count && retry_count != 255 {
+                            finalize_draft(session, draft.as_ref());
+                            return Err(AgentError::Provider(error));
+                        }
+                        // 饱和 +1：无限重试（255）时计数会长期增长，u8 溢出会 panic
+                        // （debug）或回绕（release）；退避指数已在 retry_delay_ms 内
+                        // 封顶到 16，计数饱和不影响退避效果。
+                        retry_attempt = retry_attempt.saturating_add(1);
                         let delay_ms = retry_delay_ms(
                             &error,
                             retry_attempt,
@@ -866,7 +943,8 @@ impl Agent {
                         observer.on_event(&AgentEvent::StreamReset);
                         observer.on_event(&AgentEvent::ConnectionRetry {
                             attempt: retry_attempt,
-                            max_attempts: self.provider_retry_count,
+                            // 255 表示无限重试：事件原样透传，前端可据此展示「∞」。
+                            max_attempts: retry_count,
                             delay_ms,
                             message: "网络或上游服务暂时不可用，正在自动恢复".into(),
                         });
@@ -1658,6 +1736,19 @@ fn tool_retry_block_reason(previous: ToolFailureState, repeated_in_batch: bool) 
         return "相同工具与参数此前因权限、策略、参数或路径问题失败，已阻止原样重试；请修改参数、路径或改用其他工具。".into();
     }
     "相同工具与参数已达到最多一次重试上限，已阻止继续执行；请修改参数或切换工具。".into()
+}
+
+/// 实时读取 settings.json 的 provider_retry_count（u8 哨兵：0=关闭、
+/// 1..=254=次数、255=无限）。返回 None 表示读不到有效值（文件缺失 / 损坏 /
+/// 键缺失 / 非 u8），由调用方决定回落基值。同步 IO：只在「每次失败的重试决策」
+/// 时调用（失败本来就少见），settings.json 很小，代价可忽略。
+fn live_provider_retry_count(home: &Path) -> Option<u8> {
+    let bytes = std::fs::read(home.join("config").join("settings.json")).ok()?;
+    let settings: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    settings
+        .get("provider_retry_count")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
 }
 
 fn is_transient_provider_error(error: &anyhow::Error) -> bool {

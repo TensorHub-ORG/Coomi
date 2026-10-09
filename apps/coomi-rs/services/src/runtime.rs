@@ -25,6 +25,10 @@ pub const RUNTIME_STATE_VERSION: u32 = 2;
 pub enum RuntimeBackendKind {
     LegacyTermux,
     ProotLinux,
+    /// 宿主原生：不经任何 guest。**Windows / macOS / Linux 的默认**——
+    /// 这两个平台既没有 Termux 也没有 ProotLinux，默认成 legacy_termux 会让
+    /// 落盘的 state.json 一直声称存在，shell 也会被解析到 `/bin/sh` 这类非原生路径。
+    Host,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -115,7 +119,14 @@ impl Default for RuntimeState {
     fn default() -> Self {
         Self {
             version: RUNTIME_STATE_VERSION,
-            backend: RuntimeBackendKind::LegacyTermux,
+            /* 默认后端按平台定：桌面端既没有 Termux 也没有 ProotLinux，
+               默认成 legacy_termux 会让落盘的 state.json 一直声称它存在，
+               UI 与提示词据此给出误导信息。 */
+            backend: if cfg!(target_os = "android") {
+                RuntimeBackendKind::LegacyTermux
+            } else {
+                RuntimeBackendKind::Host
+            },
             status: RuntimeInstallStatus::NotInstalled,
             active_version: None,
             previous_version: None,
@@ -582,6 +593,7 @@ if command -v curl >/dev/null 2>&1; then echo "__curl__$(curl --version 2>&1 | h
         backend: match backend.kind() {
             RuntimeBackendKind::ProotLinux => "proot_linux".into(),
             RuntimeBackendKind::LegacyTermux => "legacy_termux".into(),
+            RuntimeBackendKind::Host => "host".into(),
         },
         ..GuestFacts::default()
     };
@@ -1225,15 +1237,15 @@ mod tests {
     #[test]
     fn termux_layout_is_derived_from_android_coomi_home() {
         let backend = LegacyTermuxBackend::from_coomi_home(Path::new(
-            "/data/data/com.coomi.android/files/home/.coomi",
+            "/data/data/com.monai.coomiplus/files/home/.coomi",
         ));
         assert_eq!(
             backend.prefix,
-            PathBuf::from("/data/data/com.coomi.android/files/usr")
+            PathBuf::from("/data/data/com.monai.coomiplus/files/usr")
         );
         assert_eq!(
             backend.home,
-            PathBuf::from("/data/data/com.coomi.android/files/home")
+            PathBuf::from("/data/data/com.monai.coomiplus/files/home")
         );
     }
 

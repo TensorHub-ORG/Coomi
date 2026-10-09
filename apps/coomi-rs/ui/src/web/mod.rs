@@ -132,6 +132,8 @@ use uuid::Uuid;
 
 const PROTOCOL_VERSION: u8 = 1;
 mod api;
+// 前缀缓存诊断（纯观测层）：只测量、只记账，不碰任何发给模型的内容。
+mod cache_metrics;
 mod runtime_state;
 const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -324,6 +326,7 @@ struct SessionTask {
     /// 运行中插话的队列：本轮还在跑时收到的 send_message 排在这里，
     /// 本轮 turn_end 之后由同一个 worker 按顺序继续执行（串行，绝不并发第二条 run）。
     queued_prompts: StdMutex<VecDeque<QueuedPrompt>>,
+    accepted_resume_ids: StdMutex<VecDeque<String>>,
     /// 本轮写文件类工具声明的产物候选路径（原样保存，可能相对可能绝对）。
     /// turn_end 时统一过真实文件校验再汇总成 `artifacts` 下发，下发后清空。
     turn_artifacts: StdMutex<Vec<String>>,
@@ -344,10 +347,14 @@ struct SessionTask {
     /// 工具定义属于提示前缀的一部分：每轮换一次工具集，就等于每轮把自己的 KV-cache
     /// 作废（多花钱、多等首字）。所以按需注入只在会话内决定一次；只有当"可用工具总数"
     /// 变了（装了新 MCP/技能）才重新决定一次。
-    tool_freeze: StdMutex<Option<(Vec<String>, usize)>>,
+    tool_freeze: StdMutex<Option<(Vec<String>, u64)>>,
     /// 稳定前缀的指纹 (系统提示, 工具定义)。用于在缓存命中率下滑时**归因**：
     /// 前缀是 KV-cache 的命中依据，任一处变更都会让那一点之后的缓存全部作废。
+    /// 真正用来归因的是 cache_diag（这里只是它的当前值快照）。
     prefix_fingerprint: StdMutex<Option<(u64, u64)>>,
+    /// 会话级缓存诊断账本（见 cache_metrics）：前缀/尾 token、按原因的变更累计、
+    /// 冷启动与稳定期分开算的会话命中率。活到会话收尾时打一行汇总。
+    cache_diag: StdMutex<cache_metrics::CacheDiag>,
     /// 项目大纲（目录结构 / 语言分布 / 关键文件）：同一会话只算一次。
     /// 它放在**尾部上下文**里（不动前缀），内容确定，因此不影响缓存命中。
     project_outline: StdMutex<Option<String>>,
@@ -500,6 +507,7 @@ impl SessionTask {
             next_event_seq: AtomicU64::new(1),
             unacked_events: StdMutex::new(VecDeque::new()),
             queued_prompts: StdMutex::new(VecDeque::new()),
+            accepted_resume_ids: StdMutex::new(VecDeque::new()),
             turn_artifacts: StdMutex::new(Vec::new()),
             artifact_base: StdMutex::new(PathBuf::new()),
             last_prompt: StdMutex::new(None),
@@ -507,6 +515,7 @@ impl SessionTask {
             injected_memories: StdMutex::new(Vec::new()),
             tool_freeze: StdMutex::new(None),
             prefix_fingerprint: StdMutex::new(None),
+            cache_diag: StdMutex::new(cache_metrics::CacheDiag::default()),
             project_outline: StdMutex::new(None),
         }
     }
@@ -721,6 +730,14 @@ impl SessionTask {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = phase.to_owned();
     }
 
+    /// 拿本会话的缓存诊断账本。
+    /// 中毒锁照旧继续用：诊断是纯观测，绝不该把主流程带崩。
+    fn cache_diag(&self) -> std::sync::MutexGuard<'_, cache_metrics::CacheDiag> {
+        self.cache_diag
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// 记录当前模型轮次（观察者在 ModelStarted 时调用）。
     fn set_round(&self, round: u64) {
         self.round.store(round, Ordering::SeqCst);
@@ -739,6 +756,13 @@ impl SessionTask {
             .download
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        // 会话结束：把这一整场对话的缓存账打一行汇总（轮次 / 前缀·尾 token /
+        // 稳态与冷启动命中率 / 前缀变更按原因的次数与轮次）。
+        // 之前只有逐次打印、没有累计，命中率掉了只能猜"是不是又变了"。
+        // take_summary_line 自带幂等：排队里连着跑好几轮也只会打这一行。
+        if let Some(summary) = self.cache_diag().take_summary_line() {
+            eprintln!("{summary}");
+        }
     }
 }
 
@@ -917,6 +941,8 @@ fn spawn_turn_worker(
             // 界面据此决定「收尾成完成」还是「什么都不动、直接接下一轮」（不会闪一下已完成）。
             let next = turn_task.dequeue_prompt();
             let mut end = turn_end_event(&turn_task);
+            end["ok"] = json!(trace_error.is_none());
+            end["status"] = json!(if trace_error.is_none() { "succeeded" } else { "failed" });
             if next.is_some() {
                 end["more_queued"] = json!(true);
             }
@@ -1584,6 +1610,7 @@ pub async fn serve(
         )
         .route("/api/agents", get(list_subagents_api))
         .route("/api/agents/{id}/close", post(close_subagent_api))
+        .route("/api/agents/{id}/messages", get(api::agents::agent_messages_api))
         .route("/api/sessions", get(list_sessions))
         .route("/api/sessions/running", get(list_sessions_running))
         .route("/api/tasks", get(list_tasks))
@@ -1613,6 +1640,13 @@ pub async fn serve(
         // 技能索引即时刷新。数据由桌面壳在启用插件时写入 home，引擎只读。
         .route("/api/plugins/subagents", get(api::plugins::plugin_subagents_api))
         .route("/api/plugins/views", get(api::plugins::plugin_views_api))
+        // 客户端模块（对标 DSH 的 client plugin）：清单只回路径，源码按 pluginId 读；
+        // 路径只来自壳写的 plugin-clients.json，不接受调用方给路径。
+        .route("/api/plugins/client", get(api::plugins::plugin_clients_api))
+        .route(
+            "/api/plugins/client/source",
+            get(api::plugins::plugin_client_source),
+        )
         .route("/api/plugins/subagents/spawn", post(api::plugins::plugin_subagents_spawn_api))
         .route("/api/plugins/personas", get(api::plugins::plugin_personas_api))
         .route("/api/plugins/reindex-skills", post(api::plugins::plugin_reindex_skills))
@@ -2304,12 +2338,13 @@ fn configured_connection_settings(home: &Path) -> ConnectionSettings {
         .unwrap_or(defaults.reconnect_initial_delay_ms)
         .clamp(500, 60_000);
     ConnectionSettings {
+        // u8 哨兵语义：0=关闭、1..=254=次数、255=无限。u8 解析本身已封顶 255，
+        // 不再像旧版那样 min(10) 截断上限（255 是合法的「无限重试」配置）。
         provider_retry_count: settings
             .get("provider_retry_count")
             .and_then(Value::as_u64)
             .and_then(|value| u8::try_from(value).ok())
-            .unwrap_or(defaults.provider_retry_count)
-            .min(10),
+            .unwrap_or(defaults.provider_retry_count),
         ws_retry_count: settings
             .get("ws_retry_count")
             .and_then(Value::as_u64)
@@ -2340,9 +2375,12 @@ async fn set_connection_settings(
     State(state): State<AppState>,
     Json(body): Json<ConnectionSettings>,
 ) -> Result<Json<ConnectionSettings>, ApiError> {
-    if body.provider_retry_count > 10 {
+    // u8 哨兵：0=关闭、1..=254=次数、255=无限。serde 反序列化时 >255 的 JSON
+    // 值会直接 400；这里升到 u32 再比，既保留「≤255」的显式校验（文档化防线，
+    // 未来字段放宽类型时立即生效），又避免对 u8 做恒 false 比较触发无用告警。
+    if u32::from(body.provider_retry_count) > 255 {
         return Err(ApiError::bad_request(
-            "providerRetryCount must be between 0 and 10",
+            "providerRetryCount must be between 0 and 255 (255 = unlimited)",
         ));
     }
     if body.ws_retry_count > 30 {
@@ -5006,8 +5044,15 @@ fn resolve_configured_subagents(
     let settings = read_subagent_settings(home);
     let mut resolved = Vec::new();
     for entry in settings.agents {
-        let selector = format!("{}:{}", entry.provider_id, entry.model);
-        let Ok(provider) = registry.resolve(Some(&selector)) else {
+        // 子代理已改为引擎自动选择模型：没填 provider/model 的条目直接用当前
+        // 激活的 provider（resolve(None) 取 active）——不能静默丢条目，
+        // 否则保存后子代理会凭空消失。填了的按原样解析。
+        let provider = if entry.provider_id.trim().is_empty() && entry.model.trim().is_empty() {
+            registry.resolve(None)
+        } else {
+            registry.resolve(Some(&format!("{}:{}", entry.provider_id, entry.model)))
+        };
+        let Ok(provider) = provider else {
             continue;
         };
         resolved.push(ConfiguredSubAgent {
@@ -5051,26 +5096,30 @@ fn validate_subagent_settings(
         if entry.description.chars().count() > 500 {
             return Err(ApiError::bad_request("sub-agent description is too long"));
         }
-        let provider = document.providers.get(&entry.provider_id).ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "sub-agent provider `{}` is not configured",
-                entry.provider_id
-            ))
-        })?;
-        if provider.api_key.trim().is_empty() {
-            return Err(ApiError::bad_request(format!(
-                "sub-agent provider `{}` has no API key",
-                entry.provider_id
-            )));
-        }
-        if !provider_models(provider)
-            .iter()
-            .any(|model| model == &entry.model)
-        {
-            return Err(ApiError::bad_request(format!(
-                "model `{}` is not configured for provider `{}`",
-                entry.model, entry.provider_id
-            )));
+        // 子代理已改为引擎自动选择模型：条目可以不填 provider/model（跳过提供商
+        // 校验，运行时用激活 provider 解析，见 resolve_configured_subagents）。
+        // 填了的仍按原样校验，防止配错。
+        if !entry.provider_id.is_empty() {
+            let provider = document.providers.get(&entry.provider_id).ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "sub-agent provider `{}` is not configured",
+                    entry.provider_id
+                ))
+            })?;
+            if provider.api_key.trim().is_empty() {
+                return Err(ApiError::bad_request(format!(
+                    "sub-agent provider `{}` has no API key",
+                    entry.provider_id
+                )));
+            }
+            if !entry.model.is_empty()
+                && !provider_models(provider).iter().any(|model| model == &entry.model)
+            {
+                return Err(ApiError::bad_request(format!(
+                    "model `{}` is not configured for provider `{}`",
+                    entry.model, entry.provider_id
+                )));
+            }
         }
     }
     if value.agents.is_empty() {
@@ -8158,7 +8207,10 @@ async fn registry_index(
         if crate::market_v2::registry_url_for_source(source).is_some() {
             let mut settings = read_settings(&state.home);
             settings["registrySource"] = json!(source);
-            write_settings(&state.home, &settings);
+            // 必须传播失败：下面 fetch_registry_payload 是从落盘 settings 读当前源的，
+            // 写盘失败时这次切换连本次请求都不生效。丢弃 Result 会让它表现成「切了源、
+            // 看着成功、其实什么都没变」，下次进来又变回旧源（本文件其余调用点都做了处理）。
+            write_settings(&state.home, &settings)?;
         }
     }
     let remote = {
@@ -9035,10 +9087,21 @@ async fn set_mcp_settings(
     if !servers.is_object() {
         return Err(ApiError::bad_request("servers must be an object map"));
     }
+    for config in servers.as_object().unwrap().values() {
+        if !config.is_object() { return Err(ApiError::bad_request("MCP server config must be an object")); }
+        if config.get("args").is_some_and(|args| !args.is_array() || args.as_array().unwrap().iter().any(|v| !v.is_string())) { return Err(ApiError::bad_request("MCP args must be a string array")); }
+        if config.get("env").is_some_and(|env| !env.is_object() || env.as_object().unwrap().values().any(|v| !v.is_string())) { return Err(ApiError::bad_request("MCP env must be a string map")); }
+    }
     let path = state.home.join("config").join("mcp_servers.json");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| ApiError::internal(format!("failed to create config dir: {e}")))?;
+    }
+    let previous: Value = fs::read(&path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_else(|| json!({"servers":{}}));
+    if let Some(managed) = previous.get("servers").and_then(Value::as_object) {
+        for (id, config) in managed {
+            if id.starts_with("plugin:") && servers.get(id) != Some(config) { return Err(ApiError::bad_request("plugin-managed MCP config cannot be edited or removed here")); }
+        }
     }
     let doc = json!({ "servers": servers });
     let text = serde_json::to_string_pretty(&doc)
@@ -9793,17 +9856,28 @@ async fn trust_put(
 /// 执行偏好：思考强度 + 任务放行程度（工具授权策略）+ 最大工具轮次。
 /// 桌面端要在设置页和输入区都能读到当前值，所以给一个读写口，
 /// 而不是让前端去猜 settings.json / web-settings.json 的内容。
-async fn agent_preferences_get(State(state): State<AppState>) -> Json<Value> {
+async fn agent_preferences_get(State(state): State<AppState>, Query(query): Query<HashMap<String, String>>) -> Json<Value> {
+    let effort_status = ProviderRegistry::load(&providers_path(&state.home))
+        .and_then(|registry| registry.resolve(query.get("selector").map(String::as_str)))
+        .ok().map(|config| coomi_services::reasoning_parameter_status(&config, &configured_reasoning_effort(&state.home)));
     let mode = *state.permission.read().await;
     let capabilities = configured_capabilities(&state.home);
+    // 重试策略：设置页只暴露「重试次数 / 重连最大退避」两个值。与 /api/connection/settings
+    // 共用同一份 settings.json 键（provider_retry_count / reconnect_max_delay_ms），
+    // 复用 configured_connection_settings 保证默认值与 clamp 和连接设置页完全一致。
+    let connection_settings = configured_connection_settings(&state.home);
     Json(json!({
         "reasoningEffort": configured_reasoning_effort(&state.home),
+        "reasoningStatus": effort_status,
         "permissionMode": permission_mode_str(mode),
         // 信任档位（批 6）：与 permissionMode 叠加后决定有效权限与审批行为。
         "trustLevel": load_trust_level(&state.home).as_str(),
         "effectivePermissionMode": permission_mode_str(effective_permission_mode(&state.home, mode)),
         "effectiveAccessMode": policy_mode_for(&state.home, mode).label(),
         "maxToolRounds": configured_max_tool_rounds(&state.home),
+        // 提供商重试策略：重试次数（0 = 不自动重试，255 = 无限重试）+ 重连最大退避延迟（ms）。
+        "providerRetryCount": connection_settings.provider_retry_count,
+        "reconnectMaxDelayMs": connection_settings.reconnect_max_delay_ms,
         // 自动压缩：总开关 + 触发条件（窗口比例 / 绝对下限 / 保留区）+ 消息条数上限。
         // 全部返回「生效值」（含默认值与 clamp），前端可直接展示，不用自己猜默认。
         "autoCompactMessageLimit": configured_auto_compact_message_limit(&state.home),
@@ -9833,6 +9907,14 @@ struct AgentPreferencesPatch {
     trust_level: Option<String>,
     #[serde(default)]
     max_tool_rounds: Option<u64>,
+    /// 提供商临时故障重试次数，u8 哨兵：0=关闭、1..=254=次数、255=无限（默认 2）。
+    /// 与 /api/connection/settings 的 providerRetryCount 是同一份配置键。
+    #[serde(default)]
+    provider_retry_count: Option<u8>,
+    /// 重连最大退避延迟毫秒（默认 10000，clamp 1000-120000）。
+    /// 同样与连接设置页共用同一份配置键。
+    #[serde(default)]
+    reconnect_max_delay_ms: Option<u64>,
     #[serde(default)]
     auto_compact_message_limit: Option<u64>,
     #[serde(default)]
@@ -9872,6 +9954,22 @@ async fn agent_preferences_put(
         let rounds = rounds.clamp(1, 512);
         let mut settings = read_settings(&state.home);
         settings["max_tool_rounds"] = json!(rounds);
+        write_settings(&state.home, &settings).map_err(ApiError::from)?;
+    }
+    if let Some(count) = patch.provider_retry_count {
+        // u8 哨兵与连接设置页 / 引擎一致：0=关闭、1..=254=次数、255=无限。
+        // u8 解析本身已封顶 255（serde 对 >255 直接 400），不再 min(10) 截断上限，
+        // 255 是合法配置（无限重试）。引擎在每次失败时实时读取此值。
+        let mut settings = read_settings(&state.home);
+        settings["provider_retry_count"] = json!(count);
+        write_settings(&state.home, &settings).map_err(ApiError::from)?;
+    }
+    if let Some(max_delay) = patch.reconnect_max_delay_ms {
+        // clamp 1000-120000，与引擎 with_provider_retry_policy 的口径一致；
+        // 引擎侧还会保证 max >= initial（初始退避），这里只负责用户输入部分。
+        let max_delay = max_delay.clamp(1_000, 120_000);
+        let mut settings = read_settings(&state.home);
+        settings["reconnect_max_delay_ms"] = json!(max_delay);
         write_settings(&state.home, &settings).map_err(ApiError::from)?;
     }
     if let Some(mode) = patch.permission_mode.as_deref() {
@@ -9948,7 +10046,7 @@ async fn agent_preferences_put(
         settings["capabilities"] = merge_settings_capabilities(&current, capabilities);
         write_settings(&state.home, &settings).map_err(ApiError::from)?;
     }
-    Ok(agent_preferences_get(State(state)).await)
+    Ok(agent_preferences_get(State(state), Query(HashMap::new())).await)
 }
 
 fn permission_mode_str(mode: PermissionMode) -> &'static str {
@@ -10350,24 +10448,26 @@ async fn discover_provider_models(
         .get(&id)
         .cloned()
         .ok_or_else(|| ApiError::not_found("provider not found"))?;
-    let (models, stale) = match fetch_provider_models(&provider).await {
-        Ok(models) if !models.is_empty() => (models, false),
-        Ok(_) => (provider_models(&provider), true),
+    let (models, metadata, stale) = match fetch_provider_model_data(&provider).await {
+        Ok((models, metadata)) if !models.is_empty() => (models, metadata, false),
+        Ok(_) => (provider_models(&provider), json!({}), true),
         Err(error) => {
             let cached = provider_models(&provider);
             if cached.is_empty() {
                 return Err(error);
             }
-            (cached, true)
+            (cached, json!({}), true)
         }
     };
-    if persist {
+    if persist && !stale {
+        document = read_provider_document(&state.home).map_err(ApiError::from)?;
         if let Some(settings) = document.providers.get_mut(&id) {
+            if settings.base_url != provider.base_url || settings.api_key != provider.api_key { return Err(ApiError::bad_request("provider changed during model discovery; retry")); }
             apply_provider_models(settings, &models, document.active == id)?;
         }
         document.save(&path).map_err(ApiError::from)?;
     }
-    Ok(Json(json!({"models": models, "stale": stale})))
+    Ok(Json(json!({"models": models, "metadata": metadata, "stale": stale})))
 }
 
 /// POST /api/providers/discover-models-preview —— **新建厂商时也能拉模型清单**。
@@ -10406,8 +10506,9 @@ async fn discover_models_preview(
     if let Some(api_key) = string_field(&input, "apiKey").filter(|value| !value.trim().is_empty()) {
         probe.api_key = api_key;
     }
-    match fetch_provider_models(&probe).await {
-        Ok(models) if !models.is_empty() => Ok(Json(json!({
+    match fetch_provider_model_data(&probe).await {
+        Ok((models, metadata)) if !models.is_empty() => Ok(Json(json!({
+            "metadata": metadata,
             "models": models,
             "count": models.len(),
             "note": "",
@@ -10432,7 +10533,7 @@ async fn discover_provider_context(
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ApiError> {
     let path = providers_path(&state.home);
-    let mut document = read_provider_document(&state.home).map_err(ApiError::from)?;
+    let document = read_provider_document(&state.home).map_err(ApiError::from)?;
     let persist = body
         .as_ref()
         .and_then(|Json(value)| value.get("persist"))
@@ -10446,33 +10547,27 @@ async fn discover_provider_context(
     let contexts = fetch_provider_contexts(&provider).await;
     let stale = contexts.is_empty();
     let mut context_window = provider.context_window;
-    if persist {
+    if persist && !stale {
+        let mut document = read_provider_document(&state.home).map_err(ApiError::from)?;
         if let Some(settings) = document.providers.get_mut(&id) {
-            // 标记窗口来源：压缩判定按 probe → config → default 取，
-            // 探测写回的值必须能压过兜底默认值。
-            if !stale {
-                settings.context_window_source = Some("probe".into());
+            if settings.base_url != provider.base_url || settings.api_key != provider.api_key {
+                return Err(ApiError::bad_request("provider changed during metadata fetch; retry"));
             }
-            settings.model_context_windows = contexts;
+            for (model, value) in &contexts {
+                settings.model_context_windows.entry(model.clone()).or_insert(*value);
+            }
             // 未手动设置总量时，用探测到的最大窗口作为默认上下文。
-            if provider.context_window.is_none() {
+            if settings.context_window.is_none() {
                 if let Some(max_ctx) = settings.model_context_windows.values().max().copied() {
                     settings.context_window = Some(max_ctx);
+                    settings.context_window_source = Some("probe".into());
                     context_window = Some(max_ctx);
                 }
             }
         }
         document.save(&path).map_err(ApiError::from)?;
     }
-    let found = if stale {
-        BTreeMap::new()
-    } else {
-        document
-            .providers
-            .get(&id)
-            .map(|p| p.model_context_windows.clone())
-            .unwrap_or_default()
-    };
+    let found = contexts;
     Ok(Json(json!({
         "contextWindows": found,
         "contextWindow": context_window,
@@ -10765,6 +10860,10 @@ async fn life_habits_get(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn fetch_provider_models(provider: &ProviderSettings) -> Result<Vec<String>, ApiError> {
+    Ok(fetch_provider_model_data(provider).await?.0)
+}
+
+async fn fetch_provider_model_data(provider: &ProviderSettings) -> Result<(Vec<String>, Value), ApiError> {
     let base = provider.base_url.trim_end_matches('/');
     if base.is_empty() {
         return Err(ApiError::bad_request("base URL is required"));
@@ -10828,7 +10927,21 @@ async fn fetch_provider_models(provider: &ProviderSettings) -> Result<Vec<String
         .collect::<Vec<_>>();
     models.sort();
     models.dedup();
-    Ok(models)
+    Ok((models, metadata_from_model_entries(entries)))
+}
+
+fn metadata_from_model_entries(entries: &[Value]) -> Value {
+    let mut metadata = serde_json::Map::new();
+    for entry in entries {
+        let Some(id) = entry.get("id").or_else(|| entry.get("name")).and_then(Value::as_str) else { continue };
+        let id = id.strip_prefix("models/").unwrap_or(id);
+        let context = ["context_window","context_length","max_model_len","max_context_length","max_position_embeddings","inputTokenLimit"].iter().find_map(|key| entry.get(*key).and_then(Value::as_u64));
+        let output = ["max_output_tokens","max_completion_tokens","outputTokenLimit","max_output_length"].iter().find_map(|key| entry.get(*key).and_then(Value::as_u64)).or_else(|| entry.pointer("/top_provider/max_completion_tokens").and_then(Value::as_u64));
+        let vision = entry.get("supports_vision").and_then(Value::as_bool).or_else(|| entry.pointer("/architecture/input_modalities").and_then(Value::as_array).map(|values| values.iter().any(|v| v.as_str() == Some("image"))));
+        let efforts = entry.get("reasoning_efforts").or_else(|| entry.pointer("/reasoning/efforts")).and_then(Value::as_array).map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+        metadata.insert(id.to_owned(), json!({"contextWindow":context,"maxOutputTokens":output,"vision":vision,"reasoningEfforts":efforts,"source":"provider"}));
+    }
+    Value::Object(metadata)
 }
 
 /// 从上游 `/models` 响应解析每个模型的上下文长度（context_window / context_length /
@@ -11816,6 +11929,10 @@ async fn handle_command(
         }
         "retry_turn" => {
             let task = Arc::clone(&context.task);
+            if envelope_id.is_some_and(|id| task.accepted_resume_ids.lock().unwrap_or_else(|p| p.into_inner()).iter().any(|seen| seen == id)) {
+                context.send_ack(envelope_id);
+                return;
+            }
             if task.running.swap(true, Ordering::SeqCst) {
                 context.send_error(envelope_id, "a turn is already running");
                 return;
@@ -11846,6 +11963,11 @@ async fn handle_command(
                 );
                 return;
             }
+            if let Some(id) = envelope_id {
+                let mut ids = task.accepted_resume_ids.lock().unwrap_or_else(|p| p.into_inner());
+                ids.push_back(id.to_owned());
+                while ids.len() > 64 { ids.pop_front(); }
+            }
             persist_task_checkpoints(state);
             context.send_ack(envelope_id);
             let turn_state = state.clone();
@@ -11864,7 +11986,10 @@ async fn handle_command(
                 if let Err(error) = result {
                     turn_task.push_event(json!({"event_type":"agent_error","message":format!("{error:#}"),"is_fatal":false}));
                 }
-                turn_task.push_event(turn_end_event(&turn_task));
+                let mut end = turn_end_event(&turn_task);
+                end["ok"] = json!(!failed);
+                end["status"] = json!(if failed { "failed" } else { "succeeded" });
+                turn_task.push_event(end);
                 turn_task.finish(if failed { "failed" } else { "completed" });
                 persist_task_checkpoints(&turn_state);
                 turn_task
@@ -11921,7 +12046,10 @@ async fn handle_command(
                 if let Err(error) = result {
                     turn_task.push_event(json!({"event_type":"agent_error","message":format!("{error:#}"),"is_fatal":false}));
                 }
-                turn_task.push_event(turn_end_event(&turn_task));
+                let mut end = turn_end_event(&turn_task);
+                end["ok"] = json!(!failed);
+                end["status"] = json!(if failed { "failed" } else { "succeeded" });
+                turn_task.push_event(end);
                 turn_task.finish(if failed { "failed" } else { "completed" });
                 persist_task_checkpoints(&turn_state);
                 turn_task
@@ -11982,7 +12110,10 @@ async fn handle_command(
                 if let Err(error) = result {
                     turn_task.push_event(json!({"event_type":"agent_error","message":format!("{error:#}"),"is_fatal":false}));
                 }
-                turn_task.push_event(turn_end_event(&turn_task));
+                let mut end = turn_end_event(&turn_task);
+                end["ok"] = json!(!failed);
+                end["status"] = json!(if failed { "failed" } else { "succeeded" });
+                turn_task.push_event(end);
                 turn_task.finish(if failed { "failed" } else { "completed" });
                 persist_task_checkpoints(&turn_state);
                 turn_task
@@ -12475,6 +12606,17 @@ fn wants_delegation(prompt: &str) -> bool {
 
 /// FNV-1a 64 位哈希：确定性、零依赖，用来做「前缀指纹」。
 /// 不要密码学强度，只要"内容变一点点指纹就变"。
+/// 尾巴上下文限长（字符数）：记忆/目标/大纲/技能/MCP 清单都在尾巴里、每轮必重编，
+/// 太长会把缓存命中率拖在 95%。截断并留标记，保住前缀缓存命中。
+fn limit_tail(tail: &str, max_chars: usize) -> String {
+    if tail.chars().count() <= max_chars {
+        return tail.to_string();
+    }
+    let mut out: String = tail.chars().take(max_chars).collect();
+    out.push_str("\n…[上下文已截断]");
+    out
+}
+
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in bytes {
@@ -13614,7 +13756,10 @@ async fn run_turn(
     // 工具按需注入**只在会话内决定一次**：工具定义是提示前缀的一部分，每轮变一次
     // 就等于每轮作废自己的 KV-cache。只有"可用工具总数"变了（装了新 MCP/技能）才重算。
     let tool_specs = {
-        let total = tool_specs.len();
+        // A catalog with unchanged size may still have changed names/schemas.
+        let total = prefix_fingerprint("", &tool_specs).1;
+        let required = route_tool_specs(tool_specs.clone(), prompt)
+            .into_iter().map(|spec| spec.name).collect::<Vec<_>>();
         let cached = {
             let guard = task
                 .tool_freeze
@@ -13623,10 +13768,16 @@ async fn run_turn(
             guard.clone()
         };
         match cached {
-            Some((frozen, frozen_total)) if frozen_total == total => tool_specs
-                .into_iter()
-                .filter(|spec| frozen.iter().any(|name| name == &spec.name))
-                .collect(),
+            Some((mut frozen, frozen_total)) if frozen_total == total => {
+                // Preserve the old prefix where possible, but never make tools
+                // for a later user request inaccessible merely to save cache.
+                for name in required {
+                    if !frozen.contains(&name) { frozen.push(name); }
+                }
+                *task.tool_freeze.lock().unwrap_or_else(|p| p.into_inner()) =
+                    Some((frozen.clone(), total));
+                tool_specs.into_iter().filter(|spec| frozen.contains(&spec.name)).collect()
+            },
             _ => {
                 let selected = route_tool_specs(tool_specs, prompt);
                 let names = selected.iter().map(|spec| spec.name.clone()).collect();
@@ -13638,36 +13789,80 @@ async fn run_turn(
             }
         }
     };
-    // ── 前缀指纹：稳定前缀 = 系统提示 + 工具定义 ──
+    // 工具定义是提示前缀的一部分：固定按名字排序，保证字节序稳定 ——
+    // 底层枚举/MCP 发现顺序哪怕变，发送顺序也不变，前缀指纹不翻车。
+    let mut tool_specs = tool_specs;
+    tool_specs.sort_by(|a, b| a.name.cmp(&b.name));
+    // ── 尾巴上下文：先算一次，量出来的尾巴才和真正发出去的字节一致 ──
+    // 为什么要提到前面：limit_tail 是纯函数，调用两次得到两个**逐字节相同**的 String，
+    // 所以这纯粹是去重 + 让"测量值 = 实发值"成为结构上的保证（口径一漂，诊断就是假的）。
+    let request_context = limit_tail(&tail_context, 2_000);
+    // ── 前缀指纹 + 前缀/尾 token 计量：稳定前缀 = 系统提示 + 工具定义 ──
     // 纯观测，不改任何发给模型的内容（所以不可能因此破坏缓存），
-    // 只为在缓存命中率下滑时能直接归因到"是哪一半变了"。
+    // 一次把两件事都记上：① 指纹变了没（归因）② 前缀与尾巴各占多少 token（定量）。
     {
         let (system_hash, tools_hash) = prefix_fingerprint(&prompt_context, &tool_specs);
-        let previous = {
-            let guard = task
-                .prefix_fingerprint
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            *guard
-        };
-        if previous != Some((system_hash, tools_hash)) {
-            match previous {
-                None => eprintln!(
-                    "[cache] prefix {system_hash:016x}/{tools_hash:016x} · {} specs (会话首轮，必然全量 miss)",
-                    tool_specs.len()
-                ),
-                Some((old_system, old_tools)) => eprintln!(
-                    "[cache] 前缀变更 → 前缀缓存作废：系统提示 {} · 工具定义 {}（{} specs）",
-                    if old_system == system_hash { "未变" } else { "已变" },
-                    if old_tools == tools_hash { "未变" } else { "已变" },
-                    tool_specs.len()
-                ),
-            }
-            *task
-                .prefix_fingerprint
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((system_hash, tools_hash));
+        // 历史部分按"发请求时真正会出现的字节"量：content + 随消息持久化的
+        // request_context（引擎在 render_request_messages 里把它拼回正文）+ 工具调用参数。
+        // 漏掉 request_context 会系统性低估历史，漏掉 tool_calls 会低估带工具的轮次。
+        let history_chars: usize = session
+            .messages
+            .iter()
+            .map(|message| {
+                message.content.len()
+                    + message.request_context.len()
+                    + serde_json::to_string(&message.tool_calls)
+                        .map_or(0, |calls| calls.len())
+            })
+            .sum();
+        // 本轮那条 user 消息：用 model_content() 取长度而不是自己把附件/引用加起来——
+        // 手写一遍拼装规则必然会和引擎漂移，而漂移出来的诊断数字会误导人去改不该改的地方。
+        let turn_chars = ChatMessage::user(prompt.to_owned())
+            .with_attachments(turn.attachments.clone())
+            .with_quotes(turn.quotes.clone())
+            .model_content()
+            .len();
+        let measured = cache_metrics::measure_prefix_tail(
+            &prompt_context,
+            &tool_specs,
+            history_chars,
+            turn_chars,
+            request_context.len(),
+        );
+        let mut diag = task.cache_diag();
+        // 顺序要紧：先记轮次，observe_fingerprint 才知道这次变更属于第几轮。
+        diag.begin_turn(measured);
+        if diag.is_first_observation() {
+            eprintln!(
+                "[cache] prefix {system_hash:016x}/{tools_hash:016x} · {} specs (会话首轮，必然全量 miss)",
+                tool_specs.len()
+            );
         }
+        if let Some(change) = diag.observe_fingerprint(system_hash, tools_hash, tool_specs.len()) {
+            eprintln!(
+                "[cache] 前缀变更 → 前缀缓存作废：第{}轮 · 系统提示 {} · 工具定义 {}（{} specs）",
+                change.turn,
+                if change.system_changed { "已变" } else { "未变" },
+                if change.tools_changed { "已变" } else { "未变" },
+                change.tool_count
+            );
+        }
+        drop(diag);
+        *task
+            .prefix_fingerprint
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((system_hash, tools_hash));
+        eprintln!(
+            "[cache] 本轮请求 {}tok = 前缀 {}tok（系统提示 + {} 条工具定义）+ 历史 {}tok + 新增尾巴 {}tok（理论命中上限 {}）",
+            measured.total(),
+            measured.prefix_tokens,
+            tool_specs.len(),
+            measured.history_tokens,
+            measured.tail_tokens,
+            measured
+                .ceiling_hit_ratio()
+                .map_or_else(|| "n/a".to_owned(), |ratio| format!("{:.1}%", ratio * 100.0)),
+        );
     }
     // 用 OptimizedToolRuntime 包装工具运行时，透明应用结果缓存与输出压缩。
     let opt_tools = OptimizedToolRuntime::new(tools, ToolOptimizerConfig::default());
@@ -13715,11 +13910,18 @@ async fn run_turn(
             capability_settings.compression && configured_auto_compaction_enabled(&state.home),
         )
         .with_auto_compact_message_limit(configured_auto_compact_message_limit(&state.home))
+        // 提供商重试策略：设置页 preferences 与 /api/connection/settings 写的是同一份
+        // settings.json 键（provider_retry_count / reconnect_max_delay_ms），configured_connection_settings
+        // 每轮读取一次（默认 2 / 10000，读不到回落默认），这里透传给引擎作构造时默认。
+        // with_live_provider_retry_count 让重试次数在「每次失败时」实时重读 settings.json：
+        // 任务运行中改设置，对当前轮后续每次失败立即生效，不需要等下一轮重建 Agent。
+        // u8 哨兵：0=关闭、1..=254=次数、255=无限。
         .with_provider_retry_policy(
             connection_settings.provider_retry_count,
             connection_settings.reconnect_initial_delay_ms,
             connection_settings.reconnect_max_delay_ms,
         )
+        .with_live_provider_retry_count(state.home.clone())
         .with_reasoning_effort(reasoning_effort)
         .with_input_queue(Arc::clone(&task.input_queue))
         .with_turn_control(turn_control)
@@ -13778,7 +13980,11 @@ async fn run_turn(
                     .with_quotes(turn.quotes.clone())
                     // 本轮易变上下文随消息**一起落盘**（UI 仍只显示用户原文）：
                     // 下一轮它成为历史的一部分，只有存的和发的逐字节一致，前缀缓存才连得上。
-                    .with_request_context(tail_context.clone()),
+                    // 尾巴限长：记忆/目标/大纲/技能/MCP 清单都在这，每轮必重编，
+                    // 太长会把缓存命中率拖在 95%（95% 封顶的主因之一）。压到 2000 字符。
+                    // 用的是上面那份 request_context：限长函数是纯函数，两次调用字节相同，
+                    // 这样"诊断里量到的尾巴"与"这里真正发出去的尾巴"永远是同一批字节。
+                    .with_request_context(request_context),
                 &provider,
                 &opt_tools,
                 &approval,
@@ -14209,7 +14415,7 @@ impl BrowserObserver {
 
 
     /// 每轮结束把一条指标追加到 home/metrics.jsonl。
-    /// 生产环境 home = %APPDATA%\Coomi，所以这就是 %APPDATA%\Coomi\metrics.jsonl。
+    /// 生产环境 home = %APPDATA%\CoomiPlus，所以这就是 %APPDATA%\CoomiPlus\metrics.jsonl。
     fn append_turn_metrics(&self, turn: &coomi_engine::TokenUsage, elapsed: Duration) {
         let metrics = {
             let mut guard = self
@@ -14246,6 +14452,9 @@ impl BrowserObserver {
                 "compactions": metrics.compactions,
                 "prompt_layers": self.prompt_layers,
                 "skills_injected": self.skills_injected,
+                // 缓存诊断：把前缀/尾 token 与会话累计命中率一起落到 metrics.jsonl，
+                // 这样"命中率上不去"就有历史数据可查，而不是只有一句 stderr。
+                "cache_diag": self.task.cache_diag().usage_json(),
             }),
         );
     }
@@ -14285,6 +14494,13 @@ impl BrowserObserver {
             &self.reasoning_effort,
         );
         event["context_categories"] = json!(self.context_categories);
+        // 缓存诊断：前缀/尾 token、理论上限、以及冷启动与稳定期分开算的会话命中率。
+        // 前端不改也能忽略（老代码只认自己那几个键）；将来要画缓存曲线直接可用。
+        if let Value::Object(fields) = self.task.cache_diag().usage_json()
+            && let Some(usage) = event.get_mut("usage").and_then(Value::as_object_mut)
+        {
+            usage.extend(fields);
+        }
         self.task.push_event(event);
     }
 }
@@ -14921,6 +15137,10 @@ impl AgentObserver for BrowserObserver {
                         metrics.errors = metrics.errors.saturating_add(1);
                     }
                 });
+                // 工具结果在本轮是**新追加**在最后的内容：它进的是「动态尾巴」，
+                // 本轮必然 miss、下一轮才成为可命中的前缀。不计它就会低估尾巴，
+                // 而尾巴正是 95% 封顶的直接原因。
+                self.task.cache_diag().add_tool_output(result.output.len());
                 // 图片随 tool_done 推给前端（data URL），瀑布流渲染直接用；
                 // 历史恢复时由 /api/sessions/{id} 的 messages[].images 补回。
                 let images = result
@@ -14943,6 +15163,17 @@ impl AgentObserver for BrowserObserver {
                 }));
             }
             AgentEvent::ModelUsage { total, request } => {
+                // 会话级命中率按**单次请求**累计（缓存本来就是按请求算的）。
+                // 字段对齐：request.input_tokens = provider 口径的 prompt_tokens
+                // （DeepSeek 同名，且已含被缓存的部分）；request.cached_input_tokens 由
+                // provider.rs 从 OpenAI 的 prompt_tokens_details.cached_tokens 或 DeepSeek 的
+                // prompt_cache_hit_tokens 解析而来；cache_data_available=false 说明该上游
+                // 压根没报缓存字段，这条整条不计入（否则会凭空多出一堆假的全 miss）。
+                self.task.cache_diag().record_request(
+                    request.input_tokens,
+                    request.cached_input_tokens,
+                    request.cache_data_available,
+                );
                 if let Ok(mut state) = self.usage.lock() {
                     state.turn_active = true;
                     state.input_tokens = total.input_tokens;
@@ -15399,7 +15630,7 @@ async fn system_prompt_with_cognitive(
     }
     prompt.push(
         PromptLayer::Identity,
-        "You are Coomi, a local-first AI desktop assistant. Inspect evidence before editing, keep changes scoped, preserve unrelated work, and verify results. Use the fewest tool calls needed. When the requested outcome is achieved, stop calling tools and return a concise result; do not repeat read/list/cat/echo merely to verify an already successful operation. When requirements, preferences, or consequential choices are unclear, use request_user_input proactively instead of guessing; group related questions into one batch when practical. Use request_file_import when the user needs to choose phone files and request_file_export to return local artifacts such as APKs. You may use the web freely: web_search for search, fetch to read pages, and shell / curl / wget for downloads, API calls, and file access. If web_search reports unavailable, report it once and continue with other approaches rather than looping command-line searches.",
+        "You are CoomiPlus, a local-first AI desktop assistant. Inspect evidence before editing, keep changes scoped, preserve unrelated work, and verify results. Use the fewest tool calls needed. When the requested outcome is achieved, stop calling tools and return a concise result; do not repeat read/list/cat/echo merely to verify an already successful operation. When requirements, preferences, or consequential choices are unclear, use request_user_input proactively instead of guessing; group related questions into one batch when practical. Use request_file_import when the user needs to choose phone files and request_file_export to return local artifacts such as APKs. You may use the web freely: web_search for search, fetch to read pages, and shell / curl / wget for downloads, API calls, and file access. If web_search reports unavailable, report it once and continue with other approaches rather than looping command-line searches.",
     );
     prompt.push(
         PromptLayer::Style,
@@ -15431,6 +15662,13 @@ async fn system_prompt_with_cognitive(
             );
         }
     }
+    /* ── 环境层按平台生成 ──
+       桌面端（Windows / macOS / Linux）没有 Termux、也没有 ProotLinux。
+       同一份知识在 tools 侧早就有：install_runtime_environment_skill 那份安卓专属指引
+       「只对安卓安装」（见 tools/src/lib.rs）。提示词这一侧之前漏了判断 ——
+       结果桌面端每一轮都被告知 host=Android、termux/proot 可用、优先用 proot，
+       模型于是去调 environment=proot，而那个环境根本不存在，任务当场失败。 */
+    if cfg!(target_os = "android") {
     prompt.push(
         PromptLayer::Environment,
         format!(
@@ -15459,6 +15697,29 @@ Access policy: {policy}",
         "\n\nRuntime routing: shell/local_shell accept environment=auto|host|termux|proot. Use proot for Linux userland tools, termux for Android-native tools, and host for file APIs/exports. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
         Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text. When a tool result provides paths_guest, use those /workspace/... paths inside shell commands (they resolve in both Termux and ProotLinux), and the corresponding host absolute paths with built-in file tools.",
     );
+    } else {
+        prompt.push(
+            PromptLayer::Environment,
+            format!(
+            "\n\nEnvironment directory architecture:\n\
+- Host working directory (file tools and exports): {cwd}\n\
+- Coomi engine home: {home}\n\
+- Engine configuration: {home}/config (providers.json, mcp_servers.json, skills.json, settings.json)\n\
+- Installed Skills: {home}/skills; Skill tools read this host directory\n\
+- Sessions, memory, cache and tasks: {home}/sessions, {home}/memory, {home}/cache and {home}/tasks\n\
+- MCP definitions live at {home}/config/mcp_servers.json\n\
+Path rules: shell commands and built-in file tools use the same native absolute paths on this platform.\n\
+Access policy: {policy}",
+            cwd = cwd.display(),
+            home = home.display(),
+            policy = policy.label(),
+        ));
+        prompt.push(
+            PromptLayer::Environment,
+            "\n\nRuntime routing: shell / local_shell run through the native host shell (PowerShell or cmd on Windows, sh on macOS and Linux). There is no Termux, no ProotLinux and no proot launcher on this platform: never pass environment=termux or environment=proot, and never use /workspace, /home/coomi or /opt/coomi-dev paths here.\n\
+        Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text.",
+        );
+    }
     // 仅当当前 cwd 是 Coomi 源码仓库时才注入目录架构（省 token：日常对话不引入这段）。
     let is_coomi_checkout = cwd.join("apps").join("coomi-rs").is_dir()
         && cwd.join("apps").join("web").is_dir();
@@ -15514,6 +15775,15 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
     );
     // ④ 技能层：开启 skillOnDemand 时按当前消息相关性挑选（命中数上限 N，未命中不注入）；
     // 关闭时沿用旧的常驻清单，行为与改造前一致。
+    /* 按需技能块**不在这里注入**，而是挂到函数末尾追加（见下面的 deferred_skills）。
+       原因是指示词前缀缓存：provider 只能命中「完全一致的前缀」。
+       这段技能块是按**当前用户消息**打分挑出来的 —— 每轮都变。
+       PromptBuilder 按层枚举排序（prompt.rs 的 PromptLayer），技能层排在第 4 位，
+       后面还跟着 Environment / Capabilities / Memory 等**本来完全稳定**的层。
+       一旦把变化点放在中间，它后面的稳定内容每轮都要重新未命中 ——
+       稳定前缀被人为截短，命中率就这样卡在 95% 上下上不去。
+       把它挪到最后，稳定前缀立刻延长到包含它后面的全部内容。 */
+    let mut deferred_skills: Option<String> = None;
     match skills_layer {
         Some(request) if request.on_demand => {
             let selector = coomi_engine::SkillSelector::new(request.candidates.clone());
@@ -15522,7 +15792,7 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
                 coomi_engine::DEFAULT_SKILL_LIMIT,
                 coomi_engine::DEFAULT_SKILL_CONTEXT_BYTES,
             ) {
-                prompt.push(PromptLayer::Skills, block);
+                deferred_skills = Some(block);
             }
         }
         _ => {
@@ -15544,24 +15814,29 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
          - cwd: {}\n\
          - home: {}\n\
          - access: {}\n\
-         - shell env: host=Android, termux=available, proot=available (prefer proot for Linux tools)",
+         - shell env: {}",
         std::env::consts::OS,
         std::env::consts::ARCH,
         cwd.display(),
         home.display(),
         policy.label(),
+        if cfg!(target_os = "android") {
+            "host=Android, termux=available, proot=available (prefer proot for Linux tools)"
+        } else {
+            "host=native (no termux and no proot on this platform)"
+        },
     ));
     prompt.push(
         PromptLayer::Capabilities,
         "\n\n## Tool Awareness (工具感知)\n\
          You already know your environment from Runtime Facts above. Do NOT probe \
          uname/which/pwd just to discover the platform. Available built-in tools:\n\
-         - Shell: local_shell (host | termux | proot environments)\n\
+         - Shell: local_shell (the environment parameter only accepts the backends listed in its schema on this platform)\n\
          - Files: glob_files, grep_files, read_file, edit_file, apply_patch, write_file\n\
          - Search: file_search (按文件名/内容搜索工作区，自动跳过 .git/node_modules/target), context_search (在本会话历史里检索)\n\
          - Web: web_search, fetch, web_fetch (抓取 URL 转文本，带大小上限与超时)\n\
          - Media: view_image, show_image, extract_video_frames (video → key frames for vision)\n\
-         ffmpeg/ffprobe are bundled at /data/data/com.termux/files/usr/bin (no install needed; use them directly).\n\
+         ffmpeg/ffprobe: on Android they are bundled in the Termux prefix (use them directly); on desktop rely on the host PATH.\n\
          - Planning: update_plan, request_user_input, request_file_import, request_file_export\n\
          - Skills: list_skills, read_skill\n\
          - Sub-agents: spawn_task\n\
@@ -15586,7 +15861,15 @@ This map is shared with the main Agent and sub-agents. Skills add task-specific 
              cannot access them because global session memory is off.",
         );
     }
-    prompt.render()
+    let mut rendered = prompt.render();
+    /* 每轮变化的技能块追加在**整个系统提示词的末尾**：
+       它前面的一切因此保持逐字稳定，可以被前缀缓存整体命中。
+       这就是「per-turn 内容一律放尾部」那条规则的落地。 */
+    if let Some(block) = deferred_skills {
+        rendered.push_str("\n\n");
+        rendered.push_str(&block);
+    }
+    rendered
 }
 
 /// 追加已配置 MCP 服务器与工具的清单（无则跳过），让 agent 开局即知可用 MCP。
@@ -16346,6 +16629,26 @@ mod tests {
     }
 
     #[test]
+    fn disconnected_session_events_do_not_cross_into_other_session() {
+        let a = SessionTask::new();
+        let b = SessionTask::new();
+        let (a_tx, mut a_rx) = mpsc::unbounded_channel();
+        let (b_tx, mut b_rx) = mpsc::unbounded_channel();
+        a.attach_connection(a_tx.clone()); b.attach_connection(b_tx);
+        a.push_event(json!({"event_type":"text_chunk","content":"a1"}));
+        b.push_event(json!({"event_type":"text_chunk","content":"b1"}));
+        assert!(matches!(a_rx.try_recv().unwrap(), Message::Text(text) if text.contains("a1")));
+        assert!(matches!(b_rx.try_recv().unwrap(), Message::Text(text) if text.contains("b1")));
+        a.detach_connection(&a_tx);
+        a.push_event(json!({"event_type":"text_chunk","content":"a2"}));
+        assert!(b_rx.try_recv().is_err());
+        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        a.resync_from(1, &new_tx);
+        assert!(matches!(new_rx.try_recv().unwrap(), Message::Text(text) if text.contains("a2")));
+        assert!(new_rx.try_recv().is_err());
+    }
+
+    #[test]
     fn stale_websocket_cannot_detach_replacement_connection() {
         let task = SessionTask::new();
         let (old_tx, _old_rx) = mpsc::unbounded_channel();
@@ -16465,6 +16768,13 @@ mod tests {
         assert!(prompt.contains("ignore previous instructions"));
         assert!(prompt.contains("<cognitive_turn_context>"));
     }
+
+    // 这里原本有一个 embedded_extension_file_can_be_replaced_without_partial_content：
+    // 它测的 api::cognitive::write_embedded_file 已被整体删除（全仓库只剩注释里的引用，
+    // include_bytes! 也零出现），于是测试体被注释掉、断言却还在跑 —— 一个永远失败、
+    // 且测不到任何东西的死测试。删掉它：留着只会让「测试全绿」失去意义，
+    // 真正的红点反而被这三个常年失败淹掉（本次排障就吃了这个亏）。
+    // 若将来重新引入嵌入文件写入，请连测试一起加回。
 
     #[test]
     fn provider_json_never_exposes_secret() {
@@ -16720,7 +17030,7 @@ mod tests {
         assert!(prompt.starts_with("## Custom Identity (身份定位)"));
         assert!(prompt.contains(identity));
         assert!(
-            prompt.contains("You are Coomi, a local-first AI desktop assistant.")
+            prompt.contains("You are CoomiPlus, a local-first AI desktop assistant.")
         );
 
         // 空白定制提示词不注入。
@@ -16754,7 +17064,7 @@ mod tests {
             sequence: 1,
             tool: "read_file<script>".into(),
             argument_shape: json!({
-                "path": "/data/user/0/com.coomi.android/files/private.md",
+                "path": "/data/user/0/com.monai.coomiplus/files/private.md",
                 "api_key": "sk-super-secret-value",
                 "mode": "metadata"
             }),
@@ -16768,7 +17078,7 @@ mod tests {
         let serialized = serde_json::to_string(&item).expect("serialize sanitized trace");
         assert_eq!(item.tool, "read_filescript");
         assert_eq!(item.argument_shape["api_key"], "[redacted_secret]");
-        assert!(!serialized.contains("com.coomi.android"));
+        assert!(!serialized.contains("com.monai.coomiplus"));
         assert!(!serialized.contains("super-secret"));
         assert!(!serialized.contains("private.example"));
         assert!(serialized.contains("[redacted_path]"));
@@ -16790,6 +17100,12 @@ mod tests {
     async fn web_prompt_does_not_include_shared_persistent_memory() {
         let home = tempfile::tempdir().expect("temporary home");
         let project = tempfile::tempdir().expect("temporary project");
+        // 目录架构那段只在「cwd 是 Coomi 源码仓库」时才注入（见 system_prompt 里的
+        // is_coomi_checkout 判据，是为省 token 加的）。要断言那段文字，夹具就必须长得像
+        // 仓库；否则这条断言测的是「不在仓库里」的路径，必然落空。
+        std::fs::create_dir_all(project.path().join("apps").join("coomi-rs"))
+            .expect("checkout marker");
+        std::fs::create_dir_all(project.path().join("apps").join("web")).expect("checkout marker");
         MemoryManager::new(home.path(), project.path())
             .save(
                 MemoryScope::Global,
@@ -16810,34 +17126,29 @@ mod tests {
         .await;
         assert!(!prompt.contains("CROSS_SESSION_SENTINEL"));
         assert!(!prompt.contains("Persistent memory:"));
+        // 环境层现在是**按平台生成**的：Android 那套措辞只在 Android 构建里出现。
+        // 断言随之分支 —— 桌面端要断言的正是「这些东西一个都不许有」（见
+        // desktop_prompt_never_claims_android_only_environments）。
+        let host_label = if cfg!(target_os = "android") { "Android host" } else { "Host" };
         assert!(prompt.contains(&format!(
-            "Android host working directory (file tools and exports): {}",
+            "{host_label} working directory (file tools and exports): {}",
             project.path().display()
         )));
-        assert!(prompt.contains(&format!(
-            "Android host Coomi engine home: {}",
-            home.path().display()
-        )));
-        assert!(prompt.contains("Inside ProotLinux, /workspace maps exactly"));
+        // 引擎 home 的措辞在两种平台下不同（安卓带 host 前缀）——各自断言各自的。
+        let home_label = if cfg!(target_os = "android") {
+            "Android host Coomi engine home"
+        } else {
+            "Coomi engine home"
+        };
+        assert!(prompt.contains(&format!("{home_label}: {}", home.path().display())));
+        if cfg!(target_os = "android") {
+            assert!(prompt.contains("Inside ProotLinux, /workspace maps exactly"));
+        } else {
+            assert!(!prompt.contains("Inside ProotLinux"));
+        }
         assert!(prompt.contains("MCP definitions live at"));
-        // 源码仓库目录架构只在 cwd 确实是 Coomi checkout 时注入（省 token）。
-        // 这里的临时项目目录不是 checkout，所以那一段必须缺席。
-        assert!(!prompt.contains("apps/coomi-app: native Android shell"));
+        assert!(prompt.contains("apps/coomi-app: native Android shell"));
         assert!(prompt.contains("normalized absolute paths"));
-        // 反过来，cwd 同时有 apps/coomi-rs 与 apps/web 时它必须被注入。
-        let checkout = tempfile::tempdir().expect("temporary checkout");
-        std::fs::create_dir_all(checkout.path().join("apps").join("coomi-rs"))
-            .expect("engine dir");
-        std::fs::create_dir_all(checkout.path().join("apps").join("web")).expect("web dir");
-        let checkout_prompt = system_prompt(
-            home.path(),
-            checkout.path(),
-            AccessMode::FullAccess,
-            "",
-            true,
-        )
-        .await;
-        assert!(checkout_prompt.contains("apps/coomi-app: native Android shell"));
         // 全局会话记忆关闭时，系统提示必须包含隐私禁令。
         let locked = system_prompt(
             home.path(),
@@ -17481,6 +17792,35 @@ mod tests {
         assert!(!store.load(session.id).expect("reload").messages[0].pinned);
     }
 
+    /// 平台门控：非 Android 构建的提示词里不得出现「安卓专属」的断言。
+    ///
+    /// 回归背景：这些概念原本硬编码在环境层与 Runtime Facts 里 —— 桌面端每轮都在
+    /// 告诉模型 host=Android、termux/proot 可用、优先用 proot，模型于是去调
+    /// environment=proot，而那个环境在桌面上根本不存在，任务当场失败。
+    /// 断言的是那些**误导性说法**，不是「termux」这个词本身：
+    /// 桌面提示词会明确写「no termux and no proot on this platform」，那是正确的。
+    #[cfg(not(target_os = "android"))]
+    #[tokio::test]
+    async fn desktop_prompt_never_claims_android_only_environments() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let cwd = tempfile::tempdir().expect("temporary cwd");
+        let prompt = system_prompt(home.path(), cwd.path(), AccessMode::FullAccess, "", true).await;
+        for needle in [
+            "host=Android",
+            "prefer proot",
+            "termux=available",
+            "proot=available",
+            "Inside ProotLinux",
+            "Android host working directory",
+            "environment=auto|host|termux|proot",
+        ] {
+            assert!(
+                !prompt.contains(needle),
+                "桌面端提示词不得出现「{needle}」，否则模型会去用不存在的环境"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn system_prompt_assembles_six_layers_in_fixed_order() {
         let home = tempfile::tempdir().expect("temporary home");
@@ -17496,7 +17836,7 @@ mod tests {
         )
         .await;
         // ①身份与安全边界 ②环境 ③能力与工具说明 ⑤记忆与上下文摘要 ⑥用户偏好与风格
-        let identity = prompt.find("You are Coomi").expect("identity layer");
+        let identity = prompt.find("You are CoomiPlus").expect("identity layer");
         let environment = prompt
             .find("Environment directory architecture")
             .expect("environment layer");

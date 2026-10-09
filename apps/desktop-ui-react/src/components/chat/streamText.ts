@@ -29,6 +29,20 @@
 export const PLAIN_STREAM_MAX_CHARS = 100_000
 
 /** 流式中一律纯文本：与文本长度无关，永远是 true。 */
+/** 正文里有没有**已经写完**的表格。
+ *  GFM 表格至少两行：表头 + `| --- |` 分隔行。第二行到齐 = 这张表不会再变了，
+ *  此时解析它不会有「半张表」的抖动；分隔行还没到就仍按纯文本等。 */
+export function hasSettledTable(text: string): boolean {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length - 1; i++) {
+    const sep = lines[i + 1]?.trim() ?? ''
+    if (!/^\|?[\s:-]*-?[\s:|-]*\|/.test(sep) || !sep.includes('-')) continue
+    const head = lines[i]?.trim() ?? ''
+    if (head.startsWith('|') && head.endsWith('|') && head.includes('|')) return true
+  }
+  return false
+}
+
 export function isStreaming(): boolean {
   return true
 }

@@ -15,7 +15,8 @@
  */
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { ipc } from '../../lib/ipc'
+import { ipc, hasIpc } from '../../lib/ipc'
+import { currentTransport } from '../../lib/engineSocket'
 import { useEngine } from '../../stores/engine'
 import { basename, copyPath, revealPath, statPath, useDockPreview } from '../shell/dockShared'
 import { openDockTab } from '../shell/dockShared'
@@ -156,15 +157,34 @@ export class OversizedFileError extends Error {
 }
 
 /** 读文件的原始字节（带 Bearer 令牌），超过 maxBytes 直接抛 OversizedFileError。 */
-export async function readRawBuffer(path: string, maxBytes: number): Promise<ArrayBuffer> {
+async function readRawViaBridge(path: string, maxBytes: number, allowTruncated = false): Promise<ArrayBuffer> {
   const engine = useEngine.getState()
+  const reply = await ipc<{status: number; data: string; truncated: boolean}>('engine_file_read', {
+    port: engine.port, token: engine.token,
+    path: '/api/fs/raw?path=' + encodeURIComponent(path), maxBytes,
+  })
+  if (reply.status >= 400) throw new Error('读取失败：HTTP ' + reply.status)
+  if (reply.truncated && !allowTruncated) throw new OversizedFileError(maxBytes + 1, maxBytes)
+  const text = atob(reply.data)
+  return Uint8Array.from(text, char => char.charCodeAt(0)).buffer
+}
+
+export async function readRawBuffer(path: string, maxBytes: number): Promise<ArrayBuffer> {
+  if (hasIpc() && currentTransport() === 'ipc') return readRawViaBridge(path, maxBytes)
+  const engine = useEngine.getState()
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 30_000)
+  try {
   const res = await fetch('http://127.0.0.1:' + engine.port + '/api/fs/raw?path=' + encodeURIComponent(path), {
-    headers: engine.authHeaders(),
+    headers: engine.authHeaders(), signal: controller.signal,
   })
   if (!res.ok) throw new Error('读取失败：HTTP ' + res.status)
   // 先看 Content-Length：已知超限就直接拒绝，一个字节都不下载（以前是先全量读进内存再判断，上限形同虚设）。
   const declared = Number(res.headers.get('Content-Length'))
-  if (Number.isFinite(declared) && declared > maxBytes) throw new OversizedFileError(declared, maxBytes)
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => {})
+    throw new OversizedFileError(declared, maxBytes)
+  }
   // 长度缺失 / 不可信时流式读取并累计；一旦超限立刻 cancel，不再把整个大文件读进内存。
   const reader = res.body?.getReader()
   if (reader) {
@@ -190,6 +210,12 @@ export async function readRawBuffer(path: string, maxBytes: number): Promise<Arr
   const buffer = await res.arrayBuffer()
   if (buffer.byteLength > maxBytes) throw new OversizedFileError(buffer.byteLength, maxBytes)
   return buffer
+  } catch (error) {
+    if (hasIpc() && !(error instanceof OversizedFileError) && !(error instanceof Error && error.message.startsWith('读取失败：HTTP'))) {
+      return readRawViaBridge(path, maxBytes)
+    }
+    throw error
+  } finally { window.clearTimeout(timer) }
 }
 
 /** 纯文本预览的读取上限（与 dockShared.readRawText 同一口径）：几 MB 的日志直接塞进 DOM 会卡死。 */
@@ -197,9 +223,17 @@ const TEXT_PREVIEW_MAX = 400_000
 
 /** 读文本给预览用；超长就截断并明确标注。 */
 export async function readRawTextPreview(path: string): Promise<string> {
+  if (hasIpc() && currentTransport() === 'ipc') {
+    const buffer = await readRawViaBridge(path, TEXT_PREVIEW_MAX, true)
+    const text = new TextDecoder().decode(buffer)
+    return buffer.byteLength >= TEXT_PREVIEW_MAX ? text + '\n\n…（内容过长，已截断）' : text
+  }
   const engine = useEngine.getState()
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 30_000)
+  try {
   const res = await fetch('http://127.0.0.1:' + engine.port + '/api/fs/raw?path=' + encodeURIComponent(path), {
-    headers: engine.authHeaders(),
+    headers: engine.authHeaders(), signal: controller.signal,
   })
   if (!res.ok) throw new Error('读取失败：HTTP ' + res.status)
   // 文本预览**不**因 Content-Length 超限就抛错 —— 既有语义是"截断并标注"，让它报错是体验回退。
@@ -239,6 +273,14 @@ export async function readRawTextPreview(path: string): Promise<string> {
     }
   }
   return truncated ? text + '\n\n…（内容过长，已截断）' : text
+  } catch (error) {
+    if (hasIpc() && !(error instanceof Error && error.message.startsWith('读取失败：HTTP'))) {
+      const buffer = await readRawViaBridge(path, TEXT_PREVIEW_MAX, true)
+      const text = new TextDecoder().decode(buffer)
+      return buffer.byteLength >= TEXT_PREVIEW_MAX ? text + '\n\n…（内容过长，已截断）' : text
+    }
+    throw error
+  } finally { window.clearTimeout(timer) }
 }
 
 /* ── 3. 动作 ── */

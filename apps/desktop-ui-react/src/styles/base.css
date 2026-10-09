@@ -253,15 +253,32 @@
     opacity var(--motion-base) var(--ease-in-quad),
     visibility 0s step-end var(--motion-base);
 }
+/* 收起动画播完之后，隐藏移交 hidden="until-found"（content-visibility: hidden）。
+   这一条必须把收起态的 visibility:hidden 让开：祖先只要不可见，浏览器 find-in-page
+   就命不中里面 —— 那 until-found 等于白挂，用户还是「搜得到却看不到」。
+   高度不靠它管：grid 仍是 0fr，内容也是 content-visibility:hidden，两边都收成 0。 */
+.collapse[data-until-found='1'] {
+  visibility: visible;
+  pointer-events: auto;
+}
 
 /* 浮层：菜单/气泡/右键菜单。进 --motion-base + --ease-out-quint，退 --motion-fast + --ease-in-quad。
    方向语义统一：向上弹出的从下方 4px 起，向下弹出的从上方 4px 起。 */
-.pop-surface { --pop-x: 0px; --pop-y: -4px; animation: pop-in var(--motion-base) var(--ease-out-quint); }
+/* forwards 是必须的：pop-in 的终态是 transform:translate3d(0,0,0) scale(1)，
+   而元素自然态是 transform:none —— 两者不是同一个值。缺了终态填充，动画播完
+   transform 落回 none，紧接着切退场 class 时浏览器要在 none 与 scale(1) 之间
+   重建合成层，那一帧就表现为「闪一下」。 */
+.pop-surface { --pop-x: 0px; --pop-y: -4px; animation: pop-in var(--motion-base) var(--ease-out-quint) forwards; transition: opacity var(--motion-fast) var(--ease-in-quad); }
 .pop-surface[data-side='top'] { --pop-y: 4px; }
 .pop-surface[data-side='left'] { --pop-x: 4px; --pop-y: 0px; }
 .pop-surface[data-side='right'] { --pop-x: -4px; --pop-y: 0px; }
 /* Radix 的 data-state=closed 就是退场钩子：容器会等动画播完再卸载 */
 .pop-surface[data-state='closed'] { animation: pop-out var(--motion-fast) var(--ease-in-quad) both; }
+/* 宿主菜单（ContextMenuHost）不用 Radix 的 data-state，自己切 menu-fade-out。
+   起点必须与 pop-in 的终态**逐字一致**（translate3d(0,0,0) scale(1)）：
+   写 none 会让切 class 那一帧从 scale(1) 过渡到 none —— 那一下就是看到的「闪一下」。 */
+/* 退场改纯 opacity transition：不用 animation，避免 class 切换重启动画导致的闪。 */
+.menu-exit { opacity: 0; pointer-events: none; }
 
 /* 对话框：整块出现用 --motion-page，退场用 --motion-base；遮罩纯淡入淡出。
    不给位移，免得跟居中用的 translate 打架。 */
@@ -754,19 +771,48 @@ html[data-nav-dir='back']::view-transition-new(root) { animation: vt-in-left var
 html[data-vt-exp='on'] [data-pane-anim] { animation: none !important; }
 html[data-vt-exp='on'] [data-pane-role] { animation: none !important; }
 
-/* ── 面板宽度过渡（会话列表展开/收起、右侧栏展开/收起）──
-   react-resizable-panels 把尺寸写成面板**外层 div** 的 flex-grow（flex-basis 恒为 0，
-   见 Panel 的 style），所以过渡属性是 flex-grow；flex-basis 一起写上，换实现不用回来改。
-   data-pane-anim='on' 只在「展开/收起那一小段时间」挂着：拖拽期间必须没有它
-   （App 的 beginResize 会立刻清掉），否则拖起来跟手会发飘。 */
-[data-panel][data-pane-anim='on'] {
-  transition:
-    flex-grow var(--motion-page) var(--ease-soft),
-    flex-basis var(--motion-page) var(--ease-soft);
+/* ── 面板宽度：**瞬切**（会话列表展开/收起）──
+   原来这里过渡的是 flex-grow / flex-basis（react-resizable-panels 把尺寸写成面板
+   **外层 div** 的 flex-grow，flex-basis 恒为 0）。那是一次**布局**过渡：
+   过渡的每一帧主内容列都要重新布局一次，对话页的消息虚拟列表因此被 ResizeObserver
+   逐帧叫醒、重测窗口、重排那一屏 —— 「任务运行中收起左侧会话历史侧边栏」卡住就是这条链：
+     面板宽度过渡 → 主列每帧 reflow → 消息列表逐帧重量（流式输出时最贵）。
+   现在宽度一步到位：**主列只重排一次**；进出场动画全部交给下面 [data-list-body] 的
+   opacity / translate —— 那是合成器就能画完的，主列零 reflow。
+
+   ⚠ 不要再给面板加宽度过渡（flex-grow / flex-basis / width）。
+   要做「展开/收起有动画」，就在**内容层**做 transform/opacity，那条路不碰布局。
+   （右侧栏目前仍走宽度过渡：它还没有内容层的退场动画，光把过渡删掉等于动画全没了，
+     那要连内容层一起改才算数，不在这次改动里。） */
+/* ── 面板展开/收起：给一个限时过渡（原来这里是 transition: none）──
+   上面那条警告的顾虑是实打实的：flex-grow 一变，窗口里每一条消息都按新宽度重新断行。
+   所以过渡必须**同时**做两件事，缺一不可：
+     ① 时长压到 --motion-fast（140ms），只够读成「滑出来」，不够跑完一轮全量重排；
+     ② 过渡窗口内挂 html[data-msg-collapse]（App 在开合时调 markCollapseMotion），
+        base.css 的折叠窗口会把消息块的测量让路，不再逐帧量高。
+   拖拽（interacting）与「多留一拍」的宽度瞬切路径不受影响：它们不带 data-pane-anim。 */
+[data-panel][data-pane-anim] { transition: flex-grow var(--motion-fast) var(--ease-out-quint); }
+html[data-msg-collapse='1'] [data-panel][data-pane-anim] { will-change: flex-grow; }
+
+/* 左侧会话列表面板：宽度恢复过渡（只这一块）。
+   之前为了避开「逐帧 reflow 把对话列表测爆」而全��改成瞬切，代价是收起时
+   「闪一下就没了」——读起来生硬。
+   现在把 reflow 成本先降下来（下方 contain + will-change），宽度过渡就恢复得起来：
+     · 会话列表内容层用 contain: layout —— 它的重排不再向外扩散
+     · will-change: flex-grow —— 提示浏览器这一帧要动 flex-grow
+     · 时长 220ms（--motion-base），与页面切换同速，不拖沓
+   只给左侧列表这一块加，右侧栏维持瞬切（它仍没有内容层退场动画）。 */
+[data-panel='coomi-list-panel'] {
+  transition: flex-grow 220ms var(--ease-soft) !important;
+  will-change: flex-grow;
+}
+/* 收起/展开期间别让里面那条虚拟列表逐帧重测：布局收在面板内，主列只重排一次 */
+[data-panel='coomi-list-panel'] [data-list-body] {
+  contain: layout;
 }
 
 /* 会话列表内容与宽度同步收放：收起时整块向左淡出，展开时回位。
-   只动 opacity / translate，不参与布局——宽度那一段归面板自己的过渡。 */
+   只动 opacity / translate，**不参与布局** —— 这一层就是面板宽度那段过渡的替代品。 */
 [data-list-body] {
   transition: opacity var(--motion-page) var(--ease-soft), translate var(--motion-page) var(--ease-soft);
 }
@@ -800,13 +846,11 @@ html[data-vt-exp='on'] [data-pane-role] { animation: none !important; }
 }
 
 /* ── 性能：内容复用与渲染隔离（长会话、长列表的卡顿主要来自这两处）──
-   ① 一条消息 / 一张卡片 = 一个独立渲染单元。content-visibility:auto 让「离屏的那些」
-      在布局里占位但不做布局与绘制（浏览器按需唤醒），首次进入长会话、以及滚动时的
-      主线程开销因此从「整屏 × 每条都要算」降到「视口里那几条」。
-      contain-intrinsic-size 给的是**冷启动占位高度**（还没算过的条目按它估高）：
-      估得偏小只会让滚动条在滚动过程中慢慢变准，不会丢内容、也不会跳位。
-      ⚠ 只挂在消息行 / 卡片这些「别人不会去量它」的块上；滚动容器与虚拟列表的
-      测量节点（Virtuoso 的 item wrapper）绝对不能 contain: layout，否则量出来是 0。
+   ① 一条消息 = 一个独立渲染单元（contain: layout，见下面那条规则）。
+      ⚠ 只挂在消息行这种「别人不会去量它」的块上；滚动容器与虚拟列表的
+      测量节点（Virtuoso 的 item wrapper）绝对不能 contain: layout，否则量出来是 0
+      —— 对话主列表现在**不是**虚拟列表，所以这里没有测量节点，这条约束暂时不冲突；
+      但要是哪天真把虚拟化装回来（理由见 MessageList.tsx 顶部），这条规则必须先撤。
    ② 数据属性选择器（不是 class）：这些元素由别人负责，壳这边不能改它们的类名，
       只加零侵入的渲染隔离；chat 侧把类名换掉也不会让这段规则失效。 */
 /* ⚠ 这里原本还有 [data-msg-index] / .card-lift / [data-card] 的 content-visibility:auto
@@ -818,33 +862,241 @@ html[data-vt-exp='on'] [data-pane-role] { animation: none !important; }
    窗口化已经把 DOM 限制在最后 60 条（多出来的走「加载更早」），这点渲染开销不值得拿
    「消息可能不显示」去换。**不要再把 content-visibility 加回消息行。**
    回归断言见 tests/check-msg-visibility.mjs。 */
-[data-msg-index],
-.card-lift,
-[data-card] {
-  /* 占位高度留给将来万一要恢复的策略用；真正的渲染隔离已按上面的结论撤掉。 */
-  contain-intrinsic-size: auto 160px;
+/* ── 侧栏收放卡顿的止血：给每条消息一个独立的布局作用域 ──
+   现象：对话页文字一多，展开/收起左侧会话历史就严重卡顿。链路是
+     面板 flex-grow 变 → 主内容列宽变 → 窗口里**每一条**消息按新宽度重新断行。
+/* ── 页面标题区收尾（吸顶时的分界）── */
+.workbench-page-header p {
+  max-width: 72ch;
+  line-height: 1.6;
 }
-/* 卡片比消息行矮一些，估高分开给，滚动条更准 */
-.card-lift,
-[data-card] { contain-intrinsic-size: auto 120px; }
+/* 吸顶时：底色已经由 .glass-bar 给，这里只补一条与滚动内容的分界，
+   避免标题和正文糊在一起。 */
+.workbench-page-header.glass-bar {
+  border-bottom-color: var(--line-soft);
+}
 
-/* ── 滚动流畅度：滚动锚定 + 冻结测量窗口 ──
-   ① 消息列表容器**开滚动锚定**（overflow-anchor: auto，[data-msg-scroller] 由 MessageList 挂）：
-      正文在视口**上方**长高时（思考链展开、工具行多出一行、Markdown 补渲染），
-      浏览器自己把当前滚动位置顶住，不必等我们量完再回补 —— 那次回补就是
-      「我明明没滚，视口自己往上飘了一格」。虚拟列表的测量节点绝不能改这条（见上面那段注释）。 */
+/* ── 思考强度滑块（ui/EffortSlider）──
+   外观与特效照搬 dsh-effort-switcher（lemonorangeapple/dsh-effort-switcher 的 index.js）：
+   26px 胶囊轨道 / 13px 圆角 / #4c8dff 填充 / 30px 纯白无阴影滑钮 / 4px 白点刻度 /
+   315ms ease 过渡，以及**只有最高档才显形的蓝→紫渐变**（它的 .dsh-es-sliderBloom）。
+   没有毛玻璃、没有常驻光晕 —— 之前那版 .effort-glass 与呼吸动画已按这个基准删除。
+   适配：DSH 的 --dsw-alias-* 语义令牌映射到 CoomiPlus 的同义令牌；
+   它自己的品牌色（填充 / 渐变 / 白钮 / 白点）按原值照抄 —— 那是这个样式的身份。 */
+[data-effort-slider] { --es-fill: #4c8dff; }
+.es-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-3);
+}
+.es-head strong { color: var(--ink); font-weight: 600; }
+/* 左右各留出**滑钮半径**（30px / 2 = 15px）的行程：
+   滑钮是以中心定位的（left: 百分比 + margin-left: -15px），
+   如果轨道一直铺到两端，0% 与 100% 时钮会有一半伸到轨道外 ——
+   在弹层里就是「球超出弹出的框」。留够半径之后，钮的最外缘正好落在轨道边界内。 */
+.es-rail { position: relative; height: 26px; margin: 8px 15px 10px; }
+.es-groove { position: absolute; inset: 0; overflow: hidden; border-radius: 13px; pointer-events: none; }
+.es-track, .es-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 13px; pointer-events: none; }
+.es-track { right: 0; background: var(--surface-sunken); }
+.es-fill { z-index: 1; overflow: hidden; background: #4c8dff; transition: width .315s ease; }
+.es-bloom {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #4c8dff 0%, #7b6cff 52%, #b56bff 100%);
+  opacity: 0;
+  transition: opacity .315s ease;
+}
+.es-fill-max .es-bloom { opacity: 1; }
+.es-knob {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: left .315s ease;
+}
+.es-knob-face { width: 100%; height: 100%; border-radius: 50%; background: #ffffff; box-shadow: none; }
+.es-ticks {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.es-tick { width: 4px; height: 4px; border-radius: 50%; background: rgb(255 255 255 / 38%); }
+/* 原生 range 只当把手：透明、盖在轨道上；键盘 / 读屏 / 吸附全由它提供。 */
+/* 命中区必须**盖住滑钮整圆**：轨道左右各留了 15px 行程（见 .es-rail），
+   滑钮在 0% / 100% 时有一半落在那里；range 若只铺轨道宽度，
+   那半圆就没有命中目标 —— 表现就是「按圆圈的左边拖不动」。
+   两边各外扩 15px 恰好抵消浏览器给 thumb 预留的半径，
+   于是 thumb 中心仍然从轨道左端走到右端，与自绘滑钮的 left 百分比逐点对齐。 */
+.es-input {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: -15px;
+  right: -15px;
+  width: auto;
+  height: 38px;
+  transform: translateY(-50%);
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  accent-color: transparent;
+  color: transparent;
+}
+.es-input:disabled { cursor: wait; }
+.es-input::-webkit-slider-runnable-track { background: transparent; border: 0; }
+.es-input::-webkit-slider-thumb { appearance: none; width: 30px; height: 30px; background: transparent; border: 0; }
+.es-input::-moz-range-track { background: transparent; border: 0; }
+.es-input::-moz-range-thumb { width: 30px; height: 30px; background: transparent; border: 0; }
+.es-desc { margin: 6px 0 0; font-size: 11px; line-height: 1.6; color: var(--ink-4); }
+/* ══ 以下工作台样式为误删后按原文补回 ══ */
+
+/* Desktop workbench surface language: quiet chrome, stronger focus on the task. */
+.workbench-rail {
+  background: linear-gradient(180deg, var(--canvas-side) 0%, var(--surface-muted) 100%);
+}
+.workbench-toolbar {
+  background: color-mix(in srgb, var(--surface) 92%, var(--primary-soft));
+}
+.workbench-list {
+  scrollbar-gutter: stable;
+}
+.workbench-list [data-session-row],
+.workbench-list li > button {
+  min-height: 40px;
+}
+.workbench-composer-zone {
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--canvas) 92%, transparent) 30%);
+}
+.workbench-composer-fade {
+  background: linear-gradient(180deg, transparent 0%, var(--canvas) 100%);
+}
+.workbench-composer {
+  border-color: color-mix(in srgb, var(--line-strong) 42%, var(--line));
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--ink) 8%, transparent), 0 2px 8px color-mix(in srgb, var(--ink) 5%, transparent);
+}
+/* 输入栏的焦点提示**只由容器给**（下面这圈 box-shadow）。
+   输入框本体不再画 outline —— base.css 顶部那条全局 :focus-visible 会给 textarea 画一圈，
+   于是聚焦时容器外圈 + 输入框内圈两条蓝边套在一起。全局规则是 :where()（零特异性），
+   这条能稳定压过它，删掉内圈之后仍有清楚的焦点指示。 */
+.workbench-composer textarea:focus-visible { outline: none; }
+.workbench-composer:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 62%, var(--line));
+  box-shadow: 0 0 0 3px var(--primary-soft), 0 12px 32px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.workbench-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--line));
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--surface) 84%, var(--primary-soft));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.workbench-empty .empty-tagline {
+  max-width: 620px;
+  color: var(--ink);
+}
+/* ── 空态大标题（新对话首屏那句）──
+   为什么不用 text-24：cn() 里的 tailwind-merge 不认识项目自定义的 text-24/text-18 这一档，
+   会把它当成**颜色**类，被同一串里的 text-ink 覆盖掉 —— 结果标题一直按继承来的 13px 渲染。
+   尺寸这类自定义档位一律写成独立类，绕开合并器，既稳定又能跟着 --ui-font-scale 一起缩放。
+   （这条在 2026-10-07 的 base.css 事故里被误删过一次，本次补回，并按需求上调一档。） */
+.empty-tagline {
+  font-size: calc(27px * var(--ui-font-scale));
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* ── 空态轨道动画的舞台（见 components/chat/LogoOrbit.tsx）──
+   canvas 铺满容器；容器尺寸由组件的 size 内联给，这里只管铺满。 */
+.logo-orbit { position: relative; display: block; }
+.logo-orbit-canvas { display: block; width: 100%; height: 100%; }
+
+@media (max-width: 900px) {
+  .workbench-composer-zone { padding-inline: 10px; }
+  .workbench-toolbar { padding-inline: 10px; }
+}
+
+/* ── 消息区：阅读节奏 ──
+   助手正文直接落在画布上（不加卡片底），靠头像、行距与段落间距建立层级；
+   用户消息是右对齐的气泡，两者用同一条垂直节奏串起来。 */
+.workbench-msg { scroll-margin-block: 24px; }
+.workbench-msg-user + .workbench-msg-user,
+.workbench-msg-assistant + .workbench-msg-assistant {
+  padding-top: 4px;
+}
+.workbench-msg-user .sel-text {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.workbench-msg-assistant .workbench-avatar {
+  outline: 1px solid color-mix(in srgb, var(--line-strong) 22%, transparent);
+  outline-offset: -1px;
+}
+/* 操作条：静止时安静，指针进入这条消息才浮出来。
+   只在真正有悬停能力的设备上收起（@media (hover: hover)）：触屏没有 hover，
+   收起来就等于永远看不见。键盘焦点（focus-within）始终可见。 */
+@media (hover: hover) {
+  .workbench-msg [data-msg-meta] > :last-child {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--ease-out-quint);
+  }
+  .workbench-msg:hover [data-msg-meta] > :last-child,
+  .workbench-msg:focus-within [data-msg-meta] > :last-child,
+  .workbench-msg [data-msg-meta] > :last-child:focus-within {
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .workbench-msg [data-msg-meta] > :last-child { transition: none; }
+  }
+}
+
+/* 右侧栏图标条：与左侧导航同一套表面语言（同一底色、同一圆角、同一选中态）。 */
+[data-dock-bar] {
+  background: linear-gradient(180deg, var(--canvas-side) 0%, var(--surface-muted) 100%);
+}
+[data-dock-bar] button { border-radius: 10px; }
+
+/* ── 页面标题区（设置 / 技能中心 / 产物中心共用 ui/Card 的 PageHeader）── */
+.workbench-page-header {
+  align-items: center;
+  padding-block: var(--sp-6) var(--sp-5);
+}
+.workbench-page-header h1 { letter-spacing: -0.01em; }
+
+/* ── 面板展开/收起：限时过渡（原来这里是 transition: none）──
+   上面那条警告的顾虑是实打实的：flex-grow 一变，窗口里每一条消息都按新宽度重新断行。
+   所以过渡必须同时做两件事：① 时长压到 --motion-fast；
+   ② 过渡窗口内挂 html[data-msg-collapse]（App 开合时调 markCollapseMotion），
+   让 base.css 的折叠窗口把消息块的测量让路。拖拽路径不带 data-pane-anim，不受影响。 */
+[data-panel][data-pane-anim] { transition: flex-grow var(--motion-fast) var(--ease-out-quint); }
+html[data-msg-collapse='1'] [data-panel][data-pane-anim] { will-change: flex-grow; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-msg-scroller] { overflow-anchor: auto; }
 
-/* ② 冻结测量窗口：行高在「流式输出」与「折叠动画」期间是**逐帧**变的，虚拟列表每一帧都要
-      照着新高度重量一次（长会话里就是「一边流式一边滚，整屏在抖」）。窗口里只做两件事：
-        · JS 侧一次都不量：MessageList 的 measurementFrozen() 读的就是下面这两个属性
-          （与 CSS 同一判据，不各判一套）；
-        · 折叠块换成**固定高度占位**：高度一次落定、动画只走 opacity ——
-          折叠项不再逐帧改高度，虚拟列表最多只量到一次变化。
-      html[data-msg-collapse='1']  折叠动画窗口：任一折叠块被点开/收起后的 220ms（MessageList 写）
-      [data-msg-freeze='1']        流式 / 切页过渡期间（挂在消息列表容器上）
-      两者都是窗口一关就摘，静止状态下这一段一条都不生效。 */
-html[data-msg-collapse='1'] .collapse,
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-msg-freeze='1'] .collapse {
   /* grid-template-rows 不插值 = 关闭态就是 0 高度的固定占位、展开态一步到位；
      只剩透明度在走，折叠的「开」仍然是一次淡入，不是硬切。 */
@@ -852,7 +1104,9 @@ html[data-msg-collapse='1'] .collapse,
     opacity var(--motion-hover) var(--ease-out-quint),
     visibility 0s step-end 0s;
 }
-html[data-msg-collapse='1'] .collapse[data-open='false'],
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-msg-freeze='1'] .collapse[data-open='false'] {
   /* 关闭方向按退出语义取 in-quad；visibility 等透明度播完再切，内容不会中途消失。
      时长比展开再短一档（--motion-press 120ms）：收起来总是比展开快半拍。 */
@@ -861,93 +1115,81 @@ html[data-msg-collapse='1'] .collapse[data-open='false'],
     visibility 0s step-end var(--motion-press);
 }
 
-/* ── 工具栏 / 页头：半透明纯色，不套毛玻璃 ──
-   三层表面按层级各取一档底色（见 theme.css 的 --glass-*）：
-     --glass-topbar-bg 标题栏（唯一一层真毛玻璃，类 .glass-topbar）
-     --glass-bg        页面工具行（对话页工具栏、吸顶页头）
-     --glass-surface-bg 卡片内表面（吸顶表头）
-   这里再把「吸顶页头」里可能残留的 backdrop blur 一次性清掉 —— 那些页头由各页面自己写，
-   壳这边只保证：全站除标题栏外不再有任何 blur。清掉后仍是半透明，层次感照旧。 */
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [class*='backdrop-blur']:not(.glass-topbar) {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
-/* ── 性能模式（html[data-perf='low']）──
-   设置页里那一个开关带三件事，规则全在这里与 theme.css 的 [data-perf='low'] 段，
-   组件不各自判断、也不各自存一份。默认档（high）下这一段一条都不生效。 */
-/* ① 毛玻璃只留标题栏一层：其余表面退成「半透明纯色」。
-      纯色 + 透明度是合成器直接能画的，blur 每次滚动都要重新采样背景，是最贵的一种效果。
-      连遮罩那点 blur 也去掉——遮罩本来就只需要一层压暗。 */
-[data-perf='low'] *:not(.glass-topbar),
-[data-perf='low'] *:not(.glass-topbar)::before,
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-perf='low'] *:not(.glass-topbar)::after { backdrop-filter: none !important; }
-/* ② 点阵状态指示器是「一直在转」的循环动画：省电档收成一个静态点（aria-label 保留，功能不变） */
-[data-perf='low'] .ai-state .ai-ring,
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-perf='low'] .ai-state .ai-dot { animation: none !important; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-perf='low'] .ai-state .ai-ring .ai-dot { transform: none; opacity: 0.55; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-perf='low'] .ai-state .ai-dot ~ .ai-dot { display: none; }
-/* ③ 长列表更早交给虚拟化：阈值本身在 stores/ui.ts（virtualizeThreshold()），
-      这里只把「离屏条目不许算」的门槛再压低一格，两条路径一起省。 */
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-perf='low'] [data-msg-index] { contain-intrinsic-size: auto 96px; }
 
-/* ── 消息导航条（components/chat/MessageNav.tsx）──
-   位置、高度、行距、点子尺寸都在组件里算（贴内容列左缘外侧 + 垂直居中；
-   高度 = 点数 × 行距，夹在 48px 与 min(70vh,520px) 之间，超限时先压行距、
-   再降聚合预算、最后才让轨道自己滚）。这里只补样式管不到的三件事。 */
-/* ① 轨道自己滚的时候不要滚动条：那 6px 会顶掉刻度的对齐，滚轮的让渡由 onWheel 负责。 */
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-msg-nav-track] { scrollbar-width: none; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-msg-nav-track]::-webkit-scrollbar { width: 0; height: 0; display: none; }
-/* ② 高亮的位置指示条只动 transform / opacity：合成器直接搬图层，不参与布局，
-      也不会有「每次高亮都去读 rect」那种强制同步布局。 */
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-nav-marker] {
   transition: transform var(--motion-fast) var(--ease-spring), opacity var(--motion-fast) var(--ease-spring);
   will-change: transform;
 }
-[data-motion='off'] [data-nav-marker] { transition: none; }
-@media (prefers-reduced-motion: reduce) {
-  [data-nav-marker] { transition: none; }
-}
 
-/* ── 只挂「当前 + 上一次」：隐藏的那一页就地停动效 ──
-   上一次那一页还在 DOM 里（保留滚动位置与已渲染内容），它是 inert 且透明的，但里面的
-   循环动效（状态点阵、骨架呼吸）照旧会在合成器上一直跑。用 paused 而不是 none：
-   切回来时从暂停的那一帧接着走，不会「重新开始」。卸载掉的那些页面不用管 —— 它们已经没了。
-   ⚠ [data-pane-anim] 那一层要排除掉：它是「旧页正在淡出」的动画本体，暂停它＝退场不动。 */
-[data-view-pane][data-view-state='inactive'],
-[data-view-pane][data-view-state='inactive'] *:not([data-pane-anim]),
-[data-view-pane][data-view-state='inactive'] *::before,
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
+[data-motion='off'] [data-nav-marker] { transition: none; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 [data-view-pane][data-view-state='inactive'] *::after { animation-play-state: paused !important; }
 
-/* ── 切页那一拍（html[data-nav-busy]，由 App.tsx 的 markNavPause 写，320ms）──
-   换页后的这几帧是主线程最忙的一拍：播新旧两页的动画、卸载旧页、挂载目标页正文。
-   内容列里的 CSS 循环动效就地停住，别再来抢这一拍；JS 侧的统计轮询与列表测量读同一个
-   属性跳过（App 的探活看门狗、MessageNav 的 recompute 都读 html[data-nav-busy]）。
-   ⚠ 同样要放过 [data-pane-anim]：换页动画就跑在闸门窗口里，一起暂停就等于「切页没动画」。 */
-html[data-nav-busy] [data-view-pane] *:not([data-pane-anim]),
-html[data-nav-busy] [data-view-pane] *::before,
-html[data-nav-busy] [data-view-pane] *::after { animation-play-state: paused !important; }
 
-/* ── 省电档（html[data-perf='low']）：同一条换页路径，只把位移与错峰归零 ──
-   这一档里位移要重新合成、错峰会让「挂载那一拍」摊得更散，都不划算；
-   留纯淡入淡出就够读出「换了一页」。路径不变（还是 pane-enter-xxx / pane-exit-xxx），
-   只是不再滑动、不再错峰 —— 一条路两种力度，好过两条路各修一遍。
-   View Transitions 实验开关在这一档一律不启用（见 App 的 vtExperimentOn：
-   拍整页快照再逐帧合成是这一档里最贵的一件事）。 */
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
+html[data-nav-busy] [data-loop-anim] { animation-play-state: paused !important; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
+html[data-nav-busy] [data-loop-anim] > :last-child::after { animation-play-state: paused !important; }
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
 html[data-perf='low'] {
   --pane-shift: 0px;
   --pane-item-shift: 0px;
   --pane-stagger: 0s;
 }
 
-/* ── 空态大标题（新对话首屏那句）──
-   为什么不用 text-24：cn() 里的 tailwind-merge 不认识项目自定义的 text-24/text-18 这一档，
-   会把它当成**颜色**类，被同一串里的 text-ink 覆盖掉 —— 结果标题一直按继承来的 13px 渲染
-   （用户看到的就是「首屏那句话怎么变小了」）。尺寸这类自定义档位一律写成独立类，
-   绕开合并器，既稳定又能跟着 --ui-font-scale 一起缩放。 */
-.empty-tagline {
-  font-size: calc(24px * var(--ui-font-scale));
-  line-height: 1.4;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
+@keyframes page-fade-in {
+  from { opacity: 0 }
+  to   { opacity: 1 }
+}
+
+
+/* 以下规则在 2026-10-07 的 base.css 事故里被误删，此处按备份原文恢复。 */
+[data-view-pane][data-view-state='active'] {
+  animation: page-fade-in var(--motion-base) var(--ease-out);
 }

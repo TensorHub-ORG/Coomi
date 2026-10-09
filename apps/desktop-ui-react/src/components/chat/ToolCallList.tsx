@@ -10,8 +10,10 @@ import type { ToolCall } from '../../lib/chat'
  * 正文反而要往上翻。这里把**同一组**工具收成一行摘要，按需展开。
  *
  * 三条规矩：
- *  ① 正在跑的一律看得见：streaming 或还有 running/queued 时**强制展开**，用户点也收不起来。
- *  ② 小事不折叠：全部落定且 N ≤ 3 时保持平铺（连摘要行都不出），N > 3 才折。
+ *  ① **生成中也能折叠**：streaming 不再是强制展开的理由（用户明确要求）。
+ *     active（还有 running/queued 在跑）只影响**默认展开** —— 新工具到达时自动展开；
+ *     用户手动折过之后（userOpen）不会再被顶开。
+ *  ② 小事不折叠：N ≤ 3 时保持平铺（连摘要行都不出），N > 3 才折。
  *  ③ 工具行本身**不在这里重画**：由调用方通过 renderTool 注入现有 ToolRow ——
  *     `ToolMark`（状态点）、`toolTarget`（目标）以及「展开看参数与结果」都留在 ToolRow 里，
  *     这里只负责摘要与折叠，避免同一套行渲染存在两份、日后改一处漏一处。
@@ -21,8 +23,6 @@ import type { ToolCall } from '../../lib/chat'
 
 export interface ToolCallListProps {
   tools: ToolCall[]
-  /** 整条消息是否还在流式：流式期间强制展开。 */
-  streaming: boolean
   /** 某一个工具行是不是这次才出现（复用消息列表的 seen 判定，旧工具行不重播入场）。 */
   toolFresh: (callId: string) => boolean
   /** 渲染单个工具行：注入现有 ToolRow。defaultOpen 用于「失败项默认展开」。 */
@@ -40,7 +40,7 @@ function isFailure(tool: ToolCall): boolean {
   return tool.status === 'error' || tool.status === 'denied'
 }
 
-export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle, enter, spring }: ToolCallListProps) {
+export function ToolCallList({ tools, toolFresh, renderTool, onToggle, enter, spring }: ToolCallListProps) {
   /// 用户显式开合过没有：null = 还没点过，按自动规则来；点过之后以用户为准。
   const [userOpen, setUserOpen] = useState<boolean | null>(null)
   /// aria-controls 指向折叠面板：给读屏一个明确的「这个按钮管哪一块」。
@@ -48,12 +48,14 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
 
   if (!tools.length) return null
 
-  /// running 与 queued 都算「还没落定」：queued 是已排上队等状态推进，同样不该被折叠遮住。
+  /// running 与 queued 都算「还没落定」：queued 是已排上队等状态推进。
+  /// 注意：active 只影响**默认展开**，不再是强制展开 —— 生成中用户也能把列表折起来。
   const active = tools.some((t) => t.status === 'running' || t.status === 'queued')
-  /// 强制展开：正在跑的东西绝不能被收起来（本次改造的硬约束）。
-  const forced = streaming || active
-  /// 只有「全部结束且超过 3 个」才值得折；N ≤ 3 保持原样平铺，不为小事搞折叠。
-  const canFold = !forced && tools.length > 3
+  /// 进行中的数量：折叠后摘要行里要能一眼看出还剩几个在跑。
+  const inFlight = tools.filter((t) => t.status === 'running' || t.status === 'queued').length
+  /// 只有 N > 3 才值得折；N ≤ 3 保持原样平铺，不为小事搞折叠。
+  /// 不再有「强制展开」：streaming / active 都只是默认展开的依据，折不折由用户说了算。
+  const canFold = tools.length > 3
   /// 摘要行只在会折的组里出现；N ≤ 3 平铺时它只是一行噪音。
   const showHeader = tools.length > 3
 
@@ -62,9 +64,11 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
   /// 用时：有 elapsedMs 的求和（没有更好的口径）；一个都没有时整项不显示。
   const elapsed = tools.reduce((sum, t) => sum + (t.elapsedMs ?? 0), 0)
 
-  /// 强制展开 / 小列表一律展开；大列表落定后默认折叠，用户点开过就以用户为准。
-  /// 例外：**有失败时默认展开** —— 失败不该被折进摘要行里看不见（用户仍可手动收起）。
-  const open = (forced || tools.length <= 3) ? true : (userOpen ?? failed > 0)
+  /// 默认展开规则（不再有强制展开）：
+  ///  - N ≤ 3 恒展开（没得折，本来就平铺）。
+  ///  - N > 3 且用户点过 → **以用户为准**：生成中折了就不会被新工具顶开。
+  ///  - N > 3 且没点过 → 有工具在跑（active）或有失败时默认展开，全落定后默认折叠。
+  const open = tools.length <= 3 ? true : (userOpen ?? (active || failed > 0))
 
   const toggle = (): void => {
     if (!canFold) return
@@ -76,6 +80,13 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
   const summary = (
     <>
       <span className='shrink-0'>调用了 {tools.length} 个工具</span>
+      {active ? (
+        <>
+          <span aria-hidden className='shrink-0 text-ink-4'>·</span>
+          {/* 生成中还剩几个在跑：折叠状态下也一眼能看到进度。 */}
+          <span className='shrink-0'>进行中 {inFlight}</span>
+        </>
+      ) : null}
       <span aria-hidden className='shrink-0 text-ink-4'>·</span>
       <span className='shrink-0'>成功 {done}</span>
       {failed ? (
@@ -96,7 +107,7 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
 
   const headerClass = 'flex w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 py-0.5 text-12 text-ink-3'
 
-  /// 能折时是按钮（键盘原生可触发 + aria-expanded）；强制展开期间是普通 div ——
+  /// 能折时是按钮（键盘原生可触发 + aria-expanded）；N ≤ 3 平铺时是普通 div ——
   /// 一个点不动的按钮比「没有按钮」更让人困惑。
   const header = canFold ? (
     <button

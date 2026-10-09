@@ -13,7 +13,7 @@ import {
   AlertTriangle, CheckCircle2, Package, RefreshCw, Wrench,
 } from 'lucide-react'
 import { m } from 'motion/react'
-import NumberFlow from '@number-flow/react'
+import { AnimatedNumber } from '../ui/Number'
 import { ThinkingOrb } from 'thinking-orbs'
 import { cn } from '../../lib/cn'
 import { Dialog } from '../ui/Overlay'
@@ -238,7 +238,7 @@ export function ChainInstallDialog({ open, onOpenChange, runtimeId, runtimeName,
               <span>已连接</span>
               <span className='text-ink-4'>·</span>
               <span className='flex items-baseline gap-1'>
-                <NumberFlow value={outcome.toolsCount} className='text-13 font-medium tabular-nums text-ink' />
+                <AnimatedNumber value={outcome.toolsCount} className='text-13 font-medium tabular-nums text-ink' />
                 <span>个工具</span>
               </span>
             </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, RefreshCw, Search, Terminal, Trash2, Wrench, X } from 'lucide-react'
-import NumberFlow from '@number-flow/react'
+import { AnimatedNumber } from '../components/ui/Number'
 import { cn } from '../lib/cn'
 import { motionOn } from '../lib/motionPref'
 import { useEngine } from '../stores/engine'
@@ -8,13 +8,16 @@ import { useLibrary, type CatalogEntry } from '../stores/library'
 import { PageHeader, Empty, STAGGER_STEP_MS } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input, Badge } from '../components/ui/Input'
-import { Segmented, SkeletonCard, SkeletonRows, SwapIn, Switch } from '../components/ui/Controls'
+import { Segmented, SkeletonCard, SkeletonRows, Spinner, SwapIn, Switch } from '../components/ui/Controls'
+// 首帧壳闸门：这一帧过去之前只画外壳（骨架），整棵舞台（工具条 + 左轨 + 卡片网格）挪到下一帧。
+import { useFirstFrame } from '../components/ui/firstFrame'
 // 注：AI 状态动效（AgentState）由 components/ai/AgentState.tsx 提供，本页此刻还没有该文件，
 // 因此「加载中」一律先用骨架屏（SkeletonCard / SkeletonRows）占位。
 // TODO(components/ai/AgentState)：等它落地后，把这里的骨架换成 <AgentState state="running" size="sm" />。
 import { Dialog } from '../components/ui/Overlay'
 import { catalogCategory, catalogIcon, CATALOG_CATEGORIES } from '../components/skills/catalogMeta'
 import { RemoteMcpBrowser, type RemoteInstalledEcho } from '../components/skills/RemoteMcpBrowser'
+import { McpLaunchEditor } from '../components/skills/McpLaunchEditor'
 import { SkillMarketBrowser } from '../components/skills/SkillMarketBrowser'
 import { REMOTE_SOURCES, type RemoteEntry, type RemoteSourceKey } from '../components/skills/remoteSources'
 import { RuntimeBar } from '../components/skills/RuntimeBar'
@@ -252,6 +255,10 @@ function installedRank(item: InstalledItem): number {
 }
 
 export function SkillsView() {
+  /* 首帧只画外壳：这一页的首屏要把「分段 + 左轨 + 整屏卡片 + 四个对话框」一次性算完，
+     而它又是路由级懒加载的 —— 首帧之前浏览器拿不到任何新内容，用户看到的就是卡住。
+     骨架用页面里本来就有的 SkeletonCard（形状与真卡片一致），下一帧再挂正文。 */
+  const firstFrameReady = useFirstFrame()
   const ready = useEngine((s) => s.ready)
   const skills = useLibrary((s) => s.skills)
   const tools = useLibrary((s) => s.tools) as ToolEntry[]
@@ -415,9 +422,31 @@ export function SkillsView() {
 
   useEffect(() => { if (ready) void ensureFresh() }, [ready, ensureFresh])
 
-  /** 状态条与卡片上的「重新检测」：重新拉目录 + 运行环境 + 已安装清单。 */
+  /** 「重新检测」在飞的路数：>0 时状态条 / 灰显卡片上的重检按钮禁用并显示进行中文案。
+      用**计数**而不是布尔：状态条、灰显卡片、帮助弹窗、一键安装卡都可能在同一两秒里各触发一次，
+      布尔会被先返回的那一路提前关掉，按钮就又在「其实还在拉」的时候变回可点。
+      为什么不直接用 store 的 runtimesStatus === 'loading'：那只是 runtimes 这一段在拉；
+      目录、已安装清单这两段里它已经回到 ready，按钮会中途解锁 —— 正是「点不动还没反应」的来源。 */
+  const [recheckDepth, setRecheckDepth] = useState(0)
+  const rechecking = recheckDepth > 0
+
+  /** 状态条与卡片上的「重新检测」：重新拉运行环境 + 目录 + 已安装清单。 */
   const recheckAll = useCallback(async () => {
-    await Promise.all([recheckEnvironment(), loadInstalled()])
+    setRecheckDepth((n) => n + 1)
+    try {
+      /* **串行**而不是原来的 Promise.all（那是「recheckEnvironment 内部再 Promise.all」的两层并发，
+         峰值同一瞬间 3 条重请求：/api/runtime/runtimes 约 2.3s、/api/catalog 约 3.3s，
+         且前者要逐个 fork 子进程探测 10 个运行时 —— 连点几次就是几十次进程创建，机器被打满，
+         外壳的看门狗还会把这种假死误判成引擎卡死）。
+         取舍：总耗时从「最慢的那条」变成「三条之和」，顺序固定为
+         runtimes → catalog → installed，所以「缺哪个运行环境」这条最受关注的信息最先回来；
+         换来的是峰值降到 1 条请求，界面在等待期间仍然可交互，也不会再把引擎逼到被杀。
+         （recheckEnvironment 自己内部也已改成 runtimes → catalog 串行，见 stores/library。） */
+      await recheckEnvironment()
+      await loadInstalled()
+    } finally {
+      setRecheckDepth((n) => (n > 0 ? n - 1 : 0))
+    }
   }, [recheckEnvironment, loadInstalled])
 
   const catalogTools = useMemo(() => new Map(tools.map((e) => [e.id, e])), [tools])
@@ -873,7 +902,7 @@ export function SkillsView() {
                           {item.toolsCount > 0 ? (
                             <span className='flex shrink-0 items-baseline gap-1'>
                               <span>·</span>
-                              <NumberFlow value={item.toolsCount} className='tabular-nums' />
+                              <AnimatedNumber value={item.toolsCount} format={{ maximumFractionDigits: 0 }} />
                               <span>个工具</span>
                             </span>
                           ) : null}
@@ -888,8 +917,8 @@ export function SkillsView() {
                           <Button variant='secondary' size='sm' onClick={() => helpForReason(item.reason, item.name)}>
                             <Wrench size={13} /> 怎么装
                           </Button>
-                          <Button variant='ghost' size='sm' disabled={busy.has(item.id)} onClick={() => { setNotice('正在重新检测运行环境…'); void recheckAll() }}>
-                            <RefreshCw size={13} /> 重新检测
+                          <Button variant='ghost' size='sm' disabled={busy.has(item.id) || rechecking} onClick={() => { setNotice('正在重新检测运行环境…'); void recheckAll() }}>
+                            {rechecking ? <Spinner /> : <RefreshCw size={13} />} {rechecking ? '正在重新检测…' : '重新检测'}
                           </Button>
                         </div>
                       )}
@@ -900,6 +929,7 @@ export function SkillsView() {
                           <ChevronDown size={13} className={cn('transition-transform duration-[var(--motion-collapse)] ease-[var(--ease-enter)]', open && 'rotate-180')} />
                           {open ? '收起详情' : '详情'}
                         </Button>
+                        {item.kind === 'mcp' ? <McpLaunchEditor id={item.id} onSaved={() => { void loadInstalled() }} /> : null}
                       </div>
                       {/* 折叠内容的直接子元素必须「干净」：间距与描边放在再下一层，折叠态才收得到 0。 */}
                       <div id={panelId} className='collapse' data-open={open}>
@@ -1033,8 +1063,8 @@ export function SkillsView() {
                       <Wrench size={13} /> 怎么装
                     </Button>
                   )}
-                  <Button variant='secondary' size='sm' onClick={(ev) => { ev.stopPropagation(); setNotice('正在重新检测运行环境…'); void recheckAll() }}>
-                    <RefreshCw size={13} /> 我已装好，重新检测
+                  <Button variant='secondary' size='sm' disabled={rechecking} onClick={(ev) => { ev.stopPropagation(); setNotice('正在重新检测运行环境…'); void recheckAll() }}>
+                    {rechecking ? <Spinner /> : <RefreshCw size={13} />} {rechecking ? '正在重新检测…' : '我已装好，重新检测'}
                   </Button>
                 </>
               ) : (
@@ -1252,11 +1282,11 @@ export function SkillsView() {
     )
   }
 
-  // 当前内容每次渲染都重算，并覆盖缓存里的那一份：退场时就拿它当冻结快照（引用不变 → 不重渲染）。
-  panelCache.current.set(content, renderPanel(content))
-
-  return (
-    <main className='flex min-h-0 flex-1 flex-col bg-canvas'>
+  /* 页头 + 视图导航：**首帧壳与正文共用同一份**。外壳照画这一层，
+     于是「骨架 → 正文」那一跳里页头与分段控件始终在原位，切换那一帧不跳版。
+     分段控件仍然可点（goSubView 改的是 content，正文那一帧直接按新键渲染）。 */
+  const pageTop = (
+    <>
       <PageHeader
         title='技能中心'
         description='工具市场里的 MCP 服务器装上就能被 Agent 调用；缺 npx / uvx 这类运行环境时，卡片上可以直接一键把环境和工具一起装好。「任务」页可以看正在安装 / 正在跑的任务、实时日志，并取消或重试。'
@@ -1286,6 +1316,38 @@ export function SkillsView() {
       </div>
       {notice ? <p className='px-8 pt-2 text-12 text-ink-3'>{notice}</p> : null}
       {storeError ? <p className='px-8 pt-2 text-12 text-danger'>{storeError}</p> : null}
+    </>
+  )
+
+  /* ── 首帧壳 ──
+     与设置页同一条原则：首帧只画外壳，整棵舞台（renderPanel：工具条 + 左轨 + 卡片网格，
+     以及每次渲染都要为退场快照重算的那一份）挪到外壳画过之后再算。
+     骨架复用页面里原本就有的那张「目录还没回来」的骨架（SkeletonCard 六张），
+     所以首帧看到的就是今天目录未加载时的样子 —— 没有引入任何新形态。
+     取数照旧从挂载那一刻起并行跑（ensureFresh），正文那一帧数据通常已经在手。 */
+  if (!firstFrameReady) {
+    return (
+      <main data-skills-shell className='flex min-h-0 flex-1 flex-col bg-canvas'>
+        {pageTop}
+        <div data-skill-stage className='relative min-h-0 flex-1 overflow-hidden'>
+          <div className='absolute inset-0 flex min-h-0 min-w-0 flex-col overflow-hidden px-8 pb-4 pt-2'>
+            <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonCard key={i} style={stagger(i)} className='animate-card-in' />
+              ))}
+            </div>
+          </div>
+        </div>
+      </main>
+    )
+  }
+
+  // 当前内容每次渲染都重算，并覆盖缓存里的那一份：退场时就拿它当冻结快照（引用不变 → 不重渲染）。
+  panelCache.current.set(content, renderPanel(content))
+
+  return (
+    <main className='flex min-h-0 flex-1 flex-col bg-canvas'>
+      {pageTop}
       {/* ── 视图舞台 ──
           CONTENT_ORDER 的六个内容键各占一个**固定位置**的容器（DOM 顺序恒定，过渡不会被重排打断）：
           当前那份渲染正文，正在退场的那份复用上一次的节点（冻结，最多留一份），其余是空壳。

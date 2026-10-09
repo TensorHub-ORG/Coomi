@@ -4,15 +4,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { motionOn } from '../../lib/motionPref'
 import { EASE_IN_QUAD, RISE_IN, RISE_SHOWN, SEC_FAST, SPRING_SNAP } from '../ui/motion'
-import { AlertTriangle, ArrowUp, Brain, ChevronRight, FolderOpen, KeyRound, ListOrdered, Paperclip, Shield, ShieldAlert, Slash, Sparkles, Square, Wand2, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowUp, ChevronRight, FolderOpen, KeyRound, ListOrdered, Paperclip, Shield, ShieldAlert, Slash, Sparkles, Square, Wand2, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '../../lib/cn'
 import { ipc } from '../../lib/ipc'
+import { subscribeNativeFileDrop } from '../../lib/nativeFileDrop'
 import { prettyPath, shortPath, samePath, fmtTokens, fmtBytes } from '../../lib/format'
 import { useEngine } from '../../stores/engine'
 import { useSession } from '../../stores/session'
 import { useLibrary } from '../../stores/library'
-import { EFFORT_LABELS, PERMISSION_LABELS, useAgent, type PermissionMode, type ReasoningEffort } from '../../stores/agent'
+import { PERMISSION_LABELS, useAgent, type PermissionMode } from '../../stores/agent'
 import { useUi } from '../../stores/ui'
 import { Button } from '../ui/Button'
 import { FileBadge } from '../ui/FileBadge'
@@ -20,6 +21,7 @@ import { attachmentName } from './AttachmentCard'
 import { QuoteChip } from './QuoteBlock'
 import { StatsBar } from './StatsBar'
 import { Menu } from '../ui/Menu'
+import { EffortPicker } from '../ui/EffortSlider'
 import { Tip } from '../ui/Overlay'
 import { statPath } from '../shell/dockShared'
 // 插件：斜杠命令（输入 / 弹出、选中填模板）与人设提示条共用一份 store 与纯逻辑。
@@ -39,14 +41,18 @@ import {
 // 插件主题 parts（v1.7）：发送键 / 输入框 / 工具栏的部件级外观经它订阅（引擎写 data-theme-part-* 属性）。
 import { resolveImagePath, useThemeParts } from '../plugins/PluginThemeEngine'
 
-interface Provider { id: string; name?: string; model?: string; models?: string[]; active?: boolean }
-
 /** 芯片退场时长（秒）：= --motion-fast。进场是**真弹性**（spring，时长由物理量推出来，
      写不了也不需要写），所以这里只留退场这一档。 */
 const CHIP_EXIT_S = SEC_FAST
 
 /** 引用芯片最多平铺几条，多的折成「+N」——引用是长文本，铺开会把输入框顶得看不见。 */
 const QUOTE_COLLAPSE_AT = 2
+
+/// discover-models 的会话内记忆：同一个厂商本次应用生命周期内只自动探一次，
+/// 切页重挂载不再重复往返（含 persist:true 的写盘）。模块级即可 —— 组件卸载不丢。
+const autoDiscovered = new Set<string>()
+/// 探测到的模型列表也缓在模块级：重挂载后选择器里已经拿到的模型不会凭空消失。
+const discoveredCache = new Map<string, string[]>()
 
 function ContextRing() {
   const u = useEngine((s) => s.usage)
@@ -140,14 +146,19 @@ export function Composer({ hero }: { hero?: boolean }) {
   const ready = useEngine((s) => s.ready)
   const api = useEngine((s) => s.api)
   const skills = useLibrary((s) => s.skills)
-  const loadCatalog = useLibrary((s) => s.loadCatalog)
+  /// 技能目录改用带 TTL 的 ensureCatalog（见 stores/library）：Composer 只是要一份已装技能列表，
+  /// 没理由每次挂载都拉一遍实测 3.3 秒的 /api/catalog。
+  const ensureCatalog = useLibrary((s) => s.ensureCatalog)
   const setView = useUi((s) => s.setView)
-  const effort = useAgent((s) => s.effort)
   const permission = useAgent((s) => s.permission)
-  const setEffort = useAgent((s) => s.setEffort)
   const setPermission = useAgent((s) => s.setPermission)
   const loadAgent = useAgent((s) => s.load)
   const providerRevision = useAgent((s) => s.providerRevision)
+  /// 厂商列表常驻 store：切走再切回不归零，空态横幅的根因随之消失。
+  const providers = useAgent((s) => s.providers)
+  /// 三态里的「已加载」：没拉到 ≠ 拉到但一条都没有。
+  const providersLoaded = useAgent((s) => s.providersLoaded)
+  const loadProviders = useAgent((s) => s.loadProviders)
 
   /// 引用芯片（可多条）：发送时走结构化 quotes 字段，不再把引用文字拼进正文。
   /// 附件与引用都放在 session store 里、按**会话 id 分桶**（见 lib/sessionInput）：
@@ -170,9 +181,9 @@ export function Composer({ hero }: { hero?: boolean }) {
   /// 在全新安装的机器上（会话列表为空、连接自然建立不起来）会把人带偏到网络问题上。
   const noSession = useSession((s) => s.sessionId === '')
   const reconnect = useSession((s) => s.reconnect)
-  const [providers, setProviders] = useState<Provider[]>([])
   /// 每个厂商实际拉取到的模型列表（优先于设置里存的 models——旧数据可能只存了一个模型）。
-  const [discovered, setDiscovered] = useState<Record<string, string[]>>({})
+  /// 初值取自模块缓存：重挂载时已经发现过的模型不必再探一遍。
+  const [discovered, setDiscovered] = useState<Record<string, string[]>>(() => Object.fromEntries(discoveredCache))
   const [dragging, setDragging] = useState(false)
   /// 断线横幅延迟显示：快速切会话时不闪。
   const [showLinkBanner, setShowLinkBanner] = useState(false)
@@ -251,30 +262,43 @@ export function Composer({ hero }: { hero?: boolean }) {
 
   useEffect(() => {
     if (!ready) return
-    void api<{ providers?: Provider[] }>('/api/providers')
-      .then(async (d) => {
-        const list = d.providers ?? []
-        setProviders(list)
-        // 设置里存的 models 可能是旧流程只存了一个：这里自动向上游拉全量，
-        // 保证对话页能选到该厂商的**所有**模型。
-        for (const p of list) {
-          if ((p.models?.length ?? 0) > 1) continue
-          try {
-            const res = await api<{ models?: string[] }>('/api/providers/' + encodeURIComponent(p.id) + '/discover-models', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ persist: true }),
-            })
-            if (res.models?.length) setDiscovered((prev) => ({ ...prev, [p.id]: res.models as string[] }))
-          } catch { /* 上游不可达时保持原样 */ }
-        }
-      })
-      .catch(() => {})
-    void loadCatalog()
+    // 新鲜度判断在 store 里（loadProviders）：切页重挂载直接复用手里那份，不打网络 ——
+    // 既不闪空态，也不会再拉一遍 3.3 秒的目录。providerRevision 变了才会真的重拉。
+    void loadProviders()
     void loadAgent()
     // providerRevision：设置页加/删/激活厂商后自增 → 这里重新拉一次，
     // 否则刚加完厂商回到对话页仍是旧列表，会被判成「还没有配置模型」（2026-09-29）。
-  }, [ready, api, loadCatalog, loadAgent, providerRevision])
+  }, [ready, loadProviders, loadAgent, providerRevision])
+
+  /// 技能目录：与设置页/技能中心同一套口径 —— 够新（默认 60s）就一个请求都不发。
+  useEffect(() => {
+    if (!ready) return
+    void ensureCatalog()
+  }, [ready, ensureCatalog])
+
+  /// 自动补全模型：只对「设置里存了 0~1 个模型」的厂商探测（旧流程可能只存了一个），
+  /// 且每个厂商本次应用生命周期只自动探一次。多厂商**并行**发起（Promise.allSettled），
+  /// 不再在一个 for 里串行 await 一串往返；失败静默，保持原行为。
+  useEffect(() => {
+    if (!ready || !providersLoaded) return
+    const targets = providers.filter((p) => (p.models?.length ?? 0) <= 1 && !autoDiscovered.has(p.id))
+    if (!targets.length) return
+    // 先登记再发请求：同一厂商被并发触发时不会重复探测。
+    for (const p of targets) autoDiscovered.add(p.id)
+    void Promise.allSettled(targets.map(async (p) => {
+      try {
+        const res = await api<{ models?: string[] }>('/api/providers/' + encodeURIComponent(p.id) + '/discover-models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ persist: true }),
+        })
+        if (res.models?.length) {
+          discoveredCache.set(p.id, res.models)
+          setDiscovered((prev) => ({ ...prev, [p.id]: res.models as string[] }))
+        }
+      } catch { /* 上游不可达时保持原样 */ }
+    }))
+  }, [ready, providersLoaded, providers, api])
 
   useEffect(() => {
     const el = area.current
@@ -338,7 +362,8 @@ export function Composer({ hero }: { hero?: boolean }) {
     if (!connected) { toast.error('连接已断开，正在重连…'); reconnect(); return }
     // 没配模型时不要发出去（引擎会立刻失败），直接引导去设置。
     // 生成中插话不重复拦这一道：这一轮已经在跑，说明模型早配好了。
-    if (!hasProvider && !streaming) { toast.error('还没有配置模型，先去设置里添加 Provider'); setView('settings'); return }
+    // providersLoaded：还没拉回来时不要误判成「没配置」——那会弹错 toast 并强行跳设置页。
+    if (providersLoaded && !hasProvider && !streaming) { toast.error('还没有配置模型，先去设置里添加 Provider'); setView('settings'); return }
     // 技能仍然是「提示优先使用」，照旧拼在正文最前面；
     // 附件与引用改走结构化字段（见 stores/session.ts 的 send），正文保持用户原样。
     const prefix = skill ? '[使用技能 ' + skill + '] ' : ''
@@ -369,12 +394,28 @@ export function Composer({ hero }: { hero?: boolean }) {
     if (picked?.length) addPaths(picked)
   }
 
+  /* 操作系统拖放必须走 Tauri 的事件，**HTML5 的 onDrop 收不到**。
+     Tauri 2 的 WebView 会拦截 OS 文件拖放并只在它自己的事件里给出真实路径，
+     所以下面那个 onDrop 只对「页面内元素之间拖放」有效 ——
+     这就是「界面写着可以拖入、实际拖不进来」的原因。
+     这里订阅 onDragDropEvent，enter/over 时点高亮，drop 时把真实路径交给 addPaths（与「添加附件」同一条路径）。 */
+  useEffect(() => subscribeNativeFileDrop({
+    active: () => {
+      const node = area.current
+      return useUi.getState().view === 'chat' && !!node && node.getClientRects().length > 0
+    },
+    hover: setDragging,
+    drop: addPaths,
+  }), [])
+
   /// 拖拽文件到输入区＝附件；粘贴图片/文件同样收下。
+  /// 注意：这里只覆盖**页面内**拖放；来自操作系统的文件走上面的 onDragDropEvent。
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault()
     setDragging(false)
-    const paths = Array.from(e.dataTransfer.files).map((f) => (f as File & { path?: string }).path ?? f.name)
+    const paths = Array.from(e.dataTransfer.files).map((f) => (f as File & { path?: string }).path).filter((path): path is string => !!path)
     if (paths.length) addPaths(paths)
+    else if (e.dataTransfer.files.length) toast.error('无法取得文件真实路径，请使用添加附件按钮')
     const text = e.dataTransfer.getData('text/plain')
     if (text) setDraft(draft + text)
   }
@@ -558,7 +599,8 @@ export function Composer({ hero }: { hero?: boolean }) {
           )}
         </div>
       ) : null}
-      {ready && !hasProvider ? (
+      {/* 三态：只有「已加载且确实一条都没有」才提示去配置；未加载完不显示，避免切页时闪一下。 */}
+      {ready && providersLoaded && !hasProvider ? (
         <div className='animate-bar flex items-center gap-2 rounded-lg border border-primary/30 bg-primary-soft px-3 py-1.5 text-12 text-primary'>
           <KeyRound size={13} />
           <span className='flex-1'>还没有配置模型：添加一个 Provider 并选择模型后就能对话。</span>
@@ -595,7 +637,7 @@ export function Composer({ hero }: { hero?: boolean }) {
         onDrop={onDrop}
         className={cn(
           // relative：斜杠命令弹层以输入框为定位基准（absolute bottom-full 浮在上方）。
-          'relative rounded-xl border bg-surface p-2 elev-2 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
+          'workbench-composer relative rounded-2xl border bg-surface p-2.5 elev-2 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
           dragging ? 'border-primary bg-primary-soft' : 'border-line',
         )}
         style={{
@@ -724,7 +766,8 @@ export function Composer({ hero }: { hero?: boolean }) {
           />
           <div data-theme-composer-mascot className='shrink-0' />
         </div>
-        <div className='mt-1 flex items-center gap-0.5'>
+        {/* flex-wrap：窄窗口 / 右侧栏展开时，工具按钮换行而不是被挤出输入栏外。 */}
+        <div className='mt-1 flex flex-wrap items-center gap-0.5'>
           {toolbarParts?.showAttach === false ? null : (
           <Tip label='上传文件'>
             <Button
@@ -761,7 +804,7 @@ export function Composer({ hero }: { hero?: boolean }) {
               />
             }
             groups={
-              providers.length
+              providersLoaded && providers.length
                 ? [
                     ...(modelGroups.recentItems.length
                       ? [{ label: '最近使用', items: modelGroups.recentItems }]
@@ -770,7 +813,12 @@ export function Composer({ hero }: { hero?: boolean }) {
                   ]
                 : undefined
             }
-            items={providers.length ? undefined : [{ label: '未配置厂商，先去设置里添加', onSelect: () => setView('settings') }]}
+            // 未加载完时不能显示「未配置厂商」：那是在把「还没拉到」说成「没有配置」。
+            items={
+              providersLoaded
+                ? (providers.length ? undefined : [{ label: '未配置厂商，先去设置里添加', onSelect: () => setView('settings') }])
+                : [{ label: '正在加载厂商…', disabled: true }]
+            }
             trigger={
               <Button variant='ghost' size='sm' className='gap-1 text-ink-3' title='选择模型'>
                 <span className='flex min-w-0 max-w-[220px] items-center gap-1 truncate'>
@@ -787,17 +835,8 @@ export function Composer({ hero }: { hero?: boolean }) {
             }
           />
           )}
-          <Menu
-            align='start'
-            side='top'
-            items={EFFORT_LABELS.map((e) => ({ label: (e.value === effort ? '● ' : '') + e.label + ' — ' + e.hint, onSelect: () => void setEffort(e.value as ReasoningEffort) }))}
-            trigger={
-              <Button variant='ghost' size='sm' className='gap-1 text-ink-3' title='思考强度'>
-                <Brain size={14} />
-                <span>{EFFORT_LABELS.find((e) => e.value === effort)?.label ?? '自动'}</span>
-              </Button>
-            }
-          />
+          {/* 思考强度：点开一个小面板，滑块与六档刻度都在里面（见 ui/EffortSlider 的说明）。 */}
+          <EffortPicker className='shrink-0' />
           <Menu
             align='start'
             side='top'

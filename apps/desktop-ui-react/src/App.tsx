@@ -21,6 +21,10 @@ import { DialogHost } from './components/ui/DialogHost'
 import { useEngine } from './stores/engine'
 // 插件：启动时拉一次插件清单并应用已选插件主题（壳命令缺失时 store 内部降级，不影响启动）。
 import { usePluginStore } from './components/plugins/pluginStore'
+import { useLibrary } from './stores/library'
+import { markCollapseMotion } from './components/chat/collapseMotion'
+import { startPluginClients, usePluginClientViews, findPluginClientView } from './components/plugins/clientRuntime'
+import { PluginClientViewHost } from './components/plugins/PluginClientViewHost'
 import { readDraft, readLastSession, useSession } from './stores/session'
 // 启动引导的决策逻辑抽成纯函数：它漏过一个分支（空会话列表），造成过真机最难查的一次故障，
 // 现在有 tests/check-bootstrap.mjs 盯着它。
@@ -60,9 +64,34 @@ const LIVE_VIEWS_KEEP = 4
    只在真正切到那一页时才下载 —— 设置页（41KB 源码）与技能中心（41KB + 一堆对话框）
    原本全压在首屏主包里，首屏体积因此有一大截是「用户还没看的东西」。
    加载失败不做静默降级：chunk 拿不到就是拿不到，交给 React 抛错好过白屏。 */
-const SkillsView = lazy(() => import('./views/SkillsView').then((m) => ({ default: m.SkillsView })))
-const ArtifactsView = lazy(() => import('./views/ArtifactsView').then((m) => ({ default: m.ArtifactsView })))
-const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })))
+
+/* ── chunk 就绪表：切页时间轴「要不要等动画」只看这张表 ──
+   为什么需要它：切页时间轴原来把「挂正文」硬编码在**进场动画之后**（PANE_ENTER_MS=240ms），
+   于是哪怕 chunk 早就在模块缓存里，每次切页也要先空等满 240ms —— 那 240ms 里主线程
+   什么都没加载，纯粹在等定时器，用户看到的就是「点了以后卡一下才出内容」（真机 1~2 秒）。
+   判据只有一个：目标页的 chunk 到没到。lazy() 的工厂是**唯一**真正加载 chunk 的地方，
+   所以「就绪」就登记在那里（预取走的是同一个 import()，命中模块缓存，顺带补登记）。
+   登记之后，App 的切页分支据此走「立刻挂正文」那条短时间轴（见下面切页 effect）。 */
+const chunkReady = new Set<ViewKey>(['chat'])
+
+const SkillsView = lazy(() => import('./views/SkillsView').then((m) => {
+  chunkReady.add('skills')
+  return { default: m.SkillsView }
+}))
+const ArtifactsView = lazy(() => import('./views/ArtifactsView').then((m) => {
+  chunkReady.add('artifacts')
+  return { default: m.ArtifactsView }
+}))
+const SettingsView = lazy(() => import('./views/SettingsView').then((m) => {
+  chunkReady.add('settings')
+  return { default: m.SettingsView }
+}))
+
+/** 这一页能不能「不等动画直接出内容」：静态引入的对话页天然可以；
+    懒加载页看 chunk 是否已就绪 —— 没就绪就只能先挂骨架（由 Suspense 换成正文）。 */
+function viewContentReady(key: ViewKey): boolean {
+  return chunkReady.has(key)
+}
 
 /* 全局浮层同理：审批弹窗、追问弹窗、命令面板（Ctrl+K）首屏都不是必需的，
    各自成 chunk 之后主包只留「一定会用到」的东西。
@@ -166,9 +195,12 @@ function vtExperimentOn(): boolean {
     省电档（html[data-perf=low]）**不在**这里排除：它仍走同一条动画路径，
     只是 base.css 把位移与错峰归零，只留纯淡入——一条路径、两种力度，好过两条路各修一遍。 */
 function motionAllowed(): boolean {
-  const root = document.documentElement
-  if (root.dataset.motion === 'off') return false
-  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  /* 切页动画整体停用：切页直接换，不播方向动画、不开让路闸门、不进 ViewTransition。
+     原因不是「动画不好看」，是它会卡：浏览器在快照冻结期完全不绘制，
+     快速连点时每次点击又都在重置那条 140+240ms 的计时器 → 界面冻结、
+     必须等动画播完才能换页（Chrome《How To Improve INP: View Transitions》讲的就是这个）。
+     减动效开关仍照旧生效；这里是无条件关闭。 */
+  return false
 }
 
 /** 导航方向：沿视图顺序往后走＝forward（新页从右侧进），往回走＝back。
@@ -193,10 +225,25 @@ function pluginPage(key: string): ComponentType {
   return Page
 }
 
+/* ── 客户端插件页面的组件表 ──
+   与声明式插件页分开缓存：两者虽然都按 key 缓存，但渲染的东西不同 ——
+   声明式是 iframe（隔离），客户端插件渲染插件自己的 React（全信任）。 */
+const PLUGIN_CLIENT_PAGES = new Map<string, ComponentType>()
+function pluginClientPage(key: string): ComponentType {
+  const cached = PLUGIN_CLIENT_PAGES.get(key)
+  if (cached) return cached
+  const Page: ComponentType = memo(function PluginClientPage() { return <PluginClientViewHost viewKey={key} /> })
+  PLUGIN_CLIENT_PAGES.set(key, Page)
+  return Page
+}
+
 /** 视图 → 页面组件：核心四页查表，插件页现取（并缓存）。 */
 function pageFor(key: ViewKey): ComponentType {
   const core = PROBED[key as 'chat'] as ComponentType | undefined
-  return core ?? pluginPage(String(key))
+  if (core) return core
+  const text = String(key)
+  // `client:` 前缀 = 客户端插件注册的页面（渲染插件自己的 React）。
+  return text.startsWith('client:') ? pluginClientPage(text) : pluginPage(text)
 }
 
 /** pane 在这次换页里的角色：进（在最上层滑入）/ 退（淡出后卸载）。 */
@@ -254,15 +301,27 @@ function useComposerZoneHeight(active: boolean, shellRef: RefObject<HTMLDivEleme
 }
 
 /** 页面 chunk 的取数入口：同一份 import() 只写一次，
-   空闲预热、导航预热、Rail 上按下鼠标这三条路都走它（重复调用命中模块缓存，不会重复请求）。 */
+   空闲预热、悬停预热、按下预热这三条路都走它（重复调用命中模块缓存，不会重复请求）。 */
 const VIEW_CHUNK: Partial<Record<ViewKey, () => Promise<unknown>>> = {
   skills: () => import('./views/SkillsView'),
   artifacts: () => import('./views/ArtifactsView'),
   settings: () => import('./views/SettingsView'),
 }
 
+/** 正在取、还没回来的那一页：pointerover 会随着指针在按钮里挪动反复触发，
+    同一页在途时直接短路，免得每次都新建一条 promise 链（对同一个 URL 的重复 import() 会被
+    模块系统缓存住，但仍然要新建 Promise 与回调；悬停事件密度不值得付这个）。 */
+const chunkLoading = new Set<ViewKey>()
+
 function prefetchView(key: ViewKey): void {
-  void VIEW_CHUNK[key]?.()
+  const load = VIEW_CHUNK[key]
+  if (!load || chunkLoading.has(key)) return
+  chunkLoading.add(key)
+  void load()
+    // 取回来就登记进就绪表：切页时间轴据此走「不等动画」的快档（见切页 effect）。
+    .then(() => { chunkReady.add(key) })
+    // 失败要把在途标记也放开：这一下没取到不该让这一页永远走慢档（下次 hover 还能再试）。
+    .catch(() => { chunkLoading.delete(key); chunkReady.delete(key) })
 }
 
 /** 首屏空闲时把三个非首页 chunk 预热掉：切页时它们已经在缓存里，
@@ -431,7 +490,39 @@ export default function App() {
   /// 要避免的布局型动画。用户自己的开合状态（listCollapsed）与窄窗抽屉都不经 view，不受影响。
   /// （hook 自己那份 showInline 仍然按 store 的 view 立即算，给「用户点了展开列表」那一路用。）
   const listCollapsed = useUi((s) => s.listCollapsed)
-  const listInlineOpen = chromeView === 'chat' && !narrow && !listCollapsed
+  /// 内嵌会话列表是否展开：只听**用户自己的收起开关**与窗口宽度，不跟 chromeView 走。
+  /// 原来挂着 `chromeView === 'chat'` —— 切走去设置再回来时它就变了，用户从没主动收过
+  /// 却被收起 / 又弹出来。规矩：切页前什么样，回来还什么样。
+  const listInlineOpen = !narrow && !listCollapsed
+  /// 展开/收起：宽度走一段限时过渡（CSS 那边时长与这里同一个令牌）。
+  /// 开合时挂上折叠冻结窗口，让消息块在过渡的 140ms 里不再逐帧量高 ——
+  /// 这正是 base.css 那条「不要给面板加宽度过渡」所担心的开销的唯一解。
+  /* ── 展开/收起：宽度瞬切，动画全交给内容层的 transform ──
+     原来这里给面板挂一段 280ms 的 flex-grow 过渡，而那是一次**布局**动画：
+     每帧主列都重排 → 对话页的消息虚拟列表被逐帧叫醒重测窗口（流式输出时最贵）。
+     现在宽度一步到位（见 base.css「面板宽度：瞬切」），进出场由 [data-list-body] 的
+     opacity / translate 承担 —— 合成器就能画完，主列零 reflow。
+
+     但有个副作用要补：宽度瞬切的那一瞬面板就是 0 宽，里面那层淡出会被裁掉，
+     收起方向会变成「啪」地消失（展开方向不受影响：面板已经有宽度，淡入看得见）。
+     所以收起时把面板的宽度**多留一拍**，等淡出走完再瞬切到 0：
+       · 留的这一拍里只有 opacity / translate 在动 —— 一次 reflow 都没有；
+       · 拍完宽度一步到位 —— 主列只重排这一次。
+     那一拍取 --motion-fast（与 [data-list-body][data-open=false] 的退场时长同一个变量，
+     直接从 CSS 读，改主题时长不会走偏），读不到就退回 140ms 这个默认档。 */
+  const [listWidthOpen, setListWidthOpen] = useState(listInlineOpen)
+  useEffect(() => {
+    // 开合的这一拍挂冻结窗口：消息块在过渡期间不再逐帧量高（见 base.css 同一段的说明）。
+    markCollapseMotion()
+    if (listInlineOpen) { setListWidthOpen(true); return }
+    let ms = 140
+    try {
+      const parsed = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-fast'))
+      if (Number.isFinite(parsed) && parsed > 0) ms = parsed
+    } catch { /* 读不到变量就用上面的默认档 */ }
+    const timer = window.setTimeout(() => setListWidthOpen(false), ms)
+    return () => window.clearTimeout(timer)
+  }, [listInlineOpen])
   /// 抽屉（窄窗口浮层）的进出场：先以 data-state='closed' 挂一帧，再切 'open'——
   /// CSS 过渡必须先有起点可播；关闭时不立刻卸载，等退场动画（--motion-fast）播完再摘掉，
   /// 否则退场根本来不及画，看起来还是「啪」地消失。
@@ -467,10 +558,13 @@ export default function App() {
   // 外壳跟随 chromeView（过渡结束才变）：面板挂载/卸载是**布局**变化，不能落在过渡帧里。
   const dockShown = chromeView === 'chat' || chromeView === 'artifacts'
   // 内嵌会话列表「挂载」与否，和「是否展开」（listInlineOpen）拆开：
-  // 收起时面板不卸载，而是把 flex 宽度渐变到 0（见下面的 listAnim），这样展开/收起才有过渡。
-  // 原来一收起就整块卸载 → 主列瞬间补宽，「展开/收起」看着像没做动画。
+  // 收起时面板不卸载，只是被 min/max=0 夹成 0 宽——和右侧栏收成图标条是同一套写法。
+  // 原来一收起就整块卸载 → 主列瞬间补宽、滚动位置与展开态全丢；
+  // 现在留着它，展开就是面板自己回到记住的宽度（一次重排，不是逐帧动画）。
   const listInlineMounted = chromeView === 'chat' && !narrow
-  const dockMax = DOCK_BAR_W + panelMaxWidth(viewport, listInlineOpen)
+  // 侧栏上限也跟 listWidthOpen：收起时那「多留的一拍」里列表还占着布局宽度，
+  // 上限要跟着它一起留到宽度瞬切那一帧，否则右栏会提前缩 240px、整个布局提前跳一下。
+  const dockMax = DOCK_BAR_W + panelMaxWidth(viewport, listWidthOpen)
   /// 侧栏展开时的最小宽度：图标条 + 预览最小宽（PANEL_MIN_W）；收起态才允许缩到只剩图标条。
   const dockMin = DOCK_BAR_W + PANEL_MIN_W
   // 展开/收起侧栏时给 dock 面板一个 flex-grow 过渡；拖拽期间不加，否则拖起来跟手会发飘。
@@ -482,14 +576,6 @@ export default function App() {
     const timer = window.setTimeout(() => setDockAnim(false), 280)
     return () => window.clearTimeout(timer)
   }, [panelOpen])
-  // 会话列表展开/收起的宽度过渡：同一套「只在一小段时间给面板加过渡」的做法。
-  // 拖拽期间必须是关的（拖起来要跟手，加了过渡会发飘）——beginResize 里会立刻把清掉。
-  const [listAnim, setListAnim] = useState(false)
-  useEffect(() => {
-    setListAnim(true)
-    const timer = window.setTimeout(() => setListAnim(false), 280)
-    return () => window.clearTimeout(timer)
-  }, [listInlineOpen])
   /// 落盘：只有「用户正在拖 / 按方向键」时面板尺寸变化才写回
   /// （coomi.list.w / coomi.dock.w 两个键不变，语义与改造前「拖到哪存到哪」一致）。
   /// 首屏自动夹取、窗口缩放导致的尺寸变化不写：那些不是用户的选择，
@@ -513,8 +599,8 @@ export default function App() {
   useEffect(() => () => { if (persistTimer.current !== null) window.clearTimeout(persistTimer.current) }, [])
   const beginResize = (): void => {
     interacting.current = true
-    // 拖拽中禁用展开/收起的宽度过渡：跟手优先，动画让位。
-    setListAnim(false)
+    // 拖拽中禁用右侧栏的宽度过渡：跟手优先，动画让位。
+    // （会话列表已经不做宽度过渡了 —— 见下面那段注释，拖拽/展开都只有一次重排。）
     setDockAnim(false)
     persistSoon()
   }
@@ -533,8 +619,10 @@ export default function App() {
     const raf = requestAnimationFrame(() => {
       const list = listPanel.current
       if (list) {
-        // 展开 → 记住的宽度；收起 → 0（面板不卸载，宽度变化就是那段过渡本身）。
-        const want = listInlineOpen ? listWidth.width : 0
+        // 展开 → 记住的宽度；收起 → 0（面板不卸载，只是被 min/max=0 夹成 0 宽；
+        // 宽度一步到位，没有逐帧过渡 —— 见 base.css「面板宽度：瞬切」）。
+        // 跟 listWidthOpen 走而不是 listInlineOpen：收起时那「多留的一拍」里面板还得是有宽度的。
+        const want = listWidthOpen ? listWidth.width : 0
         if (Math.abs(list.getSize().inPixels - want) > 1) list.resize(want)
       }
       const dock = dockPanel.current
@@ -544,25 +632,60 @@ export default function App() {
       }
     })
     return () => cancelAnimationFrame(raf)
-  }, [panelOpen, listInlineOpen, listInlineMounted, dockShown, viewport])
+  }, [panelOpen, listWidthOpen, listInlineMounted, dockShown, viewport])
+
+  /* 环境检测（node / uv / git …）以前只在进技能中心时才跑 —— 用户要到主动打开那一页
+     才知道本机缺什么。这里在首屏空闲时预热一次：不占启动关键路径，但切到技能中心 / 设置时
+     数据已经在了。接口本身不便宜（逐个 fork 子进程探测运行时），所以放 requestIdleCallback，
+     不用挂载即发。store 里有 TTL，重复调用会直接命中缓存。 */
+  useEffect(() => {
+    const run = (): void => { void useLibrary.getState().ensureRuntimes() }
+    const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+    if (typeof idle === 'function') {
+      const handle = idle(run)
+      return () => (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback?.(handle)
+    }
+    const timer = window.setTimeout(run, 1500)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  /* 客户端插件（全信任、跑在宿主渲染进程）：启动时装一轮，之后 3s 轮询做热加载。
+     引擎还没起来 / 老引擎没有这个端点时静默跳过，下一轮再试。 */
+  /* 客户端插件：**等引擎就绪后再装**，之后 3s 轮询做热加载。
+     以前在挂载时立刻启动 —— 引擎还没起来就反复打 API，和启动引导抢引擎连接，
+     症状：卡在「正在准备一个新对话…」，要手动点「新建对话」才连上。
+     现在由 engine.ready 驱动：没就绪什么都不做，就绪后装一次（幂等）。 */
+  const pluginsEngineReady = useEngine((state) => state.ready)
+  useEffect(() => {
+    if (!pluginsEngineReady) return
+    void startPluginClients()
+  }, [pluginsEngineReady])
 
   /// 首屏空闲预热：切页那一刻三个页面 chunk 都已经在模块缓存里。
   useEffect(() => { warmViewChunks() }, [])
 
-  /// 导航预取：Rail 的导航项自带 data-nav-key，指针一按就先取那个页面的 chunk。
-  /// 预取跑在「换页那一拍」之前，View Transitions 抓快照时页面已经就绪，不会先闪一块空面。
-  /// 用捕获阶段监听：Rail 上的按钮点下去到 store 变化之间没有别的地方能插进来。
+  /* ── 导航预取：pointerover → pointerdown → focusin，三条路都只做一件事：把目标页 chunk 取回来 ──
+     为什么 pointerover（本次新增）排在最前：原来只有 pointerdown 一条路，而「按下」到「切换」
+     只隔几毫秒 —— 那点时间只够发请求，不够下 chunk，于是**首次进入某个页面大概率没备好**，
+     切页只能干等。指针移到图标上通常有几百毫秒（人从「移到」到「按下去」），
+     这段时间足够把 40KB 级的小 chunk 拿完，切页那一刻它已经在模块缓存里。
+     键盘用户走 focusin（Tab 到导航项）与原来一样，两条路都保留。
+     为什么用捕获阶段挂在 document 上：Rail 上的按钮点下去到 store 变化之间没有别的地方能插进来；
+     不用 pointerenter 是因为它不冒泡，事件委托接不到（pointerover 是它的可委托等价物）。
+     重复触发不花钱：prefetchView 内部有 in-flight 去重，import() 本身也命中模块缓存。 */
   useEffect(() => {
-    const onDown = (e: Event): void => {
+    const onNavIntent = (e: Event): void => {
       const el = e.target instanceof Element ? e.target.closest('[data-nav-key]') : null
       const key = el instanceof HTMLElement ? el.dataset.navKey as ViewKey | undefined : undefined
       if (key) prefetchView(key)
     }
-    document.addEventListener('pointerdown', onDown, true)
-    document.addEventListener('focusin', onDown, true)
+    document.addEventListener('pointerover', onNavIntent, true)
+    document.addEventListener('pointerdown', onNavIntent, true)
+    document.addEventListener('focusin', onNavIntent, true)
     return () => {
-      document.removeEventListener('pointerdown', onDown, true)
-      document.removeEventListener('focusin', onDown, true)
+      document.removeEventListener('pointerover', onNavIntent, true)
+      document.removeEventListener('pointerdown', onNavIntent, true)
+      document.removeEventListener('focusin', onNavIntent, true)
     }
   }, [])
 
@@ -586,14 +709,18 @@ export default function App() {
   const pluginViews = usePluginViews((s) => s.views)
   const loadPluginViews = usePluginViews((s) => s.load)
   useEffect(() => { if (engineReady) void loadPluginViews() }, [engineReady, loadPluginViews])
+  /* 客户端插件注册的页面也要进 viewOrder，否则它的 pane 根本不会被渲染。 */
+  const clientViews = usePluginClientViews()
   const viewOrder = useMemo<ViewKey[]>(
-    () => [...VIEW_ORDER, ...pluginViews.map((item) => item.key)],
-    [pluginViews],
+    () => [...VIEW_ORDER, ...pluginViews.map((item) => item.key), ...clientViews.map((view) => view.key)],
+    [pluginViews, clientViews],
   )
   // 正停在某个插件页上，而那个插件被停用 / 卸载了：退回对话页，别留一块空白主区。
   useEffect(() => {
     if (VIEW_ORDER.includes(view)) return
     if (pluginViews.some((item) => item.key === view)) return
+    // 客户端插件页同样算「存在的页面」，否则一点进去就被这条守卫弹回对话页。
+    if (findPluginClientView(String(view))) return
     if (!usePluginViews.getState().loaded) return
     useUi.getState().setView('chat')
   }, [view, pluginViews])
@@ -613,17 +740,26 @@ export default function App() {
     if (navTimers.current.frame) window.cancelAnimationFrame(navTimers.current.frame)
     navTimers.current = { exit: 0, settle: 0, frame: 0 }
   }
-  /* ── 切页：先播动画，动画播完再挂正文（一条确定的路）──
-     时间轴（毫秒；常量与 CSS 的 --pane-in/--pane-out 是同一个数，都在 navPause.tsx）：
-       0               指针翻到新页（这一拍它只画骨架）＋ 开「让路」闸门；
-                       新旧两页各拿一个方向 class（pane-enter-* / pane-exit-*）
-       PANE_EXIT_MS    旧页（淡出）卸载 —— 它的定时器/观测器随卸载一起停
-       PANE_ENTER_MS   进场动画播完，再等一拍 rAF，正文才走 startTransition 挂上
-       紧随其后        参与布局的外壳（会话列表 / 右侧栏）才跟着切；闸门自动收、
-                       排队重算合并成一次 flush
-     为什么这么排：动画那 240ms 里只有「骨架 + 两个纯 transform/opacity」，
-     新页正文的挂载（长列表首屏布局）被推到动画之后，掉帧不再落在动画帧上；
-     而方向 class 一挂就播（@keyframes 不读前一帧），所以不会再出现「过渡抓到空帧」。 */
+  /* ── 切页：一条动画路径 + 两条挂载档位 ──
+     动画只有一条路（保持不变）：pane 自己按方向 class 播 CSS 动画
+     （pane-enter-right/left + pane-exit-right/left，规则在 base.css）。
+     为什么是动画不是过渡：过渡要有「起点已经被画过一帧」才播得出来，而换页那一拍内容列
+     可能正是空帧/骨架——过渡抓到空帧就什么都不播，这就是上一版「切页没动画」的根因。
+     @keyframes 不读前一帧的值，class 挂上就播，所以这里一律用动画。
+
+     挂正文则分档（本次性能修复）：原来只有「动画播完再挂」一档，等于**每次切页都先空等
+     满 240ms**——那 240ms 里什么都没加载，纯等定时器。
+       毫秒（常量与 CSS 的 --pane-in/--pane-out 是同一个数，都在 navPause.tsx）：
+         0             指针翻到新页 ＋ 开「让路」闸门；新旧两页各拿一个方向 class；
+                       **快档（chunk 已就绪）正文就在这一拍走 startTransition 挂上**，
+                       进场动画与挂载并行 —— 用户看到的是内容直接滑进来，不再先盯 240ms 骨架；
+                       慢档（chunk 还在路上）这一拍仍是骨架，由 Suspense 顶着。
+         PANE_EXIT_MS  旧页（淡出）卸载 —— 它的定时器/观测器随卸载一起停
+         PANE_ENTER_MS 进场动画播完（慢档在这一拍之后再等一拍 rAF 挂正文）；
+                       参与布局的外壳（会话列表 / 右侧栏）也在这一刻才跟着切，
+                       闸门自动收、排队重算合并成一次 flush
+     档位判据只有「chunk 到位没有」（chunkReady，见上面的 VIEW_CHUNK），
+     与「用户是不是第一次进」无关：保活 4 页 + 预热已经让绝大多数切换命中快档。 */
   useEffect(() => {
     if (shownView === view) return
     const from = shownView
@@ -648,28 +784,53 @@ export default function App() {
     // 这期间排队的重算会在收闸时合并成一次 flush（见 components/shell/navPause.tsx）。
     markNavPause(NAV_PAUSE_MS)
 
-    /// 正文挂载（两条分支共用）：一拍 rAF 保证「动画最后一帧已经画过」，
-    /// startTransition 让这次挂载排在动画之后 —— 「可以晚一点」的重活都归它。
+    /// 正文挂载（本身不需要任何等待）：真正做活的只有 setLiveViews，
+    /// startTransition 让它按「可以晚一点」的优先级排 —— 时间轴长短由调用方决定。
     const mountContent = (): void => {
+      if (navSeq.current !== seq) return
+      startTransition(() => {
+        setLiveViews((list) => {
+          const next = list.includes(view) ? list : [...list, view]
+          // 最近 4 个保活（当前 + 最近 3 个）：切回去是**热挂载** —— 不重挂组件树、
+          // 也不重新打网络（数据新鲜度由各页的 ensure* TTL 兜底，见 stores/library）。
+          // 更早的从挂载集合里筛掉：React 立刻卸载它们（定时器/观察器/轮询随卸载一起停）。
+          const keep = new Set<ViewKey>(next.slice(-LIVE_VIEWS_KEEP))
+          keep.add(view)
+          keep.add(previousView.current)
+          return next.filter((key) => keep.has(key))
+        })
+      })
+    }
+
+    /// 外壳收尾（两条分支共用）：参与布局的外壳（会话列表 / 右侧栏）等动画播完再切 ——
+    /// 面板挂载/卸载会改宽度，落在动画帧里就是一次布局抖动。两条路径都在动画收尾处走它，
+    /// 所以**外壳跟随动画结束**这件事与正文早挂晚挂彻底解耦了。
+    const settleChrome = (): void => {
+      if (navSeq.current !== seq) return
+      setChromeView(view)
+      delete root.dataset.navDir
+    }
+
+    /// 外壳收尾也补一拍 rAF：面板改宽度要落在「动画最后一帧已经画过」之后，
+    /// 否则宽度变化正好压在动画的收尾帧上，看着就是内容抖一下。
+    /// 这条与「正文早挂还是晚挂」无关 —— 两条档位的外壳切换时刻完全一致，视觉不因分档而变。
+    const settleChromeAfterAnim = (): void => {
       if (navSeq.current !== seq) return
       navTimers.current.frame = window.requestAnimationFrame(() => {
         if (navSeq.current !== seq) return
-        startTransition(() => {
-          setLiveViews((list) => {
-            const next = list.includes(view) ? list : [...list, view]
-            // 最近 4 个保活（当前 + 最近 3 个）：切回去是**热挂载** —— 不重挂组件树、
-            // 也不重新打网络（数据新鲜度由各页的 ensure* TTL 兜底，见 stores/library）。
-            // 更早的从挂载集合里筛掉：React 立刻卸载它们（定时器/观察器/轮询随卸载一起停）。
-            const keep = new Set<ViewKey>(next.slice(-LIVE_VIEWS_KEEP))
-            keep.add(view)
-            keep.add(previousView.current)
-            return next.filter((key) => keep.has(key))
-          })
-        })
-        // 参与布局的外壳（会话列表 / 右侧栏）等动画与挂载都过去再切：
-        // 面板挂载/卸载会改宽度，落在动画帧里就是一次布局抖动。
-        setChromeView(view)
-        delete root.dataset.navDir
+        settleChrome()
+      })
+    }
+
+    /* 慢路径专用：正文等动画播完再挂。多等这一拍 rAF 是为了保证「动画最后一帧已经画过」，
+       免得正文在半路顶上来把动画截断（@keyframes 不读前一帧，半路换内容看着就是跳一下）。
+       只有 chunk 还没到、必须先让骨架顶着的那一支才走这里。 */
+    const mountContentAfterAnim = (): void => {
+      if (navSeq.current !== seq) return
+      navTimers.current.frame = window.requestAnimationFrame(() => {
+        if (navSeq.current !== seq) return
+        mountContent()
+        settleChrome()
       })
     }
 
@@ -695,13 +856,31 @@ export default function App() {
     // ② 默认路径：两个 pane 各拿一个方向 class，动画由 base.css 播。
     setNav({ seq, from, to: view, dir })
     setShownView(view)
-    /// 旧页淡出（PANE_EXIT_MS）后退场：只摘它一个，新页这一拍还只是骨架。
+    /// 旧页淡出（PANE_EXIT_MS）后退场：只摘它一个。
     navTimers.current.exit = window.setTimeout(() => {
       if (navSeq.current !== seq) return
       setLiveViews((list) => list.filter((key) => key !== from))
     }, PANE_EXIT_MS)
-    /// 进场动画播完 → 挂正文。
-    navTimers.current.settle = window.setTimeout(mountContent, PANE_ENTER_MS)
+
+    /* ③ 分档：**内容就绪就不再等动画**（这次性能修复的核心）。
+       原来的时间轴只有一条路：不管内容在不在内存里，一律空等完进场动画（240ms）才挂正文。
+       那 240ms 里系统一个字节都没加载，纯等定时器 —— 而三个顶级页面都是 lazy，
+       预热又只在 idle / pointerdown 两条路上（按下到切换只有几毫秒，首次进入大概率没备好），
+       于是用户看到的就是「切页像卡死 1~2 秒」。
+       现在按「chunk 到位没有」分两档：
+         · 已就绪（预热过 / 之前进过一次，chat 永远算就绪）：**这一拍就挂正文**，
+           进场动画与挂载并行 —— 动画照播、方向照旧，只是骨架不再霸屏 240ms；
+         · 未就绪：先让骨架顶着 Suspense 的加载，动画播完再挂（与原来一致）。
+       档位只由 chunkReady 决定，不由「用户是不是第一次进」决定 —— 保活 4 页的机制
+       已经让绝大多数切换命中快档，这条慢档只在冷启动首次进入某个页面时出现。
+       外壳（setChromeView）仍然等动画收尾：面板宽度变化不该落在动画帧里。 */
+    if (viewContentReady(view)) {
+      mountContent()
+      navTimers.current.settle = window.setTimeout(settleChromeAfterAnim, PANE_ENTER_MS)
+    } else {
+      /// 进场动画播完 → 挂正文。
+      navTimers.current.settle = window.setTimeout(mountContentAfterAnim, PANE_ENTER_MS)
+    }
   }, [view, shownView])
 
   /// 卸载时把「让路」闸门与换页时间轴一起收干净（收闸顺带把排队的东西放出来）。
@@ -780,6 +959,33 @@ export default function App() {
     return () => { disposed = true; off?.() }
   }, [])
 
+  /// 启动静默检查更新：壳启动后自动查一次，发现新版本会发 update:available。
+  /// 这里只弹一条不打扰的 toast（同一会话只提示一次），点「查看更新」进设置页；
+  /// 不自动下载、不自动装 —— 更新始终由用户在设置页确认后发起。
+  useEffect(() => {
+    type Payload = { latest?: string; current?: string; hasUpdate?: boolean } | undefined
+    type Listen = (name: string, cb: (e: { payload?: Payload }) => void) => Promise<() => void>
+    const listen = (window as unknown as { __TAURI__?: { event?: { listen?: Listen } } }).__TAURI__?.event?.listen
+    if (!listen) return
+    let off: (() => void) | undefined
+    let disposed = false
+    let shown = false
+    void listen('update:available', (e) => {
+      if (shown) return
+      const payload = e?.payload
+      if (!payload || !payload.hasUpdate) return
+      shown = true
+      toast('发现新版本：' + (payload.latest ?? '未知'), {
+        description: '当前版本 ' + (payload.current ?? '未知') + '，可在设置页「检查更新」处下载安装。',
+        duration: 12_000,
+        action: { label: '查看更新', onClick: () => { useUi.getState().setView('settings') } },
+      })
+    })
+      .then((unlisten) => { if (disposed) unlisten(); else off = unlisten })
+      .catch(() => {})
+    return () => { disposed = true; off?.() }
+  }, [])
+
   /// 探活看门狗：引擎「就绪」后每 15s 打一次 /api/runtime/health。
   /// 连续两次探活失败＝进程已经死了（WS 也不会自己回来），自动让壳重启引擎，
   /// 而不是把「请手动重连」丢给用户。
@@ -804,8 +1010,12 @@ export default function App() {
   /// 引擎就绪后拉一次会话列表；用户没主动选过会话时恢复上次那个，再不行才回落最近一条。
   useEffect(() => {
     if (!engineReady) return
-    void (async () => {
+    let disposed = false
+    let retry: number | undefined
+    const bootstrap = async (): Promise<void> => {
+      try {
       await loadSessions()
+      if (disposed || !useEngine.getState().ready) return
       const state = useSession.getState()
       const action = pickStartupSession({
         sessionId: state.sessionId,
@@ -821,7 +1031,14 @@ export default function App() {
       // **全新机器**（没有任何可见会话）：建一个空会话。少了这一步，sessionId 永远是空串，
       // connect() 直接返回，界面就会一直显示「与引擎的连接已断开」——而引擎其实好得很。
       await useSession.getState().newSession()
-    })()
+      } catch (error) {
+        if (disposed) return
+        useEngine.setState({ lastError: '初始化会话失败，正在重试：' + (error instanceof Error ? error.message : String(error)) })
+        retry = window.setTimeout(() => { void bootstrap() }, 1500)
+      }
+    }
+    void bootstrap()
+    return () => { disposed = true; if (retry !== undefined) window.clearTimeout(retry) }
   }, [engineReady, loadSessions, openSession])
 
   return (
@@ -856,25 +1073,31 @@ export default function App() {
               >
                 <Rail />
               </div>
-              {/* 会话列表：宽度可拖（240–420，存 coomi.list.w）；收起时整块不渲染，主列自然补上 */}
+              {/* 会话列表：宽度可拖（240–420，存 coomi.list.w）；收起时面板留在原地被夹成 0 宽，主列自然补上 */}
               {listInlineMounted ? (
                 <>
                   <Panel
                     id='coomi-list-panel'
                     panelRef={listPanel}
                     // 收起态：min = max = 0，面板留在 DOM 里被约束成 0 宽——和右侧栏收成图标条
-                    // 是同一套写法。宽度由 flex-grow 驱动，data-pane-anim='on' 期间由 base.css
-                    // 给它挂上 var(--motion-base) 的过渡，收起/展开因此是渐变而不是瞬间跳宽。
-                    minSize={listInlineOpen ? LIST_MIN_W : 0}
-                    maxSize={listInlineOpen ? LIST_MAX_W : 0}
-                    defaultSize={listInlineOpen ? listWidth.width : 0}
+                    // 是同一套写法。宽度由 flex-grow 驱动（react-resizable-panels 写在面板外层 div 上）。
+                    // ⚠ 这里**没有**宽度过渡，而且是刻意的：过渡 = 每一帧主列重排一次 =
+                    // 消息虚拟列表被逐帧叫醒重测窗口（见 base.css「面板宽度：瞬切」）。
+                    // 展开/收起的动画由下面 [data-list-body] 的 opacity / translate 承担。
+                    // 约束跟的是 listWidthOpen（收起时多留一拍给淡出），不是 listInlineOpen。
+                    minSize={listWidthOpen ? LIST_MIN_W : 0}
+                    maxSize={listWidthOpen ? LIST_MAX_W : 0}
+                    defaultSize={listWidthOpen ? listWidth.width : 0}
                     groupResizeBehavior='preserve-pixel-size'
                     onResize={onListResize}
-                    data-pane-anim={listAnim ? 'on' : undefined}
+                    // 'on' 标记「这一下是展开/收起，不是拖拽」；base.css 用它保证面板上永远没有过渡。
+                    data-pane-anim='on'
                     className={PANEL_BOX}
                     style={PANEL_CLIP}
                   >
-                    {/* 内容与宽度同步收放：收起时整块向左淡出（data-open=false），展开时回位。 */}
+                    {/* 展开/收起的动画全在这一层：宽度瞬切之后，列表内容靠 opacity / translate
+                        自己淡入淡出（transform + opacity = 合成器的事，主列一帧都不重排）。
+                        规则在 base.css 的 [data-list-body]。 */}
                     <div
                       data-list-body
                       data-open={listInlineOpen ? 'true' : 'false'}

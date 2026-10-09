@@ -71,7 +71,7 @@ export function PageHeader({ title, description, actions, sticky, className }: {
     // 内容从它底下滚过时靠 92% 的底色盖住字，不再每次滚动都重新采样一遍背景。
     <header
       className={cn(
-        'flex items-start gap-4 border-b px-8 pt-7 pb-5',
+        'workbench-page-header flex items-start gap-4 border-b px-8 pt-7 pb-5',
         sticky ? 'glass-bar sticky top-0 z-20 border-line-soft' : 'border-transparent',
         className,
       )}

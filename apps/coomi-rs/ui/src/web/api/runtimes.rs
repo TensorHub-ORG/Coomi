@@ -1543,6 +1543,12 @@ fn expand_env_with(template: &str, variables: &BTreeMap<String, String>) -> Stri
         }
         rest = &after[end + 1..];
     }
+    // 循环退出时 rest 里还压着**最后一个变量之后的全部内容**，必须补进结果。
+    // 漏掉这一行会把 `%USERPROFILE%\.local\bin` 展开成 `C:\Users\<用户>`：
+    // 「已知目录」整条清单的后缀会被逐条吃掉（winget / uv / cargo / npm / nodejs
+    // 一个都定位不到 —— 而这份清单存在的唯一理由就是「刚装完、PATH 还没刷新时也能找到」），
+    // 更糟的是用户主目录本身会被当成 bin 目录去扫。
+    result.push_str(rest);
     result = expand_dollar_vars(&result, variables);
     result
 }
@@ -1919,6 +1925,38 @@ mod tests {
         assert_eq!(found.version, "11.17.0-stub");
     }
 
+    /// %VAR% 展开必须保留变量**之后的全部内容**。
+    ///
+    /// 回归背景：这里曾经漏掉「循环结束把 rest 补进结果」这一步，于是
+    /// `%USERPROFILE%\.local\bin` 被展开成 `C:\Users\<用户>` —— known_bin_dirs 里
+    /// winget / uv / cargo / npm / nodejs 每一条的后缀都被吃掉，全部定位不到
+    /// （而这份清单存在的唯一理由就是「刚装完、PATH 还没刷新时也能找到」），
+    /// 并且用户主目录本身会被当成 bin 目录去扫。
+    #[test]
+    fn percent_expansion_keeps_text_after_the_variable() {
+        let variables = BTreeMap::from([
+            ("USERPROFILE".to_owned(), "C:\\Users\\tester".to_owned()),
+            (
+                "LOCALAPPDATA".to_owned(),
+                "C:\\Users\\tester\\AppData\\Local".to_owned(),
+            ),
+        ]);
+        // 变量后面还有内容：必须原样保留（这条就是漏掉的后缀）。
+        assert_eq!(
+            expand_env_with("%USERPROFILE%\\.local\\bin", &variables),
+            "C:\\Users\\tester\\.local\\bin"
+        );
+        assert_eq!(
+            expand_env_with("%LOCALAPPDATA%\\Microsoft\\WinGet\\Links", &variables),
+            "C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links"
+        );
+        // 裸变量（后面没有内容）照旧。
+        assert_eq!(expand_env_with("%USERPROFILE%", &variables), "C:\\Users\\tester");
+        // 未知变量原样保留，它后面的内容也不能丢。
+        assert_eq!(expand_env_with("%NOPE%\\tail", &variables), "%NOPE%\\tail");
+        // 没有配对的收尾 %：从该位起原样保留。
+        assert_eq!(expand_env_with("pre%USERPROFILE", &variables), "pre%USERPROFILE");
+    }
     /// 真机验证（替身存在才断言）：往 %USERPROFILE%\.local\bin 放一个 uv.cmd
     /// 替身、完全不改 PATH，探测也必须从这个已知目录里找到它。
     #[cfg(windows)]
@@ -1940,13 +1978,24 @@ mod tests {
         assert_eq!(found.path, stub);
         assert_eq!(found.source, SOURCE_KNOWN_DIR);
         assert!(!found.version.is_empty());
-        // 真实探测环境必须把该目录纳入候选（不动 PATH 也能被找到）。
+        // 真实探测环境必须把该目录纳入候选。
+        // 断言的是「它是候选」，**不是**「它必须打 known_dir 这个标签」：
+        // 目录已经在本机 PATH 上时，capture() 的去重会把它记成 process_path ——
+        // 那同样找得到，而且标签本来就该说明「为什么这里能找到」。
+        // 旧写法把标签当成判据，于是「PATH 里正好有这个目录」的机器上必然失败，
+        // 测的其实是环境长相而不是代码行为。
         let live = ProbeEnv::capture();
         assert!(
             live.directories
                 .iter()
-                .any(|(directory, source)| *source == SOURCE_KNOWN_DIR && directory == &bin),
+                .any(|(directory, _)| directory == &bin),
             "已知目录 {bin:?} 必须在探测路径里"
+        );
+        // 「不动 PATH 也能被找到」这一条由 known_bin_dirs 独立保证 —— 这才是本测试
+        // 真正要守住的性质（已知目录清单必须覆盖 ~/.local/bin）。
+        assert!(
+            known_bin_dirs(&live).iter().any(|directory| directory == &bin),
+            "known_bin_dirs 必须独立覆盖 {bin:?}"
         );
     }
 }

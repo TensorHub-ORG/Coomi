@@ -105,6 +105,9 @@ impl ProcessManager {
         match backend.kind() {
             RuntimeBackendKind::LegacyTermux => self.termux_backend = Some(backend),
             RuntimeBackendKind::ProotLinux => self.proot_backend = Some(backend),
+            /// 宿主原生：**不注册任何后端** —— 后端为空正是 runtime_shell / start
+            /// 走 platform_shell()（平台原生 shell）的条件，这就是我们要的语义。
+            RuntimeBackendKind::Host => {}
         }
         self
     }
@@ -298,7 +301,12 @@ impl ProcessManager {
                 .ok_or_else(|| anyhow::anyhow!("Termux environment is not available")),
             "host" => Ok(None),
             value => {
-                anyhow::bail!("environment must be auto, host, termux, or proot (received {value})")
+                let allowed = if cfg!(target_os = "android") {
+                    "auto, host, termux, or proot"
+                } else {
+                    "auto or host (Termux and ProotLinux do not exist on this platform)"
+                };
+                anyhow::bail!("environment must be {allowed} (received {value})")
             }
         }
     }

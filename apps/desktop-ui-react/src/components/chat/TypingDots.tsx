@@ -35,6 +35,7 @@ export function TypingDots({ className }: { className?: string }) {
             key={delay}
             aria-hidden
             className='coomi-typing-dot h-1 w-1 rounded-full bg-ink-3'
+            data-loop-anim
             /// 关掉动效时用内联 animation:none 压掉类里的 animation（内联样式优先级更高）。
             style={animated ? { animationDelay: delay + 's' } : { animation: 'none', opacity: 0.7 }}
           />

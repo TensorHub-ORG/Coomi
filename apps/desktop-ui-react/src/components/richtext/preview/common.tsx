@@ -32,7 +32,7 @@ export function PreviewNote({ tone = 'info', children, action }: {
 export function PreviewLoading({ label }: { label: string }) {
   return (
     <div className='flex items-center gap-2 px-3 py-6 text-12 text-ink-3'>
-      <Loader2 size={13} className='animate-spin' />
+      <Loader2 size={13} className='animate-spin' data-loop-anim />
       {label}
     </div>
   )

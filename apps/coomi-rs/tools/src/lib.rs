@@ -174,6 +174,19 @@ pub struct CoreTools {
     save_as_request: bool,
 }
 
+/// shell / local_shell 的 `environment` 可选值。
+///
+/// Termux 与 ProotLinux **只存在于 Android**。桌面端（Windows / macOS / Linux）把它们
+/// 列进工具 schema，模型就会照着调 `environment=proot` —— 而那个环境根本不存在，
+/// 任务当场失败。同一条判断在 install_runtime_environment_skill 里早就有
+/// （那份安卓专属指引「只对安卓安装」，见 with_config_home），工具 schema 这一侧之前漏了。
+fn shell_env_choices() -> Value {
+    if cfg!(target_os = "android") {
+        json!(["auto", "host", "termux", "proot"])
+    } else {
+        json!(["auto", "host"])
+    }
+}
 impl CoreTools {
     pub fn new(cwd: PathBuf, policy: SecurityPolicy) -> Self {
         Self {
@@ -360,18 +373,29 @@ impl CoreTools {
         self.path_map = RuntimePathMap::new(self.cwd.clone())
             .with_runtime_root(home.join("runtime-v2"))
             .with_termux(legacy.home.clone(), legacy.prefix.clone());
-        let prefix = legacy.prefix.clone();
-        let legacy_home = legacy.home.clone();
-        let mut processes =
-            ProcessManager::default().with_runtime_backend(Arc::new(LegacyTermuxBackend {
+        /* ── guest 后端**只对 Android 注册** ──
+           桌面端（Windows / macOS / Linux）既没有 Termux 也没有 ProotLinux。
+           以前这里是无条件挂一个 LegacyTermuxBackend，Proot 只是有条件地再覆盖一层；
+           于是 Windows 上 environment=auto 必然命中 Termux 后端，
+           shell / local_shell 就用 `/bin/sh -lc` 去起进程 —— 一个非 Windows 原生路径，
+           命令要么起不来、要么行为完全不对。
+           正路本来就有：ProcessManager 在后端为 None 时走 platform_shell()
+           （见 processes.rs 的 runtime_shell / start），只是被这个后端永远绕开了。
+           同一条平台判断在 with_config_home 上面那段 install_runtime_environment_skill 也有。 */
+        let mut processes = ProcessManager::default();
+        if cfg!(target_os = "android") {
+            let prefix = legacy.prefix.clone();
+            let legacy_home = legacy.home.clone();
+            processes = processes.with_runtime_backend(Arc::new(LegacyTermuxBackend {
                 prefix: prefix.clone(),
                 home: legacy_home.clone(),
             }));
-        if let Ok(manager) = RuntimeManager::open(&home)
-            && let Ok(backend) = manager.backend(prefix, legacy_home)
-            && backend.kind() == RuntimeBackendKind::ProotLinux
-        {
-            processes = processes.with_runtime_backend(Arc::from(backend));
+            if let Ok(manager) = RuntimeManager::open(&home)
+                && let Ok(backend) = manager.backend(prefix, legacy_home)
+                && backend.kind() == RuntimeBackendKind::ProotLinux
+            {
+                processes = processes.with_runtime_backend(Arc::from(backend));
+            }
         }
         self.processes = Arc::new(processes);
         self.config_home = Some(home);
@@ -3508,7 +3532,7 @@ impl CoreTools {
                     "type": "object",
                     "properties": {
                         "command": {"type": "string"},
-                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot"]},
+                        "environment": {"type": "string", "enum": shell_env_choices()},
                         "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 300000}
                     },
                     "required": ["command"],
@@ -3607,7 +3631,7 @@ impl CoreTools {
                     "properties": {
                         "action": {"type": "string", "enum": ["exec", "write", "wait", "terminate"]},
                         "command": {"type": "string"},
-                        "environment": {"type": "string", "enum": ["auto", "host", "termux", "proot"]},
+                        "environment": {"type": "string", "enum": shell_env_choices()},
                         "session_id": {"type": "string"},
                         "input": {"type": "string"},
                         "close_stdin": {"type": "boolean"},

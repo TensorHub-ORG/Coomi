@@ -19,9 +19,14 @@ import { useViewportWidth } from '../components/shell/dockShared'
 import { usePaneActive } from '../components/shell/navPause'
 import { fmtBytes, prettyPath, shortPath } from '../lib/format'
 import { ipc } from '../lib/ipc'
-import { PageHeader, Section, Cell } from '../components/ui/Card'
+// 全局确认弹窗（挂载在 App 根部）：安装更新前让用户确认一次。
+import { confirmAction } from '../stores/dialogs'
+import { PageHeader, Cell } from '../components/ui/Card'
+import { EffortSlider } from '../components/ui/EffortSlider'
 // 分组导航 + 「旧出 / 新入」的过渡与卡片错峰（都在这个组件里，视图只负责给数据与滚动位置）。
 import { GroupNav, GroupTransition, Stagger, StaggerGrid } from '../components/settings/GroupTransition'
+// 设置页搜索：静态索引 + 过滤 + 高亮 + 键盘导航（分组表 GROUPS 也搬到了这里）。
+import { GROUPS, SettingsSearchProvider, useSettingsSearchState, Searchable, SearchableCell, SearchSection, E, Highlight, AI_TOGGLE_ENTRIES, type GroupKey } from './settingsSearch'
 // 界面字号三档：选项与「旧值归一」都在这个表里；落盘/生效仍走 stores/ui.ts 既有的外观设置那条路。
 import { UI_FONT_SCALES, nearestFontScale } from '../components/settings/uiFontScale'
 import { ProviderWizard } from '../components/settings/ProviderWizard'
@@ -43,9 +48,11 @@ import logo from '../assets/coomi-logo.png'
 import { Button } from '../components/ui/Button'
 import { Input, Badge } from '../components/ui/Input'
 import { Segmented, Skeleton, SkeletonRows, Spinner, Switch } from '../components/ui/Controls'
+// 首帧壳闸门：这一帧过去之前只画外壳（骨架），两百多个格子的渲染全挪到下一帧。
+import { useFirstFrame } from '../components/ui/firstFrame'
 // 注：AI 状态动效（AgentState）由 components/ai/AgentState.tsx 提供，本页此刻还没有该文件，
 // 「加载中」一律先用骨架屏占位。TODO(components/ai/AgentState)：就绪后换成 <AgentState state="running" size="sm" />。
-import { useAgent, EFFORT_LABELS, PERMISSION_LABELS, type PermissionMode, type ReasoningEffort } from '../stores/agent'
+import { useAgent, EFFORT_LABELS, PERMISSION_LABELS, type PermissionMode } from '../stores/agent'
 import { useCapabilities, type Capabilities } from '../stores/capabilities'
 import { Menu } from '../components/ui/Menu'
 import { Select } from '../components/ui/Select'
@@ -54,7 +61,7 @@ import { usePluginStore, activeThemePluginId, pluginName, themePlugins } from '.
 // 「再看一次」入口：引导的开关在它自己的 store 里（首次启动那套强制勾选不受影响）。
 import { openOnboarding } from '../components/onboarding/store'
 import { cn } from '../lib/cn'
-import { Trash2, RefreshCw, FolderOpen, Plus, Brain, Shield, Wrench, Server, LifeBuoy, Download, AlertTriangle } from 'lucide-react'
+import { Trash2, RefreshCw, FolderOpen, Plus, Brain, Shield, Wrench, Server, LifeBuoy, Download, AlertTriangle, Search, X } from 'lucide-react'
 
 /** 关于页显示的「构建日期」：**必须取本地日期**。
  *  用 toISOString() 拿到的是 UTC 日期 —— 东八区凌晨 0~8 点时它还是前一天，
@@ -132,23 +139,6 @@ interface UpdateState {
   error?: string
 }
 
-/** 设置分组：左列导航，右侧只渲染当前组。**放在组件外** —— 它是静态表，
-    写在组件里等于每次渲染都新建一份，GroupNav 的 props 永远不相等（连带它的指南针测量一起重跑）。 */
-const GROUPS = [
-  { key: 'general', label: '通用' },
-  { key: 'appearance', label: '外观' },
- 
-  { key: 'models', label: '模型与厂商' },
-  { key: 'workspace', label: '工作区' },
-  { key: 'ai', label: 'AI 能力' },
-  { key: 'life', label: '数字生命体' },
-  { key: 'engine', label: '引擎与诊断' },
-  { key: 'about', label: '关于' },
-] as const
-
-/** 分组 key 的联合类型（表在上面，类型跟着表走）。 */
-type GroupKey = (typeof GROUPS)[number]['key']
-
 
 const RECENT_KEY = 'coomi.recentCwd.v1'
 
@@ -203,6 +193,27 @@ const TRACE_MAX_PRESETS = [0, 64, 256, 1024]
 function traceMaxOptions(current: number): Array<{ value: string; label: string }> {
   const values = TRACE_MAX_PRESETS.includes(current) ? TRACE_MAX_PRESETS : [...TRACE_MAX_PRESETS, current].sort((a, b) => a - b)
   return values.map((v) => ({ value: String(v), label: v === 0 ? '不限' : v + ' MB' }))
+}
+
+/** 自动恢复重试次数的档位（引擎新语义）：0 = 关闭；1–254 = 次数；255 = 无限。
+ *  「无限」由这里把 255 发到 /api/agent/preferences —— 引擎侧会一直自动重试，
+ *  直到成功或遇到非瞬时错误。引擎回读值不在预设里时（旧版存的 4、7 之类）补进
+ *  选项，否则 Segmented 整组一个都不亮（与 traceMaxOptions 同一套做法）。 */
+const RETRY_COUNT_PRESETS: Array<{ value: number; label: string }> = [
+  { value: 0, label: '关闭' },
+  { value: 1, label: '1' },
+  { value: 2, label: '2' },
+  { value: 3, label: '3' },
+  { value: 5, label: '5' },
+  { value: 10, label: '10' },
+  { value: 255, label: '无限' },
+]
+function retryCountOptions(current: number): Array<{ value: string; label: string }> {
+  const has = RETRY_COUNT_PRESETS.some((o) => o.value === current)
+  const list = has
+    ? RETRY_COUNT_PRESETS
+    : [...RETRY_COUNT_PRESETS, { value: current, label: String(current) }].sort((a, b) => a.value - b.value)
+  return list.map((o) => ({ value: String(o.value), label: o.label }))
 }
 
 /** 消息栏宽度：固定档 窄/标准/宽 + 自适应，并给实时预览与当前像素值。 */
@@ -312,15 +323,20 @@ export function SettingsView() {
   const agentPermission = useAgent((s) => s.permission)
   const agentEffort = useAgent((s) => s.effort)
   const agentMaxToolRounds = useAgent((s) => s.maxToolRounds)
+  const agentProviderRetryCount = useAgent((s) => s.providerRetryCount)
+  const agentReconnectMaxDelayMs = useAgent((s) => s.reconnectMaxDelayMs)
   const agent = useMemo(() => ({
     permission: agentPermission,
     effort: agentEffort,
     maxToolRounds: agentMaxToolRounds,
+    providerRetryCount: agentProviderRetryCount,
+    reconnectMaxDelayMs: agentReconnectMaxDelayMs,
     setPermission: useAgent.getState().setPermission,
     setEffort: useAgent.getState().setEffort,
     setMaxToolRounds: useAgent.getState().setMaxToolRounds,
-  }), [agentPermission, agentEffort, agentMaxToolRounds])
-
+    setProviderRetryCount: useAgent.getState().setProviderRetryCount,
+    setReconnectMaxDelayMs: useAgent.getState().setReconnectMaxDelayMs,
+  }), [agentPermission, agentEffort, agentMaxToolRounds, agentProviderRetryCount, agentReconnectMaxDelayMs])
   const [providers, setProviders] = useState<Provider[]>([])
   /// 每个 Provider 拉到的模型列表（自动获取，不再手打模型名）。
   const [modelMap, setModelMap] = useState<Record<string, string[]>>({})
@@ -349,16 +365,21 @@ export function SettingsView() {
   const [dataHome, setDataHome] = useState('')
   const [logPath, setLogPath] = useState('')
   const [logOpen, setLogOpen] = useState(false)
-  const [recent, setRecent] = useState<string[]>(readRecent())
+  /* 最近目录：原来是在 useState 的**初始值**里同步读 localStorage —— 那是首帧的同步活，
+     而且它只喂给「工作区」分组。首帧只画外壳时这个值用不上，
+     所以初始给空数组、挂载后（外壳画过之前，effect 就在首帧提交后跑）再读，
+     正文那一帧拿到的仍然是完整的值，界面看不出差别。 */
+  const [recent, setRecent] = useState<string[]>([])
   const [notice, setNotice] = useState('')
   /// 桌面壳行为（关闭到托盘 / 开机自启），由 Tauri 侧持久化在 desktop-ui.json。
-  const [desktopPrefs, setDesktopPrefs] = useState({ closeToTray: true, autostart: false })
+  const [desktopPrefs, setDesktopPrefs] = useState({ closeToTray: true, autostart: false, checkUpdatesOnStartup: true, updateChannel: 'beta' as 'beta' | 'release' })
   const caps = useCapabilities((s) => s.caps)
   const setCaps = useCapabilities((s) => s.set)
   /// 设置分组：左列导航，右侧只渲染当前组（分组表在文件顶部，静态一份）。
   /// 空态那句话每 14 秒换一组（默认开）。刻意**不**并进 ui.prefs：它落在自己的
   /// localStorage 键上（coomi.rotateCopy.v1），偏好结构不动，空态那边按订阅即时跟上。
-  const [rotateCopy, setRotateCopy] = useState(readRotateCopyEnabled)
+  /// 同上：读 localStorage 的那一行挪到 effect 里（默认值 true＝键没写过时的口径）。
+  const [rotateCopy, setRotateCopy] = useState(true)
   const [group, setGroup] = useState<GroupKey>('appearance')
   /// 分组切换方向：1＝往后面的分组切（内容向上走）。GroupTransition 依据它决定进出场方向。
   const [groupDir, setGroupDir] = useState(1)
@@ -366,6 +387,59 @@ export function SettingsView() {
   /// 换组时先存下当前分组的 scrollTop，新分组挂载时再由 GroupTransition 放回去。
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const scrollMemo = useRef<Record<string, number>>({})
+
+  /* ── 首帧只画外壳（重活全挪到外壳画过之后）──
+     这一页的挂载是一大坨同步活：两百多个格子、每个 Segmented 各量一次几何、
+     左列导航与卡片错峰（motion 的变体树）、搜索索引。它们全在**同一帧**里算完才提交，
+     而切页正文又是 startTransition 挂的 —— 于是这一帧之前屏幕上什么都拿不到，
+     用户看到的就是「进设置页假死约 1 秒才出界面」。
+     这里把首帧换成骨架：页头 / 左列分组导航 / 滚动容器照常画（外壳与真身完全一致，
+     切换那一帧的布局不会跳），正文等两拍 rAF 之后再挂。
+
+     取数**不受这一层影响**：下面那些 effect 照旧从挂载那一刻起并行发请求
+     （providers / life / 路径 / 日志 / 桌面偏好），外壳画完、数据陆续回来的那几帧里，
+     正文正好是数据已经在手的状态。 */
+  const firstFrameReady = useFirstFrame()
+  /** 两个 localStorage 读取：首帧的同步活，挂载后立刻补读（早于正文那一帧）。 */
+  useEffect(() => {
+    setRecent(readRecent())
+    setRotateCopy(readRotateCopyEnabled())
+  }, [])
+
+  /* ── 分帧填充：先铺当前分组，其余分组随后补挂 ──
+     八个分组无论看哪一组都写在同一棵 JSX 里（不看的那几个只是带 hidden），
+     React 照样会把它们**全部**渲染出来 —— 两百多个格子、每个格子外面还包一层 motion 变体项
+     （StaggerGrid）、每个 Segmented 各量一次几何，再加上「引擎与诊断 / AI 能力」里那几个
+     数据面板各自发的请求，全挤在进入设置页的那一帧：这就是「假死约 1 秒」的大头。
+     现在分三步走：
+       第 1 帧  外壳骨架（useFirstFrame）；
+       第 2 帧  只铺**当前分组**（三十来个格子）—— 用户马上能看能点；
+       第 3 帧  其余分组在空闲回调里**一次性**补挂（补挂时它们带 hidden，看不见）。
+     为什么不是「一个分组一帧」：每次 setState 都会重跑整个 SettingsView 的渲染，
+     已经挂上的分组要跟着重新 reconcile —— 逐个补挂等于把总工作量做成 O(n²)，反而更慢。
+     为什么用 requestIdleCallback：rAF 只是「下一帧的开头」，在那里补挂照样落在关键路径上；
+     空闲回调才会主动挑主线程的空档（timeout 兜底，页面一直忙也不会忘补）。
+     补齐之后就不再有挂载/卸载，换分组回到「热切换」：点一下立刻出内容。
+     timeout 为什么从 600ms 收到 250ms（本次性能修复）：它是「最迟多久必须补挂」的闸门，
+     浏览器一有空档就会提前触发，实际很少真的等满；真正会等满的是进入设置页后主线程最忙的
+     那几百毫秒（各面板自己发的请求与首屏渲染）—— 原来那 600ms 里用户切分组，
+     「模型与厂商 / 记忆 / 诊断」这些组仍是空的（未挂载），看起来就是「内容不全」。
+     250ms 既保留「让出关键路径」的原意，又把这段「内容不全」的窗口压掉一大半。 */
+  const [mountedGroups, setMountedGroups] = useState<ReadonlySet<GroupKey>>(() => new Set<GroupKey>([group]))
+  useEffect(() => {
+    if (!firstFrameReady) return
+    const idle = (window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    })
+    const mountRest = (): void => { setMountedGroups(new Set(GROUPS.map((g) => g.key))) }
+    if (typeof idle.requestIdleCallback !== 'function') {
+      const timer = window.setTimeout(mountRest, 120)
+      return () => window.clearTimeout(timer)
+    }
+    const handle = idle.requestIdleCallback(mountRest, { timeout: 250 })
+    return () => { idle.cancelIdleCallback?.(handle) }
+  }, [firstFrameReady])
 
   const selectGroup = (next: GroupKey): void => {
     if (next === group) return
@@ -472,6 +546,16 @@ export function SettingsView() {
       if (verify.status !== 'ok') {
         throw new Error(verify.message || '校验失败')
       }
+      // 校验通过 → 用户确认 → 才拉起安装程序（不自动静默装，也不自动退出应用）。
+      const confirmed = await confirmAction({
+        title: '确认安装更新？',
+        description: '安装包已下载并校验通过（SHA-256 匹配）。点击确认将启动安装程序，安装完成后请重启应用。',
+        confirmLabel: '启动安装',
+      })
+      if (!confirmed) {
+        setUpdatePhase({ text: '已取消安装：安装包保留在下载目录，可稍后手动安装。', tone: 'info' })
+        return
+      }
       setUpdatePhase({ text: '校验通过，正在启动安装程序…', tone: 'info' })
       const install = await ipc<UpdateActionReport>('install_update', {
         path: download.path,
@@ -479,10 +563,10 @@ export function SettingsView() {
       })
       if (install.status !== 'ok') throw new Error(install.message || '无法启动安装程序')
       setUpdatePhase({
-        text: install.message + '：它会关闭本应用并自动重开，稍等片刻即可用上新版本。',
+        text: install.message || '安装程序已启动；安装完成后请重启应用。',
         tone: 'ok',
       })
-      flash('更新已开始，应用即将重启')
+      flash('安装程序已启动')
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       setUpdatePhase({ text: '一键更新失败：' + message + '（可用「手动下载」自己装）', tone: 'error' })
@@ -547,8 +631,13 @@ export function SettingsView() {
     void ipc<string>('data_home').then(setDataHome).catch(() => {})
     void ipc<string | null>('engine_log_path').then((p) => setLogPath(p ?? '')).catch(() => {})
     // 桌面壳的后台运行开关（老版本壳没有这个命令，失败时保持默认值即可）。
-    void ipc<{ closeToTray: boolean; autostart: boolean }>('desktop_prefs')
-      .then((prefs) => setDesktopPrefs({ closeToTray: prefs?.closeToTray ?? true, autostart: prefs?.autostart ?? false }))
+    void ipc<{ closeToTray: boolean; autostart: boolean; checkUpdatesOnStartup?: boolean; updateChannel?: 'beta' | 'release' }>('desktop_prefs')
+      .then((prefs) => setDesktopPrefs({
+        closeToTray: prefs?.closeToTray ?? true,
+        autostart: prefs?.autostart ?? false,
+        checkUpdatesOnStartup: prefs?.checkUpdatesOnStartup ?? true,
+          updateChannel: prefs?.updateChannel ?? 'beta',
+      }))
       .catch(() => {})
   }, [engine.ready])
 
@@ -573,7 +662,89 @@ export function SettingsView() {
   const rawCwd = session.pendingCwd || engine.cwd || ''
   const defaultCwd = prettyPath(rawCwd)
 
+  /* ── 设置页搜索 ──
+     搜索状态由 useSettingsSearchState() 持有（防抖 / 静态索引 / 键盘导航都在 settingsSearch.tsx），
+     这里只消费：sectionCls 决定每个分组是否收起，搜索框的输入与按键回传给 hook。 */
+  const search = useSettingsSearchState()
+  const searchQuery = search.query
+  const searchRaw = search.raw
+  /// 分组可见性：搜索时只看命中（未命中的分组整组收起）；清空后回到「只显示当前分组」。
+  const sectionCls = (key: GroupKey): string =>
+    searchQuery ? (search.groupHits.has(key) ? '' : 'hidden') : group === key ? '' : 'hidden'
+  /** 这一组**挂不挂**（与「显不显示」是两件事，见上面 mountedGroups 那段）：
+      搜索时全挂（搜索要能命中任意一组，且命中的组必须全在树上）；
+      平时只挂已补挂的 + 当前这一组 —— 当前这一组永远在列内，用户点过去那一刻直接渲染出来。 */
+  const groupMounted = (key: GroupKey): boolean => searchQuery !== '' || key === group || mountedGroups.has(key)
+
+  /* 页头：**首帧壳与正文共用同一份**。外壳里也画它，切换那一帧的页头才不会凭空长出来；
+     搜索框一并放在这里 —— 它很轻，而用户点进设置页最常做的事就是搜索。 */
+  const pageHeader = (
+    <PageHeader
+      className='mb-1'
+      sticky
+      title='设置'
+      description='外观、模型、工作区、数字生命体与引擎，都集中在这里。'
+      actions={
+        <div className='flex items-center gap-3'>
+          {/* 设置页搜索：索引 / 防抖 / 高亮 / 键盘导航都在 settingsSearch.tsx，这里只接输入。
+              索引本身是懒建的（见 settingsIndex）：没敲字时它一次都不会被拼出来。 */}
+          <div className='relative'>
+            <Search size={14} className='pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4' />
+            <Input
+              className='h-8 w-60 pl-8 pr-8'
+              placeholder='搜索设置'
+              value={searchRaw}
+              onChange={(e) => search.setRaw(e.target.value)}
+              onKeyDown={search.onInputKeyDown}
+              aria-label='搜索设置'
+              data-testid='settings-search'
+            />
+            {searchRaw ? (
+              <button
+                type='button'
+                aria-label='清空搜索'
+                onClick={search.clear}
+                className='absolute right-1.5 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded text-ink-4 transition-colors hover:bg-hover hover:text-ink'
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </div>
+          {notice ? <span className='text-12 text-ok'>{notice}</span> : null}
+        </div>
+      }
+    />
+  )
+
+  /* ── 首帧壳：外壳与真身**逐层同构**，只有最里面那一层内容换成骨架 ──
+     同一个 <main>、同一层 flex、左列分组导航、滚动容器、页头全都照画，
+     所以「骨架 → 正文」这一跳的布局与真身完全一致，切换那一帧不会跳版。
+     骨架沿用文件里已有的 SkeletonRows（列表/目录那一副形状）；标题取当前分组的真名，
+     于是骨架不是「随便一块灰」，而是这一屏马上要出现的东西的轮廓。 */
+  if (!firstFrameReady) {
+    return (
+      <SettingsSearchProvider value={search}>
+        <main data-settings-shell className='flex min-h-0 flex-1 flex-col bg-canvas'>
+          <div className='flex min-h-0 flex-1 gap-6 px-8 pb-8'>
+            <GroupNav className='w-[176px] pt-1' groups={GROUPS} value={group} onChange={selectGroup} />
+            <div ref={bodyRef} className='min-h-0 flex-1 overflow-y-auto' data-testid='settings-body'>
+              {pageHeader}
+              <div className='px-8 pb-4'>
+                <div className='flex max-w-[860px] flex-col gap-5'>
+                  <SearchSection title={GROUPS.find((g) => g.key === group)?.label ?? ''}>
+                    <SkeletonRows rows={8} className='px-0 py-2' />
+                  </SearchSection>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </SettingsSearchProvider>
+    )
+  }
+
   return (
+    <SettingsSearchProvider value={search}>
     <main className='flex min-h-0 flex-1 flex-col bg-canvas'>
       <div className='flex min-h-0 flex-1 gap-6 px-8 pb-8'>
         <GroupNav className='w-[176px] pt-1' groups={GROUPS} value={group} onChange={selectGroup} />
@@ -581,13 +752,7 @@ export function SettingsView() {
             切分组不再是硬切：旧分组先退场、新分组再入场（方向按分组顺序），
             组内卡片按 20ms 错峰进来；每个分组的滚动位置各自记忆（scrollMemo）。 */}
         <div ref={bodyRef} className='min-h-0 flex-1 overflow-y-auto' data-testid='settings-body'>
-          <PageHeader
-            className='mb-1'
-            sticky
-            title='设置'
-            description='外观、模型、工作区、数字生命体与引擎，都集中在这里。'
-            actions={notice ? <span className='text-12 text-ok'>{notice}</span> : null}
-          />
+          {pageHeader}
           <GroupTransition
             groupKey={group}
             dir={groupDir}
@@ -596,21 +761,21 @@ export function SettingsView() {
             className='px-8 pb-4'
           >
           <div className='flex max-w-[860px] flex-col gap-5'>
-          <Section className={group === 'general' ? '' : 'hidden'} title='通用' description='启动行为、发送行为与危险操作的确认策略。'>
+          <SearchSection mounted={groupMounted('general')} className={sectionCls('general')} title={<Highlight text='通用' query={searchQuery} />} description={<Highlight text='启动行为、发送行为与危险操作的确认策略。' query={searchQuery} />}>
           <StaggerGrid>
-            <Cell label='启动时打开的页面' hint='下次启动默认进入这个页面'>
+            <SearchableCell entry={E.generalStartup}>
               <Segmented<ViewKey>
                 value={ui.prefs.defaultView}
                 onChange={(v) => ui.setPrefs({ defaultView: v })}
                 options={[{ value: 'chat', label: '对话' }, { value: 'skills', label: '技能中心' }, { value: 'artifacts', label: '产物中心' }]}
               />
-            </Cell>
+            </SearchableCell>
             {/* 发送时插话模式：字段就是 stores/ui.ts 的 prefs.insertMode（现为 'interrupt' | 'queue'）。
                 插队＝生成中按 Enter 打断当前轮、立刻发送新消息（已生成内容保留）；
                 排队＝本轮跑完再按顺序执行，一个字不丢。对话页输入区右下角的同名菜单
                 读写的是同一个字段，两处不会各存一份默认值。 */}
-            <Cell
-              label='发送时插话模式'
+            <SearchableCell
+              entry={E.generalInsertMode}
               hint={ui.prefs.insertMode === 'interrupt'
                 ? '插队：生成中按 Enter 打断当前轮并立刻发送（已生成内容保留）'
                 : '排队：生成中按 Enter 先排队，本轮结束后按顺序执行（不打断、不丢内容）'}
@@ -620,24 +785,26 @@ export function SettingsView() {
                 onChange={(v) => ui.setPrefs({ insertMode: v })}
                 options={[{ value: 'interrupt', label: '插队' }, { value: 'queue', label: '排队' }]}
               />
-            </Cell>
-            <Cell label='危险操作二次确认' hint='删除对话、卸载技能、清理缓存前先问一次'>
+            </SearchableCell>
+            <SearchableCell entry={E.generalConfirmDanger}>
               <Switch checked={ui.prefs.confirmDanger} onCheckedChange={(v) => ui.setPrefs({ confirmDanger: v })} />
-            </Cell>
+            </SearchableCell>
             {/* 安全模式（自救开关）：字段是 stores/ui.ts 的 prefs.safeMode（默认 false）。
                 打开＝精简模式 —— 动效、富预览、语法高亮、长列表虚拟化与刻度轨重算全部让路，
                 界面只画纯文本。发消息时整屏卡死的话，先靠它把界面救回来再查原因。
                 另外两个入口：启动时在地址栏加 ?safe=1，或把 localStorage 的 coomi.safe.v1 设成 1
                 （界面卡到点不动设置页时，那两条还走得通）。 */}
-            <Cell
+            <SearchableCell
+              entry={E.generalSafeMode}
               label={<span className='flex items-center gap-2'><LifeBuoy size={14} className='text-ink-3' /> 安全模式</span>}
               hint={ui.prefs.safeMode
                 ? '已开启：动效、富预览、语法高亮与长列表虚拟化都关了，只画纯文本 —— 卡死时自救用'
                 : '界面卡死 / 一卡一顿时打开：关掉动效、富预览、语法高亮与虚拟化，只画纯文本'}
             >
               <Switch checked={ui.prefs.safeMode} onCheckedChange={(v) => ui.setPrefs({ safeMode: v })} />
-            </Cell>
-            <Cell
+            </SearchableCell>
+            <SearchableCell
+              entry={E.generalPermission}
               label={<span className='flex items-center gap-2'><Shield size={14} className='text-ink-3' /> 任务放行程度</span>}
               hint={PERMISSION_LABELS.find((p) => p.value === agent.permission)?.hint}
             >
@@ -646,11 +813,11 @@ export function SettingsView() {
                 onChange={(v) => void agent.setPermission(v)}
                 options={PERMISSION_LABELS.map((p) => ({ value: p.value, label: p.label }))}
               />
-            </Cell>
+            </SearchableCell>
             {agent.permission === 'full' ? (
               <p className='px-1 pb-2 text-12 text-warn'>完全放行后 Agent 不再停下询问，包含删除类操作——只建议在你完全信任当前任务时使用。</p>
             ) : null}
-            <Cell label='关闭窗口时最小化到托盘' hint='后台继续运行引擎与正在跑的任务；从托盘图标可以再打开或退出'>
+            <SearchableCell entry={E.generalCloseToTray}>
               <Switch
                 checked={desktopPrefs.closeToTray}
                 onCheckedChange={(v) => {
@@ -658,8 +825,8 @@ export function SettingsView() {
                   void ipc('set_close_to_tray', { enabled: v }).catch(() => setDesktopPrefs((prev) => ({ ...prev, closeToTray: !v })))
                 }}
               />
-            </Cell>
-            <Cell label='开机自动启动' hint='登录后在后台启动 Coomi（不弹出窗口，直接进托盘）'>
+            </SearchableCell>
+            <SearchableCell entry={E.generalAutostart}>
               <Switch
                 checked={desktopPrefs.autostart}
                 onCheckedChange={(v) => {
@@ -669,32 +836,61 @@ export function SettingsView() {
                     .catch(() => setDesktopPrefs((prev) => ({ ...prev, autostart: !v })))
                 }}
               />
-            </Cell>
+            </SearchableCell>
+            {/* 启动时检查更新：壳启动后静默查一次，发现新版本才提示（默认开）。 */}
+            <SearchableCell entry={E.generalCheckUpdatesOnStartup}>
+              <Switch
+                checked={desktopPrefs.checkUpdatesOnStartup}
+                onCheckedChange={(v) => {
+                  setDesktopPrefs((prev) => ({ ...prev, checkUpdatesOnStartup: v }))
+                  void ipc('set_check_updates_on_startup', { enabled: v })
+                    .catch(() => setDesktopPrefs((prev) => ({ ...prev, checkUpdatesOnStartup: !v })))
+                }}
+              />
+            </SearchableCell>
+            {/* 更新渠道：beta（默认，含 -rc 测试版）/ release（只看正式版标签）。 */}
+            <div className='flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3'>
+              <div className='flex flex-col gap-0.5'>
+                <span className='text-13 text-ink-2'>更新渠道</span>
+                <span className='text-11 text-ink-4'>beta=含测试版（默认）；release=只收正式版</span>
+              </div>
+              <Segmented<string>
+                value={desktopPrefs.updateChannel}
+                onChange={(v) => {
+                  const channel = v === 'release' ? 'release' : 'beta'
+                  setDesktopPrefs((prev) => ({ ...prev, updateChannel: channel }))
+                  void ipc('set_update_channel', { channel }).catch(() =>
+                    setDesktopPrefs((prev) => ({ ...prev, updateChannel: prev.updateChannel === 'release' ? 'beta' : 'release' })),
+                  )
+                }}
+                options={[
+                  { value: 'beta', label: 'BETA' },
+                  { value: 'release', label: 'release' },
+                ]}
+              />
+            </div>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
 
-          <Section className={group === 'appearance' ? '' : 'hidden'} title='外观' description='主题、字号、密度与消息栏宽度。'>
+          <SearchSection mounted={groupMounted('appearance')} className={sectionCls('appearance')} title={<Highlight text='外观' query={searchQuery} />} description={<Highlight text='主题、字号、密度与消息栏宽度。' query={searchQuery} />}>
           <StaggerGrid>
-            <Cell label='字体' hint='默认内置 HarmonyOS Sans SC；系统字体更省内存'>
+            <SearchableCell entry={E.appearanceFont}>
               <Segmented<'harmony' | 'system'>
                 value={ui.prefs.fontFamily}
                 onChange={(v) => ui.setPrefs({ fontFamily: v })}
                 options={[{ value: 'harmony', label: 'HarmonyOS Sans' }, { value: 'system', label: '系统字体' }]}
               />
-            </Cell>
-            <Cell label='主题' hint='跟随系统会随 Windows 深浅色切换'>
+            </SearchableCell>
+            <SearchableCell entry={E.appearanceTheme}>
               <Segmented<ThemeMode>
                 value={ui.themeMode}
                 onChange={(v) => ui.setThemeMode(v)}
                 options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]}
               />
-            </Cell>
+            </SearchableCell>
             {/* 插件主题：有「已启用且带主题」的插件才显示这一行；选「默认」恢复内置主题。 */}
             {pluginThemes.length ? (
-              <Cell
-                label='插件主题'
-                hint='插件提供的整套配色与圆角令牌；切换立即生效，选「默认」恢复内置主题。'
-              >
+              <SearchableCell entry={E.appearancePluginTheme}>
                 <Select
                   value={activePluginThemeId ?? '__default__'}
                   width={190}
@@ -704,49 +900,55 @@ export function SettingsView() {
                     ...pluginThemes.map((p) => ({ value: p.id, label: pluginName(p) })),
                   ]}
                 />
-              </Cell>
+              </SearchableCell>
             ) : null}
             {/* 界面字号：写进 <html> 的 --ui-font-scale（stores/ui.ts 的 setFontScale），
                 即时生效并落 localStorage（键 coomi.fontScale）——与主题 / 字体 / 密度同一条路。
-                默认「较大」(1.08)：theme.css 的 --ui-font-scale 默认值同样是 1.08（12px→约 13、13px→约 14）。
+                默认「大」(1.18)：theme.css 的 --ui-font-scale 兜底值同样写 1.18（12px→约 14、13px→约 15）。
+                默认值必须是 UI_FONT_SCALES 里的档位，否则设置页高亮与实际字号对不上。
                 旧存档里的 0.92 / 1.16 由 nearestFontScale 归到最近档显示，不悄悄改用户落盘的值。 */}
-            <Cell label='界面字号' hint='全局缩放，中英文一起变；改完立即生效并记住'>
+            <SearchableCell entry={E.appearanceFontSize}>
               <Segmented<string>
                 value={String(nearestFontScale(ui.fontScale))}
                 onChange={(v) => ui.setFontScale(Number(v))}
                 options={UI_FONT_SCALES.map((o) => ({ value: String(o.value), label: o.label }))}
               />
-            </Cell>
-            <Cell label='界面密度' hint='控制页面留白与行高'>
+            </SearchableCell>
+            <SearchableCell entry={E.appearanceDensity}>
               <Segmented<Density>
                 value={ui.prefs.density}
                 onChange={(v) => ui.setPrefs({ density: v })}
                 options={[{ value: 'compact', label: '紧凑' }, { value: 'cozy', label: '舒适' }]}
               />
-            </Cell>
-            <MessageWidthField
-              wide
-              mode={ui.prefs.messageWidthMode}
-              width={ui.prefs.messageWidth}
-              onMode={(m) => ui.setPrefs({ messageWidthMode: m })}
-              onWidth={(px) => ui.setPrefs({ messageWidth: px, messageWidthMode: 'fixed' })}
-            />
-            <Cell label='界面动效' hint='关闭后所有过渡与动画立即完成'>
+            </SearchableCell>
+            <Searchable wide entry={E.appearanceMessageWidth}>
+              <MessageWidthField
+                wide
+                mode={ui.prefs.messageWidthMode}
+                width={ui.prefs.messageWidth}
+                onMode={(m) => ui.setPrefs({ messageWidthMode: m })}
+                onWidth={(px) => ui.setPrefs({ messageWidth: px, messageWidthMode: 'fixed' })}
+              />
+            </Searchable>
+            <SearchableCell entry={E.appearanceMotion}>
               <Switch checked={ui.prefs.motion} onCheckedChange={(v) => ui.setPrefs({ motion: v })} />
-            </Cell>
+            </SearchableCell>
             {/* 空态文案轮换：只影响「新对话」首屏那句话（每 14 秒换一组，上下翻页式切换）。
                 开关落在 coomi.rotateCopy.v1，写完立刻通知已挂载的空态（见 lib/rotateCopy.ts）。 */}
-            <Cell label='空态文案轮换' hint={rotateCopy ? '新对话首屏那句标题每 14 秒上下翻页换一组' : '已关闭：首屏那句标题固定不动'}>
+            <SearchableCell
+              entry={E.appearanceRotateCopy}
+              hint={rotateCopy ? '新对话首屏那句标题每 14 秒上下翻页换一组' : '已关闭：首屏那句标题固定不动'}
+            >
               <Switch
                 checked={rotateCopy}
                 onCheckedChange={(v) => { writeRotateCopyEnabled(v); setRotateCopy(v) }}
               />
-            </Cell>
+            </SearchableCell>
             {/* 性能模式：字段是 stores/ui.ts 的 prefs.perf（'high' | 'low'，默认 high）。
                 打开＝省电档：html[data-perf=low]，毛玻璃、点阵循环动效与设置页错峰都收掉，
                 长会话也更早交给虚拟列表。整档只认这一处开关，组件不各存一份。 */}
-            <Cell
-              label='性能模式'
+            <SearchableCell
+              entry={E.appearancePerf}
               hint={ui.prefs.perf === 'low'
                 ? '省电档已开启：关毛玻璃与点阵动效、长会话更早虚拟化'
                 : '机器吃紧或要省电时打开：关毛玻璃与点阵动效、长会话更早虚拟化'}
@@ -755,49 +957,42 @@ export function SettingsView() {
                 checked={ui.prefs.perf === 'low'}
                 onCheckedChange={(v) => ui.setPrefs({ perf: v ? 'low' : 'high' })}
               />
-            </Cell>
+            </SearchableCell>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
 
           {/* 插件中心已移到左侧导航栏（Rail → 插件 图标），设置页不再内嵌。 */}
 
-          <Section
-            className={group === 'models' ? '' : 'hidden'}
-            title='模型与 Provider'
-            description='OpenAI 兼容接口；当前使用的 Provider 决定对话走哪条链路。'
+          <SearchSection
+            mounted={groupMounted('models')}
+            className={sectionCls('models')}
+            title={<Highlight text='模型与 Provider' query={searchQuery} />}
+            description={<Highlight text='OpenAI 兼容接口；当前使用的 Provider 决定对话走哪条链路。' query={searchQuery} />}
             actions={<Button variant='ghost' size='sm' onClick={() => void loadProviders()}><RefreshCw size={13} /> 刷新</Button>}
           >
             {/* 这块是整块内容，不能塞进 StaggerGrid（那是两列网格，会被压成半列宽的竖条）。 */}
             <div
-              className={cn('@container flex min-w-0 flex-col gap-3 px-5 py-4', group === 'models' ? '' : 'hidden')}
+              className={cn('@container flex min-w-0 flex-col gap-3 px-5 py-4', (searchQuery ? search.groupHits.has('models') : group === 'models') ? '' : 'hidden')}
               data-testid='providers-panel'
             >
               <div className='grid min-w-0 grid-cols-1 gap-2.5 @2xl:grid-cols-3' data-testid='providers-top'>
                 {/* 三张并列卡：思考强度 / 单轮工具上限 / 添加厂商。
                     每张外面包一层 Stagger：跟着分组入场一起 20ms 错峰。 */}
                 <Stagger>
+                <Searchable entry={E.modelsThinking}>
                 <div className='card-lift flex flex-col justify-between rounded-xl border border-line bg-surface elev-1 p-4'>
                   <div className='flex items-center gap-1.5 text-12 text-ink-3'><Brain size={13} /> 思考强度</div>
                   <div className='mt-2 text-18 font-semibold text-ink'>{EFFORT_LABELS.find((e) => e.value === agent.effort)?.label ?? '自动'}</div>
                   <p className='mt-1 text-11 text-ink-4'>{EFFORT_LABELS.find((e) => e.value === agent.effort)?.hint}</p>
-                  <div className='mt-3 flex flex-wrap gap-1'>
-                    {EFFORT_LABELS.map((e) => (
-                      <button
-                        key={e.value}
-                        type='button'
-                        onClick={() => void agent.setEffort(e.value as ReasoningEffort)}
-                        className={
-                          'h-6 rounded-md border px-2 text-11 transition-colors ' +
-                          (e.value === agent.effort ? 'border-primary/40 bg-primary-soft text-primary' : 'border-line text-ink-3 hover:text-ink')
-                        }
-                      >
-                        {e.label}
-                      </button>
-                    ))}
+                  {/* 与输入栏里的是**同一个组件**：两处各写一套控件，迟早会一处改了另一处没改。 */}
+                  <div className='mt-3'>
+                    <EffortSlider />
                   </div>
                 </div>
+                </Searchable>
                 </Stagger>
                 <Stagger>
+                <Searchable entry={E.modelsMaxToolRounds}>
                 <div className='card-lift flex flex-col justify-between rounded-xl border border-line bg-surface elev-1 p-4'>
                   <div className='flex items-center gap-1.5 text-12 text-ink-3'><Wrench size={13} /> 单轮最大工具调用次数</div>
                   <div className='mt-2 flex items-baseline gap-2'>
@@ -811,8 +1006,10 @@ export function SettingsView() {
                   </div>
                   <p className='mt-2 text-11 text-ink-4'>复杂任务可调高；过高会让一轮跑很久。</p>
                 </div>
+                </Searchable>
                 </Stagger>
                 <Stagger>
+                <Searchable entry={E.modelsAddProvider}>
                 <button
                   type='button'
                   onClick={() => setAdding(true)}
@@ -822,10 +1019,12 @@ export function SettingsView() {
                   <span className='text-14 font-medium text-primary'>添加厂商</span>
                   <span className='text-11 text-primary/70'>选接口类型 → 填地址与 API Key → 获取模型</span>
                 </button>
+                </Searchable>
                 </Stagger>
               </div>
 
               {/* 厂商：按列排布，卡片可编辑；容器窄了自动回落到单列，不挤压卡片 */}
+              <Searchable entry={E.modelsProviders}>
               <div className='grid min-w-0 grid-cols-1 gap-2.5 @2xl:grid-cols-2' data-testid='providers-grid'>
               {providers.map((p) => {
                 const models = modelMap[p.id] ?? []
@@ -868,18 +1067,19 @@ export function SettingsView() {
                 )
               })}
               </div>
+              </Searchable>
               {/* 首屏加载：接口回来之前铺行骨架，别让模型分组空着一块 */}
               {providersPending && !providers.length ? <SkeletonRows rows={4} className='px-1' /> : null}
               {!providers.length && !providersPending ? (
-                <Cell label='还没有 Provider' hint='添加一个 OpenAI 兼容接口即可开始对话' />
+                <SearchableCell entry={E.modelsEmpty} />
               ) : null}
             </div>
-          </Section>
+          </SearchSection>
 
-          <Section className={group === 'workspace' ? '' : 'hidden'} title='工作区' description='新会话默认落在哪个目录。'>
+          <SearchSection mounted={groupMounted('workspace')} className={sectionCls('workspace')} title={<Highlight text='工作区' query={searchQuery} />} description={<Highlight text='新会话默认落在哪个目录。' query={searchQuery} />}>
           <StaggerGrid>
-            <Cell
-              label='默认工作目录'
+            <SearchableCell
+              entry={E.workspaceDefaultCwd}
               hint={<span className='block break-all font-mono' title={rawCwd || undefined}>{defaultCwd || '—'}</span>}
             >
               <Menu
@@ -892,42 +1092,27 @@ export function SettingsView() {
                 trigger={<Button variant='secondary' size='sm'>最近目录</Button>}
               />
               <Button variant='primary' size='sm' onClick={() => void pickDefaultCwd()}><FolderOpen size={13} /> 更改</Button>
-            </Cell>
-            <Cell label='在资源管理器中打开' hint='当前默认工作目录的实际位置'>
+            </SearchableCell>
+            <SearchableCell entry={E.workspaceOpenInExplorer}>
               <Button variant='ghost' size='sm' disabled={!defaultCwd} onClick={() => void ipc('open_path', { path: defaultCwd })}>打开</Button>
-            </Cell>
-            <Cell label='最近使用过的目录' hint={recent.length ? undefined : '还没有记录'}>
+            </SearchableCell>
+            <SearchableCell
+              entry={E.workspaceRecentCwd}
+              hint={recent.length ? undefined : '还没有记录'}
+            >
               <span className='text-12 text-ink-4'>{recent.length} 个</span>
-            </Cell>
+            </SearchableCell>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
 
-          <Section className={group === 'ai' ? '' : 'hidden'} title='AI 能力' description='每一项都能单独开关；关闭立即生效，情感类默认关闭以免影响输出风格。'>
+          <SearchSection mounted={groupMounted('ai')} className={sectionCls('ai')} title={<Highlight text='AI 能力' query={searchQuery} />} description={<Highlight text='每一项都能单独开关；关闭立即生效，情感类默认关闭以免影响输出风格。' query={searchQuery} />}>
           <StaggerGrid>
-            {([
-              ['memory', '长期记忆', '跨会话记住事实与偏好，相关时自动注入'],
-              ['memoryWrite', '记忆写入', '关闭后只读不写，不再记录新记忆'],
-              ['memoryAutoInject', '自动注入', '关闭后 AI 仍可主动检索记忆'],
-              ['memoryVector', '向量检索', '关闭后退回关键词匹配'],
-              ['compression', '上下文压缩', '接近上限时自动压缩历史'],
-              ['autoPinMilestones', '自动钉住里程碑', '关键结论不参与压缩'],
-              ['promptLayering', '提示词分层', '按层组装系统提示，各自独立预算'],
-              ['skillOnDemand', '技能按需注入', '只在相关时注入技能，避免瞎用'],
-              ['toolEnhance', '工具质量增强', '参数校验 / 失败重试 / 结果裁剪 / 缓存'],
-              ['trustGate', '信任驱动放行', '连续成功自动升级放行，失败回落询问'],
-              ['emotionTone', '情绪语气适配', '让回复语气随情绪与羁绊变化（默认关）'],
-              ['persona', '人格注入', '把人格描述写进系统提示（默认关）'],
-              ['subagents', '子代理', '允许主 AI 派发一对一子代理任务'],
-              ['notifyGuard', '后台通知护栏', '尊重免打扰时段与每日上限'],
-              ['backgroundNotify', '后台完成提醒', '窗口不在前台时，一轮回复结束后提醒你'],
-              ['askUser', '反问澄清', '信息不足时让 AI 先问一句，而不是自己猜着做'],
-              ['showArtifacts', '生成物卡片', '一轮结束后在回复下方列出本轮产出的文件（点开预览，右键另存）；关掉只是不显示这排卡片'],
-              ['allowSaveAsRequest', '允许另存为', '产物卡片与预览面板里出现「另存为…」，点击会弹系统保存对话框（默认关，避免打断）'],
-              ['metrics', '开发者度量', '本地记录质量指标（不上传）'],
-            ] as Array<[keyof Capabilities, string, string]>).map(([key, label, hint]) => (
-              <Cell key={key} label={label} hint={hint}>
-                <Switch checked={Boolean(caps[key])} onCheckedChange={(v) => setCaps({ [key]: v } as Partial<Capabilities>)} />
-              </Cell>
+            {/* 能力开关的条目（label / hint / capabilities 键）统一在 settingsSearch.tsx 的
+                AI_TOGGLE_ENTRIES 里维护：搜索索引与界面渲染共用一份，标签文案不会两处漂移。 */}
+            {AI_TOGGLE_ENTRIES.map((entry) => (
+              <SearchableCell key={entry.key} entry={entry}>
+                <Switch checked={Boolean(caps[entry.capKey])} onCheckedChange={(v) => setCaps({ [entry.capKey]: v } as Partial<Capabilities>)} />
+              </SearchableCell>
             ))}
             {/* ── 本地留痕（trajectory.jsonl）──
                 两个键都在 settings.json 的 capabilities 块里，引擎侧字段是 local_trace_enabled /
@@ -935,16 +1120,16 @@ export function SettingsView() {
                 读写与上面每一个开关完全同一条路：useCapabilities.set() → 先本地乐观生效 + 落
                 localStorage，再把**变化的键** PUT 到 /api/agent/preferences（失败回滚）。
                 默认「开 + 不限」：默认不限制增长，想控体积、或想彻底不留痕，再动下面这两项。 */}
-            <Cell
-              label='本地留痕'
+            <SearchableCell
+              entry={E.aiLocalTrace}
               hint={caps.localTraceEnabled
                 ? '开启中（默认）：每轮任务在本机落一行 trajectory.jsonl，是「越用越好用」的素材；只存本机、不上传'
                 : '已关闭：引擎不再写本地轨迹文件（trajectory.jsonl）'}
             >
               <Switch checked={caps.localTraceEnabled} onCheckedChange={(v) => setCaps({ localTraceEnabled: v })} />
-            </Cell>
-            <Cell
-              label='留痕体积上限'
+            </SearchableCell>
+            <SearchableCell
+              entry={E.aiTraceMax}
               hint={caps.localTraceMaxMb > 0
                 ? '已设为 ' + caps.localTraceMaxMb + ' MB 上限（引擎侧有效范围 1~4096）'
                 : '不限（默认）：不限制增长；想给轨迹文件设个天花板时再选一档'}
@@ -954,8 +1139,8 @@ export function SettingsView() {
                 onChange={(v) => setCaps({ localTraceMaxMb: Number(v) })}
                 options={traceMaxOptions(caps.localTraceMaxMb ?? 0)}
               />
-            </Cell>
-            <Cell label='压缩触发阈值' hint='上下文占用超过该比例时压缩（0.5–0.95）'>
+            </SearchableCell>
+            <SearchableCell entry={E.aiCompressionThreshold}>
               <Input
                 className='h-8 w-[92px]'
                 type='number'
@@ -963,20 +1148,20 @@ export function SettingsView() {
                 value={caps.compressionThreshold}
                 onChange={(e) => setCaps({ compressionThreshold: Number(e.target.value) })}
               />
-            </Cell>
-            <Cell label='子代理并发上限' hint='0–5；设 0 等同关闭子代理'>
+            </SearchableCell>
+            <SearchableCell entry={E.aiSubagentConcurrency}>
               <Input
                 className='h-8 w-[92px]'
                 type='number'
                 value={caps.subagentConcurrency}
                 onChange={(e) => setCaps({ subagentConcurrency: Number(e.target.value) })}
               />
-            </Cell>
+            </SearchableCell>
             {/* 提问等待超时：AI 停下来问你之后，多久没人理它就自动按「跳过」收掉这一问。
                 「一直等」是默认档 —— 自动替用户跳过提问，比多等一会儿更让人意外。
                 引擎还没上报这个键时只落在本地 localStorage，所以这里显式标注「仅本地」。 */}
-            <Cell
-              label='提问等待超时'
+            <SearchableCell
+              entry={E.aiAskUserTimeout}
               hint={
                 <>
                   等待回答超过这个时长就自动跳过，不让整轮对话干等
@@ -994,73 +1179,99 @@ export function SettingsView() {
                   { value: '60', label: '60 分钟' },
                 ]}
               />
-            </Cell>
+            </SearchableCell>
+            {/* ── 自动恢复重试（AI 能力组）──
+                providerRetryCount = 瞬时失败（429 限流等）时引擎自动重试的次数，
+                档位语义：0 = 关闭；1–254 = 次数；255 = 无限（一直重试直到成功或非瞬时错误）。
+                「无限」档把 255 直接发上去，等引擎同事的语义落地即可生效，前端不再有上限。
+                reconnectMaxDelayMs = 重试等待上限，引擎侧是毫秒，界面上用秒展示（30–120 秒）。
+                读写与 maxToolRounds 同一套：agent store 乐观更新 → PUT /api/agent/preferences
+                → 成功后回读引擎夹好的有效值。 */}
+            <SearchableCell entry={E.aiRetryCount}>
+              <Segmented<string>
+                value={String(agent.providerRetryCount)}
+                onChange={(v) => void agent.setProviderRetryCount(Number(v))}
+                options={retryCountOptions(agent.providerRetryCount)}
+              />
+            </SearchableCell>
+            <SearchableCell entry={E.aiRetryDelay}>
+              <Input
+                className='h-8 w-[92px]'
+                type='number'
+                min={30}
+                max={120}
+                step={5}
+                value={Math.round(agent.reconnectMaxDelayMs / 1000)}
+                onChange={(e) => void agent.setReconnectMaxDelayMs(Number(e.target.value) * 1000)}
+              />
+            </SearchableCell>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
 
-          {/* 上下文压缩：跟在「AI 能力」分组后面的一小节，只在这一组显示（自己拉引擎有效值）。 */}
-          <CompactionPanel active={group === 'ai'} />
+          {/* 上下文压缩：跟在「AI 能力」分组后面的一小节，只在这一组显示（自己拉引擎有效值）。
+              包一层 Searchable：搜索时命中才渲染、未命中收起；active 在搜索时按命中放行（保证数据会拉）。 */}
+          <Searchable entry={E.aiCompactionPanel}><CompactionPanel active={group === 'ai' || !!searchQuery} /></Searchable>
 
           {/* 经验库：同样挂在「AI 能力」分组下、紧跟着「长期记忆」那一格 —— 那里只管记不记，
               这里才能看到记住了什么、效果如何、要不要删掉。只在这一组显示（active 时才去拉数据）。 */}
-          <MemoryLessonsPanel active={group === 'ai'} />
+          <Searchable entry={E.aiLessons}><MemoryLessonsPanel active={group === 'ai' || !!searchQuery} /></Searchable>
 
           {/* 任务轨迹：trajectory.jsonl 的回放 —— 每轮跑了什么、成没成、卡在哪。
               与旁边几块同一套时机：只在这一组显示，active 时才去拉数据。 */}
-          <TrajectoryPanel active={group === 'ai'} />
+          <Searchable entry={E.aiTrajectory}><TrajectoryPanel active={group === 'ai' || !!searchQuery} /></Searchable>
 
-          <Section className={group === 'life' ? '' : 'hidden'} title='数字生命体' description='常驻伙伴的主动问候与免打扰策略。'>
+          <SearchSection mounted={groupMounted('life')} className={sectionCls('life')} title={<Highlight text='数字生命体' query={searchQuery} />} description={<Highlight text='常驻伙伴的主动问候与免打扰策略。' query={searchQuery} />}>
           <StaggerGrid>
-            <Cell label='启用数字生命体' hint='拥有情绪、羁绊与长期记忆的常驻伙伴'>
+            <SearchableCell entry={E.lifeEnabled}>
               {/* 载入时用同尺寸的骨架占位（开关形状），而不是一个小转圈把行高顶来顶去 */}
               {lifeBusy || !life
                 ? <Skeleton className='h-[22px] w-[38px] rounded-full' />
                 : <Switch checked={!!life.enabled} onCheckedChange={(v) => void patchLife({ enabled: v })} />}
-            </Cell>
-            <Cell label='每日主动上限' hint='控制一天最多主动找你几次'>
+            </SearchableCell>
+            <SearchableCell entry={E.lifeDailyMode}>
               <Segmented<string>
                 value={life?.dailyMode ?? 'auto'}
                 onChange={(v) => void patchLife({ dailyMode: v })}
                 options={[{ value: 'off', label: '不主动' }, { value: 'auto', label: '自动' }, { value: 'custom', label: '自定义' }]}
               />
-            </Cell>
+            </SearchableCell>
             {life?.dailyMode === 'custom' ? (
-              <Cell label='自定义条数' hint='每天 1–100 条'>
+              <SearchableCell entry={E.lifeDailyCustom}>
                 <Input
                   className='h-7 w-20'
                   type='number'
                   value={life.dailyLimitCustom}
                   onChange={(e) => void patchLife({ dailyLimitCustom: Number(e.target.value) })}
                 />
-              </Cell>
+              </SearchableCell>
             ) : null}
-            <Cell label='免打扰时段' hint='这段时间内不会主动打扰你'>
+            <SearchableCell entry={E.lifeQuietWindow}>
               <span className='font-mono text-12 text-ink-2'>
                 {hhmm(life?.windowStartMinutes ?? 540)} – {hhmm(life?.windowEndMinutes ?? 1380)}
               </span>
-            </Cell>
-            <Cell label='用在所有对话' hint='关闭时只有常驻会话使用数字生命体人格'>
+            </SearchableCell>
+            <SearchableCell entry={E.lifeGlobal}>
               <Switch checked={!!life?.globalMode} onCheckedChange={(v) => void patchLife({ globalMode: v })} />
-            </Cell>
+            </SearchableCell>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
 
-          <Section className={group === 'engine' ? '' : 'hidden'} title='引擎与诊断' description='后台引擎进程的状态与维护。'>
+          <SearchSection mounted={groupMounted('engine')} className={sectionCls('engine')} title={<Highlight text='引擎与诊断' query={searchQuery} />} description={<Highlight text='后台引擎进程的状态与维护。' query={searchQuery} />}>
           <StaggerGrid>
-            <Cell
-              label='运行状态'
+            <SearchableCell
+              entry={E.engineStatus}
               hint={<span className='block break-all font-mono'>{engine.status === 'running' ? '运行中 · 端口 ' + engine.port : engine.status === 'starting' ? '启动中' : engine.status === 'stopped' ? '已停止' : '异常：' + (engine.lastError || '未知')}</span>}
             >
               {/* 两个重启不一样：引擎重启只重启后台进程（会话自动恢复）；
                   应用重启会退出重开——装了 Node / uv / winget 之后必须是这一档，PATH 才会刷新。 */}
               <Button variant='ghost' size='sm' title='只重启后台引擎进程：当前会话会自动恢复' onClick={() => void restartEngineNow()}>重启引擎</Button>
-              <Button variant='ghost' size='sm' title='退出并重新打开 Coomi：装了运行环境（PATH 变了）时用这一档' onClick={() => void restartAppNow()}>重启应用</Button>
+              <Button variant='ghost' size='sm' title='退出并重新打开 CoomiPlus：装了运行环境（PATH 变了）时用这一档' onClick={() => void restartAppNow()}>重启应用</Button>
               <Button variant='ghost' size='sm' className='text-ink-3 hover:text-danger' onClick={() => void engine.stop()}>停止</Button>
-            </Cell>
+            </SearchableCell>
             {/* 崩溃恢复方式：默认「一键继续」（恢复完提示，用户点了才接着跑），
                 另一档「自动继续」＝恢复完直接接着跑。存 ui.prefs。 */}
-            <Cell
-              label='崩溃后恢复方式'
+            <SearchableCell
+              entry={E.engineCrashRecovery}
               hint={ui.prefs.crashRecovery === 'auto'
                 ? '引擎崩溃并重启后，自动把被打断的那一轮接着跑完'
                 : '引擎崩溃并重启后先提示一句，由你点「继续」再接着跑'}
@@ -1070,19 +1281,19 @@ export function SettingsView() {
                 onChange={(v) => ui.setPrefs({ crashRecovery: v })}
                 options={[{ value: 'manual', label: '一键继续' }, { value: 'auto', label: '自动继续' }]}
               />
-            </Cell>
-            <Cell label='引擎版本' hint={<span className='font-mono'>{engine.version || '—'}</span>} />
-            <Cell label='数据目录' hint={<span className='block break-all font-mono' title={dataHome || undefined}>{dataHome ? shortPath(dataHome, 52) : '—'}</span>}>
+            </SearchableCell>
+            <SearchableCell entry={E.engineVersion} hint={<span className='font-mono'>{engine.version || '—'}</span>} />
+            <SearchableCell entry={E.engineDataDir} hint={<span className='block break-all font-mono' title={dataHome || undefined}>{dataHome ? shortPath(dataHome, 52) : '—'}</span>}>
               <Button variant='ghost' size='sm' disabled={!dataHome} onClick={() => void ipc('open_path', { path: dataHome })}>打开</Button>
-            </Cell>
-            <Cell label='引擎日志' hint='查看引擎运行日志的末尾 300 行（只读）'>
+            </SearchableCell>
+            <SearchableCell entry={E.engineLog}>
               <Button variant='ghost' size='sm' onClick={() => setLogOpen(true)}>查看引擎日志</Button>
               <Button variant='ghost' size='sm' className='text-ink-3' onClick={() => void ipc<string | null>('engine_log_path').then((p) => { if (p) void ipc('open_path', { path: p }) }).catch(() => flash('日志文件打开失败'))}>所在文件夹</Button>
-            </Cell>
-            <Cell label='崩溃日志' hint={<span className='block break-all font-mono' title={logPath || undefined}>{logPath ? shortPath(logPath, 52) : '暂无'}</span>}>
+            </SearchableCell>
+            <SearchableCell entry={E.engineCrashLog} hint={<span className='block break-all font-mono' title={logPath || undefined}>{logPath ? shortPath(logPath, 52) : '暂无'}</span>}>
               <Button variant='ghost' size='sm' disabled={!logPath} onClick={() => void ipc('open_path', { path: logPath })}>打开</Button>
-            </Cell>
-            <Cell label='维护' hint='备份会话与配置，或清理缓存（不影响会话）'>
+            </SearchableCell>
+            <SearchableCell entry={E.engineMaintenance}>
               <Button
                 variant='ghost' size='sm'
                 onClick={() => void engine.api('/api/backup/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(() => flash('备份已创建')).catch(() => flash('备份失败'))}
@@ -1094,24 +1305,25 @@ export function SettingsView() {
                   void engine.api('/api/maintenance/clean', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(() => flash('清理完成')).catch(() => flash('清理失败'))
                 }}
               >清理缓存</Button>
-            </Cell>
+            </SearchableCell>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
 
           {/* 两个数据面板：跟着分组一起挂载/隐藏，切到「引擎与诊断」时才各自去拉数据。 */}
-          <MirrorPanel active={group === 'engine'} />
-          <StoragePanel active={group === 'engine'} />
+          <Searchable entry={E.engineMirror}><MirrorPanel active={group === 'engine' || !!searchQuery} /></Searchable>
+          <Searchable entry={E.engineStorage}><StoragePanel active={group === 'engine' || !!searchQuery} /></Searchable>
 
-          <DeveloperPanel active={group === 'engine'} />
+          <Searchable entry={E.engineDeveloper}><DeveloperPanel active={group === 'engine' || !!searchQuery} /></Searchable>
 
-          <Section className={group === 'about' ? '' : 'hidden'} title='关于' description='版本、许可与项目信息。'>
+          <SearchSection mounted={groupMounted('about')} className={sectionCls('about')} title={<Highlight text='关于' query={searchQuery} />} description={<Highlight text='版本、许可与项目信息。' query={searchQuery} />}>
           <StaggerGrid>
+            <Searchable wide entry={E.aboutHero}>
             <Cell wide className='items-start'>
               <div className='flex w-full items-start gap-4'>
-                <img src={logo} alt='Coomi' className='h-14 w-14 rounded-2xl object-contain' />
+                <img src={logo} alt='CoomiPlus' className='h-14 w-14 rounded-2xl object-contain' />
                 <div className='min-w-0 flex-1'>
                   <div className='flex items-center gap-2'>
-                    <span className='text-16 font-semibold text-ink'>Coomi Desktop</span>
+                    <span className='text-16 font-semibold text-ink'>CoomiPlus Desktop</span>
                     <span className='flex h-[20px] items-center rounded-full border border-warn/40 bg-warn-soft px-2 text-11 font-semibold tracking-[0.06em] text-warn'>BETA</span>
                   </div>
                   <div className='mt-0.5 font-mono text-12 text-ink-3'>Beta {clientVersion} · build {localDateStamp()}</div>
@@ -1121,11 +1333,12 @@ export function SettingsView() {
                 </div>
               </div>
             </Cell>
-            <Cell label='客户端版本' hint='当前安装的版本'><span className='font-mono text-12 text-ink-2'>Beta {clientVersion}</span></Cell>
-            <Cell label='引擎版本' hint={<span className='font-mono text-12'>{engine.version || '—'}</span>} />
+            </Searchable>
+            <SearchableCell entry={E.aboutClientVersion}><span className='font-mono text-12 text-ink-2'>Beta {clientVersion}</span></SearchableCell>
+            <SearchableCell entry={E.aboutEngineVersion} hint={<span className='font-mono text-12'>{engine.version || '—'}</span>} />
             {/* 检查更新：真调壳命令 update_check（壳读发布服务 /api/v1/info），失败给可读原因。 */}
-            <Cell
-              label='检查更新'
+            <SearchableCell
+              entry={E.aboutCheckUpdate}
               hint={update.status === 'checking'
                 ? '正在请求发布服务…'
                 : update.status === 'error'
@@ -1161,9 +1374,10 @@ export function SettingsView() {
                   </Button>
                 </>
               ) : null}
-            </Cell>
+            </SearchableCell>
             {/* 一键更新进度：下载（带速度）/ 校验 / 安装三段都写在这里，失败原因也写在这里。 */}
             {updatePhase ? (
+              <Searchable wide entry={E.aboutUpdateProgress}>
               <Cell wide className='items-start'>
                 <div className='w-full min-w-0 text-12 leading-[1.7]'>
                   <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
@@ -1188,10 +1402,12 @@ export function SettingsView() {
                   ) : null}
                 </div>
               </Cell>
+              </Searchable>
             ) : null}
-            <Cell label='制作人' hint={<span className='font-mono text-12 text-ink-2'>星奈_Star</span>} />
+            <SearchableCell entry={E.aboutAuthor} hint={<span className='font-mono text-12 text-ink-2'>星奈_Star</span>} />
             {/* 更新详情：只在真的拿到结果之后出现，缺什么显示什么（说明缺失时壳已给出兜底文案）。 */}
             {update.status === 'done' ? (
+              <Searchable wide entry={E.aboutUpdateDetails}>
               <Cell wide className='items-start'>
                 <div className='w-full min-w-0 text-12 leading-[1.7] text-ink-3'>
                   <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
@@ -1205,25 +1421,29 @@ export function SettingsView() {
                   </p>
                 </div>
               </Cell>
+              </Searchable>
             ) : null}
+            <Searchable wide entry={E.aboutOpenSource}>
             <Cell wide className='items-start'>
               <div className='w-full min-w-0 text-12 leading-[1.7] text-ink-3'>
                 <span className='font-medium text-ink-2'>开源说明：</span>
-                Coomi Desktop 源码公开在 GitHub 仓库 TensorHub-ORG/Coomi 的 coomi-desktop 分支（当前仍是 Beta 测试版，欢迎围观与自建）。问题反馈欢迎通过本页与帮助中心。
+                CoomiPlus Desktop 目前是 Beta 测试版，源代码暂不开放；正式版发布后我们会把源代码开源出来。在此之前，欢迎通过本页与帮助中心反馈问题。
               </div>
             </Cell>
-            <Cell label='数据目录' hint={<span className='block break-all font-mono text-12' title={dataHome || undefined}>{shortPath(dataHome, 46) || '—'}</span>}>
+            </Searchable>
+            <SearchableCell entry={E.aboutDataDir} hint={<span className='block break-all font-mono text-12' title={dataHome || undefined}>{shortPath(dataHome, 46) || '—'}</span>}>
               <Button variant='ghost' size='sm' disabled={!dataHome} onClick={() => void ipc('open_path', { path: dataHome })}>打开</Button>
-            </Cell>
-            <Cell label='运行日志' hint={<span className='block break-all font-mono text-12' title={logPath || undefined}>{logPath ? shortPath(logPath, 46) : '暂无'}</span>}>
+            </SearchableCell>
+            <SearchableCell entry={E.aboutLog} hint={<span className='block break-all font-mono text-12' title={logPath || undefined}>{logPath ? shortPath(logPath, 46) : '暂无'}</span>}>
               <Button variant='ghost' size='sm' disabled={!logPath} onClick={() => void ipc('open_path', { path: logPath })}>打开</Button>
-            </Cell>
-            <Cell label='隐私与使用说明' hint='三步看完：这是什么、数据与隐私、权限与风险；内容有更新时会在启动时再提示一次'>
+            </SearchableCell>
+            <SearchableCell entry={E.aboutPrivacy}>
               <Button variant='ghost' size='sm' onClick={() => openOnboarding()}>再看一次</Button>
-            </Cell>
-            <Cell label='字体与许可' hint='内置 HarmonyOS Sans SC（华为，免费商用），许可随包分发'>
+            </SearchableCell>
+            <SearchableCell entry={E.aboutFonts}>
               <Button variant='ghost' size='sm' onClick={() => flash('许可文件：安装目录 / fonts / LICENSE-HarmonyOS-Sans.txt')}>查看说明</Button>
-            </Cell>
+            </SearchableCell>
+            <Searchable wide entry={E.aboutFooter}>
             <Cell wide>
               <div className='flex w-full flex-wrap items-center gap-x-6 gap-y-2 text-12 text-ink-3'>
                 <span className='flex items-center gap-1.5'><Shield size={13} className='text-ink-4' /> 数据不出本机：会话、记忆、密钥都存本地</span>
@@ -1231,8 +1451,16 @@ export function SettingsView() {
                 <span className='flex items-center gap-1.5'><RefreshCw size={13} className='text-ink-4' /> Beta 期间欢迎反馈问题</span>
               </div>
             </Cell>
+            </Searchable>
           </StaggerGrid>
-          </Section>
+          </SearchSection>
+          {search.noResults ? (
+            <div className='flex flex-col items-center justify-center gap-1.5 rounded-lg border border-line bg-surface px-6 py-16 text-center'>
+              <Search size={20} className='text-ink-4' />
+              <p className='text-14 font-medium text-ink-2'>没有匹配的设置项</p>
+              <p className='max-w-[380px] text-12 leading-[1.6] text-ink-3'>换个关键词试试，或按 Esc 清空搜索。</p>
+            </div>
+          ) : null}
           </div>
           </GroupTransition>
         </div>
@@ -1252,5 +1480,6 @@ export function SettingsView() {
         }}
       />
     </main>
+    </SettingsSearchProvider>
   )
 }

@@ -74,9 +74,13 @@ const DEFAULT_PREFS: Prefs = {
    组件不用各自判断，也不要各自存一份。 */
 /** 性能模式开关 → html 上的档位属性。 */
 export const PERF_ATTR = 'perf'
-/** 普通档的长列表虚拟化阈值：低于它保留完整 DOM（划选、Ctrl+F 高亮都不打折）。 */
+/** 普通档的长列表虚拟化阈值：低于它保留完整 DOM（划选、Ctrl+F 高亮都不打折）。
+    ⚠ 2026-10 起这两个阈值与下面的 virtualizeThreshold() 已经**没有任何调用方**：
+    对话主列表不再走虚拟化（移除理由见 components/chat/MessageList.tsx 顶部），
+    这里只剩一份历史策略的残根。先留着不删（它们仍是对话列表「为什么不虚拟化」的文档），
+    但**不要再把它们当成生效中的开关**去调 —— 调了不会有任何效果。 */
 export const VIRTUALIZE_AT = 300
-/** 省电档阈值：更早交给 react-virtuoso，长会话滚动更稳。 */
+/** 省电档阈值：更早交给虚拟化。 */
 export const VIRTUALIZE_AT_LOW = 120
 
 /** 把性能档位写到 <html data-perf>：低档才写，高档删掉属性（CSS 只认 [data-perf=low]）。 */
@@ -87,11 +91,12 @@ export function applyPerfAttr(prefs: Prefs): void {
 }
 
 /** 长列表虚拟化阈值：按当前性能档位取。
-    消息列表按条数切换渲染路径，阈值属于性能策略，所以读取入口放在这里，
-    组件（components/chat/MessageList.tsx）只调用、不自己定义常量。 */
+    ⚠ 2026-10 起这个入口**没有任何调用方**（对话主列表已不再走虚拟化，
+    移除理由见 components/chat/MessageList.tsx 顶部）。留着只为记录当初的策略，
+    不要以为调它就能改变渲染路径。 */
 export function virtualizeThreshold(): number {
   // 安全模式 / 精简模式：**不用虚拟化**（返回无穷大＝永远走普通路径）。
-  // 全量 DOM 更好排查「卡在哪一条消息」，也少掉 Virtuoso 的测量与回收 —— 它自己也是主线程上的活。
+  // 全量 DOM 更好排查「卡在哪一条消息」，也少掉虚拟化的测量与回收 —— 它自己也是主线程上的活。
   if (isLean()) return Number.POSITIVE_INFINITY
   return appliedPrefs.perf === 'low' ? VIRTUALIZE_AT_LOW : VIRTUALIZE_AT
 }
@@ -219,9 +224,11 @@ function watchFluidBreakpoint(): void {
 /// 否则重启后会先按默认深色绘一帧，进设置页才跳成浅色。
 export function applyStoredAppearance(): void {
   const mode = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? 'system'
-  // 默认 1.08（不是 1）：内联样式会覆盖 theme.css 的同名默认值，所以"新装用户的默认字号"
-// 只能在这里决定 —— 用户明确要求"字体放大一点"，正文 12→约 13、13→约 14。
-const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
+  // 默认 1.15（不是 1）：内联样式会覆盖 theme.css 的同名默认值，所以"新装用户的默认字号"
+  // 只能在这里决定 —— 用户明确要求"字体再大一点"（1.15 比上一版的 1.08 再大约 6.5%）。
+  // 注意 1.15 **不是**设置页里的档位（档位见 components/settings/uiFontScale.ts）：
+  // 设置页把它归到最近的 1.18 显示，用户点了档位才会被改写成档位值。
+  const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.18')
   const prefs = readPrefs()
   const root = document.documentElement
   const resolved = resolveTheme(mode)
@@ -283,7 +290,8 @@ interface UiState {
 export const useUi = create<UiState>((set, get) => ({
   view: (readPrefs().defaultView ?? 'chat') as ViewKey,
   themeMode: ((typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null) as ThemeMode | null) ?? 'system',
-  fontScale: Number((typeof localStorage !== 'undefined' ? localStorage.getItem(SCALE_KEY) : null) ?? '1.08'),
+  // 与 applyStoredAppearance 的回落值必须同值（两处都决定"没存过时是多少"）。
+  fontScale: Number((typeof localStorage !== 'undefined' ? localStorage.getItem(SCALE_KEY) : null) ?? '1.18'),
   panelOpen: false,
   panelTab: 'artifacts' as PanelTab,
   listCollapsed: readListCollapsed(),

@@ -1,4 +1,4 @@
-/* Coomi Desktop 设计系统 —— 对标小米 MiMo Desktop（Electron + Tailwind v4）的令牌体系：
+/* CoomiPlus Desktop 设计系统 —— 对标小米 MiMo Desktop（Electron + Tailwind v4）的令牌体系：
    暖中性灰、墨色文字 alpha 阶梯、发丝描边、克制的强调色、固定 px 字号 × 全局缩放。 */
 @import 'tailwindcss';
 
@@ -7,6 +7,10 @@
 
 /* ── 语义令牌：同一套名字，明暗两套值 ── */
 :root {
+  /* Desktop workbench scale: stable spacing and semantic layers. */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+  --z-base: 0; --z-sticky: 10; --z-header: 20; --z-drawer: 30; --z-sheet: 40; --z-toast: 50; --z-modal: 60;
+  --inset: var(--sp-4); --gap: var(--sp-3); --section: var(--sp-6);
   /* 版面底色：canvas 最底、surface 面、card 卡片 */
   --canvas: #f6f7fa;
   --canvas-side: #ffffff;
@@ -25,16 +29,29 @@
      三档都在这里定死，组件里别再写 rgba() 当边框色。 */
   --line: #dfe3ea;
   --line-soft: rgba(16, 24, 40, 0.08);
-  /* 控件边框：设置项里的输入框/分段控件都靠它「有框」，太浅会显得一片模糊。 */
-  --line-strong: #cdc9c0;
+  /* 控件边框：设置项里的输入框/分段控件都靠它「有框」，太浅会显得一片模糊。
+     v3 对比度：原 #cdc9c0 对 --control-bg #ffffff 只有 1.65:1、对 --canvas 1.54:1，
+     控件边界达不到 WCAG 1.4.11 的 3:1（输入框与卡片同为白底时，边框是唯一边界）
+     → 压到 #8d8470：对 --surface 3.71:1、对 --canvas 3.46:1、对最不利的 --active 3.07:1
+     （静态面最低是 --surface-sunken 3.13:1），全部 ≥ 3:1。色相/饱和度不变
+     （41.5° / 11.5%），只降明度。
+     注意 --line 是发丝分隔线（装饰性），不承担「识别控件」职责，保持原值不动。 */
+  --line-strong: #8d8470;
   --control-bg: #ffffff;
   --control-bg-2: #f2f0eb;
 
-  /* 文字：墨色 + alpha 阶梯 */
+  /* 文字：墨色 + alpha 阶梯。
+     v3 对比度契约（WCAG 2.x 相对亮度，详见文件末尾「对比度审计 v3」）：
+     四档对最不利底色（--active #e6eaf2 / --surface-sunken #e9ecf2）的实测值
+       --ink 15.02 · --ink-2 9.14 · --ink-3 6.14 · --ink-4 4.59   全部 ≥ 4.5:1。
+     v3 把后两档由 0.58 / 0.38 提到 0.70 / 0.61：源码里 text-ink-3 / text-ink-4
+     共约 386 处，绝大多数是 text-10~13 的正文级元数据（时间戳、字节数、模型名、
+     说明句），属正文级而非「大字/图标」，所以按 4.5:1 收；原文 0.38 只有 2.36:1，
+     连 3:1 都不到（属必修项）。代价是四档阶梯被压紧，但四档仍在。 */
   --ink: #14161a;
   --ink-2: rgba(20, 22, 26, 0.82);
-  --ink-3: rgba(20, 22, 26, 0.58);
-  --ink-4: rgba(20, 22, 26, 0.38);
+  --ink-3: rgba(20, 22, 26, 0.70);
+  --ink-4: rgba(20, 22, 26, 0.61);
   --ink-inverse: #ffffff;
 
   /* 强调：蓝用于链接/选中/可编辑；橙只用于提醒；主按钮用墨色（大厂克制做法） */
@@ -120,7 +137,11 @@
   /* 焦点环：全站只有 base.css 那一处用，组件里不要再自己写 outline */
   --focus-ring-w: 2px;
   --focus-ring-offset: 1px;
-  --focus-ring: color-mix(in srgb, var(--primary) 70%, transparent);
+  /* v3：焦点环是不透明描边但带 alpha，口径是「环色先与相邻底色合成、再和该底色比」。
+     70% 时实测 2.48~2.77（最不利 --active #e6eaf2 只有 2.48，--surface 2.77），
+     作为非文本指示要 3:1 → 提到 88%：3.19~3.73（最不利 --active 3.19、
+     --surface 3.73、--canvas 3.53）。 */
+  --focus-ring: color-mix(in srgb, var(--primary) 88%, transparent);
 
   /* 滚动条：轨道宽度固定，滑块靠「边框宽度」做细→粗，hover 时内容不会横跳 */
   --sb-size: 10px;
@@ -273,10 +294,22 @@
   --content-w: 900px;
   --page-pad-x: 32px;
   --page-pad-y: 24px;
-  /* 界面字号基线：1 = 100%。默认 1.08 —— 正文 12px→约 13px、13px→约 14px。
+  /* ── 密度令牌 v1（可选小节，随本轮对比度审计一起立）──
+     现状实测：控件高度在组件里是硬编码 Tailwind 类，共三档 —— h-7(28px) 30 处、
+     h-8(32px) 30 处、h-9(36px) 14 处，同一个「控件高度」语义散在 70+ 处；
+     列表/表格行高则没有硬编码（由 py-* + 内容撑开，min-h-7/min-h-8 各 2~3 处）。
+     谁该用它：**新写或要改控件的同学** —— 按钮/输入框/分段控件取 --control-h-*，
+     列表行上下留白取 --row-pad-y。已存在的组件不在本次改动范围内，所以这几个
+     令牌当前暂无消费者，是刻意预留（迁移时逐组件替换 h-7/h-8/h-9）。
+     高度跟着 --ui-font-scale 缩放，与既有 h-[calc(2rem*var(--ui-font-scale))] 同口径。 */
+  --control-h-sm: calc(28px * var(--ui-font-scale));
+  --control-h-md: calc(32px * var(--ui-font-scale));
+  --control-h-lg: calc(36px * var(--ui-font-scale));
+  --row-pad-y: 8px;
+  /* 界面字号基线：1 = 100%。默认 1.18 —— 正文 12px→约 14px、13px→约 15px。
      运行时的真实值由 stores/ui.ts 的 setFontScale/applyStoredAppearance 写进 <html> 的内联样式，
      这里只是 CSS 兜底：还没被外观设置写过时的第一帧，以及给 --ui-font-scale 一个可读的默认语义。 */
-  --ui-font-scale: 1.08;
+  --ui-font-scale: 1.18;
 
   color-scheme: light;
 }
@@ -294,13 +327,21 @@
   --selected: rgba(255, 255, 255, 0.1);
   --line: #303038;
   --line-soft: rgba(255, 255, 255, 0.08);
-  --line-strong: #4a4a4a;
+  /* v3：#4a4a4a 对 --control-bg #262626 只有 1.71:1（暗色下控件边框几乎看不见）
+     → 提到 #787878：对 --surface-overlay 3.14:1、对 --surface-sunken 3.41:1、
+     对 --control-bg 3.43:1、对 --surface 3.81:1，全部 ≥ 1.4.11 的 3:1。 */
+  --line-strong: #787878;
   --control-bg: #262626;
   --control-bg-2: #1a1a1a;
+  /* 文字阶梯 v3（暗色的对比度契约见文件末尾「对比度审计 v3」）：
+     对最不利静态底色 --surface-overlay #2c2c33 的实测值
+       --ink 12.6 · --ink-2 6.99 · --ink-3 5.83 · --ink-4 4.69   全部 ≥ 4.5:1；
+     在 hover/active 这类瞬时状态底（白 7%~12% 叠加）上 ink-4 约 3.94，属按下瞬间，
+     不作为门槛背景。原 #8b8b8b / #6a6a6a 分别只有 4.07 / 2.56（后者 <3:1，必修）。 */
   --ink: #f4f4f5;
   --ink-2: #b8b8b8;
-  --ink-3: #8b8b8b;
-  --ink-4: #6a6a6a;
+  --ink-3: #a8a8a8;
+  --ink-4: #969696;
   --ink-inverse: #151c13;
   --primary: #5a9cff;
   --primary-hover: #7bb0ff;
@@ -678,3 +719,78 @@ html[data-scrolling='1'] .glass-topbar {
      · skeleton-sweep / .skeleton::after 扫光：高光长度与位置不随加载进度变化；
      · float 漂浮 / glow 呼吸光晕 / dot-travel 跑点：本仓库不存在这类关键帧
        （--animate-* 与两处 @keyframes 已逐条核对），无需处理。 */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   对比度审计 v3
+   口径：WCAG 2.x 相对亮度 L = 0.2126·R + 0.7152·G + 0.0722·B（sRGB 先线性化：
+   c ≤ 0.03928 ? c/12.92 : ((c+0.055)/1.055)^2.4），
+   对比度 = (L_亮 + 0.05) / (L_暗 + 0.05)；alpha 令牌先与底色按
+   α·fg + (1-α)·bg 合成，再代入计算。门槛：正文（<18.66px 且非粗体）≥ 4.5:1，
+   大字（≥18.66px 或 ≥14px 粗体）与非文本（图标 / 控件边框 / 焦点环）≥ 3:1。
+
+   ── 一、本轮已修（浅 / 暗各一套；「旧 → 新」为对最不利底色的最小值）──
+     --ink-3        浅 rgba(20,22,26,.58) → .70   4.18 → 6.14  （最不利 --active #e6eaf2）
+     --ink-4        浅 rgba(20,22,26,.38) → .61   2.36 → 4.59  （同上；旧值连 3:1 都不到）
+     --ink-3        暗 #8b8b8b → #a8a8a8          静态 4.07 → 5.83（--surface-overlay）
+     --ink-4        暗 #6a6a6a → #969696          静态 2.56 → 4.69（同上）
+     --line-strong  浅 #cdc9c0 → #8d8470          1.65 → 3.71（--surface）/ 3.13（--surface-sunken）
+     --line-strong  暗 #4a4a4a → #787878          1.71 → 3.14（--surface-overlay）
+     --focus-ring   浅 primary 70% → 88%          2.48 → 3.19（最不利 --active；--surface 2.77 → 3.73）
+   为什么 ink 档按 4.5 而不是 3 收：源码里 text-ink-3 / text-ink-4 共约 386 处，
+   绝大多数是 text-10~13 的正文级元数据（时间戳、字节数、模型名、说明句、
+   面包屑），不是大字也不是纯装饰；而 <3:1 是「看不清」必修项。
+   hover / active 这类 <320ms 的瞬时状态底（暗色下白 7%~12% 叠加）不作为门槛
+   背景，只作记录：暗色 --ink-4 在 --active 合成面上 3.94（≥3，且仍在按下瞬间）。
+
+   ── 二、本轮**未改**（有意保留，见各自理由；数值为实测）──
+     · 强调色族在浅色下当 11~12px 文字时不足 4.5:1：
+         --primary 对 --primary-soft@canvas 3.75（对 --canvas 4.25）
+         --ok      对 --ok-soft@canvas 2.83（对 --canvas 3.14）
+         --warn    对 --warn-soft@canvas 2.63（对 --canvas 2.97）
+         --danger  对 --danger-soft@canvas 3.22（对 --canvas 3.65）
+       这四个同时充当「填充 / 边框 / 文字」三种角色，要压到 4.5 需要整体降明度
+       15%~30%（保持 H/S 的备选值：--primary #145ceb、--ok #0d783c、
+       --warn #9b5504、--danger #c91d22），会明显改变浅色主题调性；且
+       content/help/plugins.md 第 128 行明确写「强调色一般建议保留内置值」。
+       **低风险改法是改用法而不是改色**：芯片 / 提示条里的文字改挂 --ink 或
+       --ink-2，或把 --*-soft 的 alpha 再降一点，而不是整体压暗强调色。
+       另外 --warn 对 --canvas 只有 2.97（差 1% 到 3:1），单独看属边界值。
+     · --accent / --accent-hover / --accent-active：全站零调用
+       （组件里出现的 accent-primary 是 CSS 的 accent-color 工具类，与本族无关）
+       → 不评、不改。
+     · --line：浅 1.29:1 / 暗 1.28:1。它是发丝分隔线（卡片边、工具条下沿、列表分隔），
+       不承担「识别控件」的职责，不适用 WCAG 1.4.11 → 保留。
+       例外（待办，需组件配合）：AskUserCard 的选项按钮是 border-line + bg-surface，
+       那里边框是唯一边界。
+     · AgentState 的 muted 语气 = text-ink-4 + opacity-60，等效对比度 1.64 → 2.33，
+       仍不到非文本 3:1。要达标得去掉 opacity-60（组件改动，本次未做）。
+
+   ── 三、令牌卫生（只报告，未删）──
+     · 零消费令牌：--space-0…--space-16（11 个，Tailwind 走 @theme 的 --spacing
+       4px 网格，全站没有 var(--space-*)）、--accent / --accent-hover /
+       --accent-active（含 --color-accent*）、--ok-hover / --ok-active /
+       --warn-hover / --warn-active / --danger-active、--elev-0、--scroll-shadow、
+       --shadow-tip、--shadow-composer、--msg-card / --msg-card-line、
+       --surface-raised、--text-17 / --text-22 / --text-28。
+     · 同一语义两套命名：原始令牌是 --canvas-side / --surface-muted /
+       --surface-sunken / --surface-overlay，而 @theme 别名与组件类名是
+       --color-side / --color-muted / --color-sunken / --color-overlay
+       （bg-side / bg-muted / bg-sunken / bg-overlay），两边名字对不上。
+     · 值重复：content/help/plugins.md 把 --ink-3/--ink-4 的浅色值、--line-strong
+       与整套暗色示例色板又抄了一遍 —— 本次改了 --ink-3/--ink-4/--line-strong，
+       那份文档会过期；该文档还引用了并不存在的 --tool-run。
+     · 组件引用了未定义的令牌：text-primary-ink（ProviderWizard.tsx）在 @theme
+       里没有 --color-primary-ink，该 class 静默失效。
+     · 别名（有意保留，改值不改名）：--ease-enter / --ease-exit / --ease-emph、
+       --motion-collapse、--shadow-menu / --shadow-pop。
+     · @theme inline 里的 --shadow-* : var(--shadow-*) 看着像自引用重复定义，
+       实为 Tailwind v4 inline 模式的既定写法（与 --ease-* 同理），不是错误。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 右键菜单退场：纯 opacity 淡出，且强制 animation-fill-mode: both。
+   与 --animate-fade-out 的差别在于「不继承任何 transform」——
+   进场 pop-in 播完后没有 fill，元素回到自然态；这里显式声明 transform: none
+   起止，切换 class 那一帧就不会出现缩放跳变（那正是「闪一下」的来源）。 */
+/* 起点必须与 pop-in 的终态**逐字一致**（translate3d(0,0,0) scale(1)）。
+   写 none 会让切 class 那一帧从 scale(1) 过渡到 none —— 那一下就是看到的「闪一下」。 */
+

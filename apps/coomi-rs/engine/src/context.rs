@@ -330,6 +330,19 @@ pub fn normalize_history(messages: &[ChatMessage]) -> Vec<ChatMessage> {
         {
             continue;
         }
+        // 丢弃「正文为空且没有任何工具调用」的 assistant 消息：OpenAI 兼容契约要求
+        // content 与 tool_calls 至少设置其一，否则必 400（invalid_request_error:
+        // content or tool_calls must be set），这类消息对 provider 也没有任何信息量。
+        // 典型来源：轮次中断 / stream_reset 留下的空草稿、模型只思考没输出的轮次。
+        // 注意：provider_items 非空的 assistant 是远端压缩的 compaction 载荷
+        // （provider 层会特判展开进请求），不属于「空消息」，绝不能丢。
+        if message.role == Role::Assistant
+            && message.content.trim().is_empty()
+            && message.tool_calls.is_empty()
+            && message.provider_items.is_empty()
+        {
+            continue;
+        }
         output.push(message.clone());
         if message.role == Role::Assistant {
             for call in &message.tool_calls {
@@ -762,6 +775,52 @@ mod tests {
         assert_eq!(normalized.len(), 2);
         assert_eq!(normalized[1].tool_call_id.as_deref(), Some("one"));
         assert!(normalized[1].content.contains("aborted"));
+    }
+
+    #[test]
+    fn normalization_drops_empty_assistant_messages() {
+        // 空正文且无工具调用的 assistant 消息（中断/stream_reset 残留、只思考没输出的
+        // 轮次）：对 provider 必 400，必须整体丢弃。
+        let messages = vec![
+            ChatMessage::user("question"),
+            ChatMessage::assistant("", Vec::new()),
+            ChatMessage::assistant("   ", Vec::new()),
+            ChatMessage::assistant("real answer", Vec::new()),
+        ];
+        let normalized = normalize_history(&messages);
+        // 输入 4 条：user + 两条空 assistant + 一条有正文的 assistant，空的两条被丢。
+        assert_eq!(normalized.len(), 2);
+        assert!(normalized.iter().all(|m| m.role != Role::Assistant
+            || !m.content.trim().is_empty()
+            || !m.tool_calls.is_empty()));
+        // 有正文或有工具调用的 assistant 消息不受影响（配对逻辑原样保留）。
+        let with_calls = vec![
+            ChatMessage::assistant(
+                "",
+                vec![ToolCall {
+                    id: "call".into(),
+                    name: "read_file".into(),
+                    arguments: json!({}),
+                }],
+            ),
+            ChatMessage::tool("call", "ok"),
+        ];
+        let normalized_calls = normalize_history(&with_calls);
+        assert_eq!(normalized_calls.len(), 2);
+        assert!(normalized_calls[0].tool_calls.iter().any(|c| c.id == "call"));
+    }
+
+    #[test]
+    fn normalization_keeps_provider_item_messages() {
+        // provider_item（assistant 角色、空正文）承载远端压缩的 compaction 载荷，
+        // provider 层会特判展开，不是「空消息」，绝不能丢。
+        let messages = vec![
+            ChatMessage::provider_item(json!({"type": "compaction", "id": "c1"})),
+            ChatMessage::user("after"),
+        ];
+        let normalized = normalize_history(&messages);
+        assert_eq!(normalized.len(), 2);
+        assert!(!normalized[0].provider_items.is_empty());
     }
 
     #[test]

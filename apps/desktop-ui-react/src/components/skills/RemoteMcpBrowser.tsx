@@ -8,12 +8,13 @@
  *   · 本机缺 npx / uvx 这类运行环境 → 按钮变成「一键装环境并安装」：一张两步进度卡，
  *     先装环境再装工具（见 ChainInstallDialog）。
  *  另外保留「生成配置」这条手动路（自定义安装对话框），供用户想自己改配置文件时使用。 */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { toast } from 'sonner'
 import {
   AlertTriangle, CheckCircle2, Download, ExternalLink, Globe, KeyRound, RefreshCw, Search, Wrench,
 } from 'lucide-react'
-import NumberFlow from '@number-flow/react'
+import { AnimatedNumber } from '../ui/Number'
 import { cn } from '../../lib/cn'
 import { useLibrary } from '../../stores/library'
 import { Button } from '../../components/ui/Button'
@@ -26,13 +27,15 @@ import { RuntimeHelpDialog } from './RuntimeHelpDialog'
 import { RemoteInstallDialog } from './RemoteInstallDialog'
 import { ChainInstallDialog, EMPTY_TOOL_OUTCOME, type ToolInstallOutcome } from './ChainInstallDialog'
 import {
-  entryRuntimeIds, helpTargetFor, runtimeLabel, runtimeStatusFor, type RuntimeHelpTarget,
+  entryRuntimeIds, helpTargetFor, runtimeLabel, runtimeStatusFor,
+  type RuntimeHelpTarget, type RuntimeStatus,
 } from './runtimeMeta'
 import {
   remoteInstallPlan, remoteServerName, remoteSourceDef, fetchRemoteEntries,
   type RemoteEntry, type RemoteSourceKey,
 } from './remoteSources'
 import type { McpInstallResult } from './installClient'
+import { useLatestRef, useVirtualList } from './useVirtualList'
 
 /** 卡片错峰入场：步长取令牌 --motion-stagger，超过 10 项不再往后排（与「已安装」列表同一套节奏）。 */
 const stagger = (i: number): React.CSSProperties => ({ animationDelay: 'calc(var(--motion-stagger) * ' + Math.min(i, 10) + ')' })
@@ -105,6 +108,11 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
   /** 第三方条目装完（含「已保存但没连上」）：调用方刷新目录 + 已安装两条链路并回显。 */
   onInstalled?: (entry: RemoteEntry, echo: RemoteInstalledEcho) => void
 }) {
+  /* onNotice / onInstalled / onInstallBuiltin 都由上层（SkillsView）随手传，父组件每次渲染都可能是新函数。
+     下面要交给 memo 卡片的回调必须引用稳定，所以走 ref 读最新值（见 useLatestRef 的说明）。 */
+  const onInstalledRef = useLatestRef(onInstalled)
+  const onInstallBuiltinRef = useLatestRef(onInstallBuiltin)
+
   const def = remoteSourceDef(sourceKey)
   const state = useLibrary((s) => s.remote[sourceKey])
   const setRemoteState = useLibrary((s) => s.setRemoteState)
@@ -127,7 +135,7 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
  *  并排装两条时，后点的会把先点的按钮提前解锁（用户以为装完了/没装上），
  *  而且先点的那条的 finally 又会把后点的按钮解锁（连环串台）。 */
   const [installing, setInstalling] = useState<ReadonlySet<string>>(() => new Set<string>())
-  const markInstalling = (key: string, on: boolean): void => {
+  const markInstalling = useCallback((key: string, on: boolean): void => {
     setInstalling((prev) => {
       if (prev.has(key) === on) return prev
       const next = new Set(prev)
@@ -135,7 +143,7 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
       else next.delete(key)
       return next
     })
-  }
+  }, [])
   /** 每条最近的安装结果：卡片上直接回显「已连接 · N 个工具」或失败原因。 */
   const [results, setResults] = useState<Record<string, McpInstallResult>>({})
   // 只认最后一次请求的结果：切源/连点搜索时，慢响应不能覆盖新响应。
@@ -259,7 +267,14 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
 
   const loading = state.status === 'loading'
   const entries = state.entries
-  const canInstallDirect = (entry: RemoteEntry): boolean => builtinIds.has(entry.id)
+
+  /* ── 窗口化（见 useVirtualList 的文件头）──
+     行 key（就是卡片 key）必须由 useMemo 稳定住：它是行高缓存的键，每帧换新会把量过的行全丢掉。 */
+  const virtKeys = useMemo(() => entries.map((entry) => entry.key), [entries])
+  const virt = useVirtualList({ keys: virtKeys, estimate: 236, gap: 12, overscan: 6, minCount: 30 })
+  /** 换源 / 换关键词＝整张列表换内容，把滚动位置拉回顶部（否则会停在一个已经没有内容的位置）。 */
+  const scrollToTop = useLatestRef(virt.scrollToTop)
+  useEffect(() => { scrollToTop.current() }, [sourceKey, page.query, scrollToTop])
 
   const echoOf = (entry: RemoteEntry, result: McpInstallResult): RemoteInstalledEcho => ({
     name: result.name || remoteServerName(entry),
@@ -270,14 +285,15 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
     error: result.error || result.message,
   })
 
-  /** 记下结果：卡片回显 + 通知调用方刷新两条链路。 */
-  const remember = (entry: RemoteEntry, result: McpInstallResult): void => {
+  /** 记下结果：卡片回显 + 通知调用方刷新两条链路。
+   *  引用要稳定：它被 quickInstall 与两个对话框回调引用，进而被 memo 卡片的下游引用。 */
+  const remember = useCallback((entry: RemoteEntry, result: McpInstallResult): void => {
     setResults((prev) => ({ ...prev, [entry.id]: result }))
-    if (result.saved) onInstalled?.(entry, echoOf(entry, result))
-  }
+    if (result.saved) onInstalledRef.current?.(entry, echoOf(entry, result))
+  }, [])
 
   /** 一键安装（不开表单）：清单里已经能推断出命令/地址，且不需要用户补值。 */
-  const quickInstall = async (entry: RemoteEntry, overwrite = false): Promise<void> => {
+  const quickInstall = useCallback(async (entry: RemoteEntry, overwrite = false): Promise<void> => {
     const plan = remoteInstallPlan(entry)
     markInstalling(entry.key, true)
     try {
@@ -306,18 +322,18 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
     } finally {
       markInstalling(entry.key, false)
     }
-  }
+  }, [installRemote, markInstalling, remember])
 
   /** 卡片主按钮：缺运行环境 → 两步卡；能推断 → 直接装；推不出 → 预填表单。 */
-  const primaryInstall = (entry: RemoteEntry, runtimeId: string, runtimeMissing: boolean): void => {
+  const primaryInstall = useCallback((entry: RemoteEntry, runtimeId: string, runtimeMissing: boolean): void => {
     if (runtimeMissing && runtimeId) { setChain({ entry, runtimeId }); return }
     const plan = remoteInstallPlan(entry)
     if (plan.direct) { void quickInstall(entry); return }
     setFormEntry(entry)
     setFormOpen(true)
-  }
+  }, [quickInstall])
 
-  const applySeed = (entry: RemoteEntry): void => {
+  const applySeed = useCallback((entry: RemoteEntry): void => {
     setSeed({
       id: entry.id,
       name: entry.name,
@@ -331,151 +347,35 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
       env: Object.fromEntries(entry.envKeys.map((key) => [key, ''])),
     })
     setSeedOpen(true)
-  }
+  }, [def.label])
 
-  const renderCard = (entry: RemoteEntry, i: number) => {
-    const installed = installedIds.has(entry.id)
-    const inCatalog = builtinIds.has(entry.id)
-    const command = [entry.command, ...entry.args].filter(Boolean).join(' ')
-    const heat = entry.stars !== null ? '★ ' + compact(entry.stars) : entry.downloads !== null ? '热度 ' + compact(entry.downloads) : ''
-    /// 这条要用什么拉起（npx / uvx / docker…）：本机缺它的话，装上也用不了。
-    const runtimeId = entryRuntimeIds(entry)[0] ?? ''
-    const runtime = runtimeId ? runtimeStatusFor(runtimes, runtimeId) : null
-    const runtimeMissing = !!runtime && !runtime.found
-    const runtimeUnknown = !!runtimeId && runtimes.length === 0
-    const result = results[entry.id]
-    const busy = installing.has(entry.key)
-    const plan = remoteInstallPlan(entry)
-    return (
-      <article
-        key={entry.key}
-        style={stagger(i)}
-        // 边框 / 悬浮统一到令牌 v2：默认 --line，hover 与焦点由 .card-lift 抬到 --line-strong。
-        className='card-lift flex animate-card-in flex-col rounded-lg border border-line bg-surface elev-1 p-4'
-      >
-        <div className='flex items-start gap-3'>
-          <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', installed || result?.ok ? 'bg-primary-soft text-primary' : 'bg-sunken text-ink-3')}>
-            {catalogIcon(entry.id)}
-          </span>
-          <div className='min-w-0 flex-1'>
-            <div className='flex items-center gap-1.5'>
-              <h3 className='truncate text-13 font-medium text-ink' title={entry.id}>{entry.name}</h3>
-              {entry.version ? <span className='shrink-0 text-11 text-ink-4'>v{entry.version}</span> : null}
-            </div>
-            <div className='mt-0.5 flex min-w-0 items-center gap-1.5 text-11 text-ink-4'>
-              {entry.author ? <span className='min-w-0 truncate' title={entry.author}>{entry.author}</span> : null}
-              {heat ? <span className='shrink-0'>{heat}</span> : null}
-            </div>
-          </div>
-          {result?.ok ? (
-            <Badge tone='ok'>已连接</Badge>
-          ) : installed ? <Badge tone='ok'>已安装</Badge> : inCatalog ? <Badge tone='primary'>目录内</Badge> : null}
-        </div>
+  /** 命中内置目录的条目：直接安装（要补参数的条目由上层弹表单）。 */
+  const handleBuiltin = useCallback((id: string): void => { onInstallBuiltinRef.current(id) }, [])
 
-        <p className='mt-2.5 line-clamp-3 flex-1 text-12 leading-[1.6] text-ink-3'>{entry.description || '这个源没有提供描述'}</p>
+  /** 缺运行环境时「怎么装」的弹窗；payload 由卡片自己组装，回调只负责显示、引用因此恒稳定。 */
+  const openHelp = useCallback((payload: { target: RuntimeHelpTarget | null; reason: string; entryName: string }): void => {
+    setHelp(payload)
+  }, [])
 
-        {command ? (
-          <div className='mt-2 truncate font-mono text-11 text-ink-4' title={command}>{command}</div>
-        ) : entry.url ? (
-          <div className='mt-2 truncate font-mono text-11 text-ink-4' title={entry.url}>{(entry.transport || 'http') + ' · ' + entry.url}</div>
-        ) : (
-          <div className='mt-2 text-11 text-ink-4'>源里没有给出启动方式：点「一键安装」后补一行命令或地址即可</div>
-        )}
-        {entry.envKeys.length ? (
-          <div className='mt-1 flex items-center gap-1 truncate text-11 text-warn' title={entry.envKeys.join(', ')}>
-            <KeyRound size={11} className='shrink-0' /> 需填 {entry.envKeys.length} 个环境变量
-          </div>
-        ) : null}
-
-        {/* 装完的回显：连上了就把工具数摆出来，没连上就把 stderr 的第一句摆出来 */}
-        {result ? (
-          result.ok ? (
-            <div className='mt-1.5 flex items-baseline gap-1.5 text-11 text-ok'>
-              <CheckCircle2 size={11} className='shrink-0 self-center' />
-              <span>已连接</span>
-              <span className='text-ink-4'>·</span>
-              <NumberFlow value={result.toolsCount} className='text-12 font-medium tabular-nums' />
-              <span>个工具</span>
-            </div>
-          ) : result.saved && !result.conflict ? (
-            <div className='mt-1.5 flex min-w-0 items-start gap-1.5 text-11 leading-[1.6] text-warn'>
-              <AlertTriangle size={11} className='mt-0.5 shrink-0' />
-              <span className='min-w-0 truncate' title={result.error}>{'已写入配置，但没连上：' + (result.error || '').split('\n')[0]}</span>
-            </div>
-          ) : null
-        ) : null}
-
-        {runtimeMissing ? (
-          <div className='mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-11 text-warn'>
-            <AlertTriangle size={11} className='shrink-0' />
-            <span className='min-w-0 truncate'>本机未检测到 {runtimeLabel(runtimeId)}，装好它才能拉起这条</span>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => setHelp({
-                target: helpTargetFor(runtimeId, runtimes),
-                reason: '这条要用 ' + runtimeLabel(runtimeId) + ' 拉起，引擎在本机没有检测到它。',
-                entryName: entry.name,
-              })}
-            >
-              <Wrench size={13} /> 怎么装
-            </Button>
-          </div>
-        ) : runtimeUnknown ? (
-          <div className='mt-1 truncate text-11 text-ink-4' title={'需要 ' + runtimeLabel(runtimeId)}>
-            需要 {runtimeLabel(runtimeId)}：引擎未提供环境检测，安装前请确认本机已装好
-          </div>
-        ) : null}
-
-        <div className='mt-3 flex flex-wrap items-center gap-1.5'>
-          {entry.repository || entry.homepage ? (
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                const url = entry.repository || entry.homepage
-                window.open(url, '_blank', 'noopener,noreferrer')
-              }}
-            >
-              <ExternalLink size={13} /> 主页
-            </Button>
-          ) : null}
-          <span className='flex-1' />
-          {canInstallDirect(entry) ? (
-            <Button variant='primary' size='sm' title='这条在内置目录里，直接安装' onClick={() => onInstallBuiltin(entry.id)}>
-              <Download size={13} /> 一键安装
-            </Button>
-          ) : (
-            <>
-              {!plan.direct && !runtimeMissing ? <Badge tone='warn'>需补参数</Badge> : null}
-              <Button
-                variant='ghost'
-                size='sm'
-                title='生成可粘贴进 config/mcp_servers.json 的配置片段（想自己改配置文件时用）'
-                onClick={() => applySeed(entry)}
-              >
-                生成配置
-              </Button>
-              <Button
-                variant='primary'
-                size='sm'
-                disabled={busy}
-                title={runtimeMissing
-                  ? '先装上 ' + runtimeLabel(runtimeId) + '，再装这条（一张进度卡两步）'
-                  : plan.direct
-                    ? '按清单推断的命令直接装：' + (plan.basis || '一键安装')
-                    : '清单信息不全，补一行命令或地址后再装'}
-                onClick={() => primaryInstall(entry, runtimeId, runtimeMissing)}
-              >
-                {busy ? <Spinner /> : runtimeMissing ? <Wrench size={13} /> : <Download size={13} />}
-                {runtimeMissing ? '一键装环境并安装' : '一键安装'}
-              </Button>
-            </>
-          )}
-        </div>
-      </article>
-    )
-  }
+  /** 卡片 props 组装：窗口化分支与整列分支共用同一个入口（两处字段不会不同步）。
+   *  回调全是稳定引用、其余全是原始值 —— 见文件末尾 RemoteCard 的注释。 */
+  const renderCard = (entry: RemoteEntry, index: number) => (
+    <RemoteCard
+      key={entry.key}
+      entry={entry}
+      index={index}
+      installed={installedIds.has(entry.id)}
+      inCatalog={builtinIds.has(entry.id)}
+      runtimes={runtimes}
+      result={results[entry.id]}
+      busy={installing.has(entry.key)}
+      cvStyle={virt.fallbackStyle}
+      onInstallBuiltin={handleBuiltin}
+      onSeed={applySeed}
+      onPrimary={primaryInstall}
+      onHelp={openHelp}
+    />
+  )
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-3'>
@@ -568,10 +468,30 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
             {state.fetchedAt ? <span className='ml-auto shrink-0'>{new Date(state.fetchedAt).toLocaleTimeString('zh-CN')}</span> : null}
           </div>
           {/* 滚到底自动续页（见 onResultsScroll），页脚那枚按钮是兜底。 */}
-          <div className='min-h-0 flex-1 overflow-y-auto' onScroll={onResultsScroll}>
-            <div className='grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3'>
-              {entries.map((entry, i) => renderCard(entry, i))}
-            </div>
+          <div
+            ref={virt.attachRef}
+            onScroll={(event) => { virt.handleScroll(event); onResultsScroll(event) }}
+            className='min-h-0 flex-1 overflow-y-auto'
+          >
+            {virt.virtualized ? (
+              /* 窗口化分支：撑高块定总高，每一行绝对定位 + translateY(start)。
+                 overflow-anchor:none —— 位移由 useVirtualList 的锚点校正负责，不让浏览器再补一次。 */
+              <div className='relative' style={{ height: virt.totalSize, overflowAnchor: 'none' }}>
+                {virt.rows.map((row) => (
+                  <div key={row.key} data-vi={row.index} className='absolute inset-x-0 top-0' style={virt.rowStyle(row)}>
+                    {/* data-vi-grid：useVirtualList 从这里读真实列数（Tailwind 断点是唯一事实来源）。 */}
+                    <div data-vi-grid className='grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3'>
+                      {entries.slice(row.from, row.to).map((entry, k) => renderCard(entry, row.from + k))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* 短列表：整列渲染，布局与窗口化分支逐字一致，切换时看不到重排。 */
+              <div className='grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3'>
+                {entries.map((entry, i) => renderCard(entry, i))}
+              </div>
+            )}
             {/* 翻页页脚：加载中 / 失败可重试 / 还有更多 / 没有更多了，四态都要有话说。 */}
             <div className='mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 pb-2 text-11 text-ink-4'>
               {page.loadingMore ? (
@@ -652,3 +572,170 @@ export function RemoteMcpBrowser({ sourceKey, builtinIds, installedIds, configPa
     </div>
   )
 }
+
+/** 一张远程 MCP 卡片：React.memo 包住。
+ *  为什么要 memo：父组件在「安装中状态变化（installing 集合）」「装完的结果回显」「翻页」时会整页重渲；
+ *  卡片里有几十处交互引用，几百张一起重画就是主线程被占满（＝点不动、滚不动）。
+ *  所以 props 只传原始值（installed / inCatalog / busy / index）与稳定引用
+ *  （entry / result / runtimes / 四个 useCallback 回调）。 */
+const RemoteCard = memo(function RemoteCard({
+  entry, index, installed, inCatalog, runtimes, result, busy, cvStyle,
+  onInstallBuiltin, onSeed, onPrimary, onHelp,
+}: {
+  entry: RemoteEntry
+  index: number
+  installed: boolean
+  inCatalog: boolean
+  runtimes: RuntimeStatus[]
+  result: McpInstallResult | undefined
+  busy: boolean
+  /** 未窗口化时的兜底渲染隔离样式（当前恒为空对象，见 useVirtualList 的 CV_MIN_ROWS）。 */
+  cvStyle: CSSProperties
+  onInstallBuiltin: (id: string) => void
+  onSeed: (entry: RemoteEntry) => void
+  onPrimary: (entry: RemoteEntry, runtimeId: string, runtimeMissing: boolean) => void
+  onHelp: (payload: { target: RuntimeHelpTarget | null; reason: string; entryName: string }) => void
+}) {
+  const command = [entry.command, ...entry.args].filter(Boolean).join(' ')
+  const heat = entry.stars !== null ? '★ ' + compact(entry.stars) : entry.downloads !== null ? '热度 ' + compact(entry.downloads) : ''
+  /// 这条要用什么拉起（npx / uvx / docker…）：本机缺它的话，装上也用不了。
+  const runtimeId = entryRuntimeIds(entry)[0] ?? ''
+  const runtime = runtimeId ? runtimeStatusFor(runtimes, runtimeId) : null
+  const runtimeMissing = !!runtime && !runtime.found
+  const runtimeUnknown = !!runtimeId && runtimes.length === 0
+  const plan = remoteInstallPlan(entry)
+  return (
+    <article
+      style={{ ...cvStyle, ...stagger(index) }}
+      // 边框 / 悬浮统一到令牌 v2：默认 --line，hover 与焦点由 .card-lift 抬到 --line-strong。
+      className='card-lift flex animate-card-in flex-col rounded-lg border border-line bg-surface elev-1 p-4'
+    >
+      <div className='flex items-start gap-3'>
+        <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', installed || result?.ok ? 'bg-primary-soft text-primary' : 'bg-sunken text-ink-3')}>
+          {catalogIcon(entry.id)}
+        </span>
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-center gap-1.5'>
+            <h3 className='truncate text-13 font-medium text-ink' title={entry.id}>{entry.name}</h3>
+            {entry.version ? <span className='shrink-0 text-11 text-ink-4'>v{entry.version}</span> : null}
+          </div>
+          <div className='mt-0.5 flex min-w-0 items-center gap-1.5 text-11 text-ink-4'>
+            {entry.author ? <span className='min-w-0 truncate' title={entry.author}>{entry.author}</span> : null}
+            {heat ? <span className='shrink-0'>{heat}</span> : null}
+          </div>
+        </div>
+        {result?.ok ? (
+          <Badge tone='ok'>已连接</Badge>
+        ) : installed ? <Badge tone='ok'>已安装</Badge> : inCatalog ? <Badge tone='primary'>目录内</Badge> : null}
+      </div>
+
+      {/* 描述最少占三行高：卡片高度不会因为描述长短 / 状态回显而变
+          —— 行高一变，窗口化的缓存要重量、滚动位置要重新校正，看起来就是「点一下抖一下」。 */}
+      <p className='mt-2.5 line-clamp-3 min-h-[4.8em] flex-1 text-12 leading-[1.6] text-ink-3'>{entry.description || '这个源没有提供描述'}</p>
+
+      {command ? (
+        <div className='mt-2 truncate font-mono text-11 text-ink-4' title={command}>{command}</div>
+      ) : entry.url ? (
+        <div className='mt-2 truncate font-mono text-11 text-ink-4' title={entry.url}>{(entry.transport || 'http') + ' · ' + entry.url}</div>
+      ) : (
+        <div className='mt-2 text-11 text-ink-4'>源里没有给出启动方式：点「一键安装」后补一行命令或地址即可</div>
+      )}
+      {entry.envKeys.length ? (
+        <div className='mt-1 flex items-center gap-1 truncate text-11 text-warn' title={entry.envKeys.join(', ')}>
+          <KeyRound size={11} className='shrink-0' /> 需填 {entry.envKeys.length} 个环境变量
+        </div>
+      ) : null}
+
+      {/* 装完的回显：连上了就把工具数摆出来，没连上就把 stderr 的第一句摆出来 */}
+      {result ? (
+        result.ok ? (
+          <div className='mt-1.5 flex items-baseline gap-1.5 text-11 text-ok'>
+            <CheckCircle2 size={11} className='shrink-0 self-center' />
+            <span>已连接</span>
+            <span className='text-ink-4'>·</span>
+            <AnimatedNumber value={result.toolsCount} className='text-12 font-medium tabular-nums' />
+            <span>个工具</span>
+          </div>
+        ) : result.saved && !result.conflict ? (
+          <div className='mt-1.5 flex min-w-0 items-start gap-1.5 text-11 leading-[1.6] text-warn'>
+            <AlertTriangle size={11} className='mt-0.5 shrink-0' />
+            <span className='min-w-0 truncate' title={result.error}>{'已写入配置，但没连上：' + (result.error || '').split('\n')[0]}</span>
+          </div>
+        ) : null
+      ) : null}
+
+      {runtimeMissing ? (
+        <div className='mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-11 text-warn'>
+          <AlertTriangle size={11} className='shrink-0' />
+          <span className='min-w-0 truncate'>本机未检测到 {runtimeLabel(runtimeId)}，装好它才能拉起这条</span>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => onHelp({
+              target: helpTargetFor(runtimeId, runtimes),
+              reason: '这条要用 ' + runtimeLabel(runtimeId) + ' 拉起，引擎在本机没有检测到它。',
+              entryName: entry.name,
+            })}
+          >
+            <Wrench size={13} /> 怎么装
+          </Button>
+        </div>
+      ) : runtimeUnknown ? (
+        <div className='mt-1 truncate text-11 text-ink-4' title={'需要 ' + runtimeLabel(runtimeId)}>
+          需要 {runtimeLabel(runtimeId)}：引擎未提供环境检测，安装前请确认本机已装好
+        </div>
+      ) : null}
+
+      <div className='mt-3 flex flex-wrap items-center gap-1.5'>
+        {entry.repository || entry.homepage ? (
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => {
+              const url = entry.repository || entry.homepage
+              window.open(url, '_blank', 'noopener,noreferrer')
+            }}
+          >
+            <ExternalLink size={13} /> 主页
+          </Button>
+        ) : null}
+        <span className='flex-1' />
+        {inCatalog ? (
+          <Button variant='primary' size='sm' title='这条在内置目录里，直接安装' onClick={() => onInstallBuiltin(entry.id)}>
+            <Download size={13} /> 一键安装
+          </Button>
+        ) : (
+          <>
+            {!plan.direct && !runtimeMissing ? <Badge tone='warn'>需补参数</Badge> : null}
+            <Button
+              variant='ghost'
+              size='sm'
+              title='生成可粘贴进 config/mcp_servers.json 的配置片段（想自己改配置文件时用）'
+              onClick={() => onSeed(entry)}
+            >
+              生成配置
+            </Button>
+            <Button
+              variant='primary'
+              size='sm'
+              disabled={busy}
+              title={runtimeMissing
+                ? '先装上 ' + runtimeLabel(runtimeId) + '，再装这条（一张进度卡两步）'
+                : plan.direct
+                  ? '按清单推断的命令直接装：' + (plan.basis || '一键安装')
+                  : '清单信息不全，补一行命令或地址后再装'}
+              onClick={() => onPrimary(entry, runtimeId, runtimeMissing)}
+            >
+              {/* 图标位固定 14×14（Spinner 就是 h-3.5）：安装中换图标不许把按钮撑高。
+                  已有安装/装完回显这类「卡片长高」由窗口化的重新测量 + 锚点校正兜住。 */}
+              <span className='inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center' aria-hidden>
+                {busy ? <Spinner /> : runtimeMissing ? <Wrench size={13} /> : <Download size={13} />}
+              </span>
+              {runtimeMissing ? '一键装环境并安装' : '一键安装'}
+            </Button>
+          </>
+        )}
+      </div>
+    </article>
+  )
+})

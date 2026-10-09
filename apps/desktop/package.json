@@ -1,7 +1,7 @@
 {
   "name": "coomi-desktop",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.0-rc50",
   "scripts": {
     "tauri": "tauri"
   },

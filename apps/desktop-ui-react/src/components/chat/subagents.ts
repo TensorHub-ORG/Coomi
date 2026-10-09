@@ -18,6 +18,48 @@ export interface ConfiguredSubagent {
   description?: string
 }
 
+/* ── 子智能体对话详情（GET /api/agents/{id}/messages）──
+   引擎侧已实现的只读接口：返回某个子智能体的完整对话记录。
+   详情视图只在用户点开某条时按 id 拉取；面板概览仍走上面的 deriveSubagents
+   （派生数据拿不到完整对话，只有快照里的 task / output / elapsed_ms）。 */
+
+/** assistant 消息里的一条工具调用（tools 字段的项）。 */
+export interface SubagentMessageTool {
+  /** 引擎给的工具调用 id（渲染 key 用）。 */
+  id: string
+  /** 工具名（如 read_file / spawn_agent）。 */
+  name: string
+  /** 调用参数：引擎序列化好的 JSON 字符串，原样展示、不做二次解析。 */
+  arguments: string
+}
+
+/** 一条消息的角色：引擎按对话顺序给出，前端只按角色映射渲染、不改顺序。 */
+export type SubagentMessageRole = 'system' | 'user' | 'assistant' | 'tool'
+
+/** 详情接口里的一条消息。 */
+export interface SubagentMessage {
+  role: SubagentMessageRole
+  /** 正文（user / assistant / tool 都有；system 一般是提示词等元信息）。 */
+  content: string
+  /** 思考内容：引擎只在非空时给这个字段（没有就是 undefined，不渲染折叠块）。 */
+  reasoning?: string
+  /** 该轮的工具调用列表：引擎只在非空时给（没有就是 undefined，不渲染工具行）。 */
+  tools?: SubagentMessageTool[]
+}
+
+/** GET /api/agents/{id}/messages 的 200 响应体（字段名沿用引擎口径，snake_case）。 */
+export interface SubagentDetail {
+  id: string
+  status: string
+  task: string
+  /** 最终输出：非空时在对话末尾单独展示。 */
+  output: string
+  /** 引擎计时的耗时（毫秒，数字；没跑完时可能不准确，展示时以它为准）。 */
+  elapsed_ms: number
+  /** 完整对话流：按顺序渲染，详情视图不改顺序。 */
+  messages: SubagentMessage[]
+}
+
 export type SubagentStatus = 'starting' | 'running' | 'completed' | 'failed' | 'closed'
 
 export interface SubagentEntry {

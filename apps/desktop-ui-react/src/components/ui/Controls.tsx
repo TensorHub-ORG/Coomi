@@ -258,6 +258,7 @@ export function Spinner({ className }: { className?: string }) {
     <span
       className={cn('inline-block h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent', className)}
       aria-hidden
+      data-loop-anim
     />
   )
 }
@@ -274,12 +275,13 @@ export function Skeleton({ className, style, lines = 1, circle }: {
 }) {
   // data-skeleton / animate-skeleton：关掉动效时由 base.css 统一停掉呼吸动画
   const bar = cn('animate-skeleton animate-pulse bg-sunken', circle ? 'rounded-full' : 'rounded-md')
-  if (lines <= 1) return <span aria-hidden style={style} className={cn(bar, 'block h-3 w-full', className)} />
+  if (lines <= 1) return <span aria-hidden data-loop-anim style={style} className={cn(bar, 'block h-3 w-full', className)} />
   return (
     <span aria-hidden style={style} className={cn('block w-full', className)}>
       {Array.from({ length: lines }, (_, i) => (
         <span
           key={i}
+          data-loop-anim
           className={cn(bar, 'mb-2 block h-3', i === lines - 1 ? 'w-[58%]' : i % 2 ? 'w-[86%]' : 'w-full')}
         />
       ))}

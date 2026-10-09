@@ -411,7 +411,7 @@ function referenceSnapshot(): Snapshot {
 
 const INJECT_NOTE = '当前生效的源只注入引擎派发的子进程：git 走 url.<base>.insteadOf、npm / pnpm 走 registry、'
   + 'pip 走 index-url、uv 走 UV_INDEX_URL。它不写系统或用户级的全局配置，也不会改动你自己的终端环境——'
-  + '关掉 Coomi 之后这些设置对外界没有任何影响。'
+  + '关掉 CoomiPlus 之后这些设置对外界没有任何影响。'
 
 /* ── 行内小件 ── */
 
@@ -425,7 +425,7 @@ function StatusLight({ status }: { status: MirrorItem['status'] }) {
       : status === 'testing' ? '正在测速'
         : '还没有测速结果'
   return (
-    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', dot)}>
+    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', dot)} data-loop-anim={status === 'testing' ? '' : undefined}>
       <span className='sr-only'>{label}</span>
     </span>
   )

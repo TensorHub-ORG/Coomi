@@ -12,12 +12,12 @@ import { useCapabilities } from './capabilities'
 import {
   applyEventsToMessages, applyHistoryItems, collapseAssistantCopies, dropPersistedAssistantCopies,
   firstTokenFromEvent,
-  itemsFromHistory, tokenWindowMs, turnDurationFromEvent, validTurnMs,
+  itemsFromHistory, nextAnchorSeq, tokenWindowMs, turnDurationFromEvent, validTurnMs,
   type AskAnswer, type AskAnswerItem, type ChatItem, type HistoryMergeOptions,
 } from '../lib/chat'
 import { notifyTurnDone } from '../lib/notify'
 // 传输兜底：直连 WS 不通时改走壳内桥（见该文件顶部说明）。
-import { createEngineSocket } from '../lib/engineSocket'
+import { bridgeOpenState, createEngineSocket } from '../lib/engineSocket'
 // event_seq 顺序门：缺口检测 / 乱序缓冲 / 去重（字段位置与协议见该文件顶部说明）。
 import { createSeqGate, readEventSeq } from '../lib/eventSeq'
 // 流式正文的提交节流（32ms 合批）：窗口内到达的 chunk 合成一次 set()，见 scheduleFlush。
@@ -455,6 +455,8 @@ interface SessionState {
   disconnect: () => void
 }
 
+const historyRequests = new Map<string, number>()
+let sessionsRequest = 0
 let socket: WebSocket | null = null
 let reconnectTimer: number | null = null
 let reconnectAttempt = 0
@@ -649,6 +651,7 @@ const MODEL_PENDING_TTL_MS = 10_000
 // 在途的「切换模型」请求 id：用完即删。用它把「切换失败」与「执行出错」分开——
 // 连点两次切换时，第一次的失败帧不能变成对话里的一条 agent_error。
 const modelRequestIds = new Set<string>()
+let resumeRequestId: string | null = null
 
 /// 引擎的 WS 协议是信封格式：{ id?, payload: { command, ... } }。
 /// 之前直接发扁平 { command } 会被判成 "unsupported command"，所有操作都静默失效。
@@ -1247,6 +1250,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       return
     }
     if (type === 'turn_end') {
+      resumeRequestId = null
       /* turn_end 幂等：**同一轮**在 1.5 秒内重复到达（引擎的取消路径与正常收尾各发一条、
          或补帧把同一帧重发了一遍）只按**完整流程**处理一次，否则轮次统计 +1 两次、
          完成提醒弹两遍。
@@ -1334,7 +1338,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       turnCanceled = false
       const suppressed = suppressTurnEndNotify
       suppressTurnEndNotify = false
-      if (!canceled && !duplicate && !moreQueued && !suppressed) {
+      if (ev.ok === true && !canceled && !duplicate && !moreQueued && !suppressed) {
         notifyTurnDone({
           chars: producedChars,
           sessionTitle: get().sessions.find((x) => x.id === get().sessionId)?.title ?? '',
@@ -1540,6 +1544,9 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       sessionId,
       port: engine.port,
       token: engine.token,
+      // 桥接失败不能静默：把原因写进 linkError，用户能看到"为什么没连上"，
+      // 自检也能据此定位（以前只 console.warn，界面永远停在"已断开"而没有任何线索）。
+      onTransportError: (message) => commitCritical({ linkError: message }),
     })
     socket = ws
     const isCurrent = (): boolean => generation === socketGeneration
@@ -1557,6 +1564,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 引擎按「连接」保存这两个偏好，新连接必须重新下发，
       // 否则界面上选了「高」但实际还是默认值。
       void import('./agent').then(({ useAgent }) => {
+        if (!isCurrent() || get().sessionId !== sessionId || ws.readyState !== WebSocket.OPEN) return
         const { effort, permission } = useAgent.getState()
         ws.send(envelope({ command: 'set_reasoning_effort', effort }))
         ws.send(envelope({ command: 'set_permission_mode', mode: permission }))
@@ -1578,13 +1586,23 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 断线：界面上不能继续挂「进行中」（连接都没了，什么也收不到），
       // 缓冲里已经收到的正文先落地，一行都不能丢。
       flushChunks()
+      if (resumeRequestId) { resumeRequestId = null; set({ crashInterrupted: true, resuming: false }) }
       stopWatchdog()
       // 断线不发 ack（发了也没人收），兜底定时器一起停；last 留着给重连后的 resync 用。
       stopSeqAckTimer()
       commitCritical({ connected: false, streaming: false, connecting: false })
       scheduleReconnect()
     }
-    ws.onerror = () => { if (!isCurrent()) return; commitCritical({ connected: false, connecting: false, linkError: '连接异常，正在重连…' }) }
+    ws.onerror = () => {
+      if (!isCurrent()) return
+      commitCritical({ connected: false, connecting: false, linkError: '连接异常，正在重连…' })
+      // 静默点②：以前 onerror 只写 linkError、不重连（只有 onclose 才重连）——
+      // 投递失败走 failBridge 是「先 onerror 后 onclose」，但若 onclose 不来（或桥
+      // 只报错不关闭）就会永久停在「已断开」。现在与 onclose 一致地安排重连。
+      // 双重重连的去重放在 scheduleReconnect 内部（已有待执行的重连就不再排），
+      // 所以这里照常调用即可，onerror 之后 WebSocket 规范还会补一发 onclose 也不会双排。
+      scheduleReconnect()
+    }
     ws.onmessage = (e) => {
       if (!isCurrent()) return
       try {
@@ -1594,6 +1612,12 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         const payload = frame.payload ?? (frame as Record<string, any>)
         if (frame.type === 'error') {
           const message = String(payload.message ?? '引擎返回错误')
+          if (frame.id && frame.id === resumeRequestId) {
+            resumeRequestId = null
+            commitCritical({ resuming: false, crashInterrupted: true, linkError: message })
+            toast.error('恢复任务失败：' + message)
+            return
+          }
           // 切换模型的失败要认领到具体那一次请求：引擎凭据校验没过时只回 error 帧、
           // 不落盘（web/mod.rs 的 select_model），所以这里回滚显示 + 提示一句，
           // 而不是往对话里塞一条 agent_error（那会让人以为「这轮对话出错了」）。
@@ -1632,6 +1656,10 @@ export const useSession = create<SessionState>((applyPatch, get) => {
           return
         }
         if (frame.type === 'ack') {
+          if (frame.id && frame.id === resumeRequestId) {
+            resumeRequestId = null
+            commitCritical({ resuming: false, crashInterrupted: false })
+          }
           // select_model 成功时引擎在**落盘之后**回 ack：这条切换到此确认，
           // 之后引擎回填的就是新值了。
           if (frame.id) modelRequestIds.delete(frame.id)
@@ -1647,12 +1675,19 @@ export const useSession = create<SessionState>((applyPatch, get) => {
   const scheduleReconnect = (): void => {
     // 没有会话（还没打开过）就不必重连。
     if (!get().sessionId) return
+    // 去重：同一段断线里 onerror 与随后的 onclose 会先后各进来一次（投递失败走
+    // failBridge 也是先 onerror 后 onclose，send 失败提示也会调到这里）。已有一个
+    // **待执行**的重连（reconnectTimer 非空）就复用、不重排 —— 否则一次断线排两个
+    // 重连，退避序号被加速跳过（0.5s→2s），linkError 也被反复改写。
+    // 定时器到点回调里会把 reconnectTimer 置回 null（见下），refreshInfo 卡住时
+    // 后续 schedule 仍能重排，不会因为一个挂死的 refreshInfo 永久卡在「不再重连」。
+    if (reconnectTimer !== null) return
     // **重连永不放弃**：以前 6 次用尽就 return —— 那一停，界面就永远停在「与引擎的连接已断开」，
     // 用户点「重启引擎」把引擎拉起来后前端也不会自己接上（这正是那轮 bug 的根因）。
     // 现在：前 6 次指数退避（快），之后每 5 秒慢重试一次，直到连上为止；
     // 同时**绝不自动重启引擎**（忙≠死；真死由壳守护拉起），只提示等待。
     const exhausted = reconnectAttempt >= 6
-    const delay = exhausted ? 5_000 : 500 * Math.pow(2, reconnectAttempt)
+    const delay = Math.min(5_000, 500 * Math.pow(2, Math.min(reconnectAttempt, 6)))
     if (exhausted) {
       if (get().streaming || get().runState !== 'idle') resumeAfterRestart = true
       // 带上端口与底层原因：不然用户只能看到一句「连接已断开」，无从判断是引擎没起来、
@@ -1669,8 +1704,15 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     // 重连前**先刷新端口/令牌**：引擎重启会换端口，用旧端口重试一万次也连不上
     // （这正是「重启后一直显示连接已断开」的根因）。
     reconnectTimer = window.setTimeout(() => {
+      // 到点：摘掉「待执行」标记（配合顶部的去重），refreshInfo 挂住时还能重排。
+      reconnectTimer = null
       if (!get().sessionId) return
-      void useEngine.getState().refreshInfo().finally(() => { if (get().sessionId) connect() })
+      const sessionAtReconnect = get().sessionId
+      const generationAtReconnect = socketGeneration
+      void useEngine.getState().refreshInfo().finally(() => {
+        if (get().sessionId !== sessionAtReconnect || socketGeneration !== generationAtReconnect) return
+        connect()
+      })
     }, delay)
   }
 
@@ -1755,9 +1797,16 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     setInterrupted: (v) => set({ interrupted: v }),
 
     resumeInterruptedTurn: () => {
-      if (!get().sessionId) return
-      set({ crashInterrupted: false, resuming: false })
-      get().send('继续')
+      if (!get().sessionId || resumeRequestId || get().streaming) return
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        set({ crashInterrupted: true, linkError: '等待连接恢复后继续任务' })
+        scheduleReconnect()
+        return
+      }
+      // Continue persisted state instead of appending a duplicate user prompt.
+      resumeRequestId = crypto.randomUUID()
+      set({ resuming: true })
+      socket.send(envelopeWithId(resumeRequestId, { command: 'retry_turn' }))
     },
 
     dismissCrashInterrupted: () => set({ crashInterrupted: false }),
@@ -1775,7 +1824,12 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     pendingCwd: readCwd(),
 
     loadSessions: async () => {
-      const data = await useEngine.getState().api<{ sessions?: SessionSummary[] }>('/api/sessions')
+      const request = ++sessionsRequest
+      const engine = useEngine.getState()
+      const endpoint = engine.port + ':' + engine.token
+      const data = await engine.api<{ sessions?: SessionSummary[] }>('/api/sessions')
+      const currentEngine = useEngine.getState()
+      if (request !== sessionsRequest || endpoint !== currentEngine.port + ':' + currentEngine.token) return
       const sessions = data.sessions ?? []
       // 引擎的会话列表是权威：上次在列表里、这次不在了 = 被删了，把它的输入区桶一起清掉。
       // 对账一律用**原始**列表：可见性过滤只是界面的事，不影响「哪些会话真的没了」的判定。
@@ -1814,12 +1868,20 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     },
 
     loadHistory: async (id, options) => {
+      const request = (historyRequests.get(id) ?? 0) + 1
+      historyRequests.set(id, request)
+      const engineAtRequest = useEngine.getState()
+      const endpointAtRequest = engineAtRequest.port + ":" + engineAtRequest.token
+      const isCurrentRequest = (): boolean => {
+        const engine = useEngine.getState()
+        return historyRequests.get(id) === request && endpointAtRequest === engine.port + ":" + engine.token
+      }
       // 无论成败都要把「已加载」标上：否则界面会永远停在骨架 / 半透明态。
       const settle = (): void => set((s) => ({ historyLoaded: { ...s.historyLoaded, [id]: true } }))
       try {
         const data = await useEngine.getState().api<{ messages?: Array<Record<string, any>> }>('/api/sessions/' + id)
         // 异步回读期间用户可能已经切走：进度落后的响应绝不能覆盖当前会话。
-        if (get().sessionId !== id) return
+        if (get().sessionId !== id || !isCurrentRequest()) return
         // 回读回来的用户消息按本地索引补上附件 / 引用（引擎已经返回这两个字段时以引擎为准）：
         // 卡片不该因为「引擎还没把它们落库」或者「换了一次页面」就消失。
         const decorated = decorateHistory(id, data.messages ?? [])
@@ -1840,9 +1902,9 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         const seen = new Set<string>()
         const keyOf = (item: ChatItem): string =>
           item.kind === 'user'
-            ? 'u:' + item.text.trim()
+            ? 'u:' + (item.msgId ?? item.id)
             : item.kind === 'assistant'
-              ? 'a:' + (item.msgId ?? item.id) + ':' + item.text.length
+              ? 'a:' + (item.msgId ?? item.id)
               : item.kind + ':' + item.id
         const base: ChatItem[] = []
         for (const item of [...liveBase, ...cachedBase]) {
@@ -1893,7 +1955,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       } catch {
         // 回读失败**一律不清空已有内容**：一次失败就是「刚发的一问一答全没了」的根因。
         // messages 里有什么就留什么；只有「真的没加载完」的会话才停在骨架态。
-        settle()
+        if (isCurrentRequest()) settle()
       }
     },
 
@@ -1980,6 +2042,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 切到一个正在跑的会话：起搏看门狗（不能永远挂着进行中）。
       if (running) { lastEventAt = Date.now(); ensureWatchdog() } else stopWatchdog()
       await get().loadHistory(id)
+      if (get().sessionId !== id) return
       connect()
       // 顺手刷新一次会话列表：running 是「切回时要不要恢复流式光标」的判据之一，
       // 让它跟上引擎的当前状态（失败时保持现有列表，不影响已渲染的内容）。
@@ -2055,10 +2118,11 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       if (restoredId) {
         await get().loadHistory(id)
       }
+      if (get().sessionId !== id) return
       if (get().pendingCwd) {
         try { await writeCwd(id, get().pendingCwd) } catch { /* 引擎未就绪时忽略 */ }
       }
-      connect()
+      if (get().sessionId === id) connect()
     },
 
     rememberCwd: (dir) => {
@@ -2238,18 +2302,27 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       }
       /** 乐观条目也带上这两个字段：历史回读跟上之前，卡片照样在。
           本地 id（'u' + 序号）：与引擎真身同正文，回读时被 applyHistoryItems 认领替换。 */
-      const optimistic = (queued: boolean): ChatItem => ({
+      const optimistic = (queued: boolean, base: readonly ChatItem[]): ChatItem => ({
         kind: 'user',
         id: 'u' + (streamSeq++),
         text: trimmed,
         at: Date.now(),
+        // 顺序锚取「当前数组末尾 + 1」（nextAnchorSeq）：它是新条目，永远排在对话流最后 ——
+        // 与事件创建的条目是同一坐标系（对话位置），回读合并后排序仍正确。
+        anchorSeq: nextAnchorSeq(base),
         ...(queued ? { queued: true } : {}),
         ...(attachments.length ? { attachments: attachments as Extract<ChatItem, { kind: 'user' }>['attachments'] } : {}),
         ...(quotes.length ? { quotes: quotes as Extract<ChatItem, { kind: 'user' }>['quotes'] } : {}),
         structured: true,
       })
       // 连不上时曾经是「静默 return」——用户以为发出去了，其实什么都没发生。
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
+      // 发送前校验传输真实可用（静默点③）：
+      //   readyState !== OPEN 是老路径；走桥（currentTransport()==='ipc'）时再查桥侧
+      //   第一手 opened（bridgeOpenState）—— 桥「开着但引擎还没回话」（3 秒 watchdog
+      //   窗口）或投递失败已被 failBridge 摘除时它返回 false。不查的话这条消息会
+      //   静默发进死桥里（「发两次才动」的另一面：第一次其实丢在了桥里）。
+      const bridgeOpen = bridgeOpenState(get().sessionId)
+      if (!socket || socket.readyState !== WebSocket.OPEN || bridgeOpen === false) {
         // 没发出去：草稿留在输入框里，只提示一句，不静默丢弃。
         // messages 只走函数补丁：值补丁被提交闸门顺延后会用旧快照覆盖新增条目（丢消息）。
         set((s) => ({
@@ -2289,7 +2362,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         flushChunks()
         const sid = get().sessionId
         set((s) => ({
-          messages: [...s.messages, optimistic(true)],
+          messages: [...s.messages, optimistic(true, s.messages)],
           historyLoaded: { ...s.historyLoaded, [sid]: true },
           draft: '',
           quotes: [],
@@ -2339,7 +2412,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         // 以前这条只活在历史里，一次「读回旧快照 / 读回失败」就把它和刚到的回答一起抹掉，
         // 表现就是「发消息后一问一答一起消失，切回来又好了」——现在消息只增不减，回读滞后
         // 由 applyHistoryItems 保留本地尾部，这类竞态从结构上不存在。
-        messages: journaled([...s.messages, optimistic(false)], 'send'),
+        messages: journaled([...s.messages, optimistic(false, s.messages)], 'send'),
         historyLoaded: { ...s.historyLoaded, [sid]: true },
         streaming: true,
         runState: 'thinking',
@@ -2446,8 +2519,20 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     },
 
     disconnect: () => {
-      socket?.close()
+      // Invalidate callbacks before closing: a delayed onclose from A must not
+      // settle B or start an obsolete reconnect after a session switch.
+      socketGeneration += 1
+      resumeRequestId = null
+      if (reconnectTimer !== null) { window.clearTimeout(reconnectTimer); reconnectTimer = null }
+      const previous = socket
       socket = null
+      if (previous) {
+        previous.onopen = null
+        previous.onclose = null
+        previous.onerror = null
+        previous.onmessage = null
+        try { previous.close() } catch { /* already closed */ }
+      }
       // 主动断开：停止 ack 兜底定时器（断开连接时不再发 ack）；last 留给下次连接 resync。
       stopSeqAckTimer()
       // 断开前把缓冲与草稿落定：断线不该吞掉已经收到的正文。
@@ -2499,14 +2584,42 @@ function withAskState(items: ChatItem[], answers: Record<string, AskAnswer>): Ch
   return changed ? out : items
 }
 
+/** 渲染排序：按 anchorSeq **稳定**排序（相等的保持数组原序）。
+ *  锚是「这条在对话流里的单调顺序位置」（事件创建时记下 / 历史回读按位置补齐，见 lib/chat.ts 的
+ *  「对话流顺序锚」说明）—— 顺序由引擎事件日志决定，前端不再靠启发式在两个模型之间翻译。
+ *  数组本来就在锚序上时**原样返回**（同一引用，下游一次提交都不发）；缺锚的条目（测试构造 /
+ *  旧缓存）按原数组位置兜底，绝不乱动。 */
+function stableByAnchor(items: readonly ChatItem[]): ChatItem[] {
+  const list = items as ChatItem[]
+  let needsSort = false
+  for (let i = 0; i < list.length; i += 1) {
+    const anchor = list[i].anchorSeq
+    if (typeof anchor !== 'number') { needsSort = true; break }
+    if (i > 0 && (list[i - 1].anchorSeq as number) > anchor) { needsSort = true; break }
+  }
+  if (!needsSort) return list
+  const tagged = list.map((item, index) => ({ item, index }))
+  tagged.sort((a, b) => {
+    const aa = a.item.anchorSeq
+    const bb = b.item.anchorSeq
+    if (typeof aa === 'number' && typeof bb === 'number' && aa !== bb) return aa - bb
+    return a.index - b.index
+  })
+  return tagged.map((x) => x.item)
+}
+
 /** 渲染用条目：**直接就是 messages**（唯一事实来源），只补两件 store 才知道的事：
     提问卡的回答与挂起标记。必须 memo 化——直接把 messages 当 zustand 选择器会每次返回
-    新数组，触发 React「Maximum update depth exceeded」（错误码 #185）。 */
+    新数组，触发 React「Maximum update depth exceeded」（错误码 #185）。
+    渲染顺序：先按 anchorSeq 稳定排序（见 stableByAnchor），再认领提问卡状态。 */
 export function useChatItems(): RenderItem[] {
   const messages = useSession((s) => s.messages)
   /// 提问卡的回答（按会话）：答完不消失，就靠它回填到卡片上。
   const askAnswers = useSession((s) => s.askAnswers)
-  return useMemo(() => withAskState(messages, askAnswers) as RenderItem[], [messages, askAnswers])
+  return useMemo(
+    () => withAskState(stableByAnchor(messages), askAnswers) as RenderItem[],
+    [messages, askAnswers],
+  )
 }
 
 

@@ -107,13 +107,88 @@ pub fn engine_http(
     })
 }
 
+#[derive(Serialize)]
+pub struct EngineBinaryReply { pub status: u16, pub data: String, pub truncated: bool }
+
+#[cfg(test)]
+mod binary_tests {
+    use super::*;
+    #[test]
+    fn binary_http_decode_preserves_bytes_and_checks_limits() {
+        let mut raw = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n".to_vec();
+        raw.extend_from_slice(&[0,255,128,1]);
+        assert_eq!(decode_http_body(&raw,4).unwrap(),(200,vec![0,255,128,1],false));
+        assert_eq!(decode_http_body(&raw,2).unwrap(),(200,vec![0,255],true));
+        let short = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\na";
+        assert!(decode_http_body(short,4).is_err());
+    }
+    #[test]
+    fn chunked_http_decode_checks_framing() {
+        let raw=b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n";
+        assert_eq!(decode_http_body(raw,8).unwrap(),(200,b"abcde".to_vec(),false));
+        assert_eq!(decode_http_body(raw,4).unwrap(),(200,b"abcd".to_vec(),true));
+        assert!(decode_http_body(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\na",8).is_err());
+    }
+}
+
+fn decode_http_body(raw: &[u8], limit: usize) -> Result<(u16, Vec<u8>, bool), String> {
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("invalid HTTP response")?;
+    let head = std::str::from_utf8(&raw[..split]).map_err(|_| "invalid HTTP headers")?;
+    let status = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).ok_or("invalid HTTP status")?;
+    let body = &raw[split + 4..];
+    let chunked = head.lines().any(|line| line.to_ascii_lowercase().starts_with("transfer-encoding:") && line.to_ascii_lowercase().contains("chunked"));
+    if !chunked {
+        let declared = head.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            if key.eq_ignore_ascii_case("content-length") { value.trim().parse::<usize>().ok() } else { None }
+        });
+        if declared.is_some_and(|len| len <= limit && body.len() < len) { return Err("truncated HTTP body".into()); }
+        return Ok((status, body[..body.len().min(limit)].to_vec(), body.len() > limit || declared.is_some_and(|len| len > limit)));
+    }
+    let mut output = Vec::new();
+    let mut offset = 0;
+    loop {
+        let line_end = body[offset..].windows(2).position(|w| w == b"\r\n").ok_or("invalid chunk header")? + offset;
+        let size_text = std::str::from_utf8(&body[offset..line_end]).map_err(|_| "invalid chunk size")?;
+        let size = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16).map_err(|_| "invalid chunk size")?;
+        offset = line_end + 2;
+        if size == 0 { return Ok((status, output, false)); }
+        let end = offset.checked_add(size).ok_or("chunk overflow")?;
+        if end > body.len() { return Err("truncated HTTP chunk".into()); }
+        let available = limit.saturating_sub(output.len());
+        output.extend_from_slice(&body[offset..offset + size.min(available)]);
+        if size > available { return Ok((status, output, true)); }
+        if body.get(end..end + 2) != Some(b"\r\n") { return Err("invalid chunk terminator".into()); }
+        offset = end + 2;
+    }
+}
+
+#[tauri::command]
+pub async fn engine_file_read(port: u16, token: String, path: String, max_bytes: usize) -> Result<EngineBinaryReply, String> {
+    tauri::async_runtime::spawn_blocking(move || read_engine_file(port, token, path, max_bytes)).await.map_err(|e| e.to_string())?
+}
+
+fn read_engine_file(port: u16, token: String, path: String, max_bytes: usize) -> Result<EngineBinaryReply, String> {
+    if !path.starts_with("/api/fs/raw?path=") || path.contains(['\r', '\n']) || token.contains(['\r', '\n']) {
+        return Err("invalid file read request".into());
+    }
+    let limit = max_bytes.min(32 * 1024 * 1024);
+    let mut stream = TcpStream::connect_timeout(&local_addr(port), Duration::from_millis(1500)).map_err(|e| e.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_secs(30))).map_err(|e| e.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+    let mut raw = Vec::new();
+    stream.take((limit + limit / 2 + 65536) as u64).read_to_end(&mut raw).map_err(|e| e.to_string())?;
+    let (status, data, truncated) = decode_http_body(&raw, limit)?;
+    Ok(EngineBinaryReply { status, data: base64(&data), truncated })
+}
+
 struct Bridge {
     stop: Arc<AtomicBool>,
     writer: Arc<Mutex<TcpStream>>,
 }
 
 /// 每个会话一条桥。
-///
 /// 以前这里只保留**一条**全局桥（"切会话即换"），于是桥模式下切换/关闭任一会话
 /// 都会把别的会话的推送一起掐掉 —— 多会话并行在桥模式上根本不成立。
 /// 现在按 session 各留一条，互不影响。
@@ -151,17 +226,17 @@ fn close_all_bridges() {
 }
 
 /// 打开一条到引擎的 WS 桥（同一时刻只保留一条：切会话即换）。
-#[tauri::command]
-pub fn engine_ws_open(
-    app: AppHandle,
+/// 建立到引擎的 WS 升级连接：TCP 连上 → 发升级请求 → 确认 101。
+/// 单独抽出来是为了**重试**：引擎重启 / 正在重启时首次连接常失败。
+/// 以前一次失败就 Err，前端会把「引擎此刻不可达」误判成「传输桥坏了」而静默断开
+/// （linkError 一直是空的 —— 用户看到的就是"引擎活得好好的，界面却永远已断开"）。
+fn open_engine_ws_stream(
+    addr: &std::net::SocketAddr,
     port: u16,
-    token: String,
-    session: String,
-) -> Result<(), String> {
-    // 只替换**这个会话**已有的桥；别的会话的桥保持不动。
-    close_bridge(&session);
-    let addr = local_addr(port);
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(2000))
+    token: &str,
+    session: &str,
+) -> Result<std::net::TcpStream, String> {
+    let mut stream = TcpStream::connect_timeout(addr, Duration::from_millis(2000))
         .map_err(|error| format!("connect failed: {error}"))?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(5_000)));
@@ -202,6 +277,38 @@ pub fn engine_ws_open(
             head_text.lines().next().unwrap_or("").trim()
         ));
     }
+    Ok(stream)
+}
+
+#[tauri::command]
+pub fn engine_ws_open(
+    app: AppHandle,
+    port: u16,
+    token: String,
+    session: String,
+) -> Result<(), String> {
+    // 只替换**这个会话**已有的桥；别的会话的桥保持不动。
+    close_bridge(&session);
+    let addr = local_addr(port);
+    // 引擎重启 / 正在重启时首次连接常失败：重试 3 次（间隔 500ms）再放弃，
+    // 把最后一次的原因带回（配合前端 onTransportError，不再静默断开）。
+    let mut last_error = String::new();
+    let mut stream: Option<std::net::TcpStream> = None;
+    for attempt in 0..3u32 {
+        match open_engine_ws_stream(&addr, port, &token, &session) {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(error) => {
+                last_error = error;
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+    }
+    let Some(mut stream) = stream else { return Err(last_error) };
     let stop = Arc::new(AtomicBool::new(false));
     let writer = Arc::new(Mutex::new(stream.try_clone().map_err(|e| e.to_string())?));
     {

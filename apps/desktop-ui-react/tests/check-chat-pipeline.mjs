@@ -19,6 +19,7 @@
  */
 import {
   applyEventsToMessages, applyHistoryItems, chatWindowTail, collapseAssistantCopies, itemsFromHistory,
+  splitProcessAnswer,
 } from '../src/lib/chat.ts'
 
 let failed = 0
@@ -145,30 +146,77 @@ check('④·加载更早（+60）后 120 条', tail120.length, 120)
 check('④·加更早后窗口从头开始（再 +60 才盖到 w0）', tail120[0].id, 'w30')
 check('④·窗口不足时返回原数组（同一引用）', chatWindowTail(many, 200) === many, true)
 
-/* ══ ⑤ 历史映射（itemsFromHistory）仍产出顺序段 ══ */
+/* ══ ⑤ 历史映射（itemsFromHistory）：同一轮的多条 assistant 合并成一条 ══
+   引擎把「调用工具的每一步」也存成一条 assistant 消息，一条真实回复在历史里是 N 条。
+   mergeAssistantTurns 就是为这件事写的（不合并就会「旧内容跑到新回答下面」），
+   所以这一组期望是**合并之后**的形状：a1 起头、a2 收尾，都并进同一条。
+   判据落在「合并不丢内容、顺序不被打乱、跨轮不合并」，不再依赖合并前的条数。 */
 const histItems = itemsFromHistory([
   { id: 'u1', role: 'user', content: '跑一下', at_ms: 1 },
   { id: 'a1', role: 'assistant', content: '先看', reasoning: '想', tool_calls: [{ id: 'c1', name: 'read', arguments: { path: '/x' } }] },
   { id: 't1', role: 'tool', tool_call_id: 'c1', content: 'success: ok' },
   { id: 'a2', role: 'assistant', content: '结果如上' },
 ])
-check('⑤·历史映射条数与顺序', histItems.map((i) => i.id), ['u1', 'a1', 'a2'])
+check('⑤·同一轮的多条 assistant 合并成一条', histItems.map((i) => i.id), ['u1', 'a1'])
 const h1 = asst(histItems[1])
+check('⑤·合并后正文不丢（a1 + a2 都在）', h1 ? h1.text : '', '先看结果如上')
 check('⑤·历史里的工具状态回填终态', h1 && h1.tools[0] ? h1.tools[0].status : '', 'done')
 check('⑤·历史里的工具预览回填', h1 && h1.tools[0] ? h1.tools[0].preview : '', 'success: ok')
 check('⑤·历史里的思考被还原', h1 ? h1.reasoning : '', '想')
-check('⑤·历史里的顺序段（正文 → 工具）', h1 && h1.segments ? h1.segments.map((seg) => seg.kind) : [], ['text', 'tools'])
+check('⑤·顺序段按真实先后交替（a1 正文 → 工具 → a2 正文）', h1 && h1.segments ? h1.segments.map((seg) => seg.kind) : [], ['text', 'tools', 'text'])
+/* 跨轮绝不合并：中间隔着一条 user 就是两条独立回复。 */
+const histTwoTurns = itemsFromHistory([
+  { id: 'u1', role: 'user', content: '问一' },
+  { id: 'a1', role: 'assistant', content: '答一' },
+  { id: 'u2', role: 'user', content: '问二' },
+  { id: 'a2', role: 'assistant', content: '答二' },
+])
+check('⑤·隔着 user 的两轮不合并', histTwoTurns.map((i) => i.id), ['u1', 'a1', 'u2', 'a2'])
 
+/* ══ ⑦ 过程 / 答案分离（splitProcessAnswer） ══
+   照搬 DSH 的 Turn process 判据：**最后一段正文 = 答案**，它之前的一切 = 过程。
+   这一组守住的是「折叠栏在正文上方」这件事的结构前提 —— 答案必须能独立出来。 */
+// 纯文本（没有 segments）：整条都是答案，没有过程。
+const onlyText = splitProcessAnswer({ text: '结论如上' })
+check('⑦·没有过程时答案就是全文', onlyText.answer, '结论如上')
+check('⑦·没有过程时 members 为空', onlyText.members.length, 0)
+
+// 工具在前、正文收尾：最后一段正文是答案，其余全归过程。
+const split = splitProcessAnswer({
+  text: '先看一下现在改好了',
+  segments: [
+    { kind: 'text', text: '先看一下' },
+    { kind: 'tools', callIds: ['c1'] },
+    { kind: 'text', text: '现在改好了' },
+  ],
+})
+check('⑦·最后一段正文是答案', split.answer, '现在改好了')
+check('⑦·它之前的都是过程', split.members.map((m) => m.kind), ['text', 'tools'])
+
+// 最后一步仍是工具（正文还没出来）：还没有答案，整条都算过程。
+const stillRunning = splitProcessAnswer({
+  text: '先看一下',
+  segments: [
+    { kind: 'text', text: '先看一下' },
+    { kind: 'tools', callIds: ['c1'] },
+  ],
+})
+check('⑦·最后一步是工具时没有答案', stillRunning.answer, '')
+check('⑦·此时整条都归过程', stillRunning.members.length, 2)
+
+// 一个字都不能丢：过程里的正文段 + 答案 === 全部正文段。
+const joined = split.members.filter((m) => m.kind === 'text').map((m) => m.text).join('') + split.answer
+check('⑦·过程正文与答案拼起来不丢字', joined, '先看一下现在改好了')
 /* ══ ⑥ 同一条回复被画两遍 → 折叠（assistant 前缀副本） ══
-   现场：界面出现两条「我是 Coomi」，一份是流式中间态（乱序/截断），一份是引擎落库版。
+   现场：界面出现两条「我是 CoomiPlus」，一份是流式中间态（乱序/截断），一份是引擎落库版。
    两条之间没有用户消息才算「同一条」；两份正文毫无前缀关系 → 原样保留（那是两条真回复）。 */
 const dup = collapseAssistantCopies([
   { kind: 'user', id: 'u1', text: '你好' },
   { kind: 'assistant', id: 'a1', text: '我是 Coomi', tools: [], segments: [], streaming: true, reasoningStreaming: false },
-  { kind: 'assistant', id: 'a2', text: '我是 Coomi，本地助手', tools: [], segments: [], streaming: false, reasoningStreaming: false },
+  { kind: 'assistant', id: 'a2', text: '我是 CoomiPlus，本地助手', tools: [], segments: [], streaming: false, reasoningStreaming: false },
 ])
 check('⑥·同一条回复的两份副本折叠成一条', dup.length, 2)
-check('⑥·保留更长的那一份', dup[1].text, '我是 Coomi，本地助手')
+check('⑥·保留更长的那一份', dup[1].text, '我是 CoomiPlus，本地助手')
 check('⑥·折叠后不再有流式光标', dup[1].streaming, false)
 const twoTurns = collapseAssistantCopies([
   { kind: 'user', id: 'u1', text: '问一' },

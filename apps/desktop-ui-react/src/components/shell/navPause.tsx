@@ -6,7 +6,8 @@
  * 这段时间里再跑「引擎事件驱动的重算、观测器回调、轮询、量尺寸」，等于跟过渡抢同一拍，
  * 表现出来就是切页掉帧。所以全站只用这一个开关表达「过渡正在跑」：
  *
- *   · markNavPause()             App 切页时开闸，NAV_PAUSE_MS 后自动收闸（连点会把窗口往后推）；
+ *   · markNavPause()             App 切页时开闸，NAV_PAUSE_MS 后自动收闸（连点只把窗口撑到
+ *                               NAV_PAUSE_MAX_MS 上限，不会无限往后推）；
  *   · navPauseBusy()             同步判据。CSS 读的是同一个属性 html[data-nav-busy]
  *                                （base.css 里停内容列循环动效那一段），JS 与 CSS 不会各判一套；
  *   · queueDuringNavPause(k,fn)  闸门开着时排队，收闸时**合并成一次**执行（同 key 只留最后一次）：
@@ -30,11 +31,17 @@ export const PANE_ENTER_MS = 240
 export const PANE_EXIT_MS = 140
 /** 让路窗口（毫秒）：进场动画 + 挂正文那一拍的余量。 */
 export const NAV_PAUSE_MS = PANE_ENTER_MS + 80
+/** 让路窗口硬上限（毫秒）：两倍窗口 ≈ 640ms。
+    为什么需要上限：开闸窗口里全站（CSS 循环动效 + JS 轮询/测量）都在为过渡让路，
+    连点若把窗口无限往后推，「全身让路」就会一直叠加——点 N 下 = N×320ms。 */
+export const NAV_PAUSE_MAX_MS = NAV_PAUSE_MS * 2
 
 /** 与 CSS 约定的属性名：html[data-nav-busy='1']。 */
 const BUSY_ATTR = 'navBusy'
 
 let timer: number | null = null
+/** 计划中的收闸时间点（Date.now() 口径）：连点取「剩余时间」要靠它——setTimeout 不暴露剩余时长。 */
+let deadline = 0
 /** 过渡期间排队的收尾动作：key 相同只留最后一次。 */
 const queued = new Map<string, () => void>()
 const listeners = new Set<() => void>()
@@ -50,13 +57,25 @@ export function navPauseBusy(): boolean {
   return typeof document !== 'undefined' && document.documentElement.dataset[BUSY_ATTR] === '1'
 }
 
-/** 开闸。重复调用把窗口末尾往后推：连点导航时最后一次过渡说了算。 */
+/** 开闸。连点不再把窗口无限往后推：已在忙时取「剩余时间与新时长」的较大值，
+    并封顶在 NAV_PAUSE_MAX_MS（最后那次过渡说了算 → 连点只把窗口撑到上限）。 */
 export function markNavPause(ms: number = NAV_PAUSE_MS): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
   const wasBusy = root.dataset[BUSY_ATTR] === '1'
-  root.dataset[BUSY_ATTR] = '1'
+  // 同值不重写：dataset 的同值赋值同样走 setAttribute → 属性值没变也触发一次样式失效重算；
+  // 连点高频下这就是白付的开销（[data-loop-anim] 收敛后代价变小，也不该每次点都付）。
+  if (!wasBusy) root.dataset[BUSY_ATTR] = '1'
+  if (timer !== null) {
+    // 连点：窗口取「当前剩余」与「新时长」的较大值，而不是把窗口整体往后推
+    //（否则点 N 下窗口就是 N×320ms，「全身让路」一直叠加）。
+    const remaining = Math.max(0, deadline - Date.now())
+    ms = Math.max(ms, remaining)
+  }
+  // 硬上限：连点只把窗口撑到两倍（约 640ms），之后每次点击都维持这个封顶值，不再变长。
+  ms = Math.min(ms, NAV_PAUSE_MAX_MS)
   if (timer !== null) window.clearTimeout(timer)
+  deadline = Date.now() + ms
   timer = window.setTimeout(() => { endNavPause() }, ms)
   if (!wasBusy) emit()
 }
@@ -64,6 +83,7 @@ export function markNavPause(ms: number = NAV_PAUSE_MS): void {
 /** 收闸：属性收回、通知订阅方，然后把排队的东西合并成一次放出来。 */
 export function endNavPause(): void {
   if (timer !== null) { window.clearTimeout(timer); timer = null }
+  deadline = 0
   if (typeof document !== 'undefined') delete document.documentElement.dataset[BUSY_ATTR]
   emit()
   flushQueued()
