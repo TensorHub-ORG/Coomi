@@ -201,6 +201,30 @@ impl Agent {
         .await
     }
 
+    /// Check each real user task at most once, including across persisted reloads.
+    pub async fn check_task_completion(
+        &self,
+        session: &mut Session,
+        provider: &dyn ModelProvider,
+        tools: &dyn ToolRuntime,
+        approval: &dyn ApprovalHandler,
+        observer: &dyn AgentObserver,
+    ) -> Result<String, AgentError> {
+        let Some(turn_id) = session.messages.iter().rev()
+            .find(|message| message.role == crate::Role::User && !message.internal && !message.compaction_summary)
+            .map(|message| message.id.clone()) else { return Ok(String::new()); };
+        if session.completion_checked_turn.as_ref() == Some(&turn_id) {
+            return Ok(String::new());
+        }
+        session.completion_checked_turn = Some(turn_id);
+        self.run_checkpoint(session);
+        self.run_accounted_turn(
+            session,
+            ChatMessage::internal_user(crate::session::TASK_COMPLETION_CHECK),
+            provider, tools, approval, observer,
+        ).await
+    }
+
     /// Resume an interrupted turn without presenting the recovery instruction as a
     /// new user-authored message in clients or transcript-derived metadata.
     pub async fn continue_interrupted_turn(
@@ -1100,6 +1124,46 @@ mod tests {
             .expect("agent turn");
         assert_eq!(output, "done");
         assert_eq!(session.messages.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn completion_check_is_internal_and_once_per_task_across_reload() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::SessionStore::new(home.path());
+        let mut session = Session::new("mock", "mock-model", PathBuf::from("."));
+        session.messages.push(ChatMessage::user("finish my task"));
+        let provider = MockProvider { calls: Mutex::new(0) };
+        let agent = Agent::new("test");
+        agent.check_task_completion(&mut session, &provider, &EchoTool, &Approve, &NoopObserver).await.unwrap();
+        assert_eq!(*provider.calls.lock().unwrap(), 2);
+        assert!(session.messages.iter().any(|m| m.internal && m.content == crate::session::TASK_COMPLETION_CHECK));
+        assert_eq!(session.messages.iter().filter(|m| m.role == crate::Role::User && !m.internal).count(), 1);
+        store.save(&session).unwrap();
+        let mut reloaded = store.load(session.id).unwrap();
+        agent.check_task_completion(&mut reloaded, &provider, &EchoTool, &Approve, &NoopObserver).await.unwrap();
+        assert_eq!(*provider.calls.lock().unwrap(), 2, "reloading must not repeat the check");
+        reloaded.messages.push(ChatMessage::user("another task"));
+        agent.check_task_completion(&mut reloaded, &provider, &EchoTool, &Approve, &NoopObserver).await.unwrap();
+        assert_eq!(*provider.calls.lock().unwrap(), 3);
+    }
+
+    #[test]
+    fn legacy_automatic_check_prompts_are_hidden_in_history_and_archive() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::SessionStore::new(home.path());
+        let mut session = Session::new("mock", "mock-model", PathBuf::from("."));
+        session.messages.push(ChatMessage::user("real task"));
+        for _ in 0..5 {
+            session.messages.push(ChatMessage::user(crate::session::TASK_COMPLETION_CHECK));
+            session.messages.push(ChatMessage::assistant("done", Vec::new()));
+        }
+        session.archive = session.messages.clone();
+        store.save(&session).unwrap();
+        let loaded = store.load(session.id).unwrap();
+        for messages in [&loaded.messages, &loaded.archive] {
+            assert_eq!(messages.iter().filter(|m| m.role == crate::Role::User && !m.internal).count(), 1);
+            assert_eq!(messages.iter().filter(|m| m.role == crate::Role::Assistant).count(), 5);
+        }
     }
 
     struct ParallelReadTools;

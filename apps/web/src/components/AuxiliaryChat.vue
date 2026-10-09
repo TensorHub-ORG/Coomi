@@ -125,6 +125,7 @@ select, textarea { min-width: 0; width: 100%; border: 1px solid var(--border); b
 button { flex-shrink: 0; border: 0; border-radius: 8px; background: var(--fill); color: var(--blue); padding: 7px 9px; font: inherit; font-size: 12px; }
 button:disabled { opacity: .5; }.model { width: calc(100% - 16px); margin: 0 8px; }
 .transcript { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 9px 8px; }
+.transcript > :deep(*) { flex-shrink: 0; }
 .transcript :deep(.bubble) { padding: 7px 10px; border-radius: 15px 15px 6px 15px; font-size: 12.5px; line-height: 1.48; }
 .transcript :deep(.user-wrap) { max-width: 88%; }
 .transcript :deep(.md) { font-size: 12.3px; line-height: 1.58; }

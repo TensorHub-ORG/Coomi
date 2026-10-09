@@ -12,6 +12,11 @@ const parents: Array<[RegExp, string]> = [
 export function resolveBackTarget(fullPath: string, source?: BackTarget, fallback: BackTarget = 'dashboard'): BackTarget {
   const [path, query] = fullPath.split('?')
   if (path === '/quick-commands' && new URLSearchParams(query).get('native') === '1') return 'exit'
+  const studioEditor = path.match(/^\/studio\/([^/]+)\/edit$/)
+  if (studioEditor) {
+    if (source?.split('?')[0] === '/studio') return source
+    return `/studio/${studioEditor[1]}/chat`
+  }
   for (const [pattern, parent] of parents) {
     if (pattern.test(path)) return parent
   }

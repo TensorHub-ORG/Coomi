@@ -5,7 +5,7 @@
  * 列表来自引擎磁盘会话（/api/sessions 为权威源），本地 localStorage 保存标题/置顶等
  * 元数据与最近对话正文；删除会话会同时删除引擎磁盘记录与本地记录。
  */
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { goBack } from '@/bridge/navigation'
 import { useSessionStore } from '@/stores/session'
@@ -22,9 +22,16 @@ const menuFor = ref<SessionMeta | null>(null)
 const askDelete = ref<SessionMeta | null>(null)
 const askClear = ref(false)
 
-function open(id: string) {
-  session.openSession(id)
-  router.push('/')
+async function open(id: string) {
+  const parentId = sessions.find(id)?.parentSessionId
+  if (parentId) {
+    await router.push('/')
+    await nextTick()
+    window.dispatchEvent(new CustomEvent('coomi:open-auxiliary', { detail: { parentId, sessionId: id } }))
+  } else {
+    void session.openSession(id)
+    void router.push('/')
+  }
 }
 
 function startNew() {
@@ -227,7 +234,7 @@ onBeforeUnmount(() => {
                 <span v-if="m.summary" class="rsummary">{{ m.summary }}</span>
                 <span class="rmeta">
                   <span v-if="m.id === session.sessionId" class="badge">当前</span>
-                  {{ formatSessionTime(m.updatedAt) }} · {{ m.turns }} 轮
+                  {{ m.parentSessionId ? '辅助 · ' : '' }}{{ formatSessionTime(m.updatedAt) }} · {{ m.turns }} 轮
                   <span v-if="sessions.isRunning(m.id)" class="rspin" aria-label="后台运行中" />
                 </span>
               </button>

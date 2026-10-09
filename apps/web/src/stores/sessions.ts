@@ -203,7 +203,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const filtered = computed(() => {
     const q = query.value.trim().toLowerCase()
     // 全局常驻会话由侧边栏第一行专门渲染，不进分组/搜索。
-    const withoutGlobal = sorted.value.filter(m => m.id !== GLOBAL_SESSION_ID && !m.parentSessionId)
+    const withoutGlobal = sorted.value.filter(m => m.id !== GLOBAL_SESSION_ID)
     if (!q) return withoutGlobal
     // 与 Rust 侧 ranked_sessions 一致：title×5 / summary×3 / preview×1 / model×1 加权打分排序。
     // 注意：必须 Unicode 感知分词（\p{L}\p{N} 含中文 + 技术符号 +.#），

@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 use uuid::Uuid;
 
 static SESSION_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+pub(crate) const TASK_COMPLETION_CHECK: &str = "请检查当前任务是否已完成。如果尚未完成，请继续执行直到完成；如果已完成，请简要说明结论。";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +67,10 @@ pub struct Session {
     pub loop_state: Option<LoopState>,
     #[serde(default)]
     pub hooks_started: bool,
+    /// User turn whose automatic completion check was already started.
+    /// Written before requesting the provider, so reload/recovery cannot duplicate it.
+    #[serde(default)]
+    pub completion_checked_turn: Option<String>,
     /// 压缩前的完整历史存档：压缩发生时备份，压缩后仍可从磁盘恢复完整展示。
     #[serde(default)]
     pub archive: Vec<ChatMessage>,
@@ -93,6 +98,7 @@ impl Session {
             plan: None,
             loop_state: None,
             hooks_started: false,
+            completion_checked_turn: None,
             archive: Vec::new(),
         }
     }
@@ -110,6 +116,7 @@ impl Session {
         self.plan = None;
         self.loop_state = None;
         self.hooks_started = false;
+        self.completion_checked_turn = None;
         self.summary.clear();
         self.touch();
     }
@@ -266,8 +273,16 @@ impl SessionStore {
         let path = self.path(id);
         let bytes = fs::read(&path)
             .with_context(|| format!("failed to read session {}", path.display()))?;
-        serde_json::from_slice(&bytes)
-            .with_context(|| format!("invalid session file {}", path.display()))
+        let mut session: Session = serde_json::from_slice(&bytes)
+            .with_context(|| format!("invalid session file {}", path.display()))?;
+        // Older releases persisted automatic checks as ordinary user messages.
+        // Keep model context and assistant results while hiding the injected prompts.
+        for message in session.messages.iter_mut().chain(session.archive.iter_mut()) {
+            if message.role == crate::Role::User && message.content == TASK_COMPLETION_CHECK {
+                message.internal = true;
+            }
+        }
+        Ok(session)
     }
 
     pub fn delete(&self, id: Uuid) -> Result<bool> {

@@ -4,9 +4,10 @@
  * 文件卡片（样式对齐工具调用卡片），点击后可在 app 内预览 / 保存 / 另存为 /
  * 用其它应用打开 / 复制路径。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { authedFetch, engineToken } from '@/bridge/http'
 import CoomiIcon from './CoomiIcon.vue'
+import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
 const props = defineProps<{ paths: string[] }>()
 
@@ -14,6 +15,12 @@ const open = ref(false)
 const notice = ref('')
 const activePath = ref('')
 const previewText = ref('')
+const overlayId = `file-preview-${Math.random().toString(36).slice(2)}`
+watch(open, value => {
+  if (value) registerOverlay(overlayId, () => { open.value = false })
+  else unregisterOverlay(overlayId)
+})
+onBeforeUnmount(() => unregisterOverlay(overlayId))
 
 const activeName = computed(() => activePath.value.split('/').pop() || activePath.value)
 
@@ -21,7 +28,7 @@ function isTextFile(name: string): boolean {
   return /\.(txt|md|json|log|sh|py|rs|js|ts|vue|toml|yaml|yml|conf|ini|env|html|css|xml)$/i.test(name)
 }
 function isImage(name: string): boolean {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
+  return /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i.test(name)
 }
 const previewSrc = computed(() =>
   '/api/fs/raw?path=' + encodeURIComponent(activePath.value)
@@ -34,11 +41,12 @@ function openSheet(path: string) {
   open.value = true
   if (isTextFile(path)) {
     void authedFetch(previewSrc.value)
-      .then(r => r.text())
-      .then(t => { previewText.value = t.slice(0, 200000) })
-      .catch(() => { previewText.value = '（无法读取）' })
+      .then(r => { if (!r.ok) throw new Error('read failed'); return r.text() })
+      .then(t => { if (activePath.value === path) previewText.value = t.slice(0, 200000) })
+      .catch(() => { if (activePath.value === path) previewText.value = '（无法读取）' })
   }
 }
+defineExpose({ openSheet })
 
 function saveAs() {
   window.CoomiAndroid?.exportFile?.(activePath.value, activeName.value)
@@ -56,7 +64,7 @@ function copyPath() {
 </script>
 
 <template>
-  <div class="file-chips">
+  <div v-if="paths.length" class="file-chips">
     <button v-for="p in paths" :key="p" class="chip" @click="openSheet(p)">
       <CoomiIcon name="fileRead" :size="14" />
       <span class="chip-name">{{ p.split('/').pop() }}</span>
@@ -64,12 +72,13 @@ function copyPath() {
     </button>
   </div>
 
+  <Teleport to="body">
   <div v-if="open" class="mask" @click.self="open = false">
-    <div class="sheet">
+    <div class="sheet" role="dialog" aria-modal="true" :aria-label="`附件预览：${activeName}`">
       <div class="head">
         <CoomiIcon name="fileRead" :size="16" />
         <span class="name">{{ activeName }}</span>
-        <button class="x" @click="open = false"><CoomiIcon name="close" :size="15" /></button>
+        <button class="x" aria-label="关闭附件预览" @click="open = false"><CoomiIcon name="close" :size="15" /></button>
       </div>
       <p class="path">{{ activePath }}</p>
       <p v-if="notice" class="notice">{{ notice }}</p>
@@ -77,6 +86,7 @@ function copyPath() {
       <div class="body">
         <img v-if="isImage(activeName)" :src="previewSrc" class="img" alt="" loading="lazy" decoding="async" />
         <pre v-else-if="isTextFile(activeName)" class="text">{{ previewText }}</pre>
+        <iframe v-else-if="/\.pdf$/i.test(activeName)" :src="previewSrc" title="PDF 预览" class="pdf" />
         <div v-else class="other">
           <p>该类型不支持内联预览。</p>
         </div>
@@ -89,6 +99,7 @@ function copyPath() {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -103,11 +114,13 @@ function copyPath() {
 .arw { opacity: 0.6; }
 .mask { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, 0.45); display: flex; align-items: flex-end; }
 .sheet {
+  max-height: 85dvh; min-height: 0;
   width: 100%; background: var(--bg-card);
   border-radius: 18px 18px 0 0;
   padding: 16px 16px calc(14px + var(--safe-bottom));
   display: flex; flex-direction: column;
 }
+.pdf { width: 100%; height: 55dvh; border: 0; }
 .head { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 650; }
 .x { color: var(--text-3); padding: 4px; }

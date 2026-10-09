@@ -2153,7 +2153,11 @@ async fn studio_send_message(
     emit_now(json!({"event_type":"studio_user_message","content":text,"message":store.messages(&id).ok().and_then(|mut messages| messages.pop())}));
     emit_now(json!({"event_type":"studio_start","member_ids":route.member_ids,"direct":route.direct}));
     let members = studio.members.clone();
-    let targets = route.member_ids.into_iter().take(4).collect::<Vec<_>>();
+    let targets = route.member_ids;
+    let mut history = store.messages(&id).unwrap_or_default();
+    history.pop(); // The current user message is already passed as the goal.
+    let history = history.iter().rev().take(24).collect::<Vec<_>>().into_iter().rev()
+        .map(|message| format!("{}：{}\n", message.sender_name, message.content)).collect::<String>();
     let approvals = Arc::clone(&state.studio_approvals);
     let home = state.home.clone();
     let studio_id = studio.id.clone();
@@ -2168,27 +2172,20 @@ async fn studio_send_message(
     tokio::spawn(async move {
         let _guard = guard;
         let process_managers = Arc::new(StdMutex::new(Vec::<Arc<ProcessManager>>::new()));
-        let prior = Arc::new(StdMutex::new(String::new()));
+        let prior = Arc::new(StdMutex::new(history));
         // 成员清单注入：每个成员都能感知其他成员的存在（角色/职责）。
         let members = Arc::new(members);
-        let roster = members.iter().map(|m| format!("- {}（{}）：{}", m.name, if m.id == host_id { "主持" } else { "成员" }, if m.role.is_empty() { "无特别职责，协作者" } else { &m.role })).collect::<Vec<_>>().join("\n");
+        let roster = members.iter().map(|m| format!("- @{}（{}，ID：{}）：{}", m.name, if m.id == host_id { "主持" } else { "成员" }, m.id, if m.role.is_empty() { "无特别职责，协作者" } else { &m.role })).collect::<Vec<_>>().join("\n");
         let mut pending = targets;
         let mut dispatch_count = HashMap::<String, usize>::new();
         // 按波次并发：同一波的 @成员并行，成员回复中的新 @ 进入下一波。
-        // 每个成员单次用户请求最多执行两次，总深度最多四层，避免互相 @ 死循环。
+        // 允许实现→质检→返修→复检交接，同时限制循环并向用户说明。
         let mut cancelled = false;
-        for _depth in 0..4 {
+        let mut limited_members = Vec::new();
+        for _depth in 0..coomi_services::studio::STUDIO_MAX_WAVES {
             if *cancel_rx.borrow() { cancelled = true; break; }
-            let wave = pending
-                .drain(..)
-                .filter(|member_id| {
-                    let count = dispatch_count.entry(member_id.clone()).or_default();
-                    if *count >= 2 { return false; }
-                    *count += 1;
-                    true
-                })
-                .take(6)
-                .collect::<Vec<_>>();
+            let (wave, limited) = coomi_services::studio::take_studio_wave(&mut pending, &mut dispatch_count);
+            limited_members.extend(limited);
             if wave.is_empty() { break; }
             let wave_context = prior.lock().unwrap_or_else(|p| p.into_inner()).clone();
             let followups = Arc::new(StdMutex::new(Vec::<String>::new()));
@@ -2235,7 +2232,7 @@ async fn studio_send_message(
                     member.name, member.role, member.system_prompt, workspace.display(), roster
                 );
                 let user = if !wave_context.is_empty() {
-                    format!("用户目标：{}\n\n前一波成员成果：\n{}", text, wave_context)
+                    format!("用户目标：{}\n\n工作室对话与已完成的成员成果（参考历史理解目标，只处理本轮交接）：\n{}", text, wave_context)
                 } else {
                     text.clone()
                 };
@@ -2273,7 +2270,7 @@ async fn studio_send_message(
                 match result {
                     Ok(Ok(response)) => {
                         let response = coomi_services::studio::compact_studio_reply(&response);
-                        let mentions = members.iter().filter(|other| other.id != member.id && (coomi_services::studio::mentions_member(&response, &other.name) || coomi_services::studio::mentions_member(&response, &other.id))).map(|other|other.id.clone()).collect::<Vec<_>>();
+                        let mentions = coomi_services::studio::mentioned_members(&members, &response, Some(&member.id));
                         let reply = StudioMessage::new(member.id.clone(), member.name.clone(), response.clone(), mentions.clone());
                         if let Err(error) = StudioStore::new(studio_store_root.clone()).append_message(&studio_id, &reply) { emit(json!({"event_type":"studio_error","message":format!("保存成员回复失败：{error}")})); }
                         else {
@@ -2297,6 +2294,11 @@ async fn studio_send_message(
             pending = std::mem::take(&mut *followups.lock().unwrap_or_else(|p| p.into_inner()));
             pending.sort();
             pending.dedup();
+        }
+        if !cancelled && (!pending.is_empty() || !limited_members.is_empty()) {
+            let event = json!({"event_type":"studio_notice","message":"本轮成员协作已达到轮次上限，已暂停继续 @；可发送新消息继续质检或返修。"});
+            publish_studio_event(&event_registry, &studio_id, &event);
+            let _ = tx.send(Ok(Bytes::from(format!("data: {}\n\n", event))));
         }
         let managers = std::mem::take(&mut *process_managers.lock().unwrap_or_else(|p| p.into_inner()));
         for manager in managers { manager.terminate_owned().await; }
@@ -7784,43 +7786,29 @@ async fn run_turn(
             assistant_text.push_str(&continuation);
         }
     }
-    // 需求 7：狂暴模式 —— 停止输入或到达工具上限后，自动用同一模型检查任务是否完成；
-    // 未完成就自动“继续”。手动停止（recovery/取消）会跳过。
-    if production_mode_level(&state.home) == "berserk" && !recovery {
-        let mut berserk_rounds = 0;
-        const BERZERK_MAX: usize = 5;
-        let berserk_selector = berserk_model_selector(&state.home);
-        while berserk_rounds < BERZERK_MAX
-            && !context.task.running.load(Ordering::SeqCst).then_some(false).unwrap_or(false)
-        {
-            // running 已被取消时停止：这里用任务取消标记判断（task.running 在 cancel 时会置 false）
-            if !context.task.running.load(Ordering::SeqCst) { break; }
-            berserk_rounds += 1;
-            let check = "请检查当前任务是否已完成。如果尚未完成，请继续执行直到完成；如果已完成，请简要说明结论。";
-            // 若配置了狂暴模型，用狂暴模型跑检查/继续；否则用当前会话模型。
-            let berserk_provider = berserk_selector.as_deref().and_then(|sel| {
-                ProviderRegistry::load(&providers_path(&state.home))
-                    .ok()
-                    .and_then(|reg| reg.resolve(Some(sel)).ok())
-                    .and_then(|pc| HttpModelProvider::new(pc).ok())
-            });
-            let use_provider = berserk_provider.as_ref().unwrap_or(&provider);
-            let r = agent
-                .run_turn(&mut session, check.to_owned(), use_provider, &tools, &approval, &observer)
-                .await;
-            if let Err(error) = &r {
-                maybe_degrade_vision(state, session_id, &session, error);
-                break;
-            }
-            session.touch();
-            store.save(&session)?;
-            let out = r?;
-            if !out.trim().is_empty() {
+    // One internal check per user task. Recovery resumes the saved checkpoint.
+    if production_mode_level(&state.home) == "berserk" && !recovery
+        && context.task.running.load(Ordering::SeqCst)
+    {
+        let berserk_provider = berserk_model_selector(&state.home).as_deref().and_then(|sel| {
+            ProviderRegistry::load(&providers_path(&state.home))
+                .ok()
+                .and_then(|reg| reg.resolve(Some(sel)).ok())
+                .and_then(|pc| HttpModelProvider::new(pc).ok())
+        });
+        let use_provider = berserk_provider.as_ref().unwrap_or(&provider);
+        let result = agent.check_task_completion(
+            &mut session, use_provider, &tools, &approval, &observer,
+        ).await;
+        session.touch();
+        store.save(&session)?;
+        match result {
+            Ok(out) if !out.trim().is_empty() => {
                 if !assistant_text.is_empty() { assistant_text.push_str("\n\n"); }
                 assistant_text.push_str(&out);
             }
-            // 一轮检查若不再产生新内容，避免空转
-            if out.trim().is_empty() { break; }
+            Err(error) => maybe_degrade_vision(state, session_id, &session, &error),
+            _ => {}
         }
     }
     if cognitive_enabled {

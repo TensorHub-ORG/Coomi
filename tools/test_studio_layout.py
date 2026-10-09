@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -34,6 +35,9 @@ def navigate(page, path):
     page.wait_for_timeout(350)
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--url', default='http://127.0.0.1:4173')
+    args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     passed=[]
     with sync_playwright() as p:
@@ -43,24 +47,38 @@ def main():
         context.route('**/api/**',mock)
         page=context.new_page(); errors=[]
         page.on('pageerror',lambda e:errors.append(str(e)))
-        page.goto('http://127.0.0.1:4173/?demo=1&autoplay=0')
+        page.goto(args.url + '/?demo=1&autoplay=0')
         page.locator('.composer').wait_for()
         navigate(page,'/collab/new')
         for width,height in [(320,640),(390,844),(430,844),(390,470)]:
             page.set_viewport_size({'width':width,'height':height})
+            page.wait_for_timeout(350)
             sheet=page.locator('.task-sheet')
-            assert int(float(sheet.evaluate('e=>getComputedStyle(e).paddingLeft').removesuffix('px'))) >= 16
+            form=page.locator('.task-form')
+            assert int(float(form.evaluate('e=>getComputedStyle(e).paddingLeft').removesuffix('px'))) >= 16
+            sheet_box=sheet.bounding_box(); form_box=form.bounding_box()
+            assert abs(form_box['x']+form_box['width']-sheet_box['x']-sheet_box['width'])<1
+            if height <= 640:
+                assert form.evaluate('e=>e.scrollHeight>e.clientHeight')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             for select in page.locator('.role select').all():
                 box=select.bounding_box(); assert box['x']>=16 and box['x']+box['width']<=width-16
             box=page.get_by_role('button',name='启动任务',exact=True).bounding_box()
             assert box['y']>=0 and box['y']+box['height']<=height
             page.screenshot(path=str(OUT/f'collab-{width}-{height}.png'))
-        passed.append('task sheet padding, role selectors and sticky actions fit 320/390/430px and short viewport')
+        passed.append('scrollbar reaches sheet edge; form padding, role selectors and actions fit 320/390/430px and short viewport')
         page.set_viewport_size({'width':390,'height':844})
         navigate(page,'/studio/fixture/chat')
         page.get_by_role('button',name='提及成员',exact=True).wait_for()
-        assert page.get_by_role('button',name='提及成员',exact=True).inner_text()=='@'
+        mention=page.get_by_role('button',name='提及成员',exact=True)
+        attachment=page.get_by_role('button',name='导入文件',exact=True)
+        assert mention.locator('svg').get_attribute('width')=='18'
+        assert attachment.locator('svg').get_attribute('width')=='18'
+        mb=mention.locator('svg').bounding_box(); ab=attachment.locator('svg').bounding_box()
+        assert abs(mb['y']-ab['y'])<1
+        mention.click()
+        page.locator('.at-picker > button').last.click()
+        assert page.locator('.input-row input').input_value()=='@程序员 '
         page.locator('.input-row input').fill('检查界面')
         page.get_by_role('button',name='发送',exact=True).click()
         page.wait_for_function('document.querySelectorAll("article.entry").length===3')
@@ -76,12 +94,24 @@ def main():
         assert page.locator('.tool-detail').count()==1
         assert 'design.md' in page.locator('.tool-detail').inner_text()
         page.screenshot(path=str(OUT/'studio-details.png'))
-        passed.append('actual @ button, start-order waterfall, no duplicate live/final rows, nested tools default folded')
+        passed.append('matching SVG icons align; mention picker inserts member; start-order waterfall and tools stay folded')
+        for hardware in [False,True]:
+            page.get_by_role('button',name='编辑',exact=True).click()
+            page.get_by_role('button',name='保存工作室',exact=True).wait_for()
+            if hardware: assert page.evaluate('window.__coomiHandleSystemBack()')
+            else: page.get_by_role('button',name='返回',exact=True).click()
+            page.get_by_role('button',name='提及成员',exact=True).wait_for()
+            assert page.evaluate('location.hash')=='#/studio/fixture/chat'
+            assert page.get_by_text('设计工作室',exact=True).is_visible()
+            assert page.locator('.input-row input').is_visible()
+        passed.append('editor toolbar back and hardware back both return to the same studio room')
         navigate(page,'/')
         page.locator('.bar-toggle').click()
         page.locator('.mode-pop').wait_for()
         assert page.locator('.mode-pop .pill').count()==4
         assert page.locator('.mode-pop').evaluate('e=>getComputedStyle(e).backgroundColor')!='rgba(0, 0, 0, 0)'
+        assert page.locator('.mode-pop').evaluate('e=>getComputedStyle(e).boxShadow')!='none'
+        assert page.locator('.mode-pop').evaluate('e=>getComputedStyle(e).borderTopWidth')=='1px'
         assert page.locator('.sbar').count()==0
         page.locator('.production-pill').click()
         page.locator('.mode-notice').wait_for()
@@ -92,7 +122,7 @@ def main():
         page.locator('#overload-model').wait_for()
         assert page.locator('.tabs button.on').inner_text()=='连接'
         assert page.locator('#overload-model').inner_text()=='超载模型'
-        passed.append('opaque four-mode menu covers thinking, overload notice in lower middle opens correct model settings')
+        passed.append('four mode buttons use a compact card; thinking hides; overload opens model settings')
         navigate(page,'/')
         page.locator('textarea.input').fill('检查工具折叠')
         page.get_by_role('button',name='发送',exact=True).click()

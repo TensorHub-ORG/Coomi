@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { buildAttachmentRequest, parseAttachmentRequest, type ChatAttachment } from '@/utils/attachments'
 import { ref, computed, shallowRef, watch, inject, hasInjectionContext, type Ref, type InjectionKey } from 'vue'
 import { createTransport, type Transport } from '@/bridge'
 import { authedFetch, apiGet } from '@/bridge/http'
@@ -544,9 +545,9 @@ function defineSessionStore(storeId: string, auxiliary = false) {
     if (changed) persistSoon()
   }
 
-  function sendMessage(text: string, displayText?: string, morph = false, attachments?: string[]): string | null {
-    const trimmed = text.trim()
-    const visible = displayText?.trim() || trimmed
+  function sendMessage(text: string, displayText?: string, morph = false, attachments?: ChatAttachment[]): string | null {
+    const trimmed = buildAttachmentRequest(text, attachments ?? [])
+    const visible = displayText?.trim() ?? text.trim()
     if (!trimmed) return null
     // 编辑覆盖模式：截断目标轮次（与引擎 edit_turn 行为一致），以新文本重新执行。
     const edit = pendingEdit.value
@@ -735,7 +736,8 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         continue
       }
       if (m.role === 'user') {
-        items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: m.content })
+        const parsed = parseAttachmentRequest(m.content)
+        items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: parsed.text, attachments: parsed.attachments })
       } else if (m.role === 'assistant') {
         if (m.content) items.push({ kind: 'assistant', id: nextId(), mid: m.id ?? '', content: m.content, streaming: false, life: m.life_proactive === true })
         for (const tc of m.tool_calls ?? []) {
@@ -845,11 +847,11 @@ function defineSessionStore(storeId: string, auxiliary = false) {
 
   /** 编辑单条消息正文（改文本），成功后从引擎重新拉取时间线。 */
   /** 进入编辑模式：把旧文本回填到输入框，发送时覆盖该轮重新执行。 */
-  function startEditMessage(mid: string, content: string) {
+  function startEditMessage(mid: string, content: string, attachments: ChatAttachment[] = []) {
     if (isBusy.value) return
     pendingEdit.value = { mid, content }
     window.dispatchEvent(new CustomEvent('coomi:prefill-draft', {
-      detail: { sessionId: sessionId.value, text: content },
+      detail: { sessionId: sessionId.value, text: content, attachments },
     }))
   }
 

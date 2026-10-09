@@ -20,6 +20,19 @@ test('session tools return to the entry source rather than the console', () => {
   }
 })
 
+test('studio editor returns to the same room for toolbar and system back', () => {
+  const navigation = new BackNavigation()
+  navigation.enter('/studio', '/')
+  navigation.enter('/studio/example/chat', '/studio')
+  navigation.enter('/studio/example/edit', '/studio/example/chat')
+  assert.equal(navigation.target('/studio/example/edit'), '/studio/example/chat')
+  navigation.prepareReturn('/studio/example/chat')
+  navigation.enter('/studio/example/chat', '/studio/example/edit')
+  assert.equal(navigation.target('/studio/example/chat'), '/studio')
+  assert.equal(resolveBackTarget('/studio/example/edit'), '/studio/example/chat')
+  assert.equal(resolveBackTarget('/studio/example/edit', '/studio'), '/studio')
+})
+
 test('returning through a child does not replace the parent entry source', () => {
   const navigation = new BackNavigation()
   navigation.enter('/settings', '/')

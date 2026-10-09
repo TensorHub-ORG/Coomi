@@ -13,6 +13,8 @@ import { useSessionStore } from '@/stores/session'
 import { renderMarkdown } from '@/utils/markdown'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
+import AttachmentStrip from './AttachmentStrip.vue'
+import { attachmentFromPath } from '@/utils/attachments'
 
 const props = defineProps<{ msg: AssistantMessage | UserMessage }>()
 const session = useSessionStore()
@@ -24,6 +26,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 let last = 0
 
 const isUser = computed(() => props.msg.kind === 'user')
+const userAttachments = computed(() => props.msg.kind === 'user' ? (props.msg.attachments ?? []).map(item => typeof item === 'string' ? attachmentFromPath(item) : item) : [])
 const isAssistant = computed(() => props.msg.kind === 'assistant')
 /** 生命体主动消息（气泡/开场问候）：带生命体标记的渲染样式。 */
 const isLife = computed(() => isAssistant.value && (props.msg as AssistantMessage).life === true)
@@ -37,7 +40,7 @@ const src = computed(() => props.msg.content)
 /** 编辑：把该消息文本回填到输入框，发送时覆盖该轮重新执行。 */
 function editUserMessage() {
   const mid = (props.msg as { mid?: string }).mid ?? ''
-  session.startEditMessage(mid, props.msg.content)
+  session.startEditMessage(mid, props.msg.content, userAttachments.value)
 }
 
 /** 回撤：先弹确认，清空该轮执行（含工具过程），回到这轮开始之前。 */
@@ -138,10 +141,8 @@ async function copyAll() {
 <template>
   <div v-if="isUser" class="row user" :class="{ 'morph-pending': (msg as UserMessage).morphing, 'morph-arrived': (msg as UserMessage).morphArrived }" :data-message-id="msg.id">
     <div class="wrap user-wrap">
-      <div class="bubble cascade">{{ msg.content }}</div>
-      <div v-if="(msg as UserMessage).attachments?.length" class="file-chips">
-        <span v-for="file in (msg as UserMessage).attachments" :key="file" class="file-chip"><CoomiIcon name="fileRead" :size="14" /><span>{{ file }}</span></span>
-      </div>
+      <div v-if="msg.content" class="bubble cascade">{{ msg.content }}</div>
+      <AttachmentStrip v-if="userAttachments.length" :items="userAttachments" />
       <div class="acts user-acts">
         <button class="act" @click="copyAll">
           <CoomiIcon :name="copied ? 'check' : 'copy'" :size="15" />

@@ -1,4 +1,5 @@
 import type { ToolAccess, UserQuestion } from '@/protocol/events'
+import type { ChatAttachment } from '@/utils/attachments'
 
 export type ToolCardStatus = 'starting' | 'running' | 'success' | 'error' | 'awaiting_approval' | 'cache_hit' | 'cancelled'
 
@@ -25,7 +26,7 @@ export interface AssistantMessage { kind: 'assistant'; id: string; mid: string; 
 export interface UserMessage {
   kind: 'user'; id: string; mid: string; content: string
   /** 文件附件独立于消息正文渲染。 */
-  attachments?: string[]
+  attachments?: ChatAttachment[]
   /** 仅用于本次渲染的发送液滴状态，不写入引擎协议。 */
   morphing?: boolean
   morphArrived?: boolean

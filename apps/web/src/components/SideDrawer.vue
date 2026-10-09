@@ -48,12 +48,15 @@ watch(() => props.open, v => {
     menuFor.value = null; renamingId.value = ''
     return
   }
+  void sessions.syncFromEngine()
   sessions.refreshRunning()
 })
 
 function pick(id: string) {
   if (renamingId.value) return
-  session.openSession(id)
+  const parentId = sessions.find(id)?.parentSessionId
+  if (parentId) window.dispatchEvent(new CustomEvent('coomi:open-auxiliary', { detail: { parentId, sessionId: id } }))
+  else void session.openSession(id)
   emit('close')
 }
 
@@ -88,9 +91,10 @@ async function doPin() {
   if (await sessions.togglePin(menuFor.value.id)) closeMenu()
 }
 
-function doDelete() {
+async function doDelete() {
   if (!menuFor.value) return
-  session.deleteSession(menuFor.value.id)
+  if (menuFor.value.parentSessionId) await sessions.removeAuxiliary(menuFor.value.id)
+  else session.deleteSession(menuFor.value.id)
   closeMenu()
 }
 
@@ -184,6 +188,7 @@ function openDashboard() {
               <p v-else class="rtitle">{{ m.title }}</p>
               <p class="rmeta">
                 <CoomiIcon v-if="m.pinned" name="pin" :size="11" />
+                <span v-if="m.parentSessionId" class="aux-badge">辅助</span>
                 <span>{{ formatSessionTime(m.updatedAt) }}</span>
                 <template v-if="m.turns">
                   <span>·</span><span>{{ m.turns }} 轮</span>

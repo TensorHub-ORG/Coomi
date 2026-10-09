@@ -220,7 +220,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
       </main>
 
       <Transition name="pop">
-        <button v-if="!following" class="to-bottom" aria-label="回到底部" @click="jumpToBottom">
+        <button v-if="!following && !composerModesOpen" class="to-bottom" aria-label="回到底部" @click="jumpToBottom">
           <CoomiIcon name="arrowDown" :size="18" />
         </button>
       </Transition>

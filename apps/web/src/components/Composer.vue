@@ -15,6 +15,8 @@ import { MorphIcon } from 'morphicons/vue'
 import { gsap, prefersReducedMotion } from '@/composables/useGsap'
 import { Menu, ChevronUp, Plus, X } from 'lucide'
 import CoomiIcon from './CoomiIcon.vue'
+import AttachmentStrip from './AttachmentStrip.vue'
+import { normalizeAttachments, type ChatAttachment } from '@/utils/attachments'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 
 const emit = defineEmits<{ (e: 'modes-open', open: boolean): void }>()
@@ -62,11 +64,10 @@ watch(quickOpen, open => {
 })
 const transferText = ref('')
 const transferProgress = ref(0)
-const textareaScrollable = ref(false)
-const importedFiles = ref<string[]>([])
+const attachments = ref<ChatAttachment[]>([])
 const hasNative = typeof window !== 'undefined' && !!window.CoomiAndroid
 
-const canSend = computed(() => text.value.trim().length > 0 || importedFiles.value.length > 0)
+const canSend = computed(() => text.value.trim().length > 0 || attachments.value.length > 0)
 const isJumpIn = computed(() => session.isBusy && canSend.value)
 const showStop = computed(() => session.isBusy && !canSend.value)
 
@@ -123,8 +124,7 @@ function autoGrow() {
   if (!el) return
   el.style.height = 'auto'
   const scrollHeight = el.scrollHeight
-  textareaScrollable.value = scrollHeight > 132
-  el.style.height = Math.min(scrollHeight, 132) + 'px'
+  el.style.height = scrollHeight + 'px'
 }
 
 async function submit() {
@@ -137,17 +137,12 @@ async function submit() {
     }
   }
   const visibleText = text.value.trim()
-  const files = [...importedFiles.value]
-  const fileInstruction = files.length ? `请读取这些已导入文件：\n${files.join('\n')}` : ''
-  const requestText = [visibleText, fileInstruction].filter(Boolean).join('\n\n')
-  const fileNames = files.map(path => path.split('/').pop() || '文件')
-  const displayText = visibleText
-  const messageId = session.sendMessage(requestText, displayText, false, fileNames)
+  const messageId = session.sendMessage(visibleText, visibleText, false, [...attachments.value])
   if (messageId && config.sendMorphAnimation && !prefersReducedMotion()) {
     sendRipples.value = [++rippleSequence]
   }
   text.value = ''
-  importedFiles.value = []
+  attachments.value = []
   await nextTick()
   autoGrow()
 }
@@ -350,7 +345,7 @@ function onFilesImported(event: Event) {
   transferText.value = paths.length ? `已导入 ${paths.length} 个文件` : '文件导入完成'
   transferProgress.value = 100
   if (detail.requestId) session.completeFileTransfer(detail.requestId, paths)
-  else if (paths.length) importedFiles.value = Array.from(new Set([...importedFiles.value, ...paths]))
+  else if (paths.length) attachments.value = normalizeAttachments([...attachments.value.map(item => item.path), ...paths])
   setTimeout(() => { transferText.value = ''; transferProgress.value = 0 }, 2600)
 }
 function onFileExported(event: Event) {
@@ -359,12 +354,13 @@ function onFileExported(event: Event) {
   if (detail.requestId) session.completeFileTransfer(detail.requestId, detail.path ? [detail.path] : [])
 }
 function removeImportedFile(path: string) {
-  importedFiles.value = importedFiles.value.filter(item => item !== path)
+  attachments.value = attachments.value.filter(item => item.path !== path)
 }
 function onPrefillDraft(event: Event) {
-  const detail = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail ?? {}
+  const detail = (event as CustomEvent<{ sessionId?: string; text?: string; attachments?: ChatAttachment[] }>).detail ?? {}
   if ((detail.sessionId && detail.sessionId !== session.sessionId) || typeof detail.text !== 'string') return
   text.value = detail.text
+  attachments.value = normalizeAttachments((detail.attachments ?? []).map(item => item.path))
   void nextTick(autoGrow)
 }
 onMounted(() => {
@@ -372,6 +368,7 @@ onMounted(() => {
   window.addEventListener('coomi:files-imported', onFilesImported)
   window.addEventListener('coomi:file-exported', onFileExported)
   window.addEventListener('coomi:prefill-draft', onPrefillDraft)
+  window.addEventListener('resize', autoGrow)
   loadDraft()
 })
 onBeforeUnmount(() => {
@@ -382,11 +379,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('coomi:files-imported', onFilesImported)
   window.removeEventListener('coomi:file-exported', onFileExported)
   window.removeEventListener('coomi:prefill-draft', onPrefillDraft)
+  window.removeEventListener('resize', autoGrow)
   saveDraft()
 })
 
 // ── 草稿按会话持久化：每个会话（含新对话）各自保留输入框内容 ──
 const DRAFT_PREFIX = 'coomi.draft.'
+const DRAFT_ATTACHMENTS_PREFIX = 'coomi.draft.attachments.'
 let draftTimer: ReturnType<typeof setTimeout> | null = null
 
 function draftKey(id: string) { return DRAFT_PREFIX + id }
@@ -395,12 +394,17 @@ function loadDraft() {
   let saved = ''
   try { saved = localStorage.getItem(draftKey(session.sessionId)) ?? '' } catch { /* ignore */ }
   text.value = saved
+  try {
+    const paths = JSON.parse(localStorage.getItem(DRAFT_ATTACHMENTS_PREFIX + session.sessionId) ?? '[]')
+    attachments.value = Array.isArray(paths) ? normalizeAttachments(paths.map(String)) : []
+  } catch { attachments.value = [] }
   void nextTick(autoGrow)
 }
 
 function saveDraft() {
   if (draftTimer) { clearTimeout(draftTimer); draftTimer = null }
   try { localStorage.setItem(draftKey(session.sessionId), text.value) } catch { /* ignore */ }
+  try { localStorage.setItem(DRAFT_ATTACHMENTS_PREFIX + session.sessionId, JSON.stringify(attachments.value.map(item => item.path))) } catch { /* ignore */ }
 }
 
 // 切会话（含新建会话）时：先把旧会话的草稿存回【旧】key，再加载新会话草稿。
@@ -409,6 +413,7 @@ function saveDraft() {
 watch(() => session.sessionId, (next, prev) => {
   if (prev && prev !== next) {
     try { localStorage.setItem(draftKey(prev), text.value) } catch { /* ignore */ }
+    try { localStorage.setItem(DRAFT_ATTACHMENTS_PREFIX + prev, JSON.stringify(attachments.value.map(item => item.path))) } catch { /* ignore */ }
   }
   loadDraft()
 })
@@ -416,6 +421,10 @@ watch(text, () => {
   if (draftTimer) clearTimeout(draftTimer)
   draftTimer = setTimeout(saveDraft, 200)
 })
+watch(attachments, () => {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(saveDraft, 200)
+}, { deep: true })
 </script>
 
 <template>
@@ -471,19 +480,12 @@ watch(text, () => {
         </div>
         <div class="life-stats-grid"><span>当前模式<strong>数字生命</strong></span><span>推理档位<strong>{{ REASONING_EFFORTS.find(i => i.value === config.reasoningEffort)?.label }}</strong></span><span>会话状态<strong>{{ session.isBusy ? '运行中' : '待命' }}</strong></span><span>动态流<strong>已连接</strong></span></div>
       </div>
-      <div class="input-clip">
-        <div v-if="importedFiles.length" class="attachments" aria-label="已导入文件">
-          <span v-for="path in importedFiles" :key="path" class="attachment">
-            <CoomiIcon name="fileRead" :size="15" />
-            <span>{{ path.split('/').pop() || '文件' }}</span>
-            <button type="button" aria-label="移除文件" @click="removeImportedFile(path)"><CoomiIcon name="close" :size="12" /></button>
-          </span>
-        </div>
+      <div class="composer-content">
+        <AttachmentStrip v-if="attachments.length" :items="attachments" removable @remove="removeImportedFile" />
         <textarea
           ref="textarea"
           v-model="text"
           class="input"
-          :class="{ scrollable: textareaScrollable }"
           rows="1"
           :placeholder="session.isBusy ? '插队补充指令…' : '给 Coomi 下达任务…'"
           @input="autoGrow"
@@ -700,14 +702,15 @@ watch(text, () => {
 .field:focus-within { border-color: var(--blue-border); background: var(--bg); }
 .field.busy { border-color: var(--border-strong); }
 
-.input-clip { overflow: hidden; border-radius: 18px 18px 8px 8px; }
+.composer-content { max-height: 132px; overflow-y: auto; overflow-x: hidden; border-radius: 18px 18px 8px 8px; padding-top: 3px; scrollbar-width: thin; }
+.composer-content :deep(.attachment-strip) { padding: 4px 6px; }
 .attachments { display:flex; flex-wrap:wrap; gap:6px; padding:7px 6px 2px; }
 .attachment { display:inline-flex; align-items:center; gap:5px; max-width:100%; height:30px; padding:0 7px 0 9px; border:1px solid var(--blue-border); border-radius:10px; background:var(--blue-soft); color:var(--blue); font-size:12px; }
 .attachment > span { min-width:0; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .attachment button { display:grid; place-items:center; width:20px; height:20px; padding:0; border:0; border-radius:50%; background:transparent; color:inherit; }
 .attachment button:active { background:color-mix(in srgb,var(--blue) 12%,transparent); }
 .input {
-  display: block; width: 100%; max-height: 132px; overflow-y: hidden;
+  display: block; width: 100%; overflow-y: hidden;
   padding: 9px 10px 5px 6px; border: 0; background: none; outline: none; resize: none;
   font: inherit; font-size: 15.5px; line-height: 1.5; color: var(--text);
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
@@ -725,13 +728,14 @@ watch(text, () => {
   flex-wrap: wrap; min-width: 0;
 }
 .spacer { flex: 1 1 auto; min-width: 4px; }
-/* 模式竖向弹出面板：在输入框上方竖排，带展开动画（由快到慢）。 */
+/* 模式按钮浮在输入框上方，保留展开动画。 */
 .mode-pop {
   position: absolute; z-index: 30; left: 10px; right: 10px; bottom: calc(100% - 4px);
   display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
   flex-wrap: wrap; gap: 6px;
-  /* 透明浮层：按钮就是普通 pill 大小，从模式键位置模糊分裂出来 */
-  background: var(--bg); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-2); padding: 12px; min-height: 66px;
+  /* 紧凑底部卡片随内容换行。 */
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .08); padding: 8px;
 }
 .mode-pop .pill {
   /* 保持与以前一样大小的按钮 */

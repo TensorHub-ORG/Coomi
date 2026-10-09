@@ -276,6 +276,7 @@ export const useStudioStore = defineStore('studio', () => {
     streamAbort = controller
     running.value = true
     error.value = ''
+    notice.value = ''
     const active = () => ticket === generation && currentStudio.value?.id === id && !controller.signal.aborted
     try {
       const response = await authedFetch(`/api/studios/${encodeURIComponent(id)}/messages`, {

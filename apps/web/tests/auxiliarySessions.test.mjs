@@ -21,7 +21,7 @@ test('auxiliary sockets, model selection, timeline and active main session stay 
   }
   const result = await build({
     absWorkingDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'),
-    stdin: { loader: 'ts', contents: `import { createPinia, setActivePinia } from 'pinia'; import { useSessionStore, useAuxiliarySessionStore, completePendingFileTransfer } from './src/stores/session'; import { useSessionsStore } from './src/stores/sessions'; import { sockets } from '@/bridge'; setActivePinia(createPinia()); const session = useSessionStore(); const transferText = { value: '' }, transferProgress = { value: 0 }, importedFiles = { value: [] }; ${nativeHandlers} export { useSessionStore, useAuxiliarySessionStore, useSessionsStore, completePendingFileTransfer, sockets, onFilesImported, onFileExported };`, resolveDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1') },
+    stdin: { loader: 'ts', contents: `import { createPinia, setActivePinia } from 'pinia'; import { useSessionStore, useAuxiliarySessionStore, completePendingFileTransfer } from './src/stores/session'; import { useSessionsStore } from './src/stores/sessions'; import { sockets } from '@/bridge'; setActivePinia(createPinia()); const session = useSessionStore(); const normalizeAttachments = paths => paths.map(path => ({ path })); const transferText = { value: '' }, transferProgress = { value: 0 }, attachments = { value: [] }; ${nativeHandlers} export { useSessionStore, useAuxiliarySessionStore, useSessionsStore, completePendingFileTransfer, sockets, onFilesImported, onFileExported };`, resolveDir: new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1') },
     bundle: true, platform: 'node', format: 'esm', write: false,
     plugins: [{ name: 'agent-transport', setup(builder) {
       builder.onResolve({ filter: /.*/ }, args => args.path in mocks ? { path: args.path, namespace: 'mock' } : undefined)
@@ -72,6 +72,6 @@ test('auxiliary sockets, model selection, timeline and active main session stay 
   assert.equal(sessions.find(created).parentSessionId, mainId, 'creation must survive its immediate engine sync')
   await sessions.syncFromEngine()
   assert.equal(sessions.childrenOf(mainId).some(s => s.id === created), true, 'later refresh must retain the child')
-  assert.equal(sessions.filtered.some(s => s.id === created), false, 'child belongs to its parent rather than main history')
+  assert.equal(sessions.filtered.some(s => s.id === created), true, 'auxiliary sessions are visible in history')
   for (const store of [main, child, second]) { store.flushPersistence(); store.disconnect() }
 })
