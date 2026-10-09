@@ -209,7 +209,7 @@ export function AskUserCard({ item }: { item: AskItem }) {
           <p className='flex items-center gap-1.5 text-11 text-ink-4'>
             {answer?.timedOut
               ? <><TimerOff size={12} /> 等待超时，已按跳过处理（可在设置里改「提问等待超时」）</>
-              : <><Check size={12} /> 已回答 · 这张卡会留在对话里</>}
+              : <><Check size={12} /> 已回答 · 这张卡会留在会话里</>}
           </p>
         ) : (
           <div className='flex items-center justify-end gap-1.5'>

@@ -7,6 +7,7 @@ import { applyStoredAppearance } from './stores/ui'
 import { forcedSafeMode, installGuard, setSafeMode } from './lib/guard'
 import { clearCrashRecord, shouldSelfHeal } from './lib/crashGuard'
 import './styles/base.css'
+import './styles/desktop.css'
 
 /* ── 界面保险丝（lib/guard.ts）：必须在首帧之前装好 ──
    心跳要从第一帧就开始打点（否则「卡过一回」这件事没人记得住），提示通道也要先接上 ——

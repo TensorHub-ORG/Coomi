@@ -70,6 +70,7 @@ export function PageHeader({ title, description, actions, sticky, className }: {
     // 吸顶页头属于「工具栏」那一类：半透明纯色，不做毛玻璃（毛玻璃全站只在标题栏，见 theme.css）。
     // 内容从它底下滚过时靠 92% 的底色盖住字，不再每次滚动都重新采样一遍背景。
     <header
+      data-page-header
       className={cn(
         'flex items-start gap-4 border-b px-8 pt-7 pb-5',
         sticky ? 'glass-bar sticky top-0 z-20 border-line-soft' : 'border-transparent',
@@ -95,7 +96,7 @@ export function Section({ title, description, actions, children, className }: {
   className?: string
 }) {
   return (
-    <section data-card='static' className={cn('card-lift rounded-lg border border-line bg-surface elev-1', className)}>
+    <section data-card='static' className={cn('coomi-section card-lift rounded-lg border border-line bg-surface elev-1', className)}>
       {title ? (
         <div className='flex min-w-0 items-center gap-3 border-b border-line-soft px-5 pt-4 pb-2.5'>
           <div className='min-w-0 flex-1'>
@@ -134,7 +135,7 @@ export function Row({ label, hint, children, className }: {
 
 /** 设置项网格：两列排布，每格都是独立带框的控件格——不再挤成一坨。 */
 export function SettingsGrid({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('grid grid-cols-1 gap-2.5 px-5 py-4 lg:grid-cols-2', className)}>{children}</div>
+  return <div data-settings-grid className={cn('grid grid-cols-1 gap-2.5 px-5 py-4 lg:grid-cols-2', className)}>{children}</div>
 }
 
 /** 控件格：左标签 + 说明，右控件。
@@ -152,6 +153,8 @@ export function Cell({ label, hint, children, className, wide, labelTitle, hintC
 }) {
   return (
     <div
+      data-settings-cell
+      data-standalone={!label && !hint ? '' : undefined}
       className={cn(
         'card-lift flex min-h-[64px] min-w-0 flex-wrap items-center gap-x-4 gap-y-2 overflow-hidden rounded-lg',
         'border border-line bg-surface px-3.5 py-3',

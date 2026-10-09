@@ -87,7 +87,7 @@ check('名单过期也能自愈：引擎已经有标题就放出来',
 
 /* ④ 空态轮换文案：池子、节奏、随机起点与开关。 */
 check('池子七条、顺序固定', [ROTATE_COPY_POOL.length, ROTATE_COPY_POOL[0], ROTATE_COPY_POOL[6]],
-  [7, '开始新对话', '先说清楚，再动手'])
+  [7, '开始新会话', '先说清楚，再动手'])
 check('轮换节奏 14 秒', ROTATE_COPY_MS, 14000)
 ok('随机起点始终落在池内',
   [0, 0.5, 0.999, 1.5, -0.2].every((r) => { const i = randomCopyIndex(7, () => r); return i >= 0 && i < 7 }))

@@ -194,7 +194,7 @@ export function TrajectoryPanel({ active }: { active: boolean }) {
             compact
             art='tasks'
             title='还没有任务轨迹'
-            description='引擎会在每轮任务结束后写一行本地记录；跑一轮对话后再回来看。'
+            description='引擎会在每轮任务结束后写一行本地记录；跑一轮会话后再回来看。'
           />
         ) : null}
 

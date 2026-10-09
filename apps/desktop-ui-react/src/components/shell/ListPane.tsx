@@ -143,7 +143,7 @@ export function ListPane({ variant = 'inline', onClose }: {
 
   /** 重命名：标题的权威值在会话元数据里（引擎落盘），改完重拉一次列表回显。 */
   const rename = async (s: SessionSummary): Promise<void> => {
-    const next = await promptText({ title: '重命名对话', value: s.empty ? '' : sessionTitle(s, meta), placeholder: '输入新的对话名称', confirmLabel: '保存' })
+    const next = await promptText({ title: '重命名会话', value: s.empty ? '' : sessionTitle(s, meta), placeholder: '输入新的会话名称', confirmLabel: '保存' })
     if (next === null) return
     const title = next.trim()
     if (!title) { toast.error('名称不能为空'); return }
@@ -204,7 +204,7 @@ export function ListPane({ variant = 'inline', onClose }: {
   /** 删除：二次确认后删引擎磁盘记录，删的就是当前会话时先切走，最后重拉列表。 */
   const remove = async (s: SessionSummary, title: string): Promise<void> => {
     const ok = await confirmAction({
-      title: '删除对话',
+      title: '删除会话',
       description: '「' + title + '」会连同磁盘上的会话记录一起删除，无法撤销。',
       confirmLabel: '删除',
       danger: true,
@@ -236,7 +236,7 @@ export function ListPane({ variant = 'inline', onClose }: {
 
   /** 空白处的菜单：列表里最常用的两个动作。 */
   const blankMenu = (): CtxItem[] => [
-    { label: '新建对话', icon: <Plus size={14} />, onSelect: () => { void newSession(); dismiss?.() } },
+    { label: '新建会话', icon: <Plus size={14} />, onSelect: () => { void newSession(); dismiss?.() } },
     {
       label: '刷新列表',
       icon: <RefreshCw size={14} />,
@@ -263,13 +263,14 @@ export function ListPane({ variant = 'inline', onClose }: {
         drawer ? 'shrink-0 border-r border-line' : 'w-full',
       )}
     >
+      <div className='session-heading'><span>Coomi</span><span className='session-heading-note'>与灵感同行</span></div>
       <div className='flex items-center gap-2 px-3 pt-3 pb-2'>
           {/* 新对话常驻头部：列表里最常用的动作，不该藏在别处。
               文字显式跟密度档的 13 号走，字重比按钮默认的 font-medium 再加一档 ——
               它是这一栏唯一的主行动，压得住下面一整列会话标题（Button 的 size=md 已是 13 号，
               这里写死是防止以后有人把密度档调小，这一格跟着缩下去）。 */}
-          <Button variant='neutral' size='md' className='min-w-0 flex-1 text-13 font-semibold' onClick={() => { void newSession(); dismiss?.() }}>
-            <Plus size={14} /> 新对话
+          <Button variant='primary' size='md' className='new-conversation min-w-0 flex-1 text-13 font-semibold' onClick={() => { void newSession(); dismiss?.() }}>
+            <Plus size={14} /> 新会话
           </Button>
           {onClose ? (
             <button
@@ -289,7 +290,8 @@ export function ListPane({ variant = 'inline', onClose }: {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder='搜索对话'
+            placeholder='搜索会话'
+            aria-label='搜索会话'
             className='h-7 border-transparent bg-muted pl-7 text-12'
           />
         </div>
@@ -336,6 +338,8 @@ export function ListPane({ variant = 'inline', onClose }: {
                         <m.li key={s.id} {...(rowProps(rowOrder.get(s.id) ?? 0) ?? {})}>
                           <button
                             type='button'
+                            data-session-row
+                            aria-current={on ? 'true' : undefined}
                             onClick={() => { setView('chat'); void openSession(s.id); dismiss?.() }}
                             // 右键菜单走全局宿主；stopPropagation 挡住外层「空白处」那份菜单。
                             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); showContextMenu(e.clientX, e.clientY, rowMenu(s)) }}
@@ -347,7 +351,6 @@ export function ListPane({ variant = 'inline', onClose }: {
                             )}
                           >
                             {/* 通高强调条：贴着整行左边，不再是插在文字中间的小短线 */}
-                            {on ? <span className='absolute left-0 top-0 h-full w-[3px] bg-primary' /> : null}
                             {meta[s.id]?.pinned ? <Pin size={11} className='shrink-0 text-ink-4' /> : null}
                             {/* 空占位行的标识是灰的：它只说明「你在这条还没有内容的会话里」，
                                 不是一个可以拿去认的对话名。 */}
@@ -367,8 +370,8 @@ export function ListPane({ variant = 'inline', onClose }: {
               compact
               art={query ? 'search' : 'sessions'}
               className='animate-bar py-6'
-              title={query ? '没有匹配的对话' : '还没有对话'}
-              description={query ? '换个关键词试试。' : '点上面的「新对话」开始第一轮。'}
+              title={query ? '没有匹配的会话' : '还没有会话'}
+              description={query ? '换个关键词试试。' : '点上面的「新会话」开始第一轮。'}
             />
           ) : null}
         </div>

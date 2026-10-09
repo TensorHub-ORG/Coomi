@@ -1256,10 +1256,10 @@ export function SkillsView() {
   panelCache.current.set(content, renderPanel(content))
 
   return (
-    <main className='flex min-h-0 flex-1 flex-col bg-canvas'>
+    <main data-skills-page className='flex min-h-0 flex-1 flex-col bg-canvas'>
       <PageHeader
         title='技能中心'
-        description='工具市场里的 MCP 服务器装上就能被 Agent 调用；缺 npx / uvx 这类运行环境时，卡片上可以直接一键把环境和工具一起装好。「任务」页可以看正在安装 / 正在跑的任务、实时日志，并取消或重试。'
+        description='为 Coomi 添加新能力。发现技能、连接工具，在这里管理每一项任务。'
         actions={<Button variant='ghost' size='md' onClick={() => void refresh()}><RefreshCw size={14} /> 刷新</Button>}
       />
       {/* 视图导航：三个视图一条分段控件（滑动指示器），左边是说明「现在在哪一层」的面包屑。 */}

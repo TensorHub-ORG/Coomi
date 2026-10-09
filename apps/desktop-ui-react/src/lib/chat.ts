@@ -1017,7 +1017,7 @@ export function firstTokenFromEvent(ev: Record<string, any> | null | undefined):
 }
 
 /** 会话标题：优先手动标题，其次首条用户消息，最后兜底。 */
-export function deriveTitle(items: ChatItem[], fallback = '新对话'): string {
+export function deriveTitle(items: ChatItem[], fallback = '新会话'): string {
   const first = items.find((i) => i.kind === 'user')
   if (!first || first.kind !== 'user') return fallback
   const line = first.text.split('\n')[0].trim()

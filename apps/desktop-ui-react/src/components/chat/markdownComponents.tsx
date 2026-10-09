@@ -49,7 +49,7 @@ const COMPONENTS: Components = {
         lang={lang}
         streaming={ctx.streaming}
         live={ctx.isLive(lang, code)}
-        origin='对话里的代码块'
+        origin='会话里的代码块'
       />
     )
   },

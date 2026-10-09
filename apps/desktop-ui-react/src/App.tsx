@@ -1,6 +1,7 @@
 import { Suspense, lazy, memo, startTransition, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
-import { Toaster, toast } from 'sonner'
+import { toast } from 'sonner'
+import { AppToaster } from './components/ui/AppToaster'
 import { Group, Panel, usePanelRef, type PanelSize } from 'react-resizable-panels'
 // motion 按需入口：全站只在根上挂一次 LazyMotion + domAnimation，
 // 组件里一律用 m.*（不要 import 全量 motion），features 不重复加载。
@@ -996,7 +997,7 @@ export default function App() {
       <OnboardingGate />
       <DialogHost />
       <ContextMenuHost />
-      <Toaster position='bottom-right' theme='system' />
+      <AppToaster />
     </TooltipProvider>
     </LazyMotion>
   )

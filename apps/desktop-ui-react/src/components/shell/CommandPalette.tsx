@@ -72,8 +72,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       id: 'view:' + key, label, icon, run: () => setView(key),
     })
     const list: Command[] = [
-      { id: 'new', label: '新建对话', icon: <Plus size={15} />, run: () => { setView('chat'); void newSession() } },
-      view('chat', '前往 对话', <MessageSquare size={15} />),
+      { id: 'new', label: '新建会话', icon: <Plus size={15} />, run: () => { setView('chat'); void newSession() } },
+      view('chat', '前往 会话', <MessageSquare size={15} />),
       view('skills', '前往 技能中心', <Sparkles size={15} />),
       view('artifacts', '前往 产物中心', <Package size={15} />),
       view('settings', '前往 设置', <Settings size={15} />),
@@ -112,7 +112,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       },
       {
         id: 'group:sessions',
-        label: '切换对话',
+        label: '切换会话',
         hint: sessions.length + ' 个',
         icon: <UserRound size={15} />,
         children: () => sessions.map((s) => ({
@@ -217,7 +217,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               value={query}
               onChange={(e) => { setQuery(e.target.value); setIndex(0) }}
               onKeyDown={onKeyDown}
-              placeholder={parent ? '在「' + parent.label + '」里筛选…' : '搜索对话、页面、模型策略…'}
+              placeholder={parent ? '在「' + parent.label + '」里筛选…' : '搜索会话、页面、模型策略…'}
               className='flex-1 bg-transparent text-14 text-ink placeholder:text-ink-4'
             />
             <kbd className='rounded border border-line-strong px-1.5 py-0.5 text-11 text-ink-4'>Esc</kbd>

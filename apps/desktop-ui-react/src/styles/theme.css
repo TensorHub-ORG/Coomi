@@ -1,5 +1,4 @@
-/* Coomi Desktop 设计系统 —— 对标小米 MiMo Desktop（Electron + Tailwind v4）的令牌体系：
-   暖中性灰、墨色文字 alpha 阶梯、发丝描边、克制的强调色、固定 px 字号 × 全局缩放。 */
+/* Coomi Desktop：与移动端同源的蓝白、浅灰表面与克制的信息层级。 */
 @import 'tailwindcss';
 
 /* 暗色以 [data-theme=dark] 驱动，避免 prefers-color-scheme 与手动切换打架。 */
@@ -8,44 +7,44 @@
 /* ── 语义令牌：同一套名字，明暗两套值 ── */
 :root {
   /* 版面底色：canvas 最底、surface 面、card 卡片 */
-  --canvas: #f6f7fa;
-  --canvas-side: #ffffff;
+  --canvas: #ffffff;
+  --canvas-side: #f7f8fa;
   --surface: #ffffff;
-  --surface-muted: #f1f3f7;
-  --surface-sunken: #e9ecf2;
+  --surface-muted: #f5f6f8;
+  --surface-sunken: #edeff3;
   /* 表面层级 v2：canvas → surface → surface-raised → surface-overlay（自下而上四档）。
      浅色下四档都是白/近白，层级靠描边 + 高程区分；暗色下靠明度递增区分。 */
   --surface-raised: #ffffff;
   --surface-overlay: #ffffff;
-  --hover: #eef1f6;
-  --active: #e6eaf2;
-  --selected: #eeedec;
+  --hover: #eef1f5;
+  --active: #e5eaf2;
+  --selected: #eaf0fc;
 
   /* 边框 v2 三档：soft（发丝 / 行分隔）→ line（默认描边：卡片、浮层）→ strong（控件描边）。
      三档都在这里定死，组件里别再写 rgba() 当边框色。 */
-  --line: #dfe3ea;
-  --line-soft: rgba(16, 24, 40, 0.08);
+  --line: #e7e9ee;
+  --line-soft: #eef0f4;
   /* 控件边框：设置项里的输入框/分段控件都靠它「有框」，太浅会显得一片模糊。 */
-  --line-strong: #cdc9c0;
+  --line-strong: #dadde4;
   --control-bg: #ffffff;
-  --control-bg-2: #f2f0eb;
+  --control-bg-2: #f5f6f8;
 
   /* 文字：墨色 + alpha 阶梯 */
-  --ink: #14161a;
-  --ink-2: rgba(20, 22, 26, 0.82);
-  --ink-3: rgba(20, 22, 26, 0.58);
-  --ink-4: rgba(20, 22, 26, 0.38);
+  --ink: #1b1e23;
+  --ink-2: #4e5665;
+  --ink-3: #707887;
+  --ink-4: #818997;
   --ink-inverse: #ffffff;
 
   /* 强调：蓝用于链接/选中/可编辑；橙只用于提醒；主按钮用墨色（大厂克制做法） */
-  --primary: #2f6fed;
-  --primary-hover: #2a63d4;
-  --primary-active: #2453b4;
-  --primary-soft: rgba(47, 111, 237, 0.1);
-  --accent: #ff6a2b;
-  --accent-hover: #ef5a17;
-  --accent-active: #d24c0e;
-  --ok: #12a150;
+  --primary: #2d61c6;
+  --primary-hover: #24509f;
+  --primary-active: #1f4488;
+  --primary-soft: #eaf0fc;
+  --accent: #d47458;
+  --accent-hover: #bd6046;
+  --accent-active: #a64d36;
+  --ok: #1f9d6b;
   --ok-hover: #0e8743;
   --ok-active: #0b6d36;
   --ok-soft: rgba(18, 161, 80, 0.1);
@@ -53,7 +52,7 @@
   --warn-hover: #b86105;
   --warn-active: #964e04;
   --warn-soft: rgba(217, 119, 6, 0.12);
-  --danger: #e5484d;
+  --danger: #d9503f;
   --danger-hover: #cf3a3f;
   --danger-active: #b32f34;
   --danger-soft: rgba(229, 72, 77, 0.1);
@@ -134,18 +133,18 @@
   --sel-bg: color-mix(in srgb, var(--primary) 26%, transparent);
 
   /* 代码块 */
-  --code-bg: #f1f3f7;
-  --code-fg: #3a3a38;
+  --code-bg: #f5f6f8;
+  --code-fg: #313743;
 
   /* 消息：用户实心气泡（方案 A），助手浅底卡片 */
-  --bubble-user: #dbe7ff;
-  --bubble-user-line: #bfd3fb;
-  --bubble-user-ink: #101a2e;
+  --bubble-user: #eaf0fc;
+  --bubble-user-line: #eaf0fc;
+  --bubble-user-ink: #263b60;
   --msg-card: #ffffff;
-  --msg-card-line: #e3e7ee;
+  --msg-card-line: #e7e9ee;
   /* 列表选中：整行框 + 通高强调条 */
-  --row-active: #eef0f6;
-  --row-active-line: #d7dbe6;
+  --row-active: #eaf0fc;
+  --row-active-line: #eaf0fc;
   /* 中性主按钮：浅色=深墨底白字，深色=浅于卡片的面板色深字 */
   --neutral-btn: #22262e;
   --neutral-btn-hover: #2f3540;
@@ -155,17 +154,17 @@
      --r-sm(8px) 是早期控件圆角，既有组件还在引用，保留不删。 */
   --r-xs: 6px;
   --r-sm: 8px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 18px;
-  --r-2xl: 22px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-2xl: 24px;
 
   /* ── 高程系统 v2：卡片(1) → 悬浮(2) → 浮层(3) → 模态/顶层(4)，外加按下态内阴影。
      1~3 的值与 v1 一字不差（既有组件的观感零变化），--elev-4 只给「盖在所有东西上面」那一层。 ── */
   --elev-0: none;
-  --elev-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 1px rgba(16, 24, 40, 0.03);
-  --elev-2: 0 2px 8px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
-  --elev-3: 0 12px 32px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --elev-1: 0 1px 3px rgba(23, 32, 54, 0.03);
+  --elev-2: 0 4px 20px rgba(23, 32, 54, 0.05);
+  --elev-3: 0 12px 36px rgba(23, 32, 54, 0.12), 0 2px 6px rgba(23, 32, 54, 0.04);
   --elev-4: 0 24px 64px rgba(16, 24, 40, 0.22), 0 6px 16px rgba(16, 24, 40, 0.08);
   /* 按下态：用内阴影表示「按进去了」，比让按钮整体位移 1px 稳（不会带着周围文字一起抖） */
   --elev-press: inset 0 1px 3px rgba(16, 24, 40, 0.16), inset 0 1px 1px rgba(16, 24, 40, 0.08);
@@ -242,8 +241,8 @@
 
   /* 指针反馈的位移：一律 2~3px —— 再大就不是「被按到」而是「整块在晃」。
      hover 抬起 2px、按下沉 2px；卡片 / 按钮 / 芯片都取这两个值，不再各写各的 px。 */
-  --shift-hover: 2px;
-  --shift-press: 2px;
+  --shift-hover: 1px;
+  --shift-press: 1px;
 
   /* 页面级过渡的基准位移：内容区按导航方向滑动用它（View Transitions 与降级分支共用）。
      v3 从 28px 收到 **4px**：整页级的位移越大，越像「换了个屏幕」而不是「同一块内容换了一页」，
@@ -282,31 +281,31 @@
 }
 
 [data-theme='dark'] {
-  --canvas: #131315;
-  --canvas-side: #0e0e10;
-  --surface: #1d1d21;
-  --surface-muted: #17171a;
-  --surface-sunken: #26262b;
-  --surface-raised: #26262b;
-  --surface-overlay: #2c2c33;
+  --canvas: #131518;
+  --canvas-side: #171a1f;
+  --surface: #191d23;
+  --surface-muted: #1c2026;
+  --surface-sunken: #242a33;
+  --surface-raised: #222730;
+  --surface-overlay: #252b34;
   --hover: rgba(255, 255, 255, 0.07);
   --active: rgba(255, 255, 255, 0.12);
-  --selected: rgba(255, 255, 255, 0.1);
-  --line: #303038;
-  --line-soft: rgba(255, 255, 255, 0.08);
-  --line-strong: #4a4a4a;
-  --control-bg: #262626;
-  --control-bg-2: #1a1a1a;
-  --ink: #f4f4f5;
-  --ink-2: #b8b8b8;
-  --ink-3: #8b8b8b;
-  --ink-4: #6a6a6a;
+  --selected: #1c2c47;
+  --line: #2a3039;
+  --line-soft: #242a32;
+  --line-strong: #3a4351;
+  --control-bg: #20252d;
+  --control-bg-2: #191d23;
+  --ink: #e7e9ee;
+  --ink-2: #bac2cf;
+  --ink-3: #9aa4b4;
+  --ink-4: #8893a3;
   --ink-inverse: #151c13;
-  --primary: #5a9cff;
-  --primary-hover: #7bb0ff;
-  --primary-active: #9dc4ff;
-  --primary-soft: rgba(90, 156, 255, 0.16);
-  --accent: #ff7d45;
+  --primary: #82a9fa;
+  --primary-hover: #96b7fa;
+  --primary-active: #abc5ff;
+  --primary-soft: #1c2c47;
+  --accent: #e08a6b;
   --accent-hover: #ff9463;
   --accent-active: #ffab82;
   --ok: #3fb950;
@@ -357,15 +356,15 @@
   --sb-thumb-hover: rgba(255, 255, 255, 0.3);
   --sb-thumb-active: rgba(255, 255, 255, 0.42);
   --sel-bg: color-mix(in srgb, var(--primary) 38%, transparent);
-  --code-bg: #2e2e2e;
+  --code-bg: #1a1e25;
   --code-fg: #e6e6e6;
-  --bubble-user: #1f2b45;
-  --bubble-user-line: #33456a;
+  --bubble-user: #20314e;
+  --bubble-user-line: #20314e;
   --bubble-user-ink: #e8eefb;
-  --msg-card: #1a1a1e;
+  --msg-card: #131518;
   --msg-card-line: #2b2b31;
-  --row-active: #242424;
-  --row-active-line: #333333;
+  --row-active: #1c2c47;
+  --row-active-line: #1c2c47;
   --neutral-btn: #34343a;
   --neutral-btn-hover: #3f3f47;
   --neutral-btn-ink: #f2f3f5;

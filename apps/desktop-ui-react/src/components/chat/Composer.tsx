@@ -97,6 +97,7 @@ export function WorkdirBar({ prominent }: { prominent?: boolean }) {
 
   return (
     <div
+      data-workdir
       className={cn(
         'flex w-full items-center gap-2 rounded-lg border border-dashed border-line-strong bg-muted',
         prominent ? 'h-12 px-3.5' : 'h-8 border-solid bg-surface px-2.5',
@@ -118,7 +119,7 @@ export function WorkdirBar({ prominent }: { prominent?: boolean }) {
         }
       />
       {isDefault ? <span className='shrink-0 rounded-[5px] bg-primary-soft px-1.5 text-11 text-primary'>默认</span> : null}
-      <Button variant={prominent ? 'primary' : 'ghost'} size={prominent ? 'md' : 'sm'} onClick={() => void pick()}>
+      <Button variant='ghost' size='sm' onClick={() => void pick()}>
         选择目录
       </Button>
     </div>
@@ -131,6 +132,7 @@ export function Composer({ hero }: { hero?: boolean }) {
   const send = useSession((s) => s.send)
   const cancel = useSession((s) => s.cancel)
   const streaming = useSession((s) => s.streaming)
+  const hasMessages = useSession((s) => s.messages.length > 0)
   const connected = useSession((s) => s.connected)
   const selectModel = useSession((s) => s.selectModel)
   // 当前模型以会话 store 为准（引擎回读校验过）：切换模型后立刻换名字。
@@ -538,7 +540,7 @@ export function Composer({ hero }: { hero?: boolean }) {
 
   return (
 
-    <div className={cn('flex w-full flex-col gap-2', hero && 'gap-2.5')}>
+    <div data-composer data-hero={!!hero} className={cn('flex w-full flex-col gap-2', hero && 'gap-2.5')}>
       {hero ? <WorkdirBar prominent /> : null}
       {showLinkBanner ? (
         <div
@@ -550,7 +552,7 @@ export function Composer({ hero }: { hero?: boolean }) {
           <AlertTriangle size={13} />
           <span className='flex-1'>
             {noSession
-              ? '正在准备一个新对话…'
+              ? '正在准备一个新会话…'
               : linkError || '与引擎的连接已断开（可点右侧重连）'}
           </span>
           {noSession ? null : (
@@ -561,7 +563,7 @@ export function Composer({ hero }: { hero?: boolean }) {
       {ready && !hasProvider ? (
         <div className='animate-bar flex items-center gap-2 rounded-lg border border-primary/30 bg-primary-soft px-3 py-1.5 text-12 text-primary'>
           <KeyRound size={13} />
-          <span className='flex-1'>还没有配置模型：添加一个 Provider 并选择模型后就能对话。</span>
+          <span className='flex-1'>还没有配置模型：添加一个 Provider 并选择模型后就能会话。</span>
           <Button variant='ghost' size='sm' onClick={() => setView('settings')}>去配置</Button>
         </div>
       ) : null}
@@ -590,6 +592,7 @@ export function Composer({ hero }: { hero?: boolean }) {
         </div>
       ) : null}
       <div
+        data-composer-box
         onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
@@ -706,6 +709,7 @@ export function Composer({ hero }: { hero?: boolean }) {
         <div className={cn('flex w-full min-w-0 items-start gap-1.5', sendLeft && 'items-end')}>
           {sendLeft ? sendBtnNode : null}
           <textarea
+            aria-label='消息输入框'
             ref={area}
             value={draft}
             onChange={onChange}
@@ -714,7 +718,7 @@ export function Composer({ hero }: { hero?: boolean }) {
             placeholder={inputParts?.placeholder ?? (!ready ? '引擎启动中…'
               : streaming
                 ? (insertMode === 'interrupt' ? '正在生成：Enter 打断本轮并发送新消息' : '正在生成：Enter 插话（排队，本轮结束后立刻执行）')
-                : '描述你的任务，Enter 发送 / Shift+Enter 换行')}
+                : '告诉 Coomi，你想做些什么…')}
             disabled={!ready}
             className='max-h-[168px] min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-13 leading-[1.65] text-ink placeholder:text-ink-4'
             style={{
@@ -724,11 +728,12 @@ export function Composer({ hero }: { hero?: boolean }) {
           />
           <div data-theme-composer-mascot className='shrink-0' />
         </div>
-        <div className='mt-1 flex items-center gap-0.5'>
+        <div data-composer-tools className='mt-1 flex items-center gap-0.5'>
           {toolbarParts?.showAttach === false ? null : (
           <Tip label='上传文件'>
             <Button
               variant='ghost' size='icon-sm'
+              aria-label='上传文件'
               onClick={() => void attach()}
             >
               <Paperclip size={15} />
@@ -865,11 +870,11 @@ export function Composer({ hero }: { hero?: boolean }) {
           {!sendLeft ? sendBtnNode : null}
         </div>
       </div>
-      <StatsBar />
+      {!hero || hasMessages || streaming ? <StatsBar /> : null}
       {hero ? (
-        <div className='flex items-center justify-center gap-3 text-11 text-ink-4'>
-          <span>Enter 发送 · Shift+Enter 换行 · 拖入文件作为附件</span>
-          <span className='text-ink-4'>技能默认全部可用，选中的技能只是提示优先使用</span>
+        <div className='composer-hint text-11 text-ink-3'>
+          <span><kbd>Enter</kbd> 发送 <span aria-hidden>·</span> <kbd>Shift + Enter</kbd> 换行</span>
+          <span>也可以拖入文件，与 Coomi 一起阅读</span>
         </div>
       ) : null}
     </div>

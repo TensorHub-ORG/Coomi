@@ -323,7 +323,7 @@ export function DockTasksTab({ refresh, onRefresh }: { refresh: number; onRefres
           empty={ready && !!tasks && !items.length}
           emptyArt='tasks'
           emptyTitle='当前没有任务'
-          emptyDesc='发起一轮对话或后台安装任务后，这里会实时显示状态。'
+          emptyDesc='发起一轮会话或后台安装任务后，这里会实时显示状态。'
         >
           <ul className='-mx-1'>
             {items.slice(0, 20).map((task) => {

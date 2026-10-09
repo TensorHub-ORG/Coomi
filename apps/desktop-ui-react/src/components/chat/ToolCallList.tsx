@@ -1,17 +1,19 @@
 import { useId, useState, type ReactNode } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Wrench, LoaderCircle, CircleCheck } from 'lucide-react'
 import { m, type MotionProps, type Transition } from 'motion/react'
 import { cn } from '../../lib/cn'
 import type { ToolCall } from '../../lib/chat'
+import { useUi } from '../../stores/ui'
+import { toolDisclosure } from '../../lib/toolDisclosure'
 
 /* ── 一轮工具调用的折叠列表 ──
  *
  * 改造前 `item.tools.map(...)` 是平铺的：一轮调 6 个工具就是 6 张卡，屏幕全被工具占满，
  * 正文反而要往上翻。这里把**同一组**工具收成一行摘要，按需展开。
  *
- * 三条规矩：
- *  ① 正在跑的一律看得见：streaming 或还有 running/queued 时**强制展开**，用户点也收不起来。
- *  ② 小事不折叠：全部落定且 N ≤ 3 时保持平铺（连摘要行都不出），N > 3 才折。
+ * 两种展示密度：
+ *  ① 极简模式：所有调用默认收为摘要，运行状态持续可见，错误默认展开，用户可手动开合。
+ *  ② 标准模式：流式 / 运行中强制展开，小于等于三个工具平铺，更多工具结束后折叠。
  *  ③ 工具行本身**不在这里重画**：由调用方通过 renderTool 注入现有 ToolRow ——
  *     `ToolMark`（状态点）、`toolTarget`（目标）以及「展开看参数与结果」都留在 ToolRow 里，
  *     这里只负责摘要与折叠，避免同一套行渲染存在两份、日后改一处漏一处。
@@ -21,7 +23,7 @@ import type { ToolCall } from '../../lib/chat'
 
 export interface ToolCallListProps {
   tools: ToolCall[]
-  /** 整条消息是否还在流式：流式期间强制展开。 */
+  /** 整条消息是否还在流式：标准模式下流式期间强制展开。 */
   streaming: boolean
   /** 某一个工具行是不是这次才出现（复用消息列表的 seen 判定，旧工具行不重播入场）。 */
   toolFresh: (callId: string) => boolean
@@ -41,6 +43,7 @@ function isFailure(tool: ToolCall): boolean {
 }
 
 export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle, enter, spring }: ToolCallListProps) {
+  const minimal = useUi((s) => s.prefs.minimalUi)
   /// 用户显式开合过没有：null = 还没点过，按自动规则来；点过之后以用户为准。
   const [userOpen, setUserOpen] = useState<boolean | null>(null)
   /// aria-controls 指向折叠面板：给读屏一个明确的「这个按钮管哪一块」。
@@ -48,23 +51,11 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
 
   if (!tools.length) return null
 
-  /// running 与 queued 都算「还没落定」：queued 是已排上队等状态推进，同样不该被折叠遮住。
-  const active = tools.some((t) => t.status === 'running' || t.status === 'queued')
-  /// 强制展开：正在跑的东西绝不能被收起来（本次改造的硬约束）。
-  const forced = streaming || active
-  /// 只有「全部结束且超过 3 个」才值得折；N ≤ 3 保持原样平铺，不为小事搞折叠。
-  const canFold = !forced && tools.length > 3
-  /// 摘要行只在会折的组里出现；N ≤ 3 平铺时它只是一行噪音。
-  const showHeader = tools.length > 3
+  const { active, failed, canFold, showHeader, open } = toolDisclosure(tools, streaming, minimal, userOpen)
 
   const done = tools.filter((t) => t.status === 'done').length
-  const failed = tools.filter(isFailure).length
   /// 用时：有 elapsedMs 的求和（没有更好的口径）；一个都没有时整项不显示。
   const elapsed = tools.reduce((sum, t) => sum + (t.elapsedMs ?? 0), 0)
-
-  /// 强制展开 / 小列表一律展开；大列表落定后默认折叠，用户点开过就以用户为准。
-  /// 例外：**有失败时默认展开** —— 失败不该被折进摘要行里看不见（用户仍可手动收起）。
-  const open = (forced || tools.length <= 3) ? true : (userOpen ?? failed > 0)
 
   const toggle = (): void => {
     if (!canFold) return
@@ -73,7 +64,17 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
     setUserOpen(!open)
   }
 
-  const summary = (
+  const summary = minimal ? (
+    <>
+      <Wrench size={13} className='shrink-0' />
+      <span className='min-w-0 truncate'>{tools.length === 1 ? tools[0].name : `${tools.length} 项工具调用`}</span>
+      <span className='tool-summary-state'>
+        {active ? <><LoaderCircle size={12} className='animate-spin' />正在执行 {done}/{tools.length}</>
+          : failed ? `${failed} 项失败` : <><CircleCheck size={12} />已完成</>}
+      </span>
+      {!active && elapsed > 0 ? <span className='shrink-0 text-ink-3'>{(elapsed / 1000).toFixed(1)}s</span> : null}
+    </>
+  ) : (
     <>
       <span className='shrink-0'>调用了 {tools.length} 个工具</span>
       <span aria-hidden className='shrink-0 text-ink-4'>·</span>
@@ -94,7 +95,7 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
     </>
   )
 
-  const headerClass = 'flex w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 py-0.5 text-12 text-ink-3'
+  const headerClass = minimal ? 'tool-summary' : 'flex w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 py-0.5 text-12 text-ink-3'
 
   /// 能折时是按钮（键盘原生可触发 + aria-expanded）；强制展开期间是普通 div ——
   /// 一个点不动的按钮比「没有按钮」更让人困惑。
@@ -122,11 +123,11 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
   )
 
   return (
-    <div className='my-0.5'>
+    <div className='my-0.5' data-tool-group data-minimal={minimal} data-status={failed ? 'error' : active ? 'running' : 'done'}>
       {/* 入场只给摘要行：工具行各自的入场仍在 ToolRow 里，套两层会叠出 12px 的位移。 */}
       {showHeader ? <m.div {...enter}>{header}</m.div> : null}
       {/* 折叠统一走 .collapse + data-open：与 Reasoning / ToolRow 同一套高度与透明度收放。 */}
-      <div id={panelId} className='collapse' data-open={open}>
+      <div id={panelId} className='collapse' data-open={open} inert={!open}>
         <div>
           <div className='flex flex-col'>
             {tools.map((tool) => renderTool(tool, toolFresh(tool.callId), isFailure(tool)))}

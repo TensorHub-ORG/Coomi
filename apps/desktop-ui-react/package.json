@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:ui": "node tests/check-minimal-ui.mjs",
+    "test:visual": "node tests/visual-review.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",

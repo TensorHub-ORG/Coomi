@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
 import { Minus, Square, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { ipc } from '../../lib/ipc'
 import { useSession } from '../../stores/session'
 import { Button } from '../ui/Button'
-import { Divider } from '../ui/Card'
+import { DesktopMenus } from './DesktopMenus'
 import { queueDuringNavPause } from './navPause'
-import logo from '../../assets/coomi-logo.png'
 
 /** 滚动信号的空闲窗口（ms）：最后一次滚动之后再等这么久才摘掉标记。
     200ms 是「手指还在滚」与「停下来了」之间的那一档——短于 150ms 会在连续滚动里
@@ -76,21 +76,15 @@ export function TitleBar({ title }: { title?: string }) {
   const streaming = useSession((s) => s.streaming)
   /// 窗口按钮的按压反馈：沉 2px（--shift-press）+ --motion-press(120ms) 弹性曲线，
   /// 两个值都从令牌取（指针反馈全站只有 2~3px 这一个量级，别在这里写死 px）。 */
-  const winBtn = 'transition-transform duration-[var(--motion-press)] ease-[var(--ease-spring)] active:translate-y-[var(--shift-press)]'
+  const winBtn = 'window-control'
 
   return (
     <div
       data-tauri-drag-region
-      className='glass-topbar drag flex h-[var(--topbar-h)] shrink-0 items-center gap-2 border-b border-line pl-4 pr-2'
+      data-shell-part='titlebar'
+      className='glass-topbar drag flex h-[var(--topbar-h)] shrink-0 items-center gap-2 border-b border-line pl-2 pr-0'
     >
-      <img src={logo} alt='' className='h-4 w-4 rounded-xs object-contain' />
-      <span className='text-12 font-semibold tracking-wide text-ink-3'>Coomi</span>
-      <span
-        className='flex h-5 select-none items-center rounded-xs border border-warn/40 bg-warn-soft px-1.5 text-10 font-semibold tracking-[0.08em] text-warn'
-        title='Beta 版本：功能仍在迭代'
-      >
-        BETA
-      </span>
+      <DesktopMenus />
       {title ? (
         <>
           <span className='text-ink-4'>/</span>
@@ -109,23 +103,22 @@ export function TitleBar({ title }: { title?: string }) {
         </>
       ) : null}
       <div className='flex-1' />
-      <div className='no-drag flex items-center gap-1'>
-        <Button variant='ghost' size='icon-sm' aria-label='最小化' title='最小化' className={winBtn} onClick={() => void ipc('win_minimize')}>
-          <Minus size={15} />
+      <div className='no-drag flex h-full items-center'>
+        <Button variant='ghost' size='icon-sm' aria-label='最小化' title='最小化' className={winBtn} onClick={() => void ipc('win_minimize').catch((e) => toast.error(String(e)))}>
+          <Minus size={16} strokeWidth={1.5} />
         </Button>
-        <Button variant='ghost' size='icon-sm' aria-label='最大化' title='最大化' className={winBtn} onClick={() => void ipc('win_toggle_maximize')}>
-          <Square size={12} />
+        <Button variant='ghost' size='icon-sm' aria-label='最大化' title='最大化' className={winBtn} onClick={() => void ipc('win_toggle_maximize').catch((e) => toast.error(String(e)))}>
+          <Square size={16} strokeWidth={1.5} />
         </Button>
-        <Divider vertical />
         <Button
           variant='ghost'
           size='icon-sm'
-          aria-label='关闭'
-          title='关闭'
-          className={winBtn + ' hover:bg-danger hover:text-white active:bg-danger-hover'}
-          onClick={() => void ipc('win_close')}
+          aria-label='收起到托盘'
+          title='收起到托盘；完全退出请使用托盘菜单'
+          className={winBtn}
+          onClick={() => void ipc('win_close').catch((e) => toast.error(String(e)))}
         >
-          <X size={15} />
+          <X size={16} strokeWidth={1.5} />
         </Button>
       </div>
     </div>

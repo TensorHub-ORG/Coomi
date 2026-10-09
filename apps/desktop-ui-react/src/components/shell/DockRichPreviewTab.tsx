@@ -77,7 +77,7 @@ export function DockRichPreviewTab({ refresh, onRefresh }: { refresh: number; on
     <div data-dock-tab='preview' className='flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overflow-x-hidden p-2.5'>
       <DockSection
         title='富内容预览'
-        hint={isPinned ? '已固定在对话里的某一块（取消固定后重新跟随最新块）' : '自动跟随对话里最新的富内容块'}
+        hint={isPinned ? '已固定在会话里的某一块（取消固定后重新跟随最新块）' : '自动跟随会话里最新的富内容块'}
         actions={(
           <>
             {isPinned ? (
@@ -94,7 +94,7 @@ export function DockRichPreviewTab({ refresh, onRefresh }: { refresh: number; on
         <StateBlock
           empty={!block}
           emptyTitle='还没有可预览的富内容'
-          emptyDesc={'对话里出现 ' + SUPPORTED + ' 的代码块后，这里会跟随最新的一块；流式生成中的块不会进来。'}
+          emptyDesc={'会话里出现 ' + SUPPORTED + ' 的代码块后，这里会跟随最新的一块；流式生成中的块不会进来。'}
         >
           {block ? (
             <div className='min-w-0'>
@@ -127,7 +127,7 @@ export function DockRichPreviewTab({ refresh, onRefresh }: { refresh: number; on
                   <PackagePlus size={11} />存为产物
                 </Button>
                 {allowSaveAs ? (
-                  <Tip label='另存为…（先落进会话工作区，再弹系统保存对话框）'>
+                  <Tip label='另存为…（先落进会话工作区，再弹系统保存弹窗）'>
                     <Button
                       variant='secondary'
                       size='sm'

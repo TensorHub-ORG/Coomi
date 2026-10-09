@@ -73,14 +73,14 @@ export function ArtifactsView() {
   }
 
   return (
-    <main className='flex min-h-0 flex-1 flex-col bg-canvas'>
+    <main data-artifacts-page className='flex min-h-0 flex-1 flex-col bg-canvas'>
       <PageHeader
         title='产物中心'
         description='每个会话的工作目录与产出文件，选中即在右侧预览。'
         actions={<Button variant='ghost' size='md' onClick={() => void listDir(currentPath || engineCwd || '/')}>刷新</Button>}
       />
-      <div className='flex min-h-0 flex-1 gap-4 px-8 pb-6'>
-        <aside className='w-[248px] shrink-0 overflow-y-auto rounded-lg border border-line bg-surface p-2 elev-1'>
+      <div className='artifact-workspace flex min-h-0 flex-1 gap-4 px-8 pb-6'>
+        <aside className='artifact-sessions w-[248px] shrink-0 overflow-y-auto rounded-lg border border-line bg-surface p-2 elev-1'>
           <p className='px-2 py-1 text-11 font-medium text-ink-4'>会话</p>
           {groups.map((g) => (
             <div key={g.key} className='mb-1'>
@@ -149,6 +149,7 @@ export function ArtifactsView() {
               {shown.map((f, i) => (
                 <button
                   key={f.path}
+                  data-artifact-row
                   type='button'
                   style={longList ? { ...stagger(i), ...CV_ROW } : stagger(i)}
                   onClick={() => openEntry(f)}
@@ -169,7 +170,7 @@ export function ArtifactsView() {
             {/* 加载态统一成骨架屏，不再出现「引擎启动中…」这种一行字 */}
             {!ready ? <SkeletonRows rows={6} className='px-0' /> : null}
             {ready && !files.length ? (
-              <Empty className='animate-card-in' art='artifacts' title='这个目录还是空的' description='让 Agent 干活之后，产物会出现在这里。' />
+              <Empty className='animate-card-in' art='artifacts' title='留个位置，给下一个好作品' description='和 Coomi 一起创建的文件，会在这里与你见面。' />
             ) : null}
             {ready && !!files.length && !shown.length ? (
               <Empty

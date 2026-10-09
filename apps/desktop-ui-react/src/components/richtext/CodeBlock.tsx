@@ -87,7 +87,7 @@ export function CodeBlock({ code, lang, streaming, live, origin }: {
 
   const detection = useMemo(() => detectRichBlock(code, lang), [code, lang])
   const block = useMemo(
-    () => makeBlock(detection.kind, detection.lang, code, origin ?? '对话里的代码块'),
+    () => makeBlock(detection.kind, detection.lang, code, origin ?? '会话里的代码块'),
     [detection.kind, detection.lang, code, origin],
   )
   // 流式没结束就不允许预览：这是「只在代码块流式结束后允许预览」的唯一判定点。

@@ -53,7 +53,7 @@ export function writeHiddenEmptySessions(store: KeyValueStore, ids: Iterable<str
 
 /** 界面兜底的默认标题（workspace.ts 的 sessionTitle 在标题 / 摘要都缺时显示的那一个）。
  *  引擎把「新建的空记录」也带上这个标题返回，所以它**不算内容**。 */
-export const DEFAULT_SESSION_TITLE = '未命名对话'
+export const DEFAULT_SESSION_TITLE = '未命名会话'
 
 /** 这条会话摘要里到底有没有「内容」——列表可见性的唯一判据。
  *

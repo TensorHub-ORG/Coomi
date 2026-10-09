@@ -46,7 +46,7 @@ export function ChatSearchBar() {
             if (e.key === 'Escape') { e.preventDefault(); hide(); return }
             if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) prev(); else next() }
           }}
-          placeholder='在当前对话里搜索…'
+          placeholder='在当前会话里搜索…'
           className='h-7 min-w-0 flex-1 rounded-md border border-line-strong bg-control px-2 text-12 text-ink placeholder:text-ink-4 focus:border-primary'
         />
         <span className='shrink-0 px-1 text-11 tabular-nums text-ink-3'>{status}</span>

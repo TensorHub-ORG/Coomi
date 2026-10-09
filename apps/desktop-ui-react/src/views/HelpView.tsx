@@ -90,10 +90,10 @@ export function HelpView({ open, onClose }: { open: boolean; onClose: () => void
     [needle],
   )
   /// 搜索时正文也只留命中的篇：文章里全是没命中的内容，等于搜索没生效。
-  const shown = needle ? matched : DOCS
   /// 目录高亮：当前那一篇被搜索筛掉时，高亮落到第一个命中上（否则整列一个亮的都没有，
   /// 看起来像「选中丢了」）。
   const activeId = matched.some((doc) => doc.id === active) ? active : (matched[0]?.id ?? active)
+  const shown = matched.filter((doc) => doc.id === activeId)
   /// 关掉时把状态收干净：下次打开不该还留着上一次的搜索词（那会看起来像"没命中"）。
   useEffect(() => {
     if (open) return
@@ -103,9 +103,7 @@ export function HelpView({ open, onClose }: { open: boolean; onClose: () => void
 
   const jump = (id: string): void => {
     setActive(id)
-    const target = articleRef.current?.querySelector<HTMLElement>('[data-help-doc="' + id + '"]')
-    // 目录与正文共用一个滚动容器：scrollIntoView 会自己找最近的可滚动祖先，不用手算 offset。
-    target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    articleRef.current?.scrollTo({ top: 0 })
   }
 
   return (
@@ -116,7 +114,7 @@ export function HelpView({ open, onClose }: { open: boolean; onClose: () => void
         <RadixDialog.Overlay className='dialog-scrim fixed inset-0 z-40 bg-black/35' />
         <RadixDialog.Content
           data-help-center
-          style={{ width: 'min(1180px, calc(100vw - 40px))', height: 'min(86vh, 880px)' }}
+          style={{ width: 'min(960px, calc(100vw - 40px))', height: 'min(86vh, 880px)' }}
           className={cn(
             'dialog-surface fixed left-1/2 top-1/2 z-50 flex -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden',
             'rounded-lg border border-line bg-overlay shadow-elev-4',
@@ -127,7 +125,7 @@ export function HelpView({ open, onClose }: { open: boolean; onClose: () => void
             <div className='min-w-0 flex-1'>
               <RadixDialog.Title className='text-15 font-semibold text-ink'>帮助中心</RadixDialog.Title>
               <RadixDialog.Description className='mt-0.5 text-11 text-ink-3'>
-                快速上手 · 功能地图 · 常见问题 · 快捷键 · 故障排查 · 隐私与数据
+                使用指南与常见问题
               </RadixDialog.Description>
             </div>
             <div className='relative shrink-0'>
@@ -137,8 +135,8 @@ export function HelpView({ open, onClose }: { open: boolean; onClose: () => void
                 value={query}
                 data-help-search
                 aria-label='搜索帮助'
-                placeholder='搜索帮助（Enter 跳到首个命中）'
-                className='w-[280px] pl-7'
+                placeholder='搜索帮助'
+                className='w-[200px] pl-7'
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return

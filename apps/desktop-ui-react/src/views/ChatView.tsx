@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { AlertTriangle, ChevronDown, Menu, PanelRight, PanelRightClose, Plus, Search } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Menu, PanelRight, PanelRightClose, Plus, Search, SlidersHorizontal } from 'lucide-react'
 import { useChatItems, useSession } from '../stores/session'
 import { useEngine } from '../stores/engine'
 import { MessageList } from '../components/chat/MessageList'
@@ -8,6 +8,7 @@ import { MessageNav, scrollChatToBottom, useChatAtBottom } from '../components/c
 import { MessageSkeleton } from '../components/chat/MessageSkeleton'
 import { CrashResumeBar, EngineRestartBar } from '../components/chat/RecoveryBars'
 import { Composer } from '../components/chat/Composer'
+import { WelcomeSuggestions } from '../components/chat/WelcomeSuggestions'
 import { ChatSearchBar } from '../components/chat/ChatSearchBar'
 import { SubagentPanel } from '../components/chat/SubagentPanel'
 import { useChatSearch } from '../stores/chatSearch'
@@ -16,10 +17,6 @@ import { Button } from '../components/ui/Button'
 import { Tip } from '../components/ui/Overlay'
 import { useListPaneLayout } from '../components/shell/dockShared'
 import { cn } from '../lib/cn'
-// 空态那句大标题的轮换文案：池子、节奏与开关都在 lib/rotateCopy.ts（纯逻辑，可单跑）。
-import {
-  ROTATE_COPY_MS, ROTATE_COPY_POOL, nextCopyIndex, randomCopyIndex, readRotateCopyEnabled, subscribeRotateCopy,
-} from '../lib/rotateCopy'
 import logo from '../assets/coomi-logo.png'
 
 /** 对话页自己的工具栏。
@@ -28,6 +25,8 @@ import logo from '../assets/coomi-logo.png'
     左＝会话列表开关（窄窗口打开抽屉），中＝会话标题 + 当前模型，右＝搜索 / 右侧栏 / 新对话。
     开关状态仍然只读改 stores/ui 的 listCollapsed / listDrawerOpen（谁都不用自己存一份）。 */
 function ChatToolbar() {
+  const minimal = useUi((s) => s.prefs.minimalUi)
+  const setPrefs = useUi((s) => s.setPrefs)
   const { narrow, showInline, showDrawer, open, close } = useListPaneLayout()
   const panelOpen = useUi((s) => s.panelOpen)
   const togglePanel = useUi((s) => s.togglePanel)
@@ -51,6 +50,7 @@ function ChatToolbar() {
           variant='ghost'
           size='sm'
           data-list-toggle
+          aria-label={listVisible ? '收起会话列表' : '打开会话列表'}
           aria-expanded={listVisible}
           aria-controls={narrow ? 'coomi-list-drawer' : 'coomi-list'}
           onClick={toggleList}
@@ -68,13 +68,18 @@ function ChatToolbar() {
         ) : streaming ? (
           <span role='status' aria-label='会话标题生成中' className='skeleton mx-auto block h-3 w-28 rounded-sm' />
         ) : (
-          <p className='truncate text-13 font-semibold leading-tight text-ink-3'>新对话</p>
+          <p className='truncate text-13 font-semibold leading-tight text-ink-3'>新会话</p>
         )}
         <p className='truncate text-11 leading-tight text-ink-4'>{(turnMeta?.model || currentModel || '默认模型')}</p>
       </div>
 
-      <Tip label='搜索对话内容 · Ctrl+F'>
-        <Button variant='ghost' size='icon-sm' aria-label='搜索对话内容' onClick={() => useChatSearch.getState().show()}>
+      <Tip label={minimal ? '极简界面已开启，点击切换标准界面' : '开启极简界面'}>
+        <button type='button' className='minimal-toggle' aria-label='极简界面模式' aria-pressed={minimal} onClick={() => setPrefs({ minimalUi: !minimal })}>
+          <SlidersHorizontal size={13} /><span>极简</span>
+        </button>
+      </Tip>
+      <Tip label='搜索会话内容 · Ctrl+F'>
+        <Button variant='ghost' size='icon-sm' aria-label='搜索会话内容' onClick={() => useChatSearch.getState().show()}>
           <Search size={15} />
         </Button>
       </Tip>
@@ -89,75 +94,12 @@ function ChatToolbar() {
           {panelOpen ? <PanelRightClose size={15} /> : <PanelRight size={15} />}
         </Button>
       </Tip>
-      <Tip label='新对话 · Ctrl+N'>
-        <Button variant='ghost' size='icon-sm' aria-label='新对话' onClick={() => void useSession.getState().newSession()}>
+      <Tip label='新会话 · Ctrl+N'>
+        <Button variant='ghost' size='icon-sm' aria-label='新会话' onClick={() => void useSession.getState().newSession()}>
           <Plus size={15} />
         </Button>
       </Tip>
     </header>
-  )
-}
-
-/** 空态的大标题：进入空态随机一组，之后每 14 秒换一组（「设置 → 外观」里可关）。
- *
- *  **上下翻页**：换字时旧的那条向上翻出去（-translate-y + 淡出），新的那条从下方翻进来
- *  （+translate-y → 0），两条同时动，像翻一页纸；比单纯淡入更像「换了一页」。
- *  靠 prevIndex 记住上一条，才分得清「正在离开」与「还在下面等着」。
- *
- *  为什么能「不重排」：七条文案**同时**渲染在同一个网格单元里（col-start-1 row-start-1），
- *  容器的尺寸 = 池子里最长的那一条，切换只动 opacity / translate ——
- *  文字换了一轮，布局一个像素都不动，也不会把下面的输入框顶来顶去。
- *  动画是纯 CSS transition（只走两个合成层属性，没有 JS 逐帧、没有 setState 循环）；
- *  动效开关关掉时由 base.css 的 [data-motion=off] 把时长压到 0。
- *  组件跟着空态一起挂载 / 卸载：每次进空态都重新随机一组（清空对话后再进来不会接着上一次的序号）。 */
-function EmptyTagline() {
-  const [rotate, setRotate] = useState(readRotateCopyEnabled)
-  const [index, setIndex] = useState(() => randomCopyIndex(ROTATE_COPY_POOL.length))
-  // 上一条的下标：用来区分「正在向上翻出」与「在下面等着翻入」。
-  const [prevIndex, setPrevIndex] = useState<number | null>(null)
-  // 设置页改了开关，已经挂在这一屏上的空态立刻跟上（同一个窗口内不需要重新进来）。
-  useEffect(() => subscribeRotateCopy(() => setRotate(readRotateCopyEnabled())), [])
-  useEffect(() => {
-    if (!rotate) return
-    const timer = window.setInterval(
-      () => setIndex((i) => {
-        setPrevIndex(i)
-        return nextCopyIndex(i, ROTATE_COPY_POOL.length)
-      }),
-      ROTATE_COPY_MS,
-    )
-    return () => window.clearInterval(timer)
-  }, [rotate])
-  return (
-    <div className='grid max-w-[560px] justify-items-center overflow-hidden py-1'>
-      {ROTATE_COPY_POOL.map((copy, i) => {
-        const on = i === index
-        const leaving = prevIndex !== null && i === prevIndex && !on
-        return (
-          <h1
-            key={copy}
-            // 非当前那一组对读屏软件隐身：七条都在 DOM 里，但「正在说的」始终只有一条。
-            aria-hidden={on ? undefined : true}
-            data-empty-copy={on ? 'on' : leaving ? 'leaving' : 'off'}
-            className={cn(
-              // 首屏主标题：24 号（.empty-tagline，见 base.css —— 自定义字号档不能走 cn()，
-              // 会被 tailwind-merge 当成颜色类丢掉）。
-              'empty-tagline col-start-1 row-start-1 text-center text-ink',
-              'transition-[opacity,translate] duration-[var(--motion-slow)] ease-[var(--ease-soft)]',
-              on
-                ? 'translate-y-0 opacity-100'
-                : leaving
-                  // 向上翻出：翻出去的那条要更小一点位移，避免整块看起来在跳。
-                  ? 'pointer-events-none -translate-y-4 opacity-0'
-                  // 在下面等着入场：先待在下方，轮到自己时翻上来。
-                  : 'pointer-events-none translate-y-4 opacity-0',
-            )}
-          >
-            {copy}
-          </h1>
-        )
-      })}
-    </div>
   )
 }
 
@@ -241,6 +183,7 @@ const ScrollToLatest = memo(function ScrollToLatest() {
 })
 
 export function ChatView() {
+  const sloganFont = useUi((s) => s.prefs.welcomeSloganFont)
   const streaming = useSession((s) => s.streaming)
   const engineStatus = useEngine((s) => s.status)
   const lastError = useEngine((s) => s.lastError)
@@ -316,7 +259,7 @@ export function ChatView() {
         {/* 会话区**自己的一层**错误边界：消息列表崩了只让这一块换成一张小卡片 + 重试，
             导航 / 会话列表 / 输入区 / 标题栏全都照常可用 —— 绝不把整屏一起带走。
             resetKey 跟着会话走：换个会话（或新建）自动复位，不用用户去点重试。 */}
-        <ErrorBoundary scope='chat.messages' variant='section' label='对话内容' resetKey={sessionId}>
+        <ErrorBoundary scope='chat.messages' variant='section' label='会话内容' resetKey={sessionId}>
           <MessageList />
         </ErrorBoundary>
         <MessageNav />
@@ -374,14 +317,22 @@ export function ChatView() {
       {!empty ? conversation : loadingHistory ? (
         <MessageSkeleton />
       ) : (
-        <div className='flex min-h-0 flex-1 animate-page flex-col items-center justify-center px-3 pb-16'>
-          <div className='w-full max-w-[var(--content-w)]'>
-            <div className='mb-7 flex flex-col items-center gap-3 text-center'>
-              {/* data-theme-mascot=logo：插件主题 mascot.logo 替换空态 hero logo 的挂点（引擎缓存原 src，卸载恢复）。 */}
-              <img data-theme-mascot='logo' src={logo} alt='Coomi' className='h-12 w-12 rounded-2xl object-contain' />
-              <EmptyTagline />
+        <div className='welcome-page min-h-0 flex-1 animate-page'>
+          <div className='welcome-content'>
+            <div className='welcome-heading'>
+              <div className='welcome-brand'>
+                <img data-theme-mascot='logo' src={logo} alt='' />
+                {sloganFont === 'guofeng'
+                  ? <span className='welcome-wordmark' role='img' aria-label='Coomi.'><span className='sr-only'>Coomi.</span></span>
+                  : <span className='welcome-wordmark-text'>Coomi<span className='brand-dot'>.</span></span>}
+              </div>
+              <h1 className={cn('welcome-title', sloganFont === 'guofeng' && 'welcome-calligraphy')}>
+                <span className={sloganFont === 'guofeng' ? 'sr-only' : undefined}>慎终如始，则无败事</span>
+              </h1>
+              <p className='welcome-description'>准备好了，就告诉我想做什么</p>
             </div>
             <Composer hero />
+            <WelcomeSuggestions />
           </div>
         </div>
       )}

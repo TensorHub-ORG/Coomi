@@ -65,10 +65,8 @@ struct PrefsState {
 impl Default for PrefsState {
     fn default() -> Self {
         Self {
-            // 默认关（不常驻）：关窗就退出、引擎一起停。
-            // 这是产品边界 —— 它是一个 Agent 工具，不是常驻托盘程序；
-            // 需要「关窗后台继续跑」的用户可以在设置里显式打开。
-            close_to_tray: Mutex::new(false),
+            // 关闭窗口保留后台任务，完全退出从托盘菜单执行。
+            close_to_tray: Mutex::new(true),
             autostart: Mutex::new(false),
         }
     }
@@ -79,7 +77,7 @@ const TRAY_ID: &str = "coomi-tray";
 const TRAY_MENU_SHOW: &str = "tray-show";
 const TRAY_MENU_NEW_CHAT: &str = "tray-new-chat";
 const TRAY_MENU_QUIT: &str = "tray-quit";
-/// 托盘「新建对话」广播的事件：前端 listen 后调用 session.newSession() 即可。
+/// 托盘「新建会话」广播的事件：前端 listen 后调用 session.newSession() 即可。
 const TRAY_EVENT_NEW_CHAT: &str = "tray:new-chat";
 
 /// 开机自启（HKCU 的 Run 键，免管理员、免新依赖）。
@@ -129,7 +127,7 @@ fn random_token() -> String {
 }
 
 /// 默认工作目录：用户可见的位置，而不是藏在 %APPDATA% 里的数据目录。
-/// 引擎的 `--cwd` 就是「新建对话的默认工作目录」，用户第一眼要能看懂、能打开。
+/// 引擎的 `--cwd` 就是「新建会话的默认工作目录」，用户第一眼要能看懂、能打开。
 fn default_cwd(home: &std::path::Path) -> PathBuf {
     let base = std::env::var("USERPROFILE")
         .ok()
@@ -175,11 +173,8 @@ fn read_theme() -> Option<String> {
 }
 
 fn read_close_to_tray() -> bool {
-    read_ui_prefs()
-        .get("closeToTray")
-        .and_then(serde_json::Value::as_bool)
-        // 首次运行默认关：关窗即退出（不常驻）。与 PrefsState::default 保持一致。
-        .unwrap_or(false)
+    // Closing always keeps background work alive. Legacy opt-out values are ignored.
+    true
 }
 
 /* ── 「另存为」的默认落点 ──
@@ -2140,10 +2135,10 @@ fn refresh_tray_tooltip(app: &tauri::AppHandle) {
     }
 }
 
-/// 系统托盘：图标 + 「显示主窗口 / 新建对话 / 退出」。左键单击直接切回主窗口。
+/// 系统托盘：图标 + 「显示主窗口 / 新建会话 / 退出」。左键单击直接切回主窗口。
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW, "显示主窗口", true, None::<&str>)?;
-    let new_chat_item = MenuItem::with_id(app, TRAY_MENU_NEW_CHAT, "新建对话", true, None::<&str>)?;
+    let new_chat_item = MenuItem::with_id(app, TRAY_MENU_NEW_CHAT, "新建会话", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT, "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &new_chat_item, &separator, &quit_item])?;
@@ -2215,8 +2210,12 @@ fn set_close_to_tray(
     state: State<'_, PrefsState>,
     enabled: bool,
 ) -> Result<(), String> {
-    *state.close_to_tray.lock().unwrap() = enabled;
-    write_ui_prefs(serde_json::json!({ "closeToTray": enabled }))?;
+    if !enabled {
+        return Err("关闭窗口会收起到托盘；请从托盘菜单退出应用。".into());
+    }
+    let available = app.tray_by_id(TRAY_ID).is_some();
+    *state.close_to_tray.lock().unwrap() = available;
+    write_ui_prefs(serde_json::json!({ "closeToTray": available }))?;
     refresh_tray_tooltip(&app);
     Ok(())
 }
@@ -3756,12 +3755,12 @@ fn main() {
         .manage(EngineState::default())
         .manage(PrefsState::default())
         // 关闭窗口默认只是隐藏到托盘：后台任务（长生成、子代理）继续跑，引擎不退出。
-        // 托盘「退出」或把「关闭窗口时最小化到托盘」关掉，才走真正的退出流程。
+        // 托盘「退出」才结束应用；托盘不可用时保留系统关闭以免窗口无法找回。
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let prefs: State<PrefsState> = app.state();
-                if *prefs.close_to_tray.lock().unwrap() {
+                if *prefs.close_to_tray.lock().unwrap() && app.tray_by_id(TRAY_ID).is_some() {
                     api.prevent_close();
                     let _ = window.hide();
                     refresh_tray_tooltip(app);
@@ -3782,10 +3781,10 @@ fn main() {
             // 否则浅色用户会先看到一帧深色、深色用户先看到一帧白。
             let theme = read_theme();
             let background = match theme.as_deref() {
-                Some("light") => tauri::window::Color(255, 254, 253, 255),
-                Some("dark") => tauri::window::Color(24, 24, 24, 255),
-                // 首次运行未知主题：跟随系统亮暗（Windows 下由 tao 解析）。
-                _ => tauri::window::Color(255, 254, 253, 255),
+                Some("light") => tauri::window::Color(255, 255, 255, 255),
+                Some("dark") => tauri::window::Color(19, 21, 24, 255),
+                // 首次运行默认亮色，与前端 --canvas 一致。
+                _ => tauri::window::Color(255, 255, 255, 255),
             };
             // 开机自启拉起时带 --minimized：直接进托盘，不抢焦点。
             let start_hidden = std::env::args().any(|arg| arg == "--minimized");

@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
 import {
-  MessageSquare, Sparkles, Package, Settings, CircleHelp, Puzzle,
+  MessageSquare, Sparkles, Package, Settings, Puzzle,
   FileText, Globe, Star, BookOpen, Activity, Image as ImageIcon, LayoutGrid,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
@@ -10,15 +10,11 @@ import { useEngine } from '../../stores/engine'
 // 插件主题 parts（v1.7）：侧栏 logo 圆角 / 导航图标颜色经它订阅。
 import { useThemeParts } from '../plugins/PluginThemeEngine'
 import { Tip } from '../ui/Overlay'
-import logo from '../../assets/coomi-logo.png'
 
-/* 帮助中心：和页面级 chunk 一样懒加载 —— 六篇正文加上一套 Markdown 渲染不该压进首屏主包，
-   而它只有用户真的点了「帮助」之后才有用。 */
-const HelpView = lazy(() => import('../../views/HelpView').then((m) => ({ default: m.HelpView })))
 const PluginsView = lazy(() => import('../../views/PluginsView').then((m) => ({ default: m.PluginsView })))
 
 const NAV: Array<{ key: ViewKey; label: string; icon: React.ReactNode }> = [
-  { key: 'chat', label: '对话', icon: <MessageSquare size={18} /> },
+  { key: 'chat', label: '会话', icon: <MessageSquare size={18} /> },
   { key: 'skills', label: '技能中心', icon: <Sparkles size={18} /> },
   { key: 'artifacts', label: '产物中心', icon: <Package size={18} /> },
 ]
@@ -54,16 +50,11 @@ export function Rail() {
   const iconColor = rail?.iconColor
   /** 导航图标按钮的底色 / 图标色：有 iconColor 时图标一律用 --rail-icon（选中态保留底色）。 */
   const navBtn = (on: boolean): string => cn(
-    'relative grid h-9 w-9 place-items-center rounded-lg transition-colors duration-[var(--motion-fast)]',
+    'rail-button relative grid h-9 w-9 place-items-center rounded-lg transition-colors duration-[var(--motion-fast)]',
     iconColor
       ? on ? 'bg-selected text-[var(--rail-icon)]' : 'text-[var(--rail-icon)] hover:bg-hover'
-      : on ? 'bg-selected text-ink' : 'text-ink-3 hover:bg-hover hover:text-ink-2',
+      : on ? 'bg-primary-soft text-primary' : 'text-ink-3 hover:bg-hover hover:text-ink-2',
   )
-  /* 帮助入口以前是 window.open('https://github.com/')——点了等于没点（那也不是本项目）。
-     现在它打开下面的帮助中心：打开过一次之后就保持挂载，Radix 的退场动画要有那一帧才播得出来。 */
-  const [helpOpen, setHelpOpen] = useState(false)
-  const [helpReady, setHelpReady] = useState(false)
-  useEffect(() => { if (helpOpen) setHelpReady(true) }, [helpOpen])
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const [pluginsReady, setPluginsReady] = useState(false)
   useEffect(() => { if (pluginsOpen) setPluginsReady(true) }, [pluginsOpen])
@@ -85,9 +76,10 @@ export function Rail() {
           onClick={() => setView(key)}
           className={navBtn(on)}
           aria-label={label}
+          aria-current={on ? 'page' : undefined}
         >
-          {on ? <span className='absolute -left-[11px] h-4 w-[2px] rounded-full bg-primary' /> : null}
           {icon}
+          <span className='rail-label'>{key === 'skills' ? '技能' : key === 'artifacts' ? '产物' : label}</span>
         </button>
       </Tip>
     )
@@ -100,20 +92,12 @@ export function Rail() {
   return (
     <nav
       data-shell-part='rail'
+      aria-label='主导航'
       className='flex h-full w-full flex-col items-center gap-1 border-r border-line bg-side py-3'
       style={iconColor ? ({ '--rail-icon': iconColor } as React.CSSProperties) : undefined}
     >
       {/* data-theme-mascot=logo：插件主题 mascot.logo 替换侧栏 logo 的挂点（引擎缓存原 src，卸载恢复）。
           v1.7：parts.rail.logoRadius 覆盖 logo 圆角（内联样式优先于内置 rounded-xl）。 */}
-      <img
-        data-theme-mascot='logo'
-        src={logo}
-        alt='Coomi'
-        className='mb-2 h-9 w-9 rounded-xl object-contain'
-        style={rail?.logoRadius != null
-          ? { borderRadius: typeof rail.logoRadius === 'number' ? rail.logoRadius + 'px' : rail.logoRadius }
-          : undefined}
-      />
       {NAV.map((n) => item(n.key, n.label, n.icon))}
       {/* 插件注册的页面：分隔线只在真的有插件页时出现，平时一个像素都不多。 */}
       {pluginViews.length ? <div className='my-1 h-px w-6 shrink-0 bg-line-soft' /> : null}
@@ -132,24 +116,6 @@ export function Rail() {
           <Puzzle size={18} />
         </button>
       </Tip>
-      <Tip label='帮助' side='right'>
-        <button
-          type='button'
-          data-help-entry
-          aria-expanded={helpOpen}
-          onClick={() => setHelpOpen(true)}
-          className={navBtn(helpOpen)}
-          aria-label='帮助'
-        >
-          <CircleHelp size={18} />
-        </button>
-      </Tip>
-      {/* 帮助中心 Portal 到 body，所以挂在这个 60px 宽的导航条里也不会被外层裁掉。 */}
-      {helpReady ? (
-        <Suspense fallback={null}>
-          <HelpView open={helpOpen} onClose={() => setHelpOpen(false)} />
-        </Suspense>
-      ) : null}
       {pluginsReady ? (
         <Suspense fallback={null}>
           <PluginsView open={pluginsOpen} onClose={() => setPluginsOpen(false)} />

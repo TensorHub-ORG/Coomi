@@ -40,7 +40,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 }))
 
 export function sessionTitle(s: SessionSummary, meta: Record<string, SessionMeta>): string {
-  return meta[s.id]?.title || s.title || s.preview || '未命名对话'
+  return meta[s.id]?.title || s.title || s.preview || '未命名会话'
 }
 
 function sortSessions(list: SessionSummary[], meta: Record<string, SessionMeta>): SessionSummary[] {
@@ -75,7 +75,7 @@ export function groupSessions(
   }
   const out: SessionGroup[] = []
   if (inDefault.length) {
-    out.push({ key: 'default', label: '对话', path: defaultCwd, sessions: sortSessions(inDefault, meta), kind: 'default' })
+    out.push({ key: 'default', label: '会话', path: defaultCwd, sessions: sortSessions(inDefault, meta), kind: 'default' })
   }
   const projects = [...byPath.entries()]
     .map(([path, list]) => ({

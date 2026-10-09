@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { navPauseBusy, queueDuringNavPause } from './navPause'
-import { Eye, Files, Layers, ListChecks, Package, Sigma } from 'lucide-react'
+import { Eye, Files, Layers, ListChecks, Package, ChartNoAxesCombined } from 'lucide-react'
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { cn } from '../../lib/cn'
@@ -37,9 +37,9 @@ export interface DockTabMeta {
 /** 五个页签的唯一登记处：右侧图标条与面板标题都读它，避免两处各写一份。 */
 export const DOCK_TABS: DockTabMeta[] = [
   { key: 'artifacts', label: '产物', desc: '本次会话产出的文件与图片', icon: <Package size={16} /> },
-  { key: 'preview', label: '预览', desc: '跟随对话里最新的富内容块，可固定', icon: <Eye size={16} /> },
+  { key: 'preview', label: '预览', desc: '跟随会话里最新的富内容块，可固定', icon: <Eye size={16} /> },
   { key: 'files', label: '文件', desc: '当前工作目录的文件树', icon: <Files size={16} /> },
-  { key: 'stats', label: '统计', desc: 'token 用量、速度与缓存命中', icon: <Sigma size={16} /> },
+  { key: 'stats', label: '统计', desc: 'token 用量、速度与缓存命中', icon: <ChartNoAxesCombined size={16} /> },
   { key: 'context', label: '上下文', desc: '上下文占用与压缩情况', icon: <Layers size={16} /> },
   { key: 'tasks', label: '任务', desc: '运行中任务、引擎健康与日志', icon: <ListChecks size={16} /> },
 ]

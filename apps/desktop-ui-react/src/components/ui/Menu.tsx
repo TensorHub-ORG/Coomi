@@ -49,7 +49,7 @@ function Entries({ items }: { items: MenuEntry[] }) {
 }
 
 /** 下拉菜单：Radix 自带边界碰撞检测，靠近窗口边缘会自动翻转/收缩，不会再出界。 */
-export function Menu({ trigger, items, groups, header, align = 'end', side = 'bottom' }: {
+export function Menu({ trigger, items, groups, header, align = 'end', side = 'bottom', onCloseAutoFocus }: {
   trigger: React.ReactNode
   /// 菜单顶部固定区域（例如搜索框）
   header?: React.ReactNode
@@ -58,12 +58,14 @@ export function Menu({ trigger, items, groups, header, align = 'end', side = 'bo
   groups?: Array<{ label: string; items: MenuEntry[] }>
   align?: 'start' | 'center' | 'end'
   side?: 'top' | 'bottom' | 'left' | 'right'
+  onCloseAutoFocus?: (event: Event) => void
 }) {
   return (
     <RadixMenu.Root>
       <RadixMenu.Trigger asChild>{trigger}</RadixMenu.Trigger>
       <RadixMenu.Portal>
         <RadixMenu.Content
+          onCloseAutoFocus={onCloseAutoFocus}
           align={align}
           side={side}
           sideOffset={6}

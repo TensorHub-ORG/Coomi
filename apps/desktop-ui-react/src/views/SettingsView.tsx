@@ -1,27 +1,23 @@
+import { SettingsNavigation } from '../components/settings/SettingsNavigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useEngine } from '../stores/engine'
 import { useSession } from '../stores/session'
 import {
   useUi,
-  resolveContentPx,
   MESSAGE_WIDTHS,
-  READING_MAX_W,
   type CrashRecoveryMode,
   type Density,
   type InsertMode,
   type MessageWidthMode,
   type ThemeMode,
+  type WelcomeSloganFont,
   type ViewKey,
 } from '../stores/ui'
-// 空态文案轮换的开关（键 coomi.rotateCopy.v1，默认开）：见 lib/rotateCopy.ts。
-import { readRotateCopyEnabled, writeRotateCopyEnabled } from '../lib/rotateCopy'
-import { useViewportWidth } from '../components/shell/dockShared'
-import { usePaneActive } from '../components/shell/navPause'
 import { fmtBytes, prettyPath, shortPath } from '../lib/format'
 import { ipc } from '../lib/ipc'
 import { PageHeader, Section, Cell } from '../components/ui/Card'
 // 分组导航 + 「旧出 / 新入」的过渡与卡片错峰（都在这个组件里，视图只负责给数据与滚动位置）。
-import { GroupNav, GroupTransition, Stagger, StaggerGrid } from '../components/settings/GroupTransition'
+import { GroupTransition, Stagger, StaggerGrid } from '../components/settings/GroupTransition'
 // 界面字号三档：选项与「旧值归一」都在这个表里；落盘/生效仍走 stores/ui.ts 既有的外观设置那条路。
 import { UI_FONT_SCALES, nearestFontScale } from '../components/settings/uiFontScale'
 import { ProviderWizard } from '../components/settings/ProviderWizard'
@@ -54,7 +50,7 @@ import { usePluginStore, activeThemePluginId, pluginName, themePlugins } from '.
 // 「再看一次」入口：引导的开关在它自己的 store 里（首次启动那套强制勾选不受影响）。
 import { openOnboarding } from '../components/onboarding/store'
 import { cn } from '../lib/cn'
-import { Trash2, RefreshCw, FolderOpen, Plus, Brain, Shield, Wrench, Server, LifeBuoy, Download, AlertTriangle } from 'lucide-react'
+import { Trash2, RefreshCw, FolderOpen, Plus, Brain, Shield, Server, LifeBuoy, Download, AlertTriangle } from 'lucide-react'
 
 /** 关于页显示的「构建日期」：**必须取本地日期**。
  *  用 toISOString() 拿到的是 UTC 日期 —— 东八区凌晨 0~8 点时它还是前一天，
@@ -165,35 +161,6 @@ function pushRecent(dir: string): string[] {
 const hhmm = (minutes: number): string =>
   String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0')
 
-/** 量对话列当前宽度：对话页在同一个内容层里（挂载集合是「当前 + 上一次」），
-    所以在设置页也能量到对话列的真实布局宽度，「自适应」档位显示的才是当前像素值。 */
-function useChatColumnWidth(): number {
-  // 页面前后台：设置页被换下去之后（隐藏但还挂着）这个轮询就该停 ——
-  // clientWidth 每次都触发一次同步布局，躲在 opacity:0 后面每 600ms 量一次纯属白烧主线程。
-  const active = usePaneActive()
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    if (!active) return
-    let done = false
-    const measure = (): boolean => {
-      const col = document.querySelector<HTMLElement>('[data-chat-col]')
-      if (!col || col.clientWidth <= 0) return false
-      // 量到的是同一个宽度就不写 state：这个轮询每 600ms 一次，同值 setState 会白白排一轮渲染
-      // （设置页两百多个格子 + 一堆 Segmented，多渲染一次都是钱）。
-      setWidth((prev) => (prev === col.clientWidth ? prev : col.clientWidth))
-      return true
-    }
-    if (measure()) return
-    // 对话页还没挂载过（默认页不是对话）时轮询等一会儿，拿到就停。
-    const timer = window.setInterval(() => {
-      if (measure()) { done = true; window.clearInterval(timer) }
-    }, 600)
-    return () => { if (!done) window.clearInterval(timer) }
-  }, [active])
-  return width
-}
-
-/** 固定档位的中文名：档位数值本身在 stores/ui.ts 的 MESSAGE_WIDTHS 里维护。 */
 const WIDTH_LABELS: Record<number, string> = { 680: '窄', 768: '标准', 960: '宽' }
 
 /** 本地留痕体积上限的常用档位（MB）：0 = 不限（默认）。
@@ -215,22 +182,12 @@ function MessageWidthField({ mode, width, onMode, onWidth, wide }: {
       这一格要补 lg:col-span-2——格子被错峰包了一层，跨列得由外层补。 */
   wide?: boolean
 }) {
-  const viewport = useViewportWidth()
-  const colWidth = useChatColumnWidth()
-  // 对话列左右各 12px 内边距，才是正文列的可用宽度。
-  const inner = Math.max(0, colWidth - 24)
-  const prefs = useUi((s) => s.prefs)
-  const px = resolveContentPx({ ...prefs, messageWidth: width, messageWidthMode: mode }, inner, viewport)
-  const ratio = colWidth > 0 ? Math.min(1, px / colWidth) : 0.6
   return (
     <Cell
       // 这一格永远走整行；wide 参数只决定外层 StaggerGrid 是否补 lg:col-span-2。
       wide={wide ?? true}
       label='消息栏宽度'
-      hint={mode === 'fluid'
-        ? '自适应：跟随窗口放宽到上限，正文另有阅读上限（约 ' + READING_MAX_W + 'px）'
-        : '固定宽度：无论窗口多大，对话正文都不超过这个宽度'}
-      className='items-start'
+      hint='选择阅读区域宽度'
     >
       <div className='flex w-full min-w-0 flex-col gap-2'>
         <div className='flex min-w-0 flex-wrap items-center justify-end gap-2'>
@@ -243,20 +200,8 @@ function MessageWidthField({ mode, width, onMode, onWidth, wide }: {
               { value: 'fluid', label: '自适应' },
             ]}
           />
-          <span className='shrink-0 font-mono text-11 text-ink-4' data-testid='message-width-px'>
-            {mode === 'fluid' ? '自适应 · 当前 ' + px + 'px' : '固定 ' + px + 'px'}
-          </span>
         </div>
-        {/* 实时预览：按对话列等比缩放，条形宽度就是正文列在对话列里的占比 */}
-        <div className='w-full overflow-hidden rounded-md border border-line bg-muted p-1.5' data-testid='message-width-preview'>
-          <div
-            className='mx-auto h-9 rounded-xs border-x border-primary/30 bg-primary-soft transition-[width] duration-[var(--motion-base)] ease-[var(--ease-enter)]'
-            style={{ width: Math.max(8, Math.round(ratio * 100)) + '%' }}
-          />
-          <p className='mt-1 text-center text-11 text-ink-4'>
-            {colWidth > 0 ? '对话列 ' + colWidth + 'px · 正文 ' + px + 'px' : '正文 ' + px + 'px'}
-          </p>
-        </div>
+
       </div>
     </Cell>
   )
@@ -358,7 +303,6 @@ export function SettingsView() {
   /// 设置分组：左列导航，右侧只渲染当前组（分组表在文件顶部，静态一份）。
   /// 空态那句话每 14 秒换一组（默认开）。刻意**不**并进 ui.prefs：它落在自己的
   /// localStorage 键上（coomi.rotateCopy.v1），偏好结构不动，空态那边按订阅即时跟上。
-  const [rotateCopy, setRotateCopy] = useState(readRotateCopyEnabled)
   const [group, setGroup] = useState<GroupKey>('appearance')
   /// 分组切换方向：1＝往后面的分组切（内容向上走）。GroupTransition 依据它决定进出场方向。
   const [groupDir, setGroupDir] = useState(1)
@@ -574,9 +518,9 @@ export function SettingsView() {
   const defaultCwd = prettyPath(rawCwd)
 
   return (
-    <main className='flex min-h-0 flex-1 flex-col bg-canvas'>
-      <div className='flex min-h-0 flex-1 gap-6 px-8 pb-8'>
-        <GroupNav className='w-[176px] pt-1' groups={GROUPS} value={group} onChange={selectGroup} />
+    <main className='settings-page flex min-h-0 flex-1 flex-col bg-canvas'>
+      <div className='settings-layout flex min-h-0 flex-1'>
+        <SettingsNavigation groups={GROUPS} value={group} onChange={selectGroup} />
         {/* 分组标题吸顶：标题跟着内容一起滚，滚到顶就停住并压一层毛玻璃。
             切分组不再是硬切：旧分组先退场、新分组再入场（方向按分组顺序），
             组内卡片按 20ms 错峰进来；每个分组的滚动位置各自记忆（scrollMemo）。 */}
@@ -584,8 +528,7 @@ export function SettingsView() {
           <PageHeader
             className='mb-1'
             sticky
-            title='设置'
-            description='外观、模型、工作区、数字生命体与引擎，都集中在这里。'
+            title={GROUPS.find((g) => g.key === group)?.label ?? '设置'}
             actions={notice ? <span className='text-12 text-ok'>{notice}</span> : null}
           />
           <GroupTransition
@@ -593,16 +536,16 @@ export function SettingsView() {
             dir={groupDir}
             scroller={bodyRef}
             scrollTop={scrollMemo.current[group] ?? 0}
-            className='px-8 pb-4'
+            className='settings-content'
           >
           <div className='flex max-w-[860px] flex-col gap-5'>
-          <Section className={group === 'general' ? '' : 'hidden'} title='通用' description='启动行为、发送行为与危险操作的确认策略。'>
+          <Section className={group === 'general' ? '' : 'hidden'}>
           <StaggerGrid>
             <Cell label='启动时打开的页面' hint='下次启动默认进入这个页面'>
               <Segmented<ViewKey>
                 value={ui.prefs.defaultView}
                 onChange={(v) => ui.setPrefs({ defaultView: v })}
-                options={[{ value: 'chat', label: '对话' }, { value: 'skills', label: '技能中心' }, { value: 'artifacts', label: '产物中心' }]}
+                options={[{ value: 'chat', label: '会话' }, { value: 'skills', label: '技能中心' }, { value: 'artifacts', label: '产物中心' }]}
               />
             </Cell>
             {/* 发送时插话模式：字段就是 stores/ui.ts 的 prefs.insertMode（现为 'interrupt' | 'queue'）。
@@ -621,7 +564,7 @@ export function SettingsView() {
                 options={[{ value: 'interrupt', label: '插队' }, { value: 'queue', label: '排队' }]}
               />
             </Cell>
-            <Cell label='危险操作二次确认' hint='删除对话、卸载技能、清理缓存前先问一次'>
+            <Cell label='危险操作二次确认' hint='删除会话、卸载技能、清理缓存前先问一次'>
               <Switch checked={ui.prefs.confirmDanger} onCheckedChange={(v) => ui.setPrefs({ confirmDanger: v })} />
             </Cell>
             {/* 安全模式（自救开关）：字段是 stores/ui.ts 的 prefs.safeMode（默认 false）。
@@ -632,8 +575,8 @@ export function SettingsView() {
             <Cell
               label={<span className='flex items-center gap-2'><LifeBuoy size={14} className='text-ink-3' /> 安全模式</span>}
               hint={ui.prefs.safeMode
-                ? '已开启：动效、富预览、语法高亮与长列表虚拟化都关了，只画纯文本 —— 卡死时自救用'
-                : '界面卡死 / 一卡一顿时打开：关掉动效、富预览、语法高亮与虚拟化，只画纯文本'}
+                ? '已使用纯文本显示。'
+                : '遇到卡顿时启用，使用纯文本显示。'}
             >
               <Switch checked={ui.prefs.safeMode} onCheckedChange={(v) => ui.setPrefs({ safeMode: v })} />
             </Cell>
@@ -650,15 +593,7 @@ export function SettingsView() {
             {agent.permission === 'full' ? (
               <p className='px-1 pb-2 text-12 text-warn'>完全放行后 Agent 不再停下询问，包含删除类操作——只建议在你完全信任当前任务时使用。</p>
             ) : null}
-            <Cell label='关闭窗口时最小化到托盘' hint='后台继续运行引擎与正在跑的任务；从托盘图标可以再打开或退出'>
-              <Switch
-                checked={desktopPrefs.closeToTray}
-                onCheckedChange={(v) => {
-                  setDesktopPrefs((prev) => ({ ...prev, closeToTray: v }))
-                  void ipc('set_close_to_tray', { enabled: v }).catch(() => setDesktopPrefs((prev) => ({ ...prev, closeToTray: !v })))
-                }}
-              />
-            </Cell>
+            <Cell label='关闭窗口' hint='收起到托盘，任务继续运行；右键托盘图标可完全退出。'><span className='text-12 text-ink-3'>保留在托盘</span></Cell>
             <Cell label='开机自动启动' hint='登录后在后台启动 Coomi（不弹出窗口，直接进托盘）'>
               <Switch
                 checked={desktopPrefs.autostart}
@@ -673,13 +608,21 @@ export function SettingsView() {
           </StaggerGrid>
           </Section>
 
-          <Section className={group === 'appearance' ? '' : 'hidden'} title='外观' description='主题、字号、密度与消息栏宽度。'>
+          <Section className={group === 'appearance' ? '' : 'hidden'}>
           <StaggerGrid>
-            <Cell label='字体' hint='默认内置 HarmonyOS Sans SC；系统字体更省内存'>
+            <Cell label='字体' hint='选择界面字体'>
               <Segmented<'harmony' | 'system'>
                 value={ui.prefs.fontFamily}
                 onChange={(v) => ui.setPrefs({ fontFamily: v })}
                 options={[{ value: 'harmony', label: 'HarmonyOS Sans' }, { value: 'system', label: '系统字体' }]}
+              />
+            </Cell>
+            <Cell label='初始会话界面标语字体' hint='同步设置 Coomi. 与标语的字体风格'>
+              <Segmented<WelcomeSloganFont>
+                ariaLabel='初始会话界面标语字体'
+                value={ui.prefs.welcomeSloganFont}
+                onChange={(v) => ui.setPrefs({ welcomeSloganFont: v })}
+                options={[{ value: 'guofeng', label: '国风' }, { value: 'default', label: '默认' }]}
               />
             </Cell>
             <Cell label='主题' hint='跟随系统会随 Windows 深浅色切换'>
@@ -710,7 +653,7 @@ export function SettingsView() {
                 即时生效并落 localStorage（键 coomi.fontScale）——与主题 / 字体 / 密度同一条路。
                 默认「较大」(1.08)：theme.css 的 --ui-font-scale 默认值同样是 1.08（12px→约 13、13px→约 14）。
                 旧存档里的 0.92 / 1.16 由 nearestFontScale 归到最近档显示，不悄悄改用户落盘的值。 */}
-            <Cell label='界面字号' hint='全局缩放，中英文一起变；改完立即生效并记住'>
+            <Cell label='界面字号' hint='调整文字大小'>
               <Segmented<string>
                 value={String(nearestFontScale(ui.fontScale))}
                 onChange={(v) => ui.setFontScale(Number(v))}
@@ -724,6 +667,9 @@ export function SettingsView() {
                 options={[{ value: 'compact', label: '紧凑' }, { value: 'cozy', label: '舒适' }]}
               />
             </Cell>
+            <Cell wide label='极简界面模式' hint='收起工具调用详情，失败时自动展开。'>
+              <Switch aria-label='极简界面模式' checked={ui.prefs.minimalUi} onCheckedChange={(v) => ui.setPrefs({ minimalUi: v })} />
+            </Cell>
             <MessageWidthField
               wide
               mode={ui.prefs.messageWidthMode}
@@ -734,22 +680,14 @@ export function SettingsView() {
             <Cell label='界面动效' hint='关闭后所有过渡与动画立即完成'>
               <Switch checked={ui.prefs.motion} onCheckedChange={(v) => ui.setPrefs({ motion: v })} />
             </Cell>
-            {/* 空态文案轮换：只影响「新对话」首屏那句话（每 14 秒换一组，上下翻页式切换）。
-                开关落在 coomi.rotateCopy.v1，写完立刻通知已挂载的空态（见 lib/rotateCopy.ts）。 */}
-            <Cell label='空态文案轮换' hint={rotateCopy ? '新对话首屏那句标题每 14 秒上下翻页换一组' : '已关闭：首屏那句标题固定不动'}>
-              <Switch
-                checked={rotateCopy}
-                onCheckedChange={(v) => { writeRotateCopyEnabled(v); setRotateCopy(v) }}
-              />
-            </Cell>
             {/* 性能模式：字段是 stores/ui.ts 的 prefs.perf（'high' | 'low'，默认 high）。
                 打开＝省电档：html[data-perf=low]，毛玻璃、点阵循环动效与设置页错峰都收掉，
                 长会话也更早交给虚拟列表。整档只认这一处开关，组件不各存一份。 */}
             <Cell
               label='性能模式'
               hint={ui.prefs.perf === 'low'
-                ? '省电档已开启：关毛玻璃与点阵动效、长会话更早虚拟化'
-                : '机器吃紧或要省电时打开：关毛玻璃与点阵动效、长会话更早虚拟化'}
+                ? '已降低视觉效果与资源占用。'
+                : '减少视觉效果，降低资源占用。'}
             >
               <Switch
                 checked={ui.prefs.perf === 'low'}
@@ -763,8 +701,8 @@ export function SettingsView() {
 
           <Section
             className={group === 'models' ? '' : 'hidden'}
-            title='模型与 Provider'
-            description='OpenAI 兼容接口；当前使用的 Provider 决定对话走哪条链路。'
+            title='服务与模型'
+            description='配置模型服务与连接方式。'
             actions={<Button variant='ghost' size='sm' onClick={() => void loadProviders()}><RefreshCw size={13} /> 刷新</Button>}
           >
             {/* 这块是整块内容，不能塞进 StaggerGrid（那是两列网格，会被压成半列宽的竖条）。 */}
@@ -772,66 +710,25 @@ export function SettingsView() {
               className={cn('@container flex min-w-0 flex-col gap-3 px-5 py-4', group === 'models' ? '' : 'hidden')}
               data-testid='providers-panel'
             >
-              <div className='grid min-w-0 grid-cols-1 gap-2.5 @2xl:grid-cols-3' data-testid='providers-top'>
-                {/* 三张并列卡：思考强度 / 单轮工具上限 / 添加厂商。
-                    每张外面包一层 Stagger：跟着分组入场一起 20ms 错峰。 */}
-                <Stagger>
-                <div className='card-lift flex flex-col justify-between rounded-xl border border-line bg-surface elev-1 p-4'>
-                  <div className='flex items-center gap-1.5 text-12 text-ink-3'><Brain size={13} /> 思考强度</div>
-                  <div className='mt-2 text-18 font-semibold text-ink'>{EFFORT_LABELS.find((e) => e.value === agent.effort)?.label ?? '自动'}</div>
-                  <p className='mt-1 text-11 text-ink-4'>{EFFORT_LABELS.find((e) => e.value === agent.effort)?.hint}</p>
-                  <div className='mt-3 flex flex-wrap gap-1'>
-                    {EFFORT_LABELS.map((e) => (
-                      <button
-                        key={e.value}
-                        type='button'
-                        onClick={() => void agent.setEffort(e.value as ReasoningEffort)}
-                        className={
-                          'h-6 rounded-md border px-2 text-11 transition-colors ' +
-                          (e.value === agent.effort ? 'border-primary/40 bg-primary-soft text-primary' : 'border-line text-ink-3 hover:text-ink')
-                        }
-                      >
-                        {e.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                </Stagger>
-                <Stagger>
-                <div className='card-lift flex flex-col justify-between rounded-xl border border-line bg-surface elev-1 p-4'>
-                  <div className='flex items-center gap-1.5 text-12 text-ink-3'><Wrench size={13} /> 单轮最大工具调用次数</div>
-                  <div className='mt-2 flex items-baseline gap-2'>
-                    <Input
-                      className='h-9 w-[96px] text-15'
-                      type='number'
-                      value={agent.maxToolRounds}
-                      onChange={(e) => void agent.setMaxToolRounds(Number(e.target.value))}
-                    />
-                    <span className='text-11 text-ink-4'>1–512</span>
-                  </div>
-                  <p className='mt-2 text-11 text-ink-4'>复杂任务可调高；过高会让一轮跑很久。</p>
-                </div>
-                </Stagger>
-                <Stagger>
-                <button
-                  type='button'
-                  onClick={() => setAdding(true)}
-                  className='card-lift flex flex-col items-start justify-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary-soft p-4 text-left'
-                >
-                  <span className='flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white'><Plus size={18} /></span>
-                  <span className='text-14 font-medium text-primary'>添加厂商</span>
-                  <span className='text-11 text-primary/70'>选接口类型 → 填地址与 API Key → 获取模型</span>
-                </button>
-                </Stagger>
+              <div data-testid='providers-top'>
+                <Cell label='思考强度' hint={EFFORT_LABELS.find((e) => e.value === agent.effort)?.hint}>
+                  <Select value={agent.effort} width={160} onChange={(v) => void agent.setEffort(v as ReasoningEffort)} options={EFFORT_LABELS.map((e) => ({ value: e.value, label: e.label }))} />
+                </Cell>
+                <Cell label='单轮工具调用上限' hint='复杂任务可调高，范围 1–512'>
+                  <Input aria-label='单轮工具调用上限' className='w-[96px]' type='number' min={1} max={512} value={agent.maxToolRounds} onChange={(e) => void agent.setMaxToolRounds(Number(e.target.value))} />
+                </Cell>
+                <Cell label='模型服务商' hint='添加服务地址与 API Key'>
+                  <Button variant='secondary' size='sm' onClick={() => setAdding(true)}><Plus size={14} /> 添加厂商</Button>
+                </Cell>
               </div>
 
               {/* 厂商：按列排布，卡片可编辑；容器窄了自动回落到单列，不挤压卡片 */}
-              <div className='grid min-w-0 grid-cols-1 gap-2.5 @2xl:grid-cols-2' data-testid='providers-grid'>
+              <div className='flex min-w-0 flex-col' data-testid='providers-grid'>
               {providers.map((p) => {
                 const models = modelMap[p.id] ?? []
                 return (
                   <Stagger key={p.id}>
-                  <div data-testid='provider-card' className='card-lift min-w-0 rounded-xl border border-line bg-surface elev-1 p-4'>
+                  <div data-testid='provider-card' className='provider-row min-w-0 border-b border-line-soft py-5'>
                     {/* 卡片头三列栅格：图标 / 可压缩文本列 / 固定操作列。
                         中间列必须写 minmax(0,1fr) 而不是 1fr——少了 min-width:0，
                         长厂商名会把右侧按钮顶出卡片边框。 */}
@@ -848,7 +745,7 @@ export function SettingsView() {
                       </div>
                       <div className='flex shrink-0 items-center gap-1.5'>
                         {/* 这里不再提供“选择默认模型”：用哪个模型完全在对话页选。 */}
-                        <Button variant='primary' size='sm' onClick={() => setEditingProvider({ id: p.id, name: p.name, model: p.model, type: p.type, baseUrl: p.baseUrl, models: p.models, modelContextWindows: p.modelContextWindows, modelDescriptions: p.modelDescriptions, modelParameters: p.modelParameters, capabilityOverrides: p.capabilityOverrides })}>编辑</Button>
+                        <Button variant='secondary' size='sm' onClick={() => setEditingProvider({ id: p.id, name: p.name, model: p.model, type: p.type, baseUrl: p.baseUrl, models: p.models, modelContextWindows: p.modelContextWindows, modelDescriptions: p.modelDescriptions, modelParameters: p.modelParameters, capabilityOverrides: p.capabilityOverrides })}>编辑</Button>
                         <Button variant='ghost' size='icon-sm' className='text-ink-3 hover:text-danger' title='删除厂商' onClick={() => void engine.api('/api/providers/' + encodeURIComponent(p.id), { method: 'DELETE' })
                           .then(() => { void loadProviders(); useAgent.getState().bumpProviders() })
                           .catch(() => flash('删除失败'))}>
@@ -871,12 +768,12 @@ export function SettingsView() {
               {/* 首屏加载：接口回来之前铺行骨架，别让模型分组空着一块 */}
               {providersPending && !providers.length ? <SkeletonRows rows={4} className='px-1' /> : null}
               {!providers.length && !providersPending ? (
-                <Cell label='还没有 Provider' hint='添加一个 OpenAI 兼容接口即可开始对话' />
+                <Cell label='还没有模型服务商' hint='添加一个 OpenAI 兼容接口即可开始会话' />
               ) : null}
             </div>
           </Section>
 
-          <Section className={group === 'workspace' ? '' : 'hidden'} title='工作区' description='新会话默认落在哪个目录。'>
+          <Section className={group === 'workspace' ? '' : 'hidden'} title='文件与目录'>
           <StaggerGrid>
             <Cell
               label='默认工作目录'
@@ -902,7 +799,7 @@ export function SettingsView() {
           </StaggerGrid>
           </Section>
 
-          <Section className={group === 'ai' ? '' : 'hidden'} title='AI 能力' description='每一项都能单独开关；关闭立即生效，情感类默认关闭以免影响输出风格。'>
+          <Section className={group === 'ai' ? '' : 'hidden'} title='能力偏好' description='按需开启，修改立即生效。'>
           <StaggerGrid>
             {([
               ['memory', '长期记忆', '跨会话记住事实与偏好，相关时自动注入'],
@@ -922,7 +819,7 @@ export function SettingsView() {
               ['backgroundNotify', '后台完成提醒', '窗口不在前台时，一轮回复结束后提醒你'],
               ['askUser', '反问澄清', '信息不足时让 AI 先问一句，而不是自己猜着做'],
               ['showArtifacts', '生成物卡片', '一轮结束后在回复下方列出本轮产出的文件（点开预览，右键另存）；关掉只是不显示这排卡片'],
-              ['allowSaveAsRequest', '允许另存为', '产物卡片与预览面板里出现「另存为…」，点击会弹系统保存对话框（默认关，避免打断）'],
+              ['allowSaveAsRequest', '允许另存为', '产物卡片与预览面板里出现「另存为…」，点击会弹系统保存弹窗（默认关，避免打断）'],
               ['metrics', '开发者度量', '本地记录质量指标（不上传）'],
             ] as Array<[keyof Capabilities, string, string]>).map(([key, label, hint]) => (
               <Cell key={key} label={label} hint={hint}>
@@ -979,7 +876,7 @@ export function SettingsView() {
               label='提问等待超时'
               hint={
                 <>
-                  等待回答超过这个时长就自动跳过，不让整轮对话干等
+                  等待回答超过这个时长就自动跳过，不让整轮会话干等
                   {engineReady ? null : <span className='ml-1.5 rounded bg-sunken px-1.5 py-0.5 text-11 text-ink-4'>仅本地 · 引擎未就绪</span>}
                 </>
               }
@@ -1039,7 +936,7 @@ export function SettingsView() {
                 {hhmm(life?.windowStartMinutes ?? 540)} – {hhmm(life?.windowEndMinutes ?? 1380)}
               </span>
             </Cell>
-            <Cell label='用在所有对话' hint='关闭时只有常驻会话使用数字生命体人格'>
+            <Cell label='用在所有会话' hint='关闭时只有常驻会话使用数字生命体人格'>
               <Switch checked={!!life?.globalMode} onCheckedChange={(v) => void patchLife({ globalMode: v })} />
             </Cell>
           </StaggerGrid>
@@ -1104,7 +1001,7 @@ export function SettingsView() {
 
           <DeveloperPanel active={group === 'engine'} />
 
-          <Section className={group === 'about' ? '' : 'hidden'} title='关于' description='版本、许可与项目信息。'>
+          <Section className={group === 'about' ? '' : 'hidden'} title='应用信息'>
           <StaggerGrid>
             <Cell wide className='items-start'>
               <div className='flex w-full items-start gap-4'>
@@ -1112,16 +1009,15 @@ export function SettingsView() {
                 <div className='min-w-0 flex-1'>
                   <div className='flex items-center gap-2'>
                     <span className='text-16 font-semibold text-ink'>Coomi Desktop</span>
-                    <span className='flex h-[20px] items-center rounded-full border border-warn/40 bg-warn-soft px-2 text-11 font-semibold tracking-[0.06em] text-warn'>BETA</span>
                   </div>
-                  <div className='mt-0.5 font-mono text-12 text-ink-3'>Beta {clientVersion} · build {localDateStamp()}</div>
+                  <div className='mt-0.5 font-mono text-12 text-ink-3'>{clientVersion} · build {localDateStamp()}</div>
                   <p className='mt-2 max-w-[520px] text-12 leading-[1.6] text-ink-3'>
-                    本地优先的智能体桌面端：引擎与数据都在你的机器上，模型通过你自己的 Provider 接入。
+                    本地优先，由你选择模型与工作方式。
                   </p>
                 </div>
               </div>
             </Cell>
-            <Cell label='客户端版本' hint='当前安装的版本'><span className='font-mono text-12 text-ink-2'>Beta {clientVersion}</span></Cell>
+            <Cell label='客户端版本' hint='当前安装的版本'><span className='font-mono text-12 text-ink-2'>{clientVersion}</span></Cell>
             <Cell label='引擎版本' hint={<span className='font-mono text-12'>{engine.version || '—'}</span>} />
             {/* 检查更新：真调壳命令 update_check（壳读发布服务 /api/v1/info），失败给可读原因。 */}
             <Cell
@@ -1209,7 +1105,7 @@ export function SettingsView() {
             <Cell wide className='items-start'>
               <div className='w-full min-w-0 text-12 leading-[1.7] text-ink-3'>
                 <span className='font-medium text-ink-2'>开源说明：</span>
-                Coomi Desktop 源码公开在 GitHub 仓库 TensorHub-ORG/Coomi 的 coomi-desktop 分支（当前仍是 Beta 测试版，欢迎围观与自建）。问题反馈欢迎通过本页与帮助中心。
+                <button type='button' className='text-primary hover:underline' onClick={() => void ipc('open_external', { url: 'https://github.com/TensorHub-ORG/Coomi/tree/coomi-desktop' }).catch(() => flash('无法打开浏览器'))}>查看 GitHub 源码 ↗</button>
               </div>
             </Cell>
             <Cell label='数据目录' hint={<span className='block break-all font-mono text-12' title={dataHome || undefined}>{shortPath(dataHome, 46) || '—'}</span>}>
@@ -1218,7 +1114,7 @@ export function SettingsView() {
             <Cell label='运行日志' hint={<span className='block break-all font-mono text-12' title={logPath || undefined}>{logPath ? shortPath(logPath, 46) : '暂无'}</span>}>
               <Button variant='ghost' size='sm' disabled={!logPath} onClick={() => void ipc('open_path', { path: logPath })}>打开</Button>
             </Cell>
-            <Cell label='隐私与使用说明' hint='三步看完：这是什么、数据与隐私、权限与风险；内容有更新时会在启动时再提示一次'>
+            <Cell label='隐私与使用说明' hint='了解数据使用与操作权限'>
               <Button variant='ghost' size='sm' onClick={() => openOnboarding()}>再看一次</Button>
             </Cell>
             <Cell label='字体与许可' hint='内置 HarmonyOS Sans SC（华为，免费商用），许可随包分发'>
@@ -1226,9 +1122,9 @@ export function SettingsView() {
             </Cell>
             <Cell wide>
               <div className='flex w-full flex-wrap items-center gap-x-6 gap-y-2 text-12 text-ink-3'>
-                <span className='flex items-center gap-1.5'><Shield size={13} className='text-ink-4' /> 数据不出本机：会话、记忆、密钥都存本地</span>
+                <span className='flex items-center gap-1.5'><Shield size={13} className='text-ink-4' /> 本地保存数据，模型按需接收上下文</span>
                 <span className='flex items-center gap-1.5'><Brain size={13} className='text-ink-4' /> 记忆与上下文可随时清空</span>
-                <span className='flex items-center gap-1.5'><RefreshCw size={13} className='text-ink-4' /> Beta 期间欢迎反馈问题</span>
+                <span className='flex items-center gap-1.5'><RefreshCw size={13} className='text-ink-4' /> 欢迎反馈使用问题</span>
               </div>
             </Cell>
           </StaggerGrid>

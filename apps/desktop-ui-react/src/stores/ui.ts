@@ -9,6 +9,7 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 export type ViewKey = 'chat' | 'skills' | 'artifacts' | 'settings' | (string & {})
 export type Density = 'compact' | 'cozy'
 export type FontChoice = 'harmony' | 'system'
+export type WelcomeSloganFont = 'default' | 'guofeng'
 /** 引擎崩溃后的恢复方式：一键继续＝恢复完先提示、用户点一下再重发；自动继续＝恢复完直接接着跑。 */
 export type CrashRecoveryMode = 'manual' | 'auto'
 /** 消息栏宽度：固定档位 / 自适应（跟随窗口放宽，到上限为止）。 */
@@ -22,7 +23,11 @@ export type PerfMode = 'high' | 'low'
 export type InsertMode = 'queue' | 'interrupt'
 
 export interface Prefs {
+  /** 移动端同源的视觉精简：折叠工具详情，不影响权限、富文本与运行能力。 */
+  minimalUi: boolean
   fontFamily: FontChoice
+  /** 首页品牌字与标语共用的字体风格。 */
+  welcomeSloganFont: WelcomeSloganFont
   defaultView: ViewKey
   density: Density
   messageWidth: number
@@ -50,7 +55,9 @@ const LIST_COLLAPSED_KEY = 'coomi.list.collapsed'
 const LEGACY_LIST_MODE_KEY = 'coomi.list.mode'
 
 const DEFAULT_PREFS: Prefs = {
+  minimalUi: true,
   fontFamily: 'harmony',
+  welcomeSloganFont: 'guofeng',
   defaultView: 'chat',
   density: 'compact',
   messageWidth: 768,
@@ -131,6 +138,8 @@ function readPrefs(): Prefs {
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<Prefs>
     const prefs: Prefs = { ...DEFAULT_PREFS, ...raw }
+    prefs.minimalUi = raw.minimalUi !== false
+    prefs.welcomeSloganFont = raw.welcomeSloganFont === 'default' ? 'default' : 'guofeng'
     if (!Number.isFinite(prefs.messageWidth) || prefs.messageWidth <= 0) prefs.messageWidth = DEFAULT_PREFS.messageWidth
     // 崩溃恢复方式：只认 'auto'，其余（含老版本没存过）一律回到默认的「一键继续」。
     prefs.crashRecovery = raw.crashRecovery === 'auto' ? 'auto' : 'manual'
@@ -217,8 +226,10 @@ function watchFluidBreakpoint(): void {
 
 /// 在 React 挂载前调用：把持久化的主题/字号/偏好写进 DOM，
 /// 否则重启后会先按默认深色绘一帧，进设置页才跳成浅色。
+let themeWatcherInstalled = false
+
 export function applyStoredAppearance(): void {
-  const mode = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? 'system'
+  const mode = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? 'light'
   // 默认 1.08（不是 1）：内联样式会覆盖 theme.css 的同名默认值，所以"新装用户的默认字号"
 // 只能在这里决定 —— 用户明确要求"字体放大一点"，正文 12→约 13、13→约 14。
 const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
@@ -228,8 +239,10 @@ const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
   root.dataset.theme = resolved
   // 同步给壳：下次启动时窗口首帧就用这个底色，不再闪一下再跳。
   void ipc('save_theme', { theme: resolved }).catch(() => {})
-  if (mode === 'system') {
+  if (!themeWatcherInstalled) {
+    themeWatcherInstalled = true
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+      if (useUi.getState().themeMode !== 'system') return
       const next = e.matches ? 'dark' : 'light'
       document.documentElement.dataset.theme = next
       void ipc('save_theme', { theme: next }).catch(() => {})
@@ -239,6 +252,7 @@ const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
   // 这里**只开不关** —— 关的那一下是用户在设置里显式操作（setPrefs），别把启动时的强制开关撤了。
   if (prefs.safeMode) setSafeMode(true)
   root.dataset.density = prefs.density
+  root.dataset.minimalUi = String(prefs.minimalUi)
   applyMotionAttr(prefs)
   root.dataset.font = prefs.fontFamily
   applyPerfAttr(prefs)
@@ -282,7 +296,7 @@ interface UiState {
 
 export const useUi = create<UiState>((set, get) => ({
   view: (readPrefs().defaultView ?? 'chat') as ViewKey,
-  themeMode: ((typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null) as ThemeMode | null) ?? 'system',
+  themeMode: ((typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null) as ThemeMode | null) ?? 'light',
   fontScale: Number((typeof localStorage !== 'undefined' ? localStorage.getItem(SCALE_KEY) : null) ?? '1.08'),
   panelOpen: false,
   panelTab: 'artifacts' as PanelTab,
@@ -332,6 +346,7 @@ export const useUi = create<UiState>((set, get) => ({
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch { /* 忽略 */ }
     const root = document.documentElement
     root.dataset.density = prefs.density
+    root.dataset.minimalUi = String(prefs.minimalUi)
     root.dataset.font = prefs.fontFamily
     applyPerfAttr(prefs)
     applyContentWidth(prefs)

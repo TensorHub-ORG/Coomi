@@ -93,7 +93,7 @@ const KIND_TEXT: Record<string, string> = {
   runtime_install: '运行时安装',
   runtime_tool_install: '运行时安装',
   cognitive_install: 'Coomi Life',
-  agent: '对话',
+  agent: '会话',
   team: '协作',
   download: '下载',
 }
@@ -102,7 +102,7 @@ const KIND_TEXT: Record<string, string> = {
 function kindText(task: TaskItem): string {
   const kind = String(task.task_kind ?? '')
   if (kind) return KIND_TEXT[kind] ?? kind
-  return task.download_label ? '下载' : '对话'
+  return task.download_label ? '下载' : '会话'
 }
 
 /** 排序分组：运行中 → 排队 → 其余（最近完成/失败）。 */

@@ -127,7 +127,7 @@ parent.postMessage({ type: 'coomi:request', id, path: '/api/runtime/health' }, '
 
 **强调色（一般建议保留内置值，只调背景和文字）：** `--primary`、`--primary-hover`、`--accent`、`--ok`、`--warn`、`--danger` 以及各自的 hover/soft 变体
 
-**对话区（想让消息气泡更协调时改）：** `--bubble-user`（我的消息气泡）、`--bubble-user-line`、`--bubble-user-ink`、`--msg-card`、`--msg-card-line`
+**会话区（想让消息气泡更协调时改）：** `--bubble-user`（我的消息气泡）、`--bubble-user-line`、`--bubble-user-ink`、`--msg-card`、`--msg-card-line`
 
 **工具 / 文件类型色（可选）：** `--tool-read`、`--tool-write`、`--tool-edit`、`--tool-search`、`--tool-fetch`、`--tool-run`
 
@@ -304,7 +304,7 @@ v1.5 起，theme.json 在 colors / radii / fonts 之外新增两个可选字段�
 | `data-plugins-entry` / `data-help-entry` | 侧栏「插件」「帮助」入口按钮 |
 | `data-plugins-center` | 插件中心面板 |
 | `data-main-col` / `data-content-layer` / `data-view` | 主内容列 / 内容层 / 当前页面 |
-| `data-chat-col` | 对话主列（输入区 textarea 的宿主） |
+| `data-chat-col` | 会话主列（输入区 textarea 的宿主） |
 | `data-msg-scroller` | 消息滚动容器 |
 | `data-msg-index` / `data-msg-id` | 单条消息（消息气泡类 `.bg-bubble-user` 在其中） |
 | `data-msg-meta` / `data-msg-time` | 消息元信息（模型名 / 时间） |

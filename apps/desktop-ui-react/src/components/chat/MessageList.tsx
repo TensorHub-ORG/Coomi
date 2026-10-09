@@ -627,7 +627,7 @@ function UserMessage({ item }: { item: UserChatItem }) {
             onCopy={() => { void navigator.clipboard.writeText(body); toast.success('已复制') }}
             onQuote={() => addQuote({ text: body, msgId: item.msgId, at: item.at })}
             onEdit={() => void edit()}
-            onBranch={item.msgId ? () => { void branchFrom(item.msgId as string).then(() => toast.success('已从这条消息分出新的对话')).catch((e) => toast.error('分支失败：' + String(e))) } : undefined}
+            onBranch={item.msgId ? () => { void branchFrom(item.msgId as string).then(() => toast.success('已从这条消息分出新的会话')).catch((e) => toast.error('分支失败：' + String(e))) } : undefined}
           />
         </div>
       </div>

@@ -148,7 +148,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </div>
           <p className='mt-2 text-12 leading-relaxed text-ink-3'>
             这一段界面没能画出来，已经就地停住（不会再往下渲染、也不会继续报错）。
-            你的对话和文件都保存在引擎里，<strong className='font-medium text-ink'>没有丢</strong>：重载之后就能继续用。
+            你的会话和文件都保存在引擎里，<strong className='font-medium text-ink'>没有丢</strong>：重载之后就能继续用。
           </p>
           <p className='mt-3 rounded-lg bg-muted px-3 py-2 text-12 break-words text-ink'>{summary.title}</p>
           <pre className='mt-2 max-h-40 overflow-auto rounded-lg border border-line-soft bg-surface px-3 py-2 text-11 leading-[1.6] text-ink-3'>

@@ -14,7 +14,7 @@ export const ROTATE_COPY_MS = 14000
 
 /** 池子（顺序即轮换顺序；第一条也是关掉轮换时的兜底）。 */
 export const ROTATE_COPY_POOL = [
-  '开始新对话',
+  '开始新会话',
   '问我任何事',
   '让我帮你写代码',
   '拆解复杂任务',

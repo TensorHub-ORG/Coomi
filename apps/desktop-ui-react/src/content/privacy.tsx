@@ -14,18 +14,18 @@
  */
 
 /** 内容版本：**改动本文件任何一句面向用户的文案就 +1**。 */
-export const GUIDE_CONTENT_VERSION = 1
+export const GUIDE_CONTENT_VERSION = 2
 
 /** 数据目录（界面里要逐字看清的路径，统一在这里写一次）。 */
 export const DATA_DIR_LABEL = '%APPDATA%\\Coomi'
 
 /** 引导弹窗的标题与副标题。 */
-export const GUIDE_TITLE = '使用前请阅读'
-export const GUIDE_SUBTITLE = '三步看完：这是什么、数据与隐私、权限与风险。'
+export const GUIDE_TITLE = '开始之前'
+export const GUIDE_SUBTITLE = '了解数据与权限，然后开始你的第一个会话。'
 
 /** 强制勾选的那一句（同一份文案在首次启动与回看时都用它）。 */
 export const CONSENT_LABEL = '我已阅读并同意'
-export const CONSENT_HINT = '同意后才能进入；不需要登录、不绑定账号，随时可以在「设置 → 关于」再看一次。'
+export const CONSENT_HINT = '可随时从「帮助」重新查看。'
 
 /** 回看模式下的顶部提示（首次启动不显示）。 */
 export const REVIEW_HINT = '你已同意过这份说明；内容有更新时会在启动时再提示一次。'
@@ -91,7 +91,7 @@ export const GUIDE_STEPS: GuideStep[] = [
         heading: '本地数据一览（数据目录：' + DATA_DIR_LABEL + '）',
         lead: '每一项都是普通文件，用资源管理器就能打开、备份或删除。',
         items: [
-          { title: 'sessions\\', detail: '会话记录：每条对话的消息、工具调用与中断恢复信息', mono: true },
+          { title: 'sessions\\', detail: '会话记录：每个会话的消息、工具调用与中断恢复信息', mono: true },
           { title: 'memory\\agent-memory.jsonl', detail: '长期记忆：每轮问答落一行，可以随时清空', mono: true },
           { title: 'config\\', detail: '设置与凭据：settings.json、providers.json（含 API Key）、mcp_servers.json', mono: true },
           { title: 'skills\\', detail: '已安装的技能，以及它们带来的工具与脚本', mono: true },
@@ -104,7 +104,7 @@ export const GUIDE_STEPS: GuideStep[] = [
         ],
       },
       {
-        heading: '会联网的场景（只有这四种）',
+        heading: '主要联网场景',
         items: [
           { title: '调用你配置的模型 API', detail: '你的提问、上下文与被选中的文件内容会发给你在「设置 → 模型与厂商」里填的那家服务商' },
           { title: '按你启用的镜像源下载', detail: '下载模型、技能与运行时；走哪个镜像源由「设置 → 引擎与诊断 → 下载与镜像」决定' },
@@ -117,7 +117,7 @@ export const GUIDE_STEPS: GuideStep[] = [
         tone: 'ok',
         items: [
           { title: '不上传你的文件', detail: '文件读写都发生在本地；只有你或 AI 明确把哪个文件作为上下文发给模型时，那段内容才会到模型服务商那里' },
-          { title: '不上传会话与记忆', detail: '会话记录与 agent-memory.jsonl 都只写本地磁盘' },
+          { title: '会话与记忆保存在本机', detail: '相关内容被选作模型上下文时，会发送给所选模型服务商' },
           { title: '不做后台遥测', detail: '除了上面那条「检查更新」，没有会自动发出的上报；也没有设备指纹或行为统计' },
           { title: '不转卖你的密钥', detail: 'API Key 只存在本地配置里，也只发给你自己填的那家服务商' },
         ],
@@ -129,7 +129,7 @@ export const GUIDE_STEPS: GuideStep[] = [
       {
         heading: '需要你自己把握的一点',
         tone: 'warn',
-        lead: '「调用模型」和「下载资源」是仅有的两件会把内容带出本机的事：发出去的内容会到达你填的服务商那里。如果手上有不能外发的资料，请先选好模型与开关，再让它读那些文件。',
+        lead: '模型调用、联网工具、插件与资源下载可能访问外部服务。处理敏感资料前，请确认服务地址、上下文内容与工具权限。',
       },
     ],
   },

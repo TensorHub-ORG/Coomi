@@ -114,7 +114,7 @@ function PluginRow({ p, prefs, active, busy, onToggle, onTheme, onUninstall }: {
             <div className='mt-1.5 rounded-md border border-primary/20 bg-primary-soft px-2 py-1.5'>
               <p className='flex items-center gap-1.5 text-11 text-primary'>
                 <Sparkles size={12} className='shrink-0' /> 人设：{p.persona.name}
-                <span className='ml-auto text-ink-4'>启用后对话输入区上方生效</span>
+                <span className='ml-auto text-ink-4'>启用后会话输入区上方生效</span>
               </p>
               {p.persona.description ? (
                 <p className='mt-0.5 break-words text-11 leading-[1.5] text-ink-3'>{p.persona.description}</p>
