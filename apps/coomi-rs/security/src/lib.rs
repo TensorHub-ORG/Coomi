@@ -151,6 +151,11 @@ impl SecurityPolicy {
         self.blocked_aliases.dedup();
         self
     }
+    pub fn with_additional_blocked(self, paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        let mut combined = self.blocked.clone();
+        combined.extend(paths);
+        self.with_blocked(combined)
+    }
 
     pub fn workspace(&self) -> &Path {
         &self.workspace

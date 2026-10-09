@@ -425,6 +425,11 @@ onMounted(async () => {
           <span class="rt"><span class="rmain">提示词库</span><span class="rsub">分类管理、搜索编辑与一键填入</span></span>
           <CoomiIcon name="chevronRight" :size="15" class="arw" />
         </button>
+        <button class="row" @click="router.push('/notes')">
+          <span class="ri"><CoomiIcon name="notebook" :size="17" /></span>
+          <span class="rt"><span class="rmain">笔记</span></span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
         <button class="row" @click="router.push('/quick-commands')">
           <span class="ri"><CoomiIcon name="bolt" :size="17" /></span>
           <span class="rt"><span class="rmain">新会话快捷指令</span><span class="rsub">四条指令、多套方案与恢复默认</span></span>

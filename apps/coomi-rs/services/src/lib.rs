@@ -13,6 +13,8 @@ mod group_chat;
 mod mcp;
 mod memory;
 mod provider;
+mod personal_data;
+pub use personal_data::*;
 mod runtime;
 mod runtime_paths;
 mod skill_router;

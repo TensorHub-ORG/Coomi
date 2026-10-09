@@ -1007,6 +1007,9 @@ pub async fn serve(
 .route("/api/sessions/history", get(sessions_history_get))
 .route("/api/sessions/{id}/clear", post(clear_session_data))
 .route("/api/prompts", get(get_prompt_library).put(set_prompt_library))
+.route("/api/settings/search", get(get_search_settings).put(set_search_settings))
+.route("/api/notes", get(get_notes))
+.route("/api/notes/{id}", get(get_note).put(put_note).delete(remove_note))
 .route("/api/ux-program/generate", post(ux_program_generate))
 .route("/api/git/check", get(git_check))
 .route("/api/git/status", get(git_status))
@@ -7335,6 +7338,7 @@ async fn compact_web_session(
     .await;
     let mcp_runtime = Arc::new(McpRuntime::load(&state.home).await);
     let tools = CoreTools::new(cwd.clone(), policy)
+        .with_note_context(session.messages.clone())
         .with_skills_directory(state.home.join("skills"))
         .with_config_home(state.home.clone())
         .with_session_state(session.plan.clone(), session.loop_state.clone())
@@ -7651,6 +7655,8 @@ async fn run_turn(
         .with_memory(Arc::new(MemoryManager::new(&state.home, &cwd)))
         .with_hooks(Arc::new(HookRunner::load(&state.home)?))
         .with_agent_scheduler(scheduler, session.messages.clone());
+    let tools = if recovery { tools } else { tools.with_note_request(prompt) };
+    let tools = if recovery { tools.with_note_context(session.messages.clone()) } else { tools };
     let tools = if permission == PermissionMode::Minimal {
         tools.shell_only()
     } else {
@@ -8793,6 +8799,7 @@ async fn system_prompt_with_cognitive(
     prompt.push_str(
         "\n\nCommunication: lead with results, avoid restating the request or narrating obvious steps, and keep progress updates to meaningful milestones, blockers, or decisions. Final responses start with the outcome and verification. Be concise without hiding failures, risks, or unfinished work. Tool recovery: never repeat an unchanged failing call more than once; for permission, policy, invalid-argument, or missing-path errors, change the parameters or approach before retrying.",
     );
+    prompt.push_str("\n\nWeb search priority: use the provider's native web search when enabled; otherwise use web_search, which selects configured Tavily before the default search. Do not bypass this priority with MCP search or shell searches. Personal notes are private user-authored documents, separate from persistent AI memory. Never enumerate or proactively read them. Only use read_note when the current user request supplies a note ID. Never inspect search-settings.json or API keys.");
     prompt.push_str(
         "\n\nDownloads: when a tool or dependency must be downloaded, start it through local_shell exec with yield-time_ms 0, continue independent todo items while it runs, then call local_shell wait before the first dependent step. Never assume a download succeeded without checking its final exit result.",
     );
@@ -10321,6 +10328,36 @@ async fn set_prompt_library(
 ) -> Result<Json<PromptLibrary>, ApiError> {
     save_prompt_library(&state.home, &library)?;
     Ok(Json(library))
+}
+
+async fn get_search_settings(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let settings=coomi_services::load_search_settings(&state.home).map_err(ApiError::from)?;
+    Ok(Json(json!({"tavilyConfigured":!settings.tavily_api_key.is_empty()})))
+}
+async fn set_search_settings(State(state): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let key=body["tavilyApiKey"].as_str().ok_or_else(|| ApiError::bad_request("missing API key"))?;
+    coomi_services::save_search_settings(&state.home,key).map_err(ApiError::from)?;
+    get_search_settings(State(state)).await
+}
+async fn get_notes(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let notes=coomi_services::list_personal_notes(&state.home).map_err(ApiError::from)?;
+    Ok(Json(json!({"notes":notes})))
+}
+async fn get_note(State(state): State<AppState>, AxumPath(id): AxumPath<String>) -> Result<Json<Value>, ApiError> {
+    let (note,content)=coomi_services::read_personal_note(&state.home,&id).map_err(ApiError::from)?;
+    Ok(Json(json!({"note":note,"content":content})))
+}
+async fn put_note(State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let title=body["title"].as_str().ok_or_else(|| ApiError::bad_request("missing title"))?;
+    let content=body["content"].as_str().ok_or_else(|| ApiError::bad_request("missing content"))?;
+    let revision=body["revision"].as_u64().ok_or_else(|| ApiError::bad_request("missing revision"))?;
+    let note=coomi_services::save_personal_note(&state.home,&id,title,content,revision).map_err(ApiError::from)?;
+    Ok(Json(json!({"note":note})))
+}
+async fn remove_note(State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let revision=body["revision"].as_u64().ok_or_else(|| ApiError::bad_request("missing revision"))?;
+    coomi_services::delete_personal_note(&state.home,&id,revision).map_err(ApiError::from)?;
+    Ok(Json(json!({"ok":true})))
 }
 
 fn save_prompt_library(home: &Path, library: &PromptLibrary) -> Result<(), ApiError> {

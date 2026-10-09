@@ -5,6 +5,7 @@ import { useSessionStore } from '@/stores/session'
 import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import CoomiIcon from './CoomiIcon.vue'
 import PromptLibrary from './PromptLibrary.vue'
+import NoteLibrary from './NoteLibrary.vue'
 
 const props = defineProps<{ floating?: boolean; usagePercent: number }>()
 const emit = defineEmits<{ open: [] }>()
@@ -12,7 +13,7 @@ const session = useSessionStore()
 const route = useRoute()
 const tools = [
   { id: 'version', label: '版本工具', icon: 'git' },
-  { id: 'tasks', label: '任务中心', icon: 'todo' },
+  { id: 'notes', label: '笔记', icon: 'notebook' },
   { id: 'files', label: '文件管理', icon: 'folder' },
   { id: 'floating', label: '小窗', icon: 'floatingWindow' },
   { id: 'prompts', label: '提示词', icon: 'pencil' },
@@ -29,7 +30,6 @@ const versionViews = {
 }
 const AuxiliaryChat = defineAsyncComponent(() => import('./AuxiliaryChat.vue'))
 const FileManager = defineAsyncComponent(() => import('@/views/FileManagerView.vue'))
-const TasksView = defineAsyncComponent(() => import('@/views/TasksView.vue'))
 const MemoryView = defineAsyncComponent(() => import('@/views/MemoryView.vue'))
 const versionTabs = [{ id: 'git', label: 'Git 面板' }, { id: 'restore', label: '一键还原' }, { id: 'ops', label: '运维诊断' }, { id: 'data', label: '数据工具' }] as const
 const version = ref<keyof typeof versionViews>('git')
@@ -172,7 +172,7 @@ onBeforeUnmount(() => {
   unregisterOverlay('context-orbit')
 })
 const shortLabels: Record<Tool, string> = {
-  version: '版本', tasks: '任务', files: '文件', floating: '小窗',
+  version: '版本', notes: '笔记', files: '文件', floating: '小窗',
   prompts: '提示', auxiliary: '辅助', memory: '记忆', usage: '用量',
 }
 // 圆心位于扇面右上角。每层只定义半径与角度，按钮沿同心弧均匀排布；
@@ -240,7 +240,7 @@ const fanEdgePath = computed(() => `M 0 0 A ${radius.value} ${radius.value} 0 0 
             </template>
             <PromptLibrary v-else-if="active === 'prompts'" embedded @fill="fill" />
             <AuxiliaryChat v-else-if="active === 'auxiliary'" :parent-id="session.sessionId" :initial-session-id="initialChild" />
-            <TasksView v-else-if="active === 'tasks'" embedded />
+            <NoteLibrary v-else-if="active === 'notes'" embedded @fill="fill" />
             <MemoryView v-else-if="active === 'memory'" embedded />
             <FileManager v-else-if="active === 'files'" embedded />
             <div v-else class="floating-content"><CoomiIcon name="floatingWindow" :size="30" /><h3>小窗聊天</h3><p>{{ nativeFloating ? '将当前聊天移入悬浮窗口，切换应用时也能继续查看进展。' : '小窗聊天可在 Android 应用中使用。' }}</p><button v-if="nativeFloating" class="floating-action" @click="openFloating">打开悬浮窗口</button></div>

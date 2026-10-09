@@ -465,6 +465,12 @@
                     </LinearLayout>
                     <ImageView android:layout_width="@dimen/coomi_icon_s" android:layout_height="@dimen/coomi_icon_s" android:src="@drawable/coomi_ic_chevron_right" android:tint="?attr/coomiText3" android:contentDescription="@null" />
                 </LinearLayout>
+                <View style="@style/Coomi.Divider" />
+            <LinearLayout android:id="@+id/btn_notes" style="@style/Coomi.Row" android:clickable="true" android:focusable="true">
+                <ImageView android:layout_width="@dimen/coomi_icon_m" android:layout_height="@dimen/coomi_icon_m" android:src="@drawable/coomi_ic_note" android:tint="?attr/coomiText2" android:contentDescription="@null" />
+                <TextView style="@style/Coomi.Text.Body" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="@dimen/coomi_space_m" android:text="笔记" />
+                <ImageView android:layout_width="@dimen/coomi_icon_s" android:layout_height="@dimen/coomi_icon_s" android:src="@drawable/coomi_ic_chevron_right" android:tint="?attr/coomiText3" android:contentDescription="@null" />
+            </LinearLayout>
             </LinearLayout>
             <TextView style="@style/Coomi.Text.SectionLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/coomi_space_l" android:text="@string/coomi_dash_section_extensions" />
             <LinearLayout style="@style/Coomi.Card">

@@ -73,6 +73,7 @@ impl HttpModelProvider {
                 request
                     .tools
                     .iter()
+                    .filter(|tool| !(self.config.capabilities.supports_web_search && tool.name=="web_search"))
                     .map(|tool| {
                         json!({
                             "type": "function",
@@ -90,6 +91,7 @@ impl HttpModelProvider {
                 body["parallel_tool_calls"] = Value::Bool(true);
             }
         }
+        configure_chat_web_search(&mut body, &self.config.base_url, self.config.capabilities.supports_web_search);
         apply_model_parameters(
             &self.config,
             &mut body,
@@ -131,6 +133,7 @@ impl HttpModelProvider {
                 request
                     .tools
                     .iter()
+                    .filter(|tool| !(self.config.capabilities.supports_web_search && tool.name=="web_search"))
                     .map(|tool| {
                         json!({
                             "type": "function",
@@ -148,6 +151,7 @@ impl HttpModelProvider {
                 body["parallel_tool_calls"] = Value::Bool(true);
             }
         }
+        configure_chat_web_search(&mut body, &self.config.base_url, self.config.capabilities.supports_web_search);
         apply_model_parameters(
             &self.config,
             &mut body,
@@ -200,6 +204,7 @@ impl HttpModelProvider {
         if !request.tools.is_empty() {
             prompt.push_str("你可以调用以下工具。需要调用时，只输出一个 JSON 对象：{\"tool\":\"工具名\",\"arguments\":{...}}。工具清单：\n");
             for tool in &request.tools {
+                if (self.config.deepseek_search_enabled || self.config.capabilities.supports_web_search) && tool.name=="web_search" { continue; }
                 prompt.push_str("- ");
                 prompt.push_str(&tool.name);
                 prompt.push_str(": ");
@@ -214,7 +219,7 @@ impl HttpModelProvider {
             request.thinking_enabled
         };
         let search = if self.config.kind == ProviderKind::DeepseekAccount {
-            self.config.deepseek_search_enabled
+            self.config.deepseek_search_enabled || self.config.capabilities.supports_web_search
         } else {
             request.search_enabled
         };
@@ -1170,6 +1175,23 @@ fn has_optional_capability_fields(body: &Value) -> bool {
     ]
     .iter()
     .any(|key| body.get(*key).is_some())
+}
+
+fn configure_chat_web_search(body: &mut Value, base_url: &str, enabled: bool) {
+    if !enabled { return; }
+    let host=reqwest::Url::parse(base_url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default();
+    if host=="dashscope.aliyuncs.com" || host=="dashscope-intl.aliyuncs.com" {
+        body["enable_search"]=json!(true);
+    } else if host=="open.bigmodel.cn" {
+        if !body["tools"].is_array() {body["tools"]=json!([]);}
+        body["tools"].as_array_mut().unwrap().push(json!({"type":"web_search","web_search":{"enable":true,"search_result":true}}));
+    } else {
+        // OpenAI-compatible search models advertise this native option.
+        body["web_search_options"]=json!({});
+    }
+    if body["tools"].as_array().is_some_and(Vec::is_empty) {
+        if let Some(object)=body.as_object_mut() {object.remove("tools");object.remove("tool_choice");object.remove("parallel_tool_calls");}
+    }
 }
 
 fn openai_responses_tools(tools: &[coomi_engine::ToolSpec], native_web_search: bool) -> Vec<Value> {
@@ -2863,6 +2885,21 @@ mod tests {
             tool.get("type").and_then(Value::as_str) == Some("function")
                 && tool.get("name").and_then(Value::as_str) == Some("web_search")
         }));
+    }
+    #[test]
+    fn compatible_native_search_uses_the_provider_protocol() {
+        let mut body=json!({"tools":[]});
+        configure_chat_web_search(&mut body,"https://dashscope.aliyuncs.com/compatible-mode/v1",true);
+        assert_eq!(body["enable_search"],true);assert!(body.get("tools").is_none());
+        let mut body=json!({});
+        configure_chat_web_search(&mut body,"https://open.bigmodel.cn/api/paas/v4",true);
+        assert_eq!(body["tools"][0]["type"],"web_search");
+        let mut body=json!({});
+        configure_chat_web_search(&mut body,"https://api.openai.com/v1",true);
+        assert!(body["web_search_options"].is_object());
+        let mut body=json!({});
+        configure_chat_web_search(&mut body,"https://api.openai.com/v1",false);
+        assert_eq!(body,json!({}));
     }
 
     #[test]

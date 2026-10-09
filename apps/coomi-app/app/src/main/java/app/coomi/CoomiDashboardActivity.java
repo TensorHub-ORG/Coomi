@@ -180,6 +180,7 @@ public class CoomiDashboardActivity extends Activity {
             startActivity(new Intent(this, CoomiFeedbackActivity.class)));
         mUxProgramButton.setOnClickListener(v -> openCoomiRoute("#/ux-program"));
         findViewById(R.id.btn_prompt_library).setOnClickListener(v -> openCoomiRoute("#/prompts"));
+        findViewById(R.id.btn_notes).setOnClickListener(v -> openCoomiRoute("#/notes"));
         mPermissionSettingsButton.setOnClickListener(v -> openPermissionSettings());
         mStorageSettingsButton.setOnClickListener(v -> openStorageSettings());
 

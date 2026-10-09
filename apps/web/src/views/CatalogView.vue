@@ -8,6 +8,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
+import SearchSettings from '@/components/SearchSettings.vue'
 import { authedFetch } from '@/bridge/http'
 import { goBack } from '@/bridge/navigation'
 import { filterMarketItems } from '@/utils/marketSearch'
@@ -29,7 +30,7 @@ async function parseRes(res: Response): Promise<any> {
 type Tab = 'mcp' | 'skills'
 const tab = ref<Tab>('mcp')
 /** 页签内的视图：已安装（本机实际配置，含自建/导入）｜仓库（内置目录）｜市场（社区注册表）。 */
-type Scope = 'installed' | 'catalog' | 'market'
+type Scope = 'installed' | 'catalog' | 'market' | 'network'
 const scope = ref<Scope>('catalog')
 
 interface RequiredParam { key: string; label: string; secret?: boolean }
@@ -432,8 +433,10 @@ function goDashboard() { goBack(router, 'dashboard') }
         <button class="segitem" :class="{ on: scope === 'market' }" @click="switchScope('market')">
           <CoomiIcon name="sparkle" :size="14" />广场
         </button>
+        <button class="segitem" :class="{on:scope==='network'}" @click="switchScope('network')"><CoomiIcon name="globe" :size="14" />联网</button>
       </div>
-
+      <SearchSettings v-if="scope==='network'" />
+      <template v-else>
       <!-- 二级：MCP | Skills -->
       <div class="tabs">
         <button class="tab" :class="{ on: tab === 'mcp' }" @click="tab = 'mcp'">
@@ -645,6 +648,7 @@ function goDashboard() { goBack(router, 'dashboard') }
         </template>
       </template>
 
+      </template>
       <!-- 彻底删除确认（管理页卸载 = 停用可恢复，删除 = 彻底删除） -->
       <div v-if="askDelete" class="sheet-mask" @click.self="askDelete = null">
         <div class="sheet">

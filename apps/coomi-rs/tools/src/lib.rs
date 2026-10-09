@@ -132,10 +132,21 @@ impl CoreTools {
         self.skills_directory = Some(directory);
         self
     }
+    pub fn with_note_context(mut self, history: Vec<coomi_engine::ChatMessage>) -> Self {
+        self.parent_history = history;
+        self
+    }
+    pub fn with_note_request(mut self, request: &str) -> Self {
+        self.parent_history.push(coomi_engine::ChatMessage::user(request));
+        self
+    }
 
     pub fn with_config_home(mut self, home: PathBuf) -> Self {
         let _ = CatalogInstaller::new(&home).install_runtime_environment_skill();
         let legacy = LegacyTermuxBackend::from_coomi_home(&home);
+        self.policy = self.policy.clone().with_additional_blocked([
+            home.join("notes"), home.join("search-settings.json"),
+        ]);
         self.policy = self.policy.clone().with_allowed_roots([
             home.join("runtime-v2").join("home"),
             home.join("runtime-v2").join("tmp"),
@@ -193,6 +204,18 @@ impl CoreTools {
     async fn dispatch(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
         match Self::canonical_tool_name(call.name.as_str()) {
             "read_file" => self.read_file(&call.arguments).await,
+            "read_note" => {
+                let Some(home)=self.config_home.as_ref() else { return ToolResult::error("notes unavailable"); };
+                let Some(id)=string_arg(&call.arguments,"id") else { return ToolResult::error("missing note id"); };
+                if !self.parent_history.iter().rev().find(|m| m.role == coomi_engine::Role::User && !m.internal)
+                    .is_some_and(|m| m.content.contains(id)) {
+                    return ToolResult::error("personal notes require an explicit note reference from the user");
+                }
+                match coomi_services::read_personal_note(home,id) {
+                    Ok((note,content))=>ToolResult::success(serde_json::json!({"title":note.title,"content":content}).to_string()),
+                    Err(_)=>ToolResult::error("note unavailable; ask the user to select it again"),
+                }
+            },
             "write_file" => self.write_file(&call.arguments).await,
             "edit_file" => self.edit_file(&call.arguments).await,
             "list_dir" => self.list_dir(&call.arguments),
@@ -578,6 +601,15 @@ impl CoreTools {
             }
         };
         let mut failures = Vec::new();
+        if let Some(home) = &self.config_home {
+            match coomi_services::load_search_settings(home) {
+                Ok(settings) if !settings.tavily_api_key.is_empty() => {
+                    return tavily_search(&client, "https://api.tavily.com/search", &settings.tavily_api_key, query, limit).await;
+                }
+                Err(_) => return web_search_unavailable("search settings unreadable; restore them in extension management"),
+                _ => {}
+            }
+        }
 
         // Preferred endpoint: Bing RSS. It returns stable, lightweight XML from mainland
         // China (cn.bing.com) without JavaScript rendering or aggressive bot detection.
@@ -2157,7 +2189,13 @@ impl CoreTools {
 #[async_trait]
 impl ToolRuntime for CoreTools {
     fn specs(&self) -> Vec<ToolSpec> {
+        // Notes are not included in model context or enumerated automatically.
         let mut specs = vec![
+            ToolSpec {
+                name: "read_note".into(),
+                description: "Read a personal TXT note only when the user explicitly supplies its note ID and asks to read it. Never proactively read or enumerate personal notes.".into(),
+                parameters: json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),
+            },
             ToolSpec {
                 name: "read_file".into(),
                 description: "Read a UTF-8 text file with stable line numbers. Files over 2 MiB are read in chunks: by default only the first 64 KiB is returned; pass offset (1-based line number) and limit to continue reading further chunks. Lines longer than 4096 chars are truncated. Use for log files, configs, and any large text file.".into(),
@@ -2705,7 +2743,7 @@ impl ToolRuntime for CoreTools {
             ]);
         }
         if self.shell_only {
-            return specs.into_iter().filter(|spec| spec.name == "shell").collect();
+            return specs.into_iter().filter(|spec| matches!(spec.name.as_str(), "shell" | "read_note")).collect();
         }
         if let Some(runtime) = &self.mcp_runtime {
             specs.extend(runtime.specs());
@@ -2717,7 +2755,7 @@ impl ToolRuntime for CoreTools {
     }
 
     async fn call(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
-        if self.shell_only && Self::canonical_tool_name(call.name.as_str()) != "shell" {
+        if self.shell_only && !matches!(Self::canonical_tool_name(call.name.as_str()), "shell" | "read_note") {
             return ToolResult::error("极简模式只允许使用 shell 工具");
         }
         let mut effective_call = call.clone();
@@ -3226,6 +3264,25 @@ fn normalize_search_url(value: &str) -> String {
         .unwrap_or(absolute)
 }
 
+async fn tavily_search(client: &reqwest::Client, endpoint: &str, key: &str, query: &str, limit: usize) -> ToolResult {
+    let response = match client.post(endpoint).bearer_auth(key)
+        .json(&json!({"query":query,"max_results":limit,"search_depth":"basic","include_answer":false}))
+        .send().await {
+        Ok(response) => response,
+        Err(_) => return web_search_unavailable("Tavily connection failed; check network and configuration"),
+    };
+    if !response.status().is_success() {
+        return web_search_unavailable(format!("Tavily returned HTTP {}; check API key or quota", response.status().as_u16()));
+    }
+    let body = match read_body_capped(response).await { Ok(body)=>body, Err(_)=>return web_search_unavailable("Tavily response could not be read") };
+    let data: Value = match serde_json::from_str(&body) { Ok(data)=>data, Err(_)=>return web_search_unavailable("invalid Tavily response") };
+    let results: Vec<Value> = data["results"].as_array().into_iter().flatten().take(limit)
+        .filter(|r| r["url"].as_str().is_some_and(|url| url.starts_with("https://") || url.starts_with("http://")))
+        .map(|r| json!({"title":r["title"],"url":r["url"],"content":r["content"].as_str().unwrap_or("").chars().take(4000).collect::<String>()})).collect();
+    if results.is_empty() { return web_search_unavailable("Tavily returned no results"); }
+    ToolResult::success(json!({"source":"tavily","results":results}).to_string())
+}
+
 fn web_search_unavailable(reason: impl AsRef<str>) -> ToolResult {
     ToolResult::error(format!(
         "web_search unavailable: {}. Do not retry this search with shell, curl, wget, or command-line browsing; report the cause once to the user.",
@@ -3303,6 +3360,58 @@ mod tests {
             .await;
         assert!(result.success);
         assert_eq!(std::fs::read_to_string(file).expect("read result"), "after");
+    }
+
+    #[tokio::test]
+    async fn personal_notes_require_explicit_current_user_reference() {
+        let home=tempfile::tempdir().unwrap();
+        let id=uuid::Uuid::new_v4().to_string();
+        coomi_services::save_personal_note(home.path(),&id,"private","note body",0).unwrap();
+        let policy=SecurityPolicy::new(home.path(),AccessMode::WorkspaceWrite).unwrap();
+        let tools=CoreTools::new(home.path().to_owned(),policy).with_config_home(home.path().to_owned());
+        let call=ToolCall{id:"note-read".into(),name:"read_note".into(),arguments:json!({"id":id})};
+        let denied=tools.call(&call,&Deny).await;
+        assert!(denied.output.contains("explicit note reference"));
+        let file_call=ToolCall{id:"direct".into(),name:"read_file".into(),arguments:json!({"path":home.path().join(format!("notes/{id}.txt"))})};
+        assert!(!tools.call(&file_call,&Deny).await.success);
+        let allowed=tools.with_note_request(&format!("read note {id}"));
+        let result=allowed.call(&call,&Deny).await;
+        assert!(result.output.contains("note body"));
+        let mut recovery=coomi_engine::ChatMessage::user("internal completion check");
+        recovery.internal=true;
+        let mut history=allowed.parent_history.clone();
+        history.push(recovery);
+        let allowed=allowed.with_note_context(history).shell_only();
+        assert!(allowed.specs().iter().any(|spec| spec.name=="read_note"));
+        assert!(allowed.call(&call,&Deny).await.output.contains("note body"));
+        let later=allowed.with_note_request("unrelated task");
+        assert!(later.call(&call,&Deny).await.output.contains("explicit note reference"));
+    }
+
+    #[tokio::test]
+    async fn tavily_request_uses_key_and_hides_error_body() {
+        use tokio::io::{AsyncReadExt,AsyncWriteExt};
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address=listener.local_addr().unwrap();
+        let server=tokio::spawn(async move {
+            for success in [true,false] {
+                let (mut socket,_)=listener.accept().await.unwrap();
+                let mut bytes=vec![0;8192];let n=socket.read(&mut bytes).await.unwrap();
+                let request=String::from_utf8_lossy(&bytes[..n]).to_lowercase();
+                assert!(request.contains("authorization: bearer tvly-test"));
+                assert!(request.contains("\"query\":\"test query\""));
+                let body=if success {r#"{"results":[{"title":"Evidence","url":"https://example.test","content":"Found"}]}"#} else {"secret: tvly-test"};
+                let status=if success {"200 OK"} else {"401 Unauthorized"};
+                let response=format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let client=reqwest::Client::builder().no_proxy().build().unwrap();
+        let url=format!("http://{address}/search");
+        assert!(tavily_search(&client,&url,"tvly-test","test query",5).await.output.contains("Evidence"));
+        let failure=tavily_search(&client,&url,"tvly-test","test query",5).await;
+        assert!(failure.output.contains("401"));assert!(!failure.output.contains("tvly-test"));
+        server.await.unwrap();
     }
 
     #[tokio::test]
