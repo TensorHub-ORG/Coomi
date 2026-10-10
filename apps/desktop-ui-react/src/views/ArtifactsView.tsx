@@ -11,6 +11,8 @@ import { PageHeader, Empty } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { FileBadge } from '../components/ui/FileBadge'
 import { Segmented, SkeletonRows } from '../components/ui/Controls'
+// 首帧壳闸门：这一帧过去之前只画外壳（骨架），会话分组与文件列表的渲染挪到下一帧。
+import { useFirstFrame } from '../components/ui/firstFrame'
 
 /** 文件类型筛选：只影响当前这一屏的显示，不改数据流的取数逻辑。 */
 type TypeFilter = 'all' | 'dir' | 'file'
@@ -35,6 +37,10 @@ const CV_MIN_ROWS = Number.POSITIVE_INFINITY
 const CV_ROW: React.CSSProperties = {}
 
 export function ArtifactsView() {
+  /* 首帧只画外壳：这一页的第一屏里有「全部会话按目录分组」（groupSessions，会话多了就是几百上千次
+     字符串处理）+ 整屏文件行 + 空态插画，全在**同一帧**里算完才提交。
+     外壳（页头 / 面包屑工具条 / 两块面板）照常画，正文等两拍 rAF 之后再挂。 */
+  const firstFrameReady = useFirstFrame()
   const engineCwd = useEngine((s) => s.cwd)
   const ready = useEngine((s) => s.ready)
   const sessions = useSession((s) => s.sessions)
@@ -72,13 +78,66 @@ export function ArtifactsView() {
     else { togglePanel(true); void useLibrary.getState().readFile(f.path) }
   }
 
+  /* 页头与面包屑工具条：**首帧壳与正文共用同一份**（外壳照画，切换那一帧不跳版）。
+     工具条仍可点：面包屑 / 刷新 / 筛选在骨架那一帧也是活的。 */
+  const pageHeader = (
+    <PageHeader
+      title='产物中心'
+      description='每个会话的工作目录与产出文件，选中即在右侧预览。'
+      actions={<Button variant='ghost' size='md' onClick={() => void listDir(currentPath || engineCwd || '/')}>刷新</Button>}
+    />
+  )
+  const fileHeader = (
+    <header className='flex h-10 shrink-0 items-center gap-1.5 border-b border-line-soft px-3 text-12 text-ink-3'>
+      <button
+        type='button'
+        className='rounded-xs px-1.5 py-0.5 transition-colors duration-[var(--motion-fast)] hover:bg-hover hover:text-ink'
+        onClick={() => void listDir(engineCwd || '/')}
+      >
+        根目录
+      </button>
+      {crumbs.map((c, i) => (
+        <span key={c + i} className='flex min-w-0 items-center gap-1.5'>
+          <span className='text-ink-4'>/</span>
+          <span className='truncate'>{c}</span>
+        </span>
+      ))}
+      <div className='flex-1' />
+      {/* 类型筛选：滑块指示器 + 计数，切换时列表错峰淡入 */}
+      <span className='mr-1 shrink-0 text-11 tabular-nums text-ink-4'>
+        {filter === 'all' ? files.length : shown.length}/{files.length}
+      </span>
+      <Segmented<TypeFilter> value={filter} options={FILTERS} onChange={setFilter} ariaLabel='文件类型筛选' className='shrink-0' />
+      <Button variant='ghost' size='sm' className='ml-1' onClick={() => togglePanel(true)}>在右侧预览</Button>
+    </header>
+  )
+
+  /* ── 首帧壳 ──
+     外壳与真身逐层同构（同一 <main>、同一 flex 行、同样两块面板），只有面板内部换成骨架；
+     骨架沿用本文件已有的 SkeletonRows（会话列表 / 目录列表通用那一副）。 */
+  if (!firstFrameReady) {
+    return (
+      <main data-artifacts-shell className='flex min-h-0 flex-1 flex-col bg-canvas'>
+        {pageHeader}
+        <div className='flex min-h-0 flex-1 gap-4 px-8 pb-6'>
+          <aside className='w-[248px] shrink-0 overflow-y-auto rounded-lg border border-line bg-surface p-2 elev-1'>
+            <p className='px-2 py-1 text-11 font-medium text-ink-4'>会话</p>
+            <SkeletonRows rows={5} className='px-0' />
+          </aside>
+          <section className='flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface elev-1'>
+            {fileHeader}
+            <div className='min-h-0 flex-1 overflow-y-auto p-2'>
+              <SkeletonRows rows={8} className='px-0' />
+            </div>
+          </section>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main data-artifacts-page className='flex min-h-0 flex-1 flex-col bg-canvas'>
-      <PageHeader
-        title='产物中心'
-        description='每个会话的工作目录与产出文件，选中即在右侧预览。'
-        actions={<Button variant='ghost' size='md' onClick={() => void listDir(currentPath || engineCwd || '/')}>刷新</Button>}
-      />
+      {pageHeader}
       <div className='artifact-workspace flex min-h-0 flex-1 gap-4 px-8 pb-6'>
         <aside className='artifact-sessions w-[248px] shrink-0 overflow-y-auto rounded-lg border border-line bg-surface p-2 elev-1'>
           <p className='px-2 py-1 text-11 font-medium text-ink-4'>会话</p>
@@ -120,28 +179,7 @@ export function ArtifactsView() {
         </aside>
 
         <section className='flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface elev-1'>
-          <header className='flex h-10 shrink-0 items-center gap-1.5 border-b border-line-soft px-3 text-12 text-ink-3'>
-            <button
-              type='button'
-              className='rounded-xs px-1.5 py-0.5 transition-colors duration-[var(--motion-fast)] hover:bg-hover hover:text-ink'
-              onClick={() => void listDir(engineCwd || '/')}
-            >
-              根目录
-            </button>
-            {crumbs.map((c, i) => (
-              <span key={c + i} className='flex min-w-0 items-center gap-1.5'>
-                <span className='text-ink-4'>/</span>
-                <span className='truncate'>{c}</span>
-              </span>
-            ))}
-            <div className='flex-1' />
-            {/* 类型筛选：滑块指示器 + 计数，切换时列表错峰淡入 */}
-            <span className='mr-1 shrink-0 text-11 tabular-nums text-ink-4'>
-              {filter === 'all' ? files.length : shown.length}/{files.length}
-            </span>
-            <Segmented<TypeFilter> value={filter} options={FILTERS} onChange={setFilter} ariaLabel='文件类型筛选' className='shrink-0' />
-            <Button variant='ghost' size='sm' className='ml-1' onClick={() => togglePanel(true)}>在右侧预览</Button>
-          </header>
+          {fileHeader}
           <div className='min-h-0 flex-1 overflow-y-auto p-2'>
             {/* key 挂在列表容器上：筛选切换时只重放容器的入场动画，
                 数据与滚动位置不受影响（列表本身没有需要保住的状态）。 */}

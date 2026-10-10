@@ -1,6 +1,6 @@
 /**
- * 渲染风暴探针（stormProbe）：统计「同一个组件在 1 秒内的提交次数」，
- * 超过阈值就记一次风暴（组件名 + 计数 + 时间）并触发一次可注入的回调。
+ * 渲染风暴探针：同时统计提交次数与 Profiler 的实际渲染耗时。
+ * 连续两个窗口出现高频、昂贵提交时才触发回调，正常流式更新不降级。
  *
  * 为什么单开一份：React #185（Maximum update depth exceeded）在开发版里报的是
  * 「某处 setState 套 setState」，生产构建里组件名被压成 FB / MT 之后只剩一句
@@ -8,7 +8,7 @@
  * 「一次提交」的口径），谁在刷、刷了多少次，第一时间就落在控制台上。
  *
  * 开销口径：**平时几乎为零**——没有定时器、没有订阅、只在计数超过阈值之后才
- * 计时间、才写 console、才回调。每次提交只做一次整数比较与递增。
+ * 写 console、才回调。每次提交只做时钟读取和少量计数。
  *
  * 与 lib/guard.ts 的分工：guard 的提交闸门盯的是 **store** 的提交频率（全局、带熔断），
  * 这一份盯的是 **单个组件** 的提交频率（定位到人）。两份账互不干扰，共用同一个
@@ -16,7 +16,7 @@
  */
 import { Profiler, createElement, type ReactNode } from 'react'
 
-/** 1 秒内的提交次数超过它就记一次风暴。 */
+/** 高频提交的初筛阈值，还须满足耗时与连续窗口判据。 */
 export const STORM_COMMITS = 20
 /** 计数窗口：1 秒（和阈值合起来就是「> 20 次/秒」）。 */
 export const STORM_WINDOW_MS = 1000
@@ -29,6 +29,7 @@ export interface StormRecord {
   commits: number
   /** 窗口长度（毫秒）。 */
   elapsedMs: number
+  renderMs: number
 }
 
 export type StormListener = (record: StormRecord) => void
@@ -48,7 +49,7 @@ export function stormListener(): StormListener | null {
 /** 探针：由 React.Profiler 的 onRender 每提交一次调一下。 */
 export interface StormProbe {
   /** 记录一次提交；超阈值的那个窗口里触发一次回调。 */
-  report: () => void
+  report: (id?: string, phase?: string, actualDuration?: number) => void
   /** 这一次窗口里已经记了多少次（自检 / 开发者面板用）。 */
   count: () => number
   /** 归零：换了挂载点或想重新计时的时候用。 */
@@ -69,22 +70,39 @@ export function createStormProbe(
   const windowMs = options.windowMs ?? STORM_WINDOW_MS
   let startedAt = 0
   let count = 0
+  let renderMs = 0
+  let slowCommits = 0
+  let previousOverloaded = false
+  let currentOverloaded = false
   /** 已经报过的那一秒：同一枚探针不重复刷同一条风暴（否则一次风暴会打出几百行）。 */
   let reportedSecond = -1
 
-  const report = (): void => {
+  const report = (_id?: string, _phase?: string, actualDuration = 0): void => {
     const now = Date.now()
     if (startedAt === 0 || now - startedAt > windowMs) {
+      previousOverloaded = startedAt !== 0 && now - startedAt <= windowMs * 2 && currentOverloaded
+      currentOverloaded = false
       startedAt = now
       count = 0
+      renderMs = 0
+      slowCommits = 0
     }
     count += 1
+    renderMs += Math.max(0, actualDuration)
+    if (actualDuration >= 8) slowCommits += 1
     if (count <= threshold) return
+    // Streaming and number transitions legitimately commit 30–60 times/sec.
+    // Count alone is not a stall: require sustained, expensive rendering too.
+    if (now - startedAt < 500 || renderMs < 200 || slowCommits < 8) return
+    currentOverloaded = true
+    // A costly mount followed by cheap child updates is a startup burst.
+    // Automatic fallback requires expensive work in two consecutive windows.
+    if (!previousOverloaded) return
     // 跨了「秒」才再报一次：一次风暴只留一条记录 + 一条恢复记录。
     const second = Math.floor(now / windowMs)
     if (second === reportedSecond) return
     reportedSecond = second
-    const record: StormRecord = { component, commits: count, elapsedMs: now - startedAt }
+    const record: StormRecord = { component, commits: count, elapsedMs: now - startedAt, renderMs }
     // 只在真的成灾时才写控制台（平时一行都不写）。
     try {
       console.warn('[storm] 渲染风暴：' + component + ' 在 ' + record.elapsedMs + 'ms 内提交了 ' + record.commits + ' 次')
@@ -94,7 +112,7 @@ export function createStormProbe(
     try { fn(record) } catch { /* 回调自己的异常不扩散到渲染路径 */ }
   }
 
-  return { report, count: () => count, reset: () => { startedAt = 0; count = 0; reportedSecond = -1 } }
+  return { report, count: () => count, reset: () => { startedAt = 0; count = 0; renderMs = 0; slowCommits = 0; previousOverloaded = currentOverloaded = false; reportedSecond = -1 } }
 }
 
 /* ── 显示名 ──

@@ -10,6 +10,7 @@
  * 「不可见时不解析」是每个子预览器各自实现的（useInView），分发器只负责挑实现。
  */
 import { Suspense, lazy } from 'react'
+import { useEngine } from '../../../stores/engine'
 import { FILE_KIND_TITLE, filePreviewKind } from '../fileTypes'
 import { PreviewLoading } from './common'
 import { FileInfoPanel } from './BinaryPreview'
@@ -26,20 +27,23 @@ export function FilePreview({ path, name }: {
   /** 文件名：标题与导出用。 */
   name: string
 }) {
+  const port = useEngine((state) => state.port)
+  const token = useEngine((state) => state.token)
   const kind = filePreviewKind(path || name)
+  const engineKey = path + ':' + port + ':' + token
   const loading = <PreviewLoading label={'加载' + FILE_KIND_TITLE[kind] + '器…'} />
 
   switch (kind) {
     case 'sheet':
-      return <Lazy fallback={loading}><SheetPreview path={path} name={name} /></Lazy>
+      return <Lazy fallback={loading}><SheetPreview key={engineKey} path={path} name={name} /></Lazy>
     case 'pdf':
-      return <Lazy fallback={loading}><PdfPreview path={path} name={name} /></Lazy>
+      return <Lazy fallback={loading}><PdfPreview key={engineKey} path={path} name={name} /></Lazy>
     case 'zip':
-      return <Lazy fallback={loading}><ZipPreview path={path} name={name} /></Lazy>
+      return <Lazy fallback={loading}><ZipPreview key={engineKey} path={path} name={name} /></Lazy>
     case 'docx':
-      return <Lazy fallback={loading}><DocxPreview path={path} name={name} /></Lazy>
+      return <Lazy fallback={loading}><DocxPreview key={engineKey} path={path} name={name} /></Lazy>
     case 'html':
-      return <Lazy fallback={loading}><HtmlFilePreview path={path} name={name} /></Lazy>
+      return <Lazy fallback={loading}><HtmlFilePreview key={engineKey} path={path} name={name} /></Lazy>
     default:
       // 图片 / Markdown / 纯文本由 PreviewPanel 直接渲染（那几条路更轻），
       // 走到这里的只剩「认不出的二进制」：给文件信息 + 用系统打开。

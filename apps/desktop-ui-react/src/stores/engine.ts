@@ -4,6 +4,7 @@ import { ipc } from '../lib/ipc'
 import { clearTransportHint, currentTransport, rememberIpcTransport, runTransportSelfCheck } from '../lib/engineSocket'
 // 值没变就别写：用量是一次流式上报里最热的状态，见 lib/stableState.ts。
 import { sameJson } from '../lib/stableState'
+import { takeRenderDiagnostics } from '../lib/renderDiagnostics'
 
 export interface UsageState {
   total: number
@@ -77,6 +78,7 @@ let autoRestartCount = 0
 let initRetryTimer: number | null = null
 let lastAutoRestartAt = 0
 let restartInFlight = false
+let refreshInFlight: Promise<void> | null = null
 /// 壳内转发提示只提示一次（用户不需要被反复告知）。
 let bridgeNoteShown = false
 
@@ -102,7 +104,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 /// 慢接口白名单：这些路径的超时放宽（否则大压缩会被 4 秒掐断）。
 function timeoutForPath(path: string): number {
-  return /\/(clear|branch|workspace|artifacts|compact|export|backup|install|download|mirror-test|reindex)/.test(path)
+  return /\/(catalog|market|skills|clear|branch|workspace|artifacts|compact|export|backup|install|download|mirror-test|reindex|discover-models|discover-context|settings.mcp|mcp.reload)/.test(path)
     ? ENGINE_FETCH_SLOW_MS
     : ENGINE_FETCH_TIMEOUT_MS
 }
@@ -132,6 +134,7 @@ function startStatusReport(): void {
         runState: session.runState,
         engineReady: engine.ready,
         engineStatus: engine.status,
+        rendering: takeRenderDiagnostics(),
         engineError: engine.lastError,
       })
       void ipc('frontend_status', { status }).catch(() => { /* 忽略 */ })
@@ -173,7 +176,7 @@ export const useEngine = create<EngineState>((set, get) => ({
        界面永远「与引擎的连接已断开」，可引擎其实好好的。① 让这条链路不再依赖 IPC。 */
     const boot = (window as unknown as { __COOMI_BOOT__?: { port?: number; token?: string; version?: string } }).__COOMI_BOOT__
     if (boot?.port) {
-      set((s) => (s.port === boot.port ? {} : { port: boot.port as number, token: boot.token ?? '' }))
+      set((s) => (s.port > 0 ? {} : { port: boot.port as number, token: boot.token ?? '' }))
       if (boot.version) set({ version: boot.version })
     }
     const hasShell = typeof window !== 'undefined' && !!(window as unknown as { __TAURI__?: unknown }).__TAURI__
@@ -193,8 +196,8 @@ export const useEngine = create<EngineState>((set, get) => ({
       // 有壳时才问壳（无壳场景靠注入信息，见上）。
       if (hasShell) {
         try {
-          const info = await ipc<{ port: number; token: string }>('engine_info')
-          if (info?.port) set((s) => (s.port === info.port ? {} : { port: info.port, token: info.token }))
+          const info = await withTimeout(ipc<{ port: number; token: string }>('engine_info'), ENGINE_FETCH_TIMEOUT_MS, '读取引擎连接信息')
+          if (info?.port) set((s) => (s.port === info.port && s.token === info.token ? {} : { port: info.port, token: info.token }))
         } catch (e) {
           set({ lastError: e instanceof Error ? e.message : String(e) })
         }
@@ -223,13 +226,23 @@ export const useEngine = create<EngineState>((set, get) => ({
   },
 
   /// 轻量刷新端口/令牌（引擎重启会换端口）：重连前调用，避免一直连旧端口。
-  refreshInfo: async () => {
-    try {
-      const info = await ipc<{ port: number; token: string }>('engine_info')
-      if (info?.port) {
-        set({ port: info.port, token: info.token, ready: true, status: 'running', lastError: '' })
+  refreshInfo: () => {
+    if (refreshInFlight) return refreshInFlight
+    refreshInFlight = (async () => {
+      try {
+        const info = await withTimeout(ipc<{ port: number; token: string }>('engine_info'), ENGINE_FETCH_TIMEOUT_MS, '读取引擎连接信息')
+        if (!info?.port) return
+        const changed = get().port !== info.port || get().token !== info.token
+        set({ port: info.port, token: info.token, ...(changed ? { ready: false, restarting: true, status: 'starting' as const } : {}) })
+        const health = await get().api<{ cwd?: string; home?: string; version?: string }>('/api/runtime/health')
+        if (get().port !== info.port || get().token !== info.token) return
+        set({ ready: true, status: 'running', lastError: '', cwd: health.cwd ?? get().cwd, home: health.home ?? get().home, version: health.version ?? get().version })
+      } catch (error) {
+        // A port allocation alone is not proof that the HTTP service is ready.
+        set({ lastError: error instanceof Error ? error.message : String(error) })
       }
-    } catch { /* 壳还没起来：保持原状，交给重试循环 */ }
+    })().finally(() => { refreshInFlight = null })
+    return refreshInFlight
   },
 
   /// 手动重启（设置页 / 引擎异常条的按钮）：不看冷却，计数清零。
@@ -305,15 +318,22 @@ export const useEngine = create<EngineState>((set, get) => ({
     }
     const timeoutMs = timeoutForPath(path)
     const viaBridge = async (): Promise<T> => {
+      try {
       const reply = await withTimeout(
         ipc<{ status: number; body: string }>('engine_http', {
           port, token: get().token, method, path, body,
         }),
         timeoutMs,
-        '壳内转发',
+        '引擎请求 ' + path,
       )
       markBridgeNote()
       return parse(reply.status, reply.body)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(/超时|timed? ?out/i.test(message)
+          ? '加载失败：引擎未在 ' + Math.round(timeoutMs / 1000) + ' 秒内响应 ' + path + '。请重试或检查引擎状态。'
+          : '请求 ' + path + ' 失败：' + message)
+      }
     }
     // 已知直连不通的机器：直接走壳内转发（见 lib/engineSocket.ts）。
     if (currentTransport() === 'ipc') return viaBridge()

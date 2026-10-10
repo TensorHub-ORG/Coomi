@@ -1,6 +1,7 @@
 import * as RadixMenu from '@radix-ui/react-dropdown-menu'
 import * as RadixContext from '@radix-ui/react-context-menu'
 import { cn } from '../../lib/cn'
+import { Check, ChevronRight } from 'lucide-react'
 
 /// 浮层统一走 .pop-surface：入场 --motion-base + --ease-out-quint、退场 --motion-fast + --ease-in-quad，
 /// 方向由 Radix 的 data-side 决定（向上弹出的从下方 4px 起，向下弹出的从上方 4px 起）。
@@ -23,6 +24,7 @@ export interface MenuEntry {
   danger?: boolean
   divider?: boolean
   disabled?: boolean
+  selected?: boolean
   onSelect?: () => void
 }
 
@@ -41,6 +43,7 @@ function Entries({ items }: { items: MenuEntry[] }) {
           >
             {it.icon ? <span className='shrink-0 text-ink-3 [&_svg]:h-3.5 [&_svg]:w-3.5'>{it.icon}</span> : null}
             <span className='truncate'>{it.label}</span>
+            {it.selected ? <Check size={14} className='ml-auto shrink-0 text-primary' aria-label='已选中' /> : null}
           </RadixMenu.Item>
         ),
       )}
@@ -49,10 +52,12 @@ function Entries({ items }: { items: MenuEntry[] }) {
 }
 
 /** 下拉菜单：Radix 自带边界碰撞检测，靠近窗口边缘会自动翻转/收缩，不会再出界。 */
-export function Menu({ trigger, items, groups, header, align = 'end', side = 'bottom', onCloseAutoFocus }: {
+export function Menu({ trigger, items, groups, header, nested = false, footer, align = 'end', side = 'bottom', onCloseAutoFocus }: {
   trigger: React.ReactNode
   /// 菜单顶部固定区域（例如搜索框）
   header?: React.ReactNode
+  nested?: boolean
+  footer?: MenuEntry[]
   items?: MenuEntry[]
   /// 分组菜单：用于「厂商名 → 模型列表」这种层级。
   groups?: Array<{ label: string; items: MenuEntry[] }>
@@ -75,13 +80,25 @@ export function Menu({ trigger, items, groups, header, align = 'end', side = 'bo
           {header ? <div onClick={(e) => e.stopPropagation()}>{header}</div> : null}
           {groups
             ? groups.map((g, gi) => (
-                <RadixMenu.Group key={g.label}>
+                nested ? <RadixMenu.Sub key={g.label}>
+                  <RadixMenu.SubTrigger className={itemCls}>
+                    <span className='min-w-0 flex-1 truncate'>{g.label}</span>
+                    {g.items.some(item => item.selected) ? <Check size={14} className='text-primary' /> : null}
+                    <ChevronRight size={14} className='text-ink-4' />
+                  </RadixMenu.SubTrigger>
+                  <RadixMenu.Portal>
+                    <RadixMenu.SubContent collisionPadding={8} sideOffset={4} className={cn(contentCls, 'max-h-[min(420px,80vh)] max-w-[calc(100vw-24px)] overflow-y-auto')}>
+                      <Entries items={g.items} />
+                    </RadixMenu.SubContent>
+                  </RadixMenu.Portal>
+                </RadixMenu.Sub> : <RadixMenu.Group key={g.label}>
                   {gi > 0 ? <RadixMenu.Separator className='my-1 h-px bg-line-soft' /> : null}
                   <RadixMenu.Label className='px-2 pb-1 pt-1.5 text-11 text-ink-4'>{g.label}</RadixMenu.Label>
                   <Entries items={g.items} />
                 </RadixMenu.Group>
               ))
             : <Entries items={items ?? []} />}
+          {footer?.length ? <><RadixMenu.Separator className='my-1 h-px bg-line-soft' /><Entries items={footer} /></> : null}
         </RadixMenu.Content>
       </RadixMenu.Portal>
     </RadixMenu.Root>

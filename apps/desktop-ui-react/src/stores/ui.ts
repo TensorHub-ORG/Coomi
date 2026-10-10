@@ -55,7 +55,7 @@ const LIST_COLLAPSED_KEY = 'coomi.list.collapsed'
 const LEGACY_LIST_MODE_KEY = 'coomi.list.mode'
 
 const DEFAULT_PREFS: Prefs = {
-  minimalUi: true,
+  minimalUi: false,
   fontFamily: 'harmony',
   welcomeSloganFont: 'guofeng',
   defaultView: 'chat',
@@ -81,9 +81,13 @@ const DEFAULT_PREFS: Prefs = {
    组件不用各自判断，也不要各自存一份。 */
 /** 性能模式开关 → html 上的档位属性。 */
 export const PERF_ATTR = 'perf'
-/** 普通档的长列表虚拟化阈值：低于它保留完整 DOM（划选、Ctrl+F 高亮都不打折）。 */
+/** 普通档的长列表虚拟化阈值：低于它保留完整 DOM（划选、Ctrl+F 高亮都不打折）。
+    ⚠ 2026-10 起这两个阈值与下面的 virtualizeThreshold() 已经**没有任何调用方**：
+    对话主列表不再走虚拟化（移除理由见 components/chat/MessageList.tsx 顶部），
+    这里只剩一份历史策略的残根。先留着不删（它们仍是对话列表「为什么不虚拟化」的文档），
+    但**不要再把它们当成生效中的开关**去调 —— 调了不会有任何效果。 */
 export const VIRTUALIZE_AT = 300
-/** 省电档阈值：更早交给 react-virtuoso，长会话滚动更稳。 */
+/** 省电档阈值：更早交给虚拟化。 */
 export const VIRTUALIZE_AT_LOW = 120
 
 /** 把性能档位写到 <html data-perf>：低档才写，高档删掉属性（CSS 只认 [data-perf=low]）。 */
@@ -94,11 +98,12 @@ export function applyPerfAttr(prefs: Prefs): void {
 }
 
 /** 长列表虚拟化阈值：按当前性能档位取。
-    消息列表按条数切换渲染路径，阈值属于性能策略，所以读取入口放在这里，
-    组件（components/chat/MessageList.tsx）只调用、不自己定义常量。 */
+    ⚠ 2026-10 起这个入口**没有任何调用方**（对话主列表已不再走虚拟化，
+    移除理由见 components/chat/MessageList.tsx 顶部）。留着只为记录当初的策略，
+    不要以为调它就能改变渲染路径。 */
 export function virtualizeThreshold(): number {
   // 安全模式 / 精简模式：**不用虚拟化**（返回无穷大＝永远走普通路径）。
-  // 全量 DOM 更好排查「卡在哪一条消息」，也少掉 Virtuoso 的测量与回收 —— 它自己也是主线程上的活。
+  // 全量 DOM 更好排查「卡在哪一条消息」，也少掉虚拟化的测量与回收 —— 它自己也是主线程上的活。
   if (isLean()) return Number.POSITIVE_INFINITY
   return appliedPrefs.perf === 'low' ? VIRTUALIZE_AT_LOW : VIRTUALIZE_AT
 }
@@ -138,7 +143,7 @@ function readPrefs(): Prefs {
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<Prefs>
     const prefs: Prefs = { ...DEFAULT_PREFS, ...raw }
-    prefs.minimalUi = raw.minimalUi !== false
+    prefs.minimalUi = false
     prefs.welcomeSloganFont = raw.welcomeSloganFont === 'default' ? 'default' : 'guofeng'
     if (!Number.isFinite(prefs.messageWidth) || prefs.messageWidth <= 0) prefs.messageWidth = DEFAULT_PREFS.messageWidth
     // 崩溃恢复方式：只认 'auto'，其余（含老版本没存过）一律回到默认的「一键继续」。
@@ -252,7 +257,7 @@ const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
   // 这里**只开不关** —— 关的那一下是用户在设置里显式操作（setPrefs），别把启动时的强制开关撤了。
   if (prefs.safeMode) setSafeMode(true)
   root.dataset.density = prefs.density
-  root.dataset.minimalUi = String(prefs.minimalUi)
+  root.dataset.minimalUi = 'false'
   applyMotionAttr(prefs)
   root.dataset.font = prefs.fontFamily
   applyPerfAttr(prefs)
@@ -268,6 +273,7 @@ export type PanelTab = 'artifacts' | 'preview' | 'files' | 'stats' | 'context' |
 
 interface UiState {
   view: ViewKey
+  settingsGroup: string | null
   themeMode: ThemeMode
   fontScale: number
   panelOpen: boolean
@@ -278,6 +284,7 @@ interface UiState {
   listDrawerOpen: boolean
   prefs: Prefs
   setView: (v: ViewKey) => void
+  setSettingsGroup: (group: string | null) => void
   setThemeMode: (m: ThemeMode) => void
   setFontScale: (n: number) => void
   togglePanel: (open?: boolean) => void
@@ -296,6 +303,7 @@ interface UiState {
 
 export const useUi = create<UiState>((set, get) => ({
   view: (readPrefs().defaultView ?? 'chat') as ViewKey,
+  settingsGroup: null,
   themeMode: ((typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null) as ThemeMode | null) ?? 'light',
   fontScale: Number((typeof localStorage !== 'undefined' ? localStorage.getItem(SCALE_KEY) : null) ?? '1.08'),
   panelOpen: false,
@@ -304,7 +312,8 @@ export const useUi = create<UiState>((set, get) => ({
   listDrawerOpen: false,
   prefs: readPrefs(),
 
-  setView: (view) => set({ view }),
+  setView: (view) => set(view === 'settings' ? { view, settingsGroup: get().settingsGroup ?? 'general' } : { view }),
+  setSettingsGroup: (settingsGroup) => set({ settingsGroup }),
 
   setThemeMode: (mode) => {
     try { localStorage.setItem(THEME_KEY, mode) } catch { /* 忽略 */ }
@@ -346,7 +355,7 @@ export const useUi = create<UiState>((set, get) => ({
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch { /* 忽略 */ }
     const root = document.documentElement
     root.dataset.density = prefs.density
-    root.dataset.minimalUi = String(prefs.minimalUi)
+    root.dataset.minimalUi = 'false'
     root.dataset.font = prefs.fontFamily
     applyPerfAttr(prefs)
     applyContentWidth(prefs)

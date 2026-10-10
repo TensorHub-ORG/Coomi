@@ -1,6 +1,6 @@
 /** 远程 MCP 源：官方注册表 / npm / GitHub Topic / Smithery / PulseMCP / 自定义 JSON。
  *
- *  这个模块只做「取数 + 归一化」，不含任何 JSX，也不碰引擎接口 —— 技能市场据此做
+ *  这个模块只做「取数 + 归一化 + 来源策略」，不含任何 JSX —— 技能市场据此做
  *  来源切换浏览与搜索。
  *
  *  安装有三条路，都在这里定好「走哪条」所需的数据：
@@ -11,9 +11,17 @@
  *      · 推不出来、或清单要求填环境变量的条目 → 弹预填表单让用户补齐后再装，
  *        同时保留「生成配置片段」这条手动路（mcpConfigFragment）。
  *    远端字段命名各家都不一样，所以每个源一个解析器，全部走容错读取（缺字段就留空，
- *    绝不猜、也不造假数据）。 */
+ *    绝不猜、也不造假数据）。
+ *
+ *  来源可信度分级与「疑似非 MCP」过滤：官方注册表 / Smithery / PulseMCP 是 MCP 专用目录，
+ *  默认可信；GitHub topic 标中等；自定义清单标不可信（由引擎侧安装前冒烟验证兜底）；
+ *  npm 是全品类搜索，必须包名或描述命中 MCP 特征才保留。被过滤的条目连同原因带出去，
+ *  绝不静默丢弃（见 applySourcePolicy / HiddenRemoteEntry）。
+ *  这里同时是「一键验证」（POST /api/catalog/mcp/verify）的调用点：接口不存在（404）时
+ *  折算成「未验证」返回，不抛错、不阻塞列表。 */
 
 import { fetchRemoteText } from '../../lib/remoteFetch'
+import { useEngine } from '../../stores/engine'
 
 export type RemoteSourceKey = 'official' | 'npm' | 'github' | 'smithery' | 'pulsemcp' | 'custom'
 
@@ -67,6 +75,51 @@ export function remoteSourceDef(key: RemoteSourceKey): RemoteSourceDef {
   return REMOTE_SOURCES.find((s) => s.key === key) ?? REMOTE_SOURCES[0]
 }
 
+/* ── 来源可信度分级 ──
+   判断标准只有一个：这个来源本身是不是 MCP 专用目录。MCP 专用目录里的东西默认可信；
+   npm / GitHub 是通用或社区来源，需要额外信号；自定义清单完全由用户提供，一律不可信。 */
+
+export type RemoteTrustTier = 'official' | 'npm' | 'github' | 'custom'
+
+/** 可信度档位：high = MCP 专用目录；medium = 通用目录命中特征 / 社区仓库；low = 用户自定义清单。 */
+export type RemoteTrustLevel = 'high' | 'medium' | 'low'
+
+export interface RemoteTrustInfo {
+  tier: RemoteTrustTier
+  level: RemoteTrustLevel
+  /** 徽章文案：官方目录 / npm 搜索 / GitHub / 自定义。 */
+  label: string
+  /** 一句话依据（做徽章 title）：说清「为什么给它这一档」。 */
+  detail: string
+  /** npm 命中 MCP 特征时记下命中的词；其它来源为空串。 */
+  matched: string
+}
+
+/** 被来源策略隐藏的条目：连同原因一起带出去，界面上可查看、可「仍然显示」，不是丢弃。 */
+export type RemoteHiddenRule = 'npm-no-mcp-signal'
+
+export interface HiddenRemoteEntry {
+  entry: RemoteEntry
+  rule: RemoteHiddenRule
+  /** 给用户看的中文原因（为什么这条被默认隐藏）。 */
+  reason: string
+}
+
+const TRUST_BY_SOURCE: Record<RemoteSourceKey, Omit<RemoteTrustInfo, 'matched'>> = {
+  official: { tier: 'official', level: 'high', label: '官方目录', detail: '官方 MCP 注册表（registry.modelcontextprotocol.io）：MCP 专用目录，默认按可信处理' },
+  smithery: { tier: 'official', level: 'high', label: '官方目录', detail: 'Smithery（registry.smithery.ai）：MCP 专用目录，默认按可信处理' },
+  pulsemcp: { tier: 'official', level: 'high', label: '官方目录', detail: 'PulseMCP（api.pulsemcp.com）：MCP 专用目录，默认按可信处理' },
+  npm: { tier: 'npm', level: 'medium', label: 'npm 搜索', detail: 'npm 是全品类搜索：只保留包名或描述命中 MCP 特征的包，可信度中等' },
+  github: { tier: 'github', level: 'medium', label: 'GitHub', detail: 'GitHub topic:mcp-server 的社区仓库：可信度中等，启动方式要自己补' },
+  custom: { tier: 'custom', level: 'low', label: '自定义', detail: '用户自定义清单：不可信，安装前请点「一键验证」做一次冒烟验证' },
+}
+
+/** 取来源的可信度分级。返回浅拷贝：调用方（例如 npm 过滤时补 matched）不会改到上面的常量表。 */
+export function trustForSource(key: RemoteSourceKey): RemoteTrustInfo {
+  const base = TRUST_BY_SOURCE[key] ?? TRUST_BY_SOURCE.custom
+  return { ...base, matched: '' }
+}
+
 /** 归一化后的远程条目：一张卡能用到的全部字段。 */
 export interface RemoteEntry {
   /** React key / 去重用的全局唯一标识。 */
@@ -94,6 +147,8 @@ export interface RemoteEntry {
   stars: number | null
   downloads: number | null
   source: RemoteSourceKey
+  /** 来源可信度分级：市场据此显示「官方目录 / npm 搜索 / GitHub / 自定义」徽章。 */
+  trust: RemoteTrustInfo
 }
 
 export interface RemoteFetchOptions {
@@ -111,6 +166,8 @@ export interface RemoteFetchOptions {
 
 export interface RemoteFetchResult {
   entries: RemoteEntry[]
+  /** 被来源策略隐藏的条目（含原因）：默认折叠，可查看并「仍然显示」，绝不静默丢弃。 */
+  hidden: HiddenRemoteEntry[]
   /** 实际请求的地址，展示与排查用。 */
   url: string
   /** 解析过程中值得告诉用户的一句话（例如跳过了几条没有标识的条目）。 */
@@ -231,6 +288,7 @@ function parseOfficial(payload: unknown): { entries: RemoteEntry[]; note: string
       stars: null,
       downloads: null,
       source: 'official',
+      trust: trustForSource('official'),
     })
   }
   return { entries, note: skipped ? '跳过 ' + skipped + ' 条没有名称的记录' : '' }
@@ -264,6 +322,7 @@ function parseNpm(payload: unknown): { entries: RemoteEntry[]; note: string } {
       stars: null,
       downloads: num(dig(obj(row), ['downloads', 'monthly']), dig(obj(row), ['downloads', 'weekly'])),
       source: 'npm',
+      trust: trustForSource('npm'),
     })
   }
   return { entries, note: skipped ? '跳过 ' + skipped + ' 条没有包名的记录' : '' }
@@ -296,6 +355,7 @@ function parseGithub(payload: unknown): { entries: RemoteEntry[]; note: string }
       stars: num(repo.stargazers_count),
       downloads: null,
       source: 'github',
+      trust: trustForSource('github'),
     })
   }
   return { entries, note: skipped ? '跳过 ' + skipped + ' 条没有仓库名的记录' : '' }
@@ -332,6 +392,7 @@ function parseSmithery(payload: unknown): { entries: RemoteEntry[]; note: string
       stars: null,
       downloads: num(server.useCount, server.toolsCount),
       source: 'smithery',
+      trust: trustForSource('smithery'),
     })
   }
   return { entries, note: skipped ? '跳过 ' + skipped + ' 条没有标识的记录' : '' }
@@ -367,6 +428,7 @@ function parsePulseMcp(payload: unknown): { entries: RemoteEntry[]; note: string
       stars: num(attributes.github_stars, server.github_stars, server.stars),
       downloads: null,
       source: 'pulsemcp',
+      trust: trustForSource('pulsemcp'),
     })
   }
   return { entries, note: skipped ? '跳过 ' + skipped + ' 条没有名字的记录' : '' }
@@ -419,6 +481,7 @@ function parseCustom(payload: unknown): { entries: RemoteEntry[]; note: string }
       stars: num(item.stars, item.stargazers_count),
       downloads: num(item.downloads, item.use_count),
       source: 'custom',
+      trust: trustForSource('custom'),
     })
   }
   return { entries, note: skipped ? '跳过 ' + skipped + ' 条没有 id 的条目' : '' }
@@ -435,6 +498,50 @@ function dedupe(entries: RemoteEntry[]): RemoteEntry[] {
     out.push(entry)
   }
   return out
+}
+
+/* ── 来源策略：保留什么、隐藏什么、为什么 ── */
+
+/** npm 搜索的 MCP 特征词：包名或描述（不分大小写）命中其一，才当作 MCP 相关包留下。 */
+const NPM_MCP_SIGNALS = ['mcp', 'modelcontextprotocol', 'model-context-protocol']
+
+/** 判定一条 npm 条目像不像 MCP：返回命中的特征词，没有则返回空串。 */
+export function npmMcpSignal(entry: Pick<RemoteEntry, 'id' | 'name' | 'description'>): string {
+  const haystack = (entry.id + ' ' + entry.name + ' ' + entry.description).toLowerCase()
+  for (const signal of NPM_MCP_SIGNALS) {
+    if (haystack.includes(signal)) return signal
+  }
+  return ''
+}
+
+/**
+ * 来源侧过滤：按「这个来源本身是不是 MCP 专用目录」决定保留还是隐藏。
+ *
+ *   · 官方注册表 / Smithery / PulseMCP：MCP 专用目录，默认可信，全部保留；
+ *   · npm 搜索：registry.npmjs.org 是全品类搜索，必须包名或描述命中 MCP 特征才保留 ——
+ *     否则 revolutionary-ui 这类「npm 上的 UI 生成 CLI」就会混进市场；
+ *   · GitHub topic / 自定义清单：全部保留（分别标中等 / 不可信，由引擎侧冒烟验证兜底）。
+ *
+ * 被隐藏的条目不是丢弃，而是连同原因放进 hidden 一起返回：界面可以查看并「仍然显示」。
+ */
+export function applySourcePolicy(key: RemoteSourceKey, entries: RemoteEntry[]): { entries: RemoteEntry[]; hidden: HiddenRemoteEntry[] } {
+  if (key !== 'npm') return { entries, hidden: [] }
+  const kept: RemoteEntry[] = []
+  const hidden: HiddenRemoteEntry[] = []
+  for (const entry of entries) {
+    const signal = npmMcpSignal(entry)
+    if (signal) {
+      // 记下命中的词：解释「它为什么被留下」时用得到。用浅拷贝，别改到常量表。
+      kept.push({ ...entry, trust: { ...entry.trust, matched: signal } })
+      continue
+    }
+    hidden.push({
+      entry,
+      rule: 'npm-no-mcp-signal',
+      reason: '包名与描述里都没有出现 mcp / modelcontextprotocol / model-context-protocol；npm 是全品类搜索，这条更像普通 npm 包而不是 MCP 服务器。',
+    })
+  }
+  return { entries: kept, hidden }
 }
 
 /* ── 取数 ── */
@@ -642,13 +749,18 @@ export async function fetchRemoteEntries(options: RemoteFetchOptions): Promise<R
   const payload = await fetchJson(url, headers)
   const parsed = parse(payload)
   // 同一个 id 只留一条：官方注册表按版本返回多条，其它源偶有重复条目。
-  const entries = dedupe(parsed.entries)
-  const dropped = parsed.entries.length - entries.length
+  const deduped = dedupe(parsed.entries)
+  const dropped = parsed.entries.length - deduped.length
+  // 归一化最后一步就做来源策略：被隐藏的连同原因进 hidden，交给界面「已隐藏 N 条」入口。
+  const policy = applySourcePolicy(options.key, deduped)
+  const entries = policy.entries
+  const hidden = policy.hidden
   const info = probe(payload)
   const leftover = info.total !== null ? info.total - entries.length : 0
   const note = [
     parsed.note,
     dropped > 0 ? '已合并 ' + dropped + ' 条同 id 记录' : '',
+    hidden.length > 0 ? '已隐藏 ' + hidden.length + ' 个疑似非 MCP 条目（列表底部可查看原因并「仍然显示」）' : '',
     // 有总数、却续不下去：把原因说清楚，免得用户以为是界面把条目藏了。
     !info.hasMore && options.key === 'custom' && leftover > 0
       ? '清单里还有 ' + leftover + ' 条，但它没有给续页地址（自定义源只认 next / nextCursor 这类字段）'
@@ -660,7 +772,114 @@ export async function fetchRemoteEntries(options: RemoteFetchOptions): Promise<R
       ? '这个源共 ' + info.total + ' 条，GitHub 搜索结果只开放前 ' + GITHUB_MAX_RESULTS + ' 条'
       : '',
   ].filter(Boolean).join('；')
-  return { entries, url, note, nextCursor: info.cursor, hasMore: info.hasMore, total: info.total }
+  return { entries, hidden, url, note, nextCursor: info.cursor, hasMore: info.hasMore, total: info.total }
+}
+
+/* ── 安装前冒烟验证：POST /api/catalog/mcp/verify ──
+   引擎按 command/args/env 真正把服务器拉起来做一次 MCP 握手，回报 {ok, stage, reason, tools}。
+   这里刻意「不抛异常」：接口不存在（404）、引擎没起来、网络失败，全部折算成「未验证 + 原因」，
+   由界面优雅降级显示——一键验证绝不能把整个列表卡住或弹一个用户看不懂的错。 */
+
+/** 验证状态：未验证 / 已验证 / 验证失败。 */
+export type McpVerifyStatus = 'unverified' | 'verified' | 'failed'
+
+export interface McpVerifyResult {
+  status: McpVerifyStatus
+  /** 引擎回报的原始 ok（status === 'verified' 时恒为 true）。 */
+  ok: boolean
+  /** 卡在哪一步：spawn / initialize / tools/list …（直接用引擎给的 stage）。 */
+  stage: string
+  /** 原因，失败时直接显示给用户。 */
+  reason: string
+  /** 握手成功后列出的工具数；拿不到时为 null。 */
+  tools: number | null
+  /** 引擎还没有这个接口（404）时为 true：界面按「未验证」处理，不报错、不阻塞列表。 */
+  unavailable: boolean
+}
+
+/** 验证接口入参：与引擎约定一致。 */
+export interface McpVerifyInput {
+  command: string
+  args: string[]
+  env?: Record<string, string>
+}
+
+/** 这条条目能不能做冒烟验证：接口入参只有 command/args/env，所以只有本地 stdio 条目能验。 */
+export function canVerifyRemoteEntry(entry: RemoteEntry): boolean {
+  return !!entry.command.trim()
+}
+
+/** 从条目折算验证入参：给不出启动命令（http/sse 的 url 条目）时返回 null。 */
+export function verifyInputForEntry(entry: RemoteEntry): McpVerifyInput | null {
+  if (!canVerifyRemoteEntry(entry)) return null
+  return {
+    command: entry.command,
+    args: entry.args,
+    // 值留空：验证只关心「能不能握手」，必填环境变量由安装表单负责补真值。
+    env: Object.fromEntries(entry.envKeys.map((key) => [key, ''])),
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+const VERIFY_PATH = '/api/catalog/mcp/verify'
+
+/**
+ * 一键验证：让引擎按 command/args 真正拉起它、做一次 MCP 握手。
+ *
+ * 不抛异常、不阻塞列表：引擎没起来、网络失败、接口不存在（404）都折算成「未验证 + 原因」；
+ * 只有接口明确跑完并回报 ok=false 才是「验证失败」（附 stage 与 reason）。
+ */
+export async function verifyRemoteMcp(input: McpVerifyInput): Promise<McpVerifyResult> {
+  const engine = useEngine.getState()
+  if (!engine.port) {
+    return { status: 'unverified', ok: false, stage: 'engine', reason: '引擎还没有就绪（拿不到端口），暂时无法验证', tools: null, unavailable: true }
+  }
+  let httpStatus = 0
+  let text = ''
+  try {
+    // 与 installClient 同款直连：这样才拿得到真实状态码，404 才能单独降级。
+    const res = await fetch('http://127.0.0.1:' + engine.port + VERIFY_PATH, {
+      method: 'POST',
+      headers: engine.authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ command: input.command, args: input.args, env: input.env ?? {} }),
+    })
+    httpStatus = res.status
+    text = await res.text().catch(() => '')
+  } catch (error) {
+    return { status: 'unverified', ok: false, stage: 'network', reason: '验证请求没能发出：' + describeError(error), tools: null, unavailable: false }
+  }
+  // 404：引擎还没实现这个接口 → 按「未验证」优雅降级，不报错（installClient 里对安装接口是同一套处理）。
+  if (httpStatus === 404) {
+    return { status: 'unverified', ok: false, stage: 'unavailable', reason: '当前引擎还没有验证接口（HTTP 404），本条暂时按「未验证」处理', tools: null, unavailable: true }
+  }
+  let payload: Record<string, unknown> | null = null
+  if (text) {
+    try {
+      const parsed = JSON.parse(text) as unknown
+      payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+    } catch {
+      payload = null
+    }
+  }
+  if (!payload) {
+    return {
+      status: 'failed',
+      ok: false,
+      stage: httpStatus >= 200 && httpStatus < 300 ? 'response' : 'http',
+      reason: text ? '验证接口返回的不是合法 JSON（HTTP ' + httpStatus + '）' : '验证接口没有返回内容（HTTP ' + httpStatus + '）',
+      tools: null,
+      unavailable: false,
+    }
+  }
+  const ok = payload.ok === true
+  const stage = typeof payload.stage === 'string' ? payload.stage : ''
+  const reason = typeof payload.reason === 'string' ? payload.reason : ''
+  const tools = typeof payload.tools === 'number' && Number.isFinite(payload.tools) ? payload.tools : null
+  if (ok) return { status: 'verified', ok: true, stage, reason: reason || '握手成功', tools, unavailable: false }
+  return { status: 'failed', ok: false, stage, reason: reason || '验证没有通过（HTTP ' + httpStatus + '）', tools, unavailable: false }
 }
 
 /* ── 一键安装：从远程条目推断「装什么」 ── */

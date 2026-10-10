@@ -56,7 +56,7 @@ export function PreviewPanel({ panelRef }: {
   const togglePanel = useUi((s) => s.togglePanel)
   const tab = useDockTab()
   // 宽度预设仍然写回 coomi.dock.w（和拖拽时落盘的是同一个键），再命令面板按它调宽。
-  const { setWidth } = useDockWidth()
+  const { setWidth, max } = useDockWidth()
   const [refresh, setRefresh] = useState(0)
 
   const previewPath = useDockPreview((s) => s.path)
@@ -189,6 +189,7 @@ export function PreviewPanel({ panelRef }: {
                   { label: '窄 · 280', onSelect: () => pickWidth(280) },
                   { label: '中 · 340', onSelect: () => pickWidth(340) },
                   { label: '宽 · 460', onSelect: () => pickWidth(460) },
+                  { label: '与会话等宽', onSelect: () => pickWidth(max) },
                   { divider: true },
                   { label: '复位 · ' + PANEL_DEFAULT_W, onSelect: () => pickWidth(PANEL_DEFAULT_W) },
                 ]}

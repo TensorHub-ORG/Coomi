@@ -184,3 +184,18 @@
   .settings-navigation { width: 180px; padding-inline: 10px; }
   .settings-navigation nav button { padding-inline: 8px; }
 }
+.workbench-composer { container: composer / inline-size; }
+[data-composer] { container: composer-area / inline-size; }
+@container composer (max-width: 620px) {
+  .composer-provider-name { display: none; }
+  .composer-model-label { max-width: 170px; }
+}
+@container composer (max-width: 440px) {
+  .composer-control-label, [data-effort-picker] > svg:last-child { display: none; }
+  .composer-model-label { max-width: 128px; }
+  [data-composer-tools] { gap: 0; flex-wrap: nowrap; }
+  [data-composer-tools] > button { padding-inline: 5px; }
+}
+@container composer-area (max-width: 620px) {
+  [data-chat-stats] { gap: 4px 10px; }
+}

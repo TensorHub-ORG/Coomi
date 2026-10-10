@@ -58,14 +58,14 @@ export function HtmlFilePreview({ path, name }: { path: string; name: string }) 
   return (
     <div ref={ref} className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
       <div className='flex shrink-0 items-center gap-1.5 border-b border-line px-2 py-1'>
-        <span className='min-w-0 flex-1 truncate text-11 text-ink-4'>沙箱预览（无同源、无联网、无顶层跳转）</span>
+        <span className='min-w-0 flex-1 truncate text-11 text-ink-4'>页面预览</span>
         <Button variant='ghost' size='icon-sm' className='h-6 w-6' title='重新运行' onClick={() => setReload((v) => v + 1)}>
           <RotateCcw size={11} />
         </Button>
       </div>
-      <SandboxFrame doc={doc} token={token} title={name || 'HTML 预览'} height={520} />
+      <SandboxFrame doc={doc} token={token} title={name || 'HTML 预览'} fill />
       <div className='shrink-0 border-t border-line px-2 py-1'>
-        <PreviewNote tone='info'>外链样式 / 图片 / 脚本属于网络请求，已被沙箱挡掉；页面里的内联样式与脚本正常执行。</PreviewNote>
+        <PreviewNote tone='info'>本地预览，外链资源不可用</PreviewNote>
       </div>
     </div>
   )

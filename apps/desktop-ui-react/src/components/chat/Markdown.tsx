@@ -15,10 +15,10 @@
  * 光标与段落动画全是纯 CSS（.md-body[data-caret] 的伪元素 + base.css 的 @starting-style），
  * 这里没有任何每帧 setState。
  */
-import { useDeferredValue, useEffect, useRef, useState } from 'react'
+import { memo, useDeferredValue, useEffect, useRef, useState } from 'react'
 import { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown'
 import { cn } from '../../lib/cn'
-import { isPlainTooLong, isStreaming } from './streamText'
+import { shouldUsePlainText } from './streamText'
 import { FileChipEnabled, FileLinkAnchor } from './FileChip'
 import { ReactMarkdown, markdownComponents, remarkGfm } from './markdownComponents'
 import { filePathFromHref, remarkFilePaths } from '../richtext/fileLink'
@@ -48,13 +48,14 @@ function useStreamCaret(streaming: boolean): 'in' | 'out' | undefined {
   return caret
 }
 
-export function Markdown({ text, streaming, className }: { text: string; streaming?: boolean; className?: string }) {
+export const Markdown = memo(function Markdown({ text, streaming, className }: { text: string; streaming?: boolean; className?: string }) {
   const caret = useStreamCaret(!!streaming)
   // 降级渲染：只在「要解析」的那条路上用（流式期间是纯文本，没有任何需要让路的解析工作）。
   const deferred = useDeferredValue(text)
 
-  // 流式中一律纯文本；非流式只有超长正文继续纯文本（不解析、不高亮）。
-  const plain = streaming ? isStreaming() : isPlainTooLong(text)
+  // A table header does not freeze the rest of a response. Parsing the whole body
+  // after each subsequent token makes a long stream progressively more expensive.
+  const plain = shouldUsePlainText(text, !!streaming)
   const shown = plain ? text : deferred
   /* 首部空行折叠（2026-09-28「工具卡与正文之间有奇怪空行」的根因）：
      模型在工具调用前后输出的 \n\n 在 pre-wrap 纯文本下会**按字面**渲染成空行；
@@ -63,15 +64,17 @@ export function Markdown({ text, streaming, className }: { text: string; streami
      所以在这里一刀切掉；**尾部保留**：流式光标挂在最后一个文本节点行尾。 */
   const body = shown.replace(/^[ \t]*\n+/, '')
 
+  // 光标（caret-pulse）在 .md-body 的 ::after 上：属性挂不到伪元素，所以标记本体，
+  // base.css 用 html[data-nav-busy] [data-loop-anim] > :last-child::after 这一条停它。
   return (
-    <div data-caret={caret} className={cn('md-body selectable text-13 text-ink', className)}>
+    <div data-caret={caret} data-loop-anim className={cn('md-body selectable text-13 text-ink', className)}>
       {plain
         // 纯文本：pre-wrap 保住换行与缩进（选中复制拿到的是原文），光标由 .md-body[data-caret] 的伪元素挂在最后一个子节点行尾。
         ? <div className='whitespace-pre-wrap break-words'>{body}</div>
         : <FullBody text={body} enabled={!streaming} />}
     </div>
   )
-}
+})
 
 /* ── 路径芯片的接入口 ──
    三条都只作用在「已经要解析」的那条路上，流式期间一个字节都不跑：
@@ -88,12 +91,13 @@ const FILE_URL_TRANSFORM: UrlTransform = (url: string): string =>
 
 /** 非流式（历史消息 / 流已结束）：整段一次性解析。
  *  这一段解析是「每个 text 值一次」而不是「每个 chunk 一次」，所以它的成本只付一次。 */
-function FullBody({ text, enabled }: { text: string; enabled: boolean }) {
+const MARKDOWN_PLUGINS = [remarkGfm, remarkFilePaths]
+const FullBody = memo(function FullBody({ text, enabled }: { text: string; enabled: boolean }) {
   return (
     // 芯片在流式期间不可点：正文此时本来就是纯文本，这层 context 只是兜底。
     <FileChipEnabled enabled={enabled}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkFilePaths]}
+        remarkPlugins={MARKDOWN_PLUGINS}
         urlTransform={FILE_URL_TRANSFORM}
         components={FILE_COMPONENTS}
       >
@@ -101,4 +105,4 @@ function FullBody({ text, enabled }: { text: string; enabled: boolean }) {
       </ReactMarkdown>
     </FileChipEnabled>
   )
-}
+})

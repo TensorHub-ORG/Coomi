@@ -285,7 +285,7 @@ export function ListPane({ variant = 'inline', onClose }: {
             </button>
           ) : null}
         </div>
-        <div className='relative px-3 pb-2'>
+        <div className='relative px-4 pb-3'>
           <Search size={13} className='pointer-events-none absolute left-[22px] top-1/2 -translate-y-1/2 text-ink-4' />
           <Input
             value={query}
@@ -297,7 +297,7 @@ export function ListPane({ variant = 'inline', onClose }: {
         </div>
         {/* 空白处右键：条目自己的菜单会 stopPropagation，冒泡不到这里 */}
         <div
-          className='flex-1 overflow-y-auto px-2 pb-3'
+          className='workbench-list flex-1 overflow-y-auto px-3 pb-4'
           onContextMenu={(e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, blankMenu()) }}
         >
           {filtered.map((g) => {
@@ -355,7 +355,7 @@ export function ListPane({ variant = 'inline', onClose }: {
                             {/* 空占位行的标识是灰的：它只说明「你在这条还没有内容的会话里」，
                                 不是一个可以拿去认的对话名。 */}
                             <span className={cn('truncate', s.empty && 'text-ink-4')}>{listRowTitle(s, meta)}</span>
-                            {s.running ? <span className='ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary' /> : null}
+                            {s.running ? <span className='ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary' data-loop-anim /> : null}
                           </button>
                         </m.li>
                       )

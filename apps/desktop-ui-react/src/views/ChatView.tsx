@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { AlertTriangle, ChevronDown, Menu, PanelRight, PanelRightClose, Plus, Search, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Menu, PanelRight, PanelRightClose, Plus, Search } from 'lucide-react'
 import { useChatItems, useSession } from '../stores/session'
 import { useEngine } from '../stores/engine'
 import { MessageList } from '../components/chat/MessageList'
@@ -8,9 +8,9 @@ import { MessageNav, scrollChatToBottom, useChatAtBottom } from '../components/c
 import { MessageSkeleton } from '../components/chat/MessageSkeleton'
 import { CrashResumeBar, EngineRestartBar } from '../components/chat/RecoveryBars'
 import { Composer } from '../components/chat/Composer'
-import { WelcomeSuggestions } from '../components/chat/WelcomeSuggestions'
 import { ChatSearchBar } from '../components/chat/ChatSearchBar'
-import { SubagentPanel } from '../components/chat/SubagentPanel'
+// 子智能体入口已搬进顶栏（popover），主列不再常驻展开面板。
+import { SubagentPopover } from '../components/chat/SubagentPopover'
 import { useChatSearch } from '../stores/chatSearch'
 import { useUi } from '../stores/ui'
 import { Button } from '../components/ui/Button'
@@ -25,8 +25,6 @@ import logo from '../assets/coomi-logo.png'
     左＝会话列表开关（窄窗口打开抽屉），中＝会话标题 + 当前模型，右＝搜索 / 右侧栏 / 新对话。
     开关状态仍然只读改 stores/ui 的 listCollapsed / listDrawerOpen（谁都不用自己存一份）。 */
 function ChatToolbar() {
-  const minimal = useUi((s) => s.prefs.minimalUi)
-  const setPrefs = useUi((s) => s.setPrefs)
   const { narrow, showInline, showDrawer, open, close } = useListPaneLayout()
   const panelOpen = useUi((s) => s.panelOpen)
   const togglePanel = useUi((s) => s.togglePanel)
@@ -43,7 +41,7 @@ function ChatToolbar() {
   return (
     <header
       data-chat-toolbar
-      className='glass-bar flex h-11 shrink-0 items-center gap-1.5 border-b border-line px-2.5'
+      className='workbench-toolbar glass-bar flex h-[54px] shrink-0 items-center gap-2 border-b border-line px-4'
     >
       <Tip label={listVisible ? '收起会话列表' : narrow ? '打开会话列表' : '展开会话列表'}>
         <Button
@@ -57,32 +55,29 @@ function ChatToolbar() {
           className='shrink-0 gap-1.5'
         >
           <Menu size={15} />
-          <span className='hidden truncate sm:inline'>会话列表</span>
+          {listVisible ? <span className='hidden truncate sm:inline'>会话列表</span> : null}
         </Button>
       </Tip>
 
       {/* 中间：会话标题 + 当前模型。窄列下两端一压，这里先截断，绝不把右侧按钮挤出去。 */}
-      <div className='min-w-0 flex-1 px-1 text-center'>
+      <div className='flex min-w-0 flex-1 items-center gap-2 px-2 text-left' title={(turnMeta?.model || currentModel || '默认模型') + ' · ' + (streaming ? '正在生成' : '就绪')}>
+        {streaming ? <span className='h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary' aria-label='生成中' /> : null}
         {title ? (
-          <p className='truncate text-13 font-semibold leading-tight text-ink' title={title}>{title}</p>
+          <p className='min-w-0 truncate text-14 font-semibold leading-tight text-ink' title={title}>{title}</p>
         ) : streaming ? (
           <span role='status' aria-label='会话标题生成中' className='skeleton mx-auto block h-3 w-28 rounded-sm' />
         ) : (
           <p className='truncate text-13 font-semibold leading-tight text-ink-3'>新会话</p>
         )}
-        <p className='truncate text-11 leading-tight text-ink-4'>{(turnMeta?.model || currentModel || '默认模型')}</p>
       </div>
 
-      <Tip label={minimal ? '极简界面已开启，点击切换标准界面' : '开启极简界面'}>
-        <button type='button' className='minimal-toggle' aria-label='极简界面模式' aria-pressed={minimal} onClick={() => setPrefs({ minimalUi: !minimal })}>
-          <SlidersHorizontal size={13} /><span>极简</span>
-        </button>
-      </Tip>
       <Tip label='搜索会话内容 · Ctrl+F'>
         <Button variant='ghost' size='icon-sm' aria-label='搜索会话内容' onClick={() => useChatSearch.getState().show()}>
           <Search size={15} />
         </Button>
       </Tip>
+      {/* 子智能体入口：小图标按钮 + popover，带运行中数量小徽标；不常驻展开、不占对话空间 */}
+      <SubagentPopover />
       <Tip label={panelOpen ? '收起右侧栏' : '展开右侧栏'}>
         <Button
           variant='ghost'
@@ -255,7 +250,9 @@ export function ChatView() {
         'relative flex min-h-0 flex-1 flex-col',
         'transition-opacity duration-[var(--motion-base)] ease-[var(--ease-enter)]',
         loadingHistory && 'pointer-events-none opacity-45',
-      )}>
+      )}
+      // 侧边栏宽度变化时：消息列表内部重排不再级联到整个外壳（收侧边栏卡的主因之一）
+      style={{ contain: 'layout' }}>
         {/* 会话区**自己的一层**错误边界：消息列表崩了只让这一块换成一张小卡片 + 重试，
             导航 / 会话列表 / 输入区 / 标题栏全都照常可用 —— 绝不把整屏一起带走。
             resetKey 跟着会话走：换个会话（或新建）自动复位，不用用户去点重试。 */}
@@ -267,8 +264,8 @@ export function ChatView() {
       {/* overflow-x-clip：只裁横向，不产生滚动条，也不影响输入框自带的阴影。
           [&_button:not(:last-child)]:min-w-0 让工具按钮在窄列里可以收缩，
           最后一个按钮（发送/停止）保持原尺寸，整行因此永远放得下。 */}
-      <div className='relative shrink-0 overflow-x-clip px-3 pb-4 pt-2 [&_button:not(:last-child)]:min-w-0'>
-        <div className='pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-canvas to-transparent' />
+      <div className='workbench-composer-zone relative shrink-0 overflow-x-clip px-4 pb-5 pt-3 [&_button:not(:last-child)]:min-w-0'>
+        <div className='workbench-composer-fade pointer-events-none absolute inset-x-0 -top-10 h-10' />
         {/* relative：里面的「到最新」浮标以**这一层**（＝内容列，max-w-[var(--content-w)] 居中）为准，
             所以它对齐的是输入框的右缘，不是窗口右边。 */}
         <div className='relative mx-auto w-full max-w-[var(--content-w)]'>
@@ -309,9 +306,6 @@ export function ChatView() {
       <EngineRestartBar />
       <CrashResumeBar />
       <ChatSearchBar />
-      {/* 子智能体面板：挂在搜索条下面、消息列表上面（主列的兄弟节点，
-          自己 shrink-0，不参与 MessageList 的滚动；没有子智能体时整块不渲染）。 */}
-      <SubagentPanel items={items} />
       {/* 历史没回来之前：有旧内容就让旧内容留在原位（降透明度），没内容就画骨架；
           只有「确实加载完且真的没有消息」才渲染 hero。 */}
       {!empty ? conversation : loadingHistory ? (
@@ -332,7 +326,6 @@ export function ChatView() {
               <p className='welcome-description'>准备好了，就告诉我想做什么</p>
             </div>
             <Composer hero />
-            <WelcomeSuggestions />
           </div>
         </div>
       )}

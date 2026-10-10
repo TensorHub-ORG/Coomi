@@ -8,18 +8,24 @@
 //!
 //! 这里只做读取与过滤：
 //! - <home>/plugin-views.json      —— 插件页面（views: [{id, pluginId, title, icon, order, entry}]）；
+//! - <home>/plugin-clients.json    —— 插件**客户端模块**（clients: [{pluginId, name, entry}]，
+//!   对标 DSH 的 client plugin：前端把模块源码 import 进宿主渲染进程，全信任）；
 //! - GET  /api/plugins/subagents     —— 插件子智能体模板（前端下拉读取）；
 //! - GET  /api/plugins/views         —— 插件页面注册表（侧边栏入口，v2.1）；
+//! - GET  /api/plugins/client        —— 客户端模块清单（只回路径）；
+//! - GET  /api/plugins/client/source —— 按 pluginId 读模块源码（路径只来自注册表）；
 //! - GET  /api/plugins/personas      —— 启用插件的 persona 提示词（供展示 / 调试）；
 //! - POST /api/plugins/reindex-skills —— 立即重建 SkillRouter 索引（技能中心刷新用）。
 //!
 //! 所有读取都容错：文件缺失 / 坏 JSON 一律当作空结果，绝不 panic。
 
 use axum::Json;
+use axum::extract::Query;
 use axum::extract::State;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 
 use coomi_engine::ChatMessage;
@@ -132,6 +138,58 @@ pub(in crate::web) fn plugin_views(home: &Path) -> Vec<Value> {
 /// GET /api/plugins/views —— 插件页面注册表（前端侧边栏据此多出入口）。
 pub(in crate::web) async fn plugin_views_api(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "views": plugin_views(&state.home) }))
+}
+
+/// 启用插件声明的**客户端模块**（<home>/plugin-clients.json 的 clients，按启停表过滤）。
+/// 与 plugin_views 同一套读取与过滤口径；文件缺失 / 坏 JSON 一律当空结果。
+pub(in crate::web) fn plugin_clients(home: &Path) -> Vec<Value> {
+    let Ok(text) = std::fs::read_to_string(home.join("plugin-clients.json")) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(clients) = value.get("clients").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let enabled = read_plugin_enabled(home);
+    clients
+        .iter()
+        .filter(|client| {
+            let plugin_id = client.get("pluginId").and_then(Value::as_str).unwrap_or_default();
+            plugin_enabled(&enabled, plugin_id)
+        })
+        .cloned()
+        .collect()
+}
+
+/// GET /api/plugins/client —— 客户端模块清单（**只回路径，不回源码**）。
+pub(in crate::web) async fn plugin_clients_api(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "clients": plugin_clients(&state.home) }))
+}
+
+/// GET /api/plugins/client/source?id=<pluginId> —— 读某插件客户端模块的源码。
+///
+/// 路径**只从注册表里取**，不接受调用方给路径：壳侧写注册表时已经校验过
+/// 「插件目录内的相对路径」（绝对路径与 `..` 都被挡掉），这里因此不开任意路径读取的口子。
+pub(in crate::web) async fn plugin_client_source(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let id = params
+        .get("id")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::bad_request("id is required"))?;
+    let entry = plugin_clients(&state.home)
+        .into_iter()
+        .find(|client| client.get("pluginId").and_then(Value::as_str) == Some(id))
+        .and_then(|client| client.get("entry").and_then(Value::as_str).map(str::to_owned))
+        .ok_or_else(|| ApiError::not_found(format!("plugin `{id}` has no client entry")))?;
+    let source = std::fs::read_to_string(&entry).map_err(|error| {
+        ApiError::internal(format!("failed to read plugin client `{id}`: {error}"))
+    })?;
+    Ok(Json(json!({ "id": id, "source": source })))
 }
 
 /// GET /api/plugins/personas —— 启用插件的 persona 提示词（供展示 / 调试）。

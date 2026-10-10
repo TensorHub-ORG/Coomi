@@ -34,6 +34,14 @@ export interface ItemQuote {
   at?: number
 }
 
+/** 重试信息（对标 DSH 的 ModelRetryItem）：attempt 第几次 / maxAttempts 最多几次 / delayMs 这次等多久。
+ *  delayMs 可能缺失（retry_confirmation 的事件不一定给 delay），缺失时渲染端不倒数、只显示「第 X/Y 次」。 */
+export interface NoticeRetryInfo {
+  attempt: number
+  maxAttempts: number
+  delayMs?: number
+}
+
 export type ChatItem =
   | {
       kind: 'user'
@@ -48,6 +56,22 @@ export type ChatItem =
       attachments?: ItemAttachment[]
       quotes?: ItemQuote[]
       structured?: boolean
+      /** 对话流顺序锚：这条在**引擎事件日志 / 历史消息数组**里的单调顺序位置。
+          渲染层按它稳定排序（见 stores/session.ts 的 stableByAnchor）—— 顺序由事件日志决定，
+          前端不再靠 mergeAssistantTurns / findCover 两个启发式在两个模型之间翻译。内部字段，组件不读。 */
+      anchorSeq?: number
+    }
+  | {
+      /** 引擎注入的**非用户输入**（目标复述等）：不是用户说的话，渲染成一条轻量系统行。
+       *  以前这类消息（带 internal 标记）一律当成用户消息推出去，
+       *  于是每 6 轮注入一次的目标复述会以「用户气泡」的样子突然出现。 */
+      kind: 'reminder'
+      id: string
+      /** 机器可读的种类（目前只有 'goal'）。 */
+      label: string
+      text: string
+      at?: number
+      anchorSeq?: number
     }
   | {
       kind: 'assistant'
@@ -63,6 +87,8 @@ export type ChatItem =
       /** 只有「思考内容还在流式产出」时才为 true。 */
       reasoningStreaming?: boolean
       at?: number
+      /** 对话流顺序锚（见 user 变体说明）。 */
+      anchorSeq?: number
     }
   | {
     kind: 'notice'
@@ -72,6 +98,24 @@ export type ChatItem =
     retryable?: boolean
     /** 这张卡可以「继续这一轮」（本轮被上游中断 / 工具轮次用尽时给）。 */
     resume?: boolean
+    /** 同一错误族的第几次出现（1 = 首次，正文不带标记；>=2 时正文附「（第 N 次）」）。
+     *  错误条合并用（见 pushErrorNotice），渲染层不读它。 */
+    count?: number
+    /** 错误族键：agent_error 用事件的 code、retry_confirmation 用 reason —— 都是结构化字段，
+     *  不是解析文本。族键相同的错误**替换**最后一条而不是追加，不同的照常追加。内部字段，不进 UI。 */
+    errorKey?: string
+    /** 对话流顺序锚（见 user 变体说明）。 */
+    anchorSeq?: number
+    /** 这条错误已被**本轮后续成功**吸收（B-3）：turn_end 且本轮有正文产出时，
+     *  把本轮内的 error notice 标 true，渲染端据此降级（不再当「当前失败」高亮）。 */
+    resolved?: boolean
+    /** 上游限流（B-4）：code 含 429 / rate，或 message 含 rate limit / token limit / 429 时标 true，
+     *  渲染端据此显示「上游限流」形态。 */
+    rateLimited?: boolean
+    /** 连接重试进行中：attempt / maxAttempts / delayMs 来自引擎 connection_retry
+     *  （{attempt, max_attempts, delay_ms, message}）或 retry_confirmation 事件。
+     *  渲染端据此显示「将在 N 秒后自动重试（第 X/Y 次）」的实时倒计时（见 MessageList 的 Notice）。 */
+    retryInfo?: NoticeRetryInfo
   }
   /** AI 提问卡：引擎的 user_question_request 落在对话流里的那一条。
    *  与「审批卡」（弹窗、答完就关）不同，这张卡**答完不消失** —— answer 留在卡片上，
@@ -90,6 +134,8 @@ export type ChatItem =
        *  只有它为 true 时卡片才接管键盘（数字选 / Enter 确认 / Esc 跳过），
        *  否则历史里那些早就答过的卡会跟着一起抢按键。 */
       pending: boolean
+      /** 对话流顺序锚（见 user 变体说明）。 */
+      anchorSeq?: number
     }
 
 /** 引擎在 user_question_request 里给的单个问题。
@@ -168,6 +214,14 @@ function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : v == null ? fallback : String(v)
 }
 
+/** 事件数值字段的兜底读取：数字直接用，字符串数字转一下，取不到 / 非数字用 fallback。
+    为什么单独写：事件里 attempt / max_attempts / delay_ms 的形态各家引擎不一（数字或字符串），
+    Number(undefined) 这类隐式转换会产出 NaN，拿 NaN 去拼文案会显示「第 NaN 次」。 */
+function num(v: unknown, fallback: number): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : Number.NaN
+  return Number.isFinite(n) ? n : fallback
+}
+
 /** 工具参数是对象，展示时统一成 JSON 文本（过长截断，避免一次渲染几十万字符）。 */
 function argsText(value: unknown): string {
   if (value == null) return ''
@@ -216,6 +270,54 @@ export function sameMessage(left: string, right: string): boolean {
   return head >= 40 && a.slice(0, head) === b.slice(0, head)
 }
 
+/** 过程体里的一段：叙述正文或一组工具。顺序即事件顺序，渲染层不重排。 */
+export type ProcessMember =
+  | { kind: 'text'; text: string }
+  | { kind: 'tools'; callIds: string[] }
+
+/**
+ * 把一条助手消息拆成「过程」与「答案」。
+ *
+ * 判据照搬 DSH 的回合过程模型（Turn process）：**最后一段正文就是答案**，
+ * 它之前的一切（思考 / 叙述 / 工具调用）都是过程；答案独立在后、永不参与折叠。
+ * 最后一步仍然是工具调用时（正文还没出来）视为「还没有答案」，整条都归过程。
+ *
+ * 为什么需要这个函数：直接渲染 item.text 会把工具位置抹掉（item.text 是所有正文
+ * chunk 的拼接，不含工具），而之前按 segments 交替渲染时，思考与折叠栏又会落在
+ * 正文下方、且用了工具的轮次整个不显示思考。分离之后：
+ *   · 过程按事件先后整体折在答案**上方**；
+ *   · 答案始终可见，不随折叠开合而位移；
+ *   · 正文一个字都不丢 —— members 的 text 段 + answer 恰好等于全部 text 段。
+ */
+export function splitProcessAnswer(item: {
+  text: string
+  segments?: Array<{ kind: 'text'; text: string } | { kind: 'tools'; callIds: string[] }>
+}): { answer: string; members: ProcessMember[] } {
+  const segments = item.segments
+  if (!segments?.length) return { answer: item.text, members: [] }
+  const last = segments[segments.length - 1]
+  if (last.kind === 'text' && last.text.trim()) {
+    return { answer: last.text, members: segments.slice(0, -1) }
+  }
+  /* 末段是工具（或空文本）：**不能直接判定答案为空**。
+     `item.text` 可能已经带着完整正文 —— 它不是只有 text_chunk 一条写入路径，
+     落库回读、turn_end 的整段文本、历史接管（见本文件里带 segments 的那几处合并）
+     都会更新 text，但 segments 仍以工具段结尾。
+     只按 segments 判空，就会出现「消息已完成、界面没有任何输出」「做一半就断」
+     以及「只思考不动」—— 内容明明在 text 里，却被当成不存在。
+     这里用「text 里没有被文本段覆盖的那部分」当答案，两条写入路径都能正确渲染。 */
+  const accounted = segments
+    .filter((seg): seg is { kind: 'text'; text: string } => seg.kind === 'text')
+    .map((seg) => seg.text)
+    .join('')
+  const remaining = accounted && item.text.startsWith(accounted)
+    ? item.text.slice(accounted.length)
+    : item.text
+  if (remaining.trim()) return { answer: remaining, members: segments.slice() }
+  // 正文确实还没产出：整条都算过程（答案为空，由调用方决定不渲染）。
+  return { answer: '', members: segments.slice() }
+}
+
 /**
  * 历史消息 → 条目（**历史回读的唯一映射**）。
  *
@@ -235,9 +337,26 @@ export function itemsFromHistory(messages: Array<Record<string, any>> | undefine
     const at = typeof m.at_ms === 'number' ? m.at_ms : typeof m.timestamp === 'number' ? m.timestamp : undefined
 
     if (role === 'user') {
+      /* 引擎注入的消息不是用户说的话（`internal`）：带 `reminder` 标记的渲染成系统行，
+         其余（上下文提示 / 插话提示）直接不进 UI —— 它们是发给模型的提示，不是对话内容。 */
+      if (m.internal === true) {
+        const reminderKind = str(m.reminder)
+        if (!reminderKind) continue
+        out.push({
+          kind: 'reminder',
+          id: msgId ?? 'h' + out.length,
+          label: reminderKind,
+          text,
+          at,
+          anchorSeq: messageAnchor(m, out.length),
+        })
+        continue
+      }
       if (!text) continue
       out.push({
         kind: 'user', id: msgId ?? 'h' + out.length, msgId, text, at,
+        // 顺序锚 = 它在历史消息数组里的位置（或消息自带 seq，见 messageAnchor）。
+        anchorSeq: messageAnchor(m, out.length),
         ...(m.__queued === true ? { queued: true as const } : {}),
         ...(Array.isArray(m.attachments) ? { attachments: m.attachments as ItemAttachment[] } : {}),
         ...(Array.isArray(m.quotes) ? { quotes: m.quotes as ItemQuote[] } : {}),
@@ -260,6 +379,7 @@ export function itemsFromHistory(messages: Array<Record<string, any>> | undefine
       const item: Extract<ChatItem, { kind: 'assistant' }> = {
         kind: 'assistant', id: msgId ?? 'h' + out.length, msgId,
         text, reasoning: reasoningOf(m), tools, streaming: false, at,
+        anchorSeq: messageAnchor(m, out.length),
       }
       // 顺序段：正文与工具按历史里的先后交替（一段正文一段工具）。
       if (tools.length) {
@@ -290,6 +410,7 @@ export function itemsFromHistory(messages: Array<Record<string, any>> | undefine
             status: failed ? 'error' : 'done', preview: text.slice(0, PREVIEW_LIMIT),
           }],
           streaming: false,
+          anchorSeq: messageAnchor(m, out.length),
         })
       }
     }
@@ -329,6 +450,8 @@ function mergeAssistantTurns(items: ChatItem[]): ChatItem[] {
       segments.push({ kind: 'tools', callIds: item.tools.map((t) => t.callId).filter(Boolean) })
     }
     out[out.length - 1] = {
+      // ...prev 保留 anchorSeq（本组**第一条**的顺序锚）：合并只是「展示分组」，
+      // 顺序仍由锚决定 —— 本组第一条在对话流里的位置就是整组的位置。
       ...prev,
       text: prev.text + item.text,
       reasoning: prev.reasoning + item.reasoning,
@@ -360,20 +483,245 @@ function findCurrentAssistant(list: ChatItem[]): number {
   return -1
 }
 
-/** 新建一条流式助手消息的骨架。 */
-function freshAssistant(seq: number): Extract<ChatItem, { kind: 'assistant' }> {
+/** 新建一条流式助手消息的骨架（anchor = 这条在对话流里的顺序锚，见 nextAnchor）。 */
+function freshAssistant(seq: number, anchor: number): Extract<ChatItem, { kind: 'assistant' }> {
   return {
     kind: 'assistant', id: 'e' + seq, text: '', reasoning: '',
     tools: [], segments: [], streaming: true, reasoningStreaming: false,
+    anchorSeq: anchor,
   }
 }
 
+/* ── 对话流顺序锚（anchorSeq）的取值规则 ──
+   锚的意义只有一条：**条目在对话流里的单调顺序位置**。渲染层（stores/session.ts）按它稳定排序，
+   保证「流式（事件就地追加）」与「回读（历史消息数组）」两个模型产出**完全相同的顺序**。
+
+   · **新条目**（事件第一次创建它）的锚 = max(事件的 event_seq, 数组里已有锚的最大值 + 1)：
+      事件的 event_seq 是引擎事件日志里的位置（与 event_type 同级，seq 门已在用它），
+      正常连接下它单调递增、天然就是顺序；取 max 是为了兜住两种「event_seq 变小」的形态：
+        · 引擎重启后 event_seq 从 1 重新计数（seq 门按新基线复位，见 lib/eventSeq.ts），
+          而历史条目的锚是「对话位置」—— 两套坐标系直接比会乱序，取 max 保证新条目永远
+          排在当前数组末尾，锚与数组顺序单调一致；
+        · 回读合并后条目的锚是 0,1,2… 的位置，新一轮事件的 event_seq 通常更大，max 不干预。
+   · **更新已有条目**（text_chunk / turn_end / 排队标记…）**不改写锚**：锚只表示「创建时的位置」，
+      把锚写成更新事件的 seq 等于把这条「挪」到流的更晚处，会破坏已排序的数组（老条目会被
+      拖到末尾 / 新条目被插进历史中间）。位置变了＝该重开一条新条目，而不是更新。
+   · 历史回读（itemsFromHistory / applyHistoryItems）：按消息数组的位置赋 0,1,2,…。 */
+
+/** 数组里已有锚的最大值 + 1：没有任何事件可依附的新条目（乐观用户消息等）的顺序锚。 */
+export function nextAnchorSeq(items: readonly ChatItem[]): number {
+  let max = 0
+  for (const item of items) {
+    if (typeof item.anchorSeq === 'number' && item.anchorSeq > max) max = item.anchorSeq
+  }
+  return max + 1
+}
+
+/** 事件的顺序锚：优先顶层 event_seq（正安全整数），老引擎 / 兼容帧没有时退回本地 ctx.seq。 */
+function eventAnchor(ev: Ev, fallbackSeq: number): number {
+  const raw = ev.event_seq
+  const n = typeof raw === 'number' ? raw
+    : typeof raw === 'string' && raw.trim() ? Number(raw) : Number.NaN
+  if (Number.isSafeInteger(n) && n > 0) return n
+  return Number.isSafeInteger(fallbackSeq) && fallbackSeq > 0 ? fallbackSeq : 0
+}
+
+/** 新条目的最终锚：见上面「取值规则」——event_seq 与「末尾位置」取大者，保证单调。 */
+function nextAnchor(list: readonly ChatItem[], ev: Ev, fallbackSeq: number): number {
+  const fromEvent = eventAnchor(ev, fallbackSeq)
+  const tail = nextAnchorSeq(list)
+  return fromEvent > tail ? fromEvent : tail
+}
+
+/** 历史回读合并后把**缺锚**的条目按数组位置补齐（有锚的原样保留）：
+ *  历史条目在 itemsFromHistory 已按位置赋锚、本地尾部在事件落地时已带锚 ——
+ *  这里只兜底「测试构造 / 旧版本缓存」这类没有锚的条目，让排序永远有据可依。
+ *  有锚的条目一个都不动：历史条目的「对话位置」与尾部条目的「创建位置」是同一坐标系，
+ *  直接比就是对的（这正是回读后顺序与流式一致的关键）。 */
+function fillMissingAnchors(list: ChatItem[]): ChatItem[] {
+  let changed = false
+  const out = list.map((item, i) => {
+    if (typeof item.anchorSeq === 'number') return item
+    changed = true
+    return { ...item, anchorSeq: i }
+  })
+  return changed ? out : list
+}
+
+/** 限流识别（B-4）：code 含 429 / rate，或 message 含 rate limit / token limit / 429。
+ *  命中就给 notice 打 rateLimited 标记，渲染端据此显示「上游限流」形态（不解析正文文案）。 */
+function isRateLimited(ev: Ev): boolean {
+  const code = str(ev.code).toLowerCase()
+  const message = str(ev.message).toLowerCase()
+  if (code.includes('429') || code.includes('rate')) return true
+  return message.includes('429') || message.includes('rate limit') || message.includes('token limit')
+}
+
+/** 历史消息的顺序锚：引擎消息自带 seq / order / position 时优先用（它是权威的对话位置），
+ *  没有（当前引擎的 ChatMessage 不带这类字段，已核对 apps/coomi-rs/engine/src/types.rs）
+ *  就按它在消息数组里的位置（0,1,2,…）。 */
+function messageAnchor(m: Record<string, any>, position: number): number {
+  for (const key of ['seq', 'order', 'position']) {
+    const raw = m[key]
+    const n = typeof raw === 'number' ? raw
+      : typeof raw === 'string' && raw.trim() ? Number(raw) : Number.NaN
+    if (Number.isSafeInteger(n) && n >= 0) return n
+  }
+  return position
+}
+
+/* ── 错误条合并（B-1）与条数上限（B-2） ──
+   根因（用户反馈「错误条在页面底部越堆越多」）：
+     · agent_error / retry_confirmation 原来每次都 [...list, 新notice] —— 无脑追加；
+     · findCover 对 notice 一律不算覆盖 —— 历史对账永远清不掉它们；
+     · 没有「成功时清除错误条」的逻辑，也没有条数上限。
+   对策：
+     · 同族错误（结构化族键相同）**替换**最后一条而不是再堆一条；
+     · 超过上限时只留最新 2 条，更早的移除并写进最新一条的正文。 */
+
+/** 错误条上限：任何未预料到的路径也不允许错误条无限堆积。 */
+const MAX_ERROR_NOTICES = 3
+
+/** 同一错误族第 N 次出现时附在正文末尾的标记（N = 1 是首次，不写；N >= 2 才写）。
+ *  格式示例：「...429...（第 3 次）」。 */
+function errorCountSuffix(count: number): string {
+  return count > 1 ? '（第 ' + count + ' 次）' : ''
+}
+
+/** 错误条上限兜底：error notice 数量超过 MAX_ERROR_NOTICES 时，
+ *  只保留最新 2 条、更早的全部移除，并把被移除的数量写进**最新一条**的正文
+ *  （示例：「...（另有 2 条更早错误已折叠）」）—— 用户看得到「还有 N 条更早的没显示」，
+ *  而不是静默消失。 */
+function foldErrorNotices(list: ChatItem[]): ChatItem[] {
+  const errorIdx: number[] = []
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i]  // 先取本地变量：TS 对「两次下标访问」不做类型收窄，直接 list[i].kind + list[i].tone 会报错
+    if (item.kind === 'notice' && item.tone === 'error') errorIdx.push(i)
+  }
+  if (errorIdx.length <= MAX_ERROR_NOTICES) return list
+  const keepFrom = errorIdx[errorIdx.length - 2]  // 保留下来的最老那条（在原 list 里的索引）
+  const removedCount = errorIdx.length - 2
+  const out: ChatItem[] = []
+  let newestErrorAt = -1
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i]
+    if (item.kind === 'notice' && item.tone === 'error' && i < keepFrom) continue  // 更早的移除
+    const at = out.length
+    out.push(item)
+    if (item.kind === 'notice' && item.tone === 'error') newestErrorAt = at  // 最后一次赋值 = 最新那条
+  }
+  if (newestErrorAt >= 0) {
+    const newest = out[newestErrorAt]
+    // 本地变量收窄后 spread 才安全（对 union 里其它成员没有 text 字段）。
+    if (newest.kind === 'notice' && newest.tone === 'error') {
+      out[newestErrorAt] = {
+        ...newest,
+        text: newest.text + '（另有 ' + removedCount + ' 条更早错误已折叠）',
+      }
+    }
+  }
+  return out
+}
+
+/** 追加（或同族替换）一条错误 notice —— agent_error / retry_confirmation 的公共后处理：
+ *   · list 最后一条是 notice、tone='error' 且 errorKey 相同 → **替换**它而不是 push：
+ *     count = (旧.count ?? 1) + 1，正文换最新消息并附「（第 N 次）」；
+ *     只替换**最后一条**：不同族键（不同 code/reason）之间的错误仍各自成条，绝不合并。
+ *   · 其余情况照常追加一条；
+ *   · 返回前统一过一次 foldErrorNotices 上限兜底。
+ *  retryable / resume 一律取最新事件的（调用方按事件字段传入）。
+ *  anchor = 这条错误在对话流里的顺序锚（调用方按 nextAnchor 算出，追加时写入；
+ *           同族替换时**保留旧锚** —— 它是同一条逻辑卡，位置不该随新事件漂移）。
+ *  rateLimited = 上游限流（B-4），渲染端据此显示「上游限流」形态。 */
+function pushErrorNotice(
+  list: ChatItem[],
+  seq: number,
+  key: string,
+  text: string,
+  retryable?: boolean,
+  resume?: boolean,
+  anchor?: number,
+  rateLimited?: boolean,
+  retryInfo?: NoticeRetryInfo,
+): ChatItem[] {
+  const last = list[list.length - 1]
+  if (last && last.kind === 'notice' && last.tone === 'error' && last.errorKey === key) {
+    const count = (last.count ?? 1) + 1
+    const copy = list.slice()
+    // id 保持不变：React key 稳定，卡片原地更新，不会重播入场动画（也不触发「新条目」闪烁）。
+    // anchor 同样保留（同族替换＝同一条卡的第 N 次出现，不挪位置）。
+    copy[copy.length - 1] = {
+      ...last,
+      text: text + errorCountSuffix(count),
+      count,
+      tone: 'error',
+      retryable,
+      ...(resume === true ? { resume: true as const } : {}),
+      ...(rateLimited === true ? { rateLimited: true as const } : {}),
+      // 替换时显式写 retryInfo：不传（undefined）就清掉旧的重试数据 ——
+      // 新错误到来意味着旧的等待窗口不再算数，倒计时不该还挂在一条新卡上。
+      retryInfo,
+    }
+    return foldErrorNotices(copy)
+  }
+  return foldErrorNotices([...list, {
+    kind: 'notice', id: 'n' + seq, text, tone: 'error', errorKey: key,
+    retryable,
+    // resume 只在真是「可继续」时写出（agent_error 不带 → 不写 undefined 键，语义不变）。
+    ...(resume === true ? { resume: true as const } : {}),
+    ...(anchor !== undefined ? { anchorSeq: anchor } : {}),
+    ...(rateLimited === true ? { rateLimited: true as const } : {}),
+    ...(retryInfo ? { retryInfo } : {}),
+  }])
+}
+
+/* ── 错误码 → 友好文案（对标 DSH 的 failureMessage）──
+   只换「主句」：判据用结构化字段 —— agent_error 的 code（存在 errorKey 里）、
+   retry_confirmation 的 reason（同 errorKey）、限流用 rateLimited 标记（数据层已按
+   code/message 判好，见 isRateLimited）—— 不解析 message 文本（文本是给人看的，格式各家不一）。
+   pushErrorNotice 拼在正文末尾的「（第 N 次）」「（另有 M 条更早错误已折叠）」是身份信息，
+   映射时拆出来原样挂回，别让友好文案把「第几次」吃掉。 */
+
+/** 把正文末尾的计数后缀拆出来：可能叠加（先「（第 3 次）」再「（另有 2 条…）」），循环剥到没有为止。 */
+function splitCountSuffix(text: string): { body: string; suffix: string } {
+  let body = text
+  let suffix = ''
+  for (;;) {
+    const m = body.match(/（第 \d+ 次）|（另有 \d+ 条更早错误已折叠）$/)
+    if (!m) break
+    suffix = m[0] + suffix
+    body = body.slice(0, body.length - m[0].length)
+  }
+  return { body, suffix }
+}
+
+/** 错误条主文案：错误码命中映射表就换成人话，没命中（或 info 条 / 已恢复条）原样返回。
+    MessageList 的 Notice 渲染用；放这里是为了纯函数可被回归脚本（node 直接跑本文件）测。 */
+export function friendlyErrorText(item: Extract<ChatItem, { kind: 'notice' }>): string {
+  if (item.tone !== 'error' || item.resolved) return item.text
+  const { body, suffix } = splitCountSuffix(item.text)
+  const key = (item.errorKey ?? '').toLowerCase()
+  // 传输层失败（TLS 握手中断 / 连不上 / DNS / 代理）：瞬时网络问题，提示用户检查网络
+  // 或稍后重试 —— 这类错误引擎已改为可自动恢复重试，这里把原始英文换成能看懂的。
+  const transportHit = /tls|handshake|connect|dns|request_send|stream|proxy/i.test(body + ' ' + key)
+  const head = item.rateLimited ? '上游限流，建议稍等'
+    : transportHit ? '网络连接失败（TLS 握手被中断）：检查网络/代理/防火墙，正在自动重试'
+    : key === 'no_provider' || key.includes('no_provider') ? '未配置模型，先到设置添加'
+      : key === 'quota' || key.includes('quota') ? '配额用尽'
+        : key === 'auth' || key === 'authentication' || key.includes('auth') ? '凭据无效'
+          : body
+  return head === body ? item.text : head + suffix
+}
+
 /**
- * 一条实时事件 → 就地追加到消息数组（**不合并、不剪枝、不覆盖**）：
+ * 一条实时事件 → 就地追加到消息数组（**不合并、不剪枝、不覆盖**是默认行为，
+ * **唯一例外**是错误条：见下）：
  *   · text_chunk / reasoning_chunk 直接追加到「当前这条 assistant 消息」；
  *   · tool_start / running / done / cache_hit 写进这条消息的 tools 与 **segments 顺序段**
  *     （正文 / 工具按事件先后交替）；
  *   · compression / agent_error / user_question_request 各落一条 notice / ask 条目；
+ *     agent_error 与 retry_confirmation 是**唯一例外**：同族错误（code/reason 相同）
+ *     替换最后一条而不是追加，并受条数上限约束（见 pushErrorNotice / foldErrorNotices）；
  *   · turn_end 收尾（streaming=false + reasoningStreaming=false）；
  *   · message_queued / queued_message_started / queue_cleared / turn_interrupted 维护「排队中」标记。
  * 没有任何内容变化时返回**原数组引用**（渲染层靠引用判断要不要重画）。
@@ -394,9 +742,11 @@ export function applyEventToMessages(
     let idx = findCurrentAssistant(list)
     let copy: ChatItem[]
     if (idx < 0) {
-      copy = [...list, freshAssistant(seq)]
+      // 新建条目：顺序锚 = 事件日志位置（取 max 兜底，见 nextAnchor）。
+      copy = [...list, freshAssistant(seq, nextAnchor(list, ev, seq))]
       idx = copy.length - 1
     } else {
+      // 更新已有条目：**不改写锚**（位置没变，见 nextAnchor 上方的取值规则）。
       copy = list.slice()
     }
     const host = copy[idx] as Extract<ChatItem, { kind: 'assistant' }>
@@ -431,7 +781,7 @@ export function applyEventToMessages(
     let idx = findCurrentAssistant(list)
     let copy: ChatItem[]
     if (idx < 0) {
-      copy = [...list, freshAssistant(seq)]
+      copy = [...list, freshAssistant(seq, nextAnchor(list, ev, seq))]
       idx = copy.length - 1
     } else {
       copy = list.slice()
@@ -497,16 +847,24 @@ export function applyEventToMessages(
       kind: 'notice', id: 'n' + seq,
       text: '上下文已压缩 ' + str(ev.before, '?') + ' → ' + str(ev.after, '?'),
       tone: 'info',
+      anchorSeq: nextAnchor(list, ev, seq),
     }]
   }
   if (type === 'agent_error') {
-    return [...list, {
-      kind: 'notice', id: 'n' + seq,
-      text: str(ev.message, '执行出错'),
-      tone: 'error',
+    // 族键用事件的结构化 code 字段，不解析 message 文本 —— 文本是给人看的，code 才是身份。
+    // 同 code 连续出现（例如 429 限流反复触发）会合并成一条并附「（第 N 次）」。
+    // B-4：限流（code 含 429/rate，或 message 含 rate limit/token limit/429）单独打标记，
+    //      渲染端显示「上游限流」形态 —— 不在这里拼正文，正文交给渲染层按标记决定。
+    return pushErrorNotice(
+      list, seq,
+      str(ev.code),
+      str(ev.message, '执行出错'),
       // 没配模型属于「先配置再用」，重试没意义；其它错误允许重试。
-      retryable: ev.code !== 'no_provider',
-    }]
+      ev.code !== 'no_provider',
+      undefined,
+      nextAnchor(list, ev, seq),
+      isRateLimited(ev),
+    )
   }
 
   /* ── AI 提问：对话流里的一张卡（答完不消失）。条目 id 用 call_id（重发不重复画卡）。 ── */
@@ -516,7 +874,47 @@ export function applyEventToMessages(
     return [...list, {
       kind: 'ask', id: 'ask:' + (callId || 'q' + seq), callId,
       prompt: askPromptText(questions), questions, answer: null, pending: false,
+      anchorSeq: nextAnchor(list, ev, seq),
     }]
+  }
+
+  /* ── 引擎在自动重试（上游抖动）：把 attempt / max_attempts / delay_ms 挂到当前错误条上 ──
+     事件形态（engine/src/agent.rs 的 ConnectionRetry）：{attempt, max_attempts, delay_ms, message}，
+     会连着发好几条（每次退避一条）。stores/session.ts 的连接层只拿它写全局 retrying 状态、
+     不把事件送进消息管线（连接层同事在并行改，前端这里不动它）—— 这里在数据层补上
+     「错误条倒计时」的通路，让回归脚本（node 直接跑本文件）与将来的接线都能用：
+        · 已有错误条（agent_error / retry_confirmation 落下的）→ retryInfo 挂到**最新那条**上，
+          不新增卡片（卡片原地更新，React key 稳定，不重播入场）；
+        · 没有错误条（引擎没先发 agent_error 就直接重试）→ 自己落一条「正在自动重试」，
+          免得用户干等几十秒一个字都看不到。
+     每次事件都**整体替换** retryInfo：新的 attempt / delay_ms 才是当前这个等待窗口。 */
+  if (type === 'connection_retry') {
+    const retryInfo: NoticeRetryInfo = {
+      attempt: num(ev.attempt, 1),
+      maxAttempts: num(ev.max_attempts, 1),
+      delayMs: num(ev.delay_ms, 0),
+    }
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const item = list[i]
+      if (item.kind !== 'notice' || item.tone !== 'error') continue
+      const copy = list.slice()
+      copy[i] = { ...item, retryInfo }
+      return copy
+    }
+    // 没有错误条可挂：兜底创建（族键固定 'connection_retry'）。连续到来时**原地替换**而不
+    // 走 pushErrorNotice 的「第 N 次」文案——重试次数在 retryInfo / 倒计时文案里已经有了，
+    // 正文再拼「（第 N 次）」就是重复（countdown 会显示第 X/Y 次）。
+    const last = list[list.length - 1]
+    if (last && last.kind === 'notice' && last.tone === 'error' && last.errorKey === 'connection_retry') {
+      const copy = list.slice()
+      copy[copy.length - 1] = { ...last, retryInfo }
+      return copy
+    }
+    return pushErrorNotice(
+      list, seq, 'connection_retry',
+      str(ev.message, '正在自动重试'),
+      true, undefined, nextAnchor(list, ev, seq), undefined, retryInfo,
+    )
   }
 
   /* ── 本轮被中断（上游不可用 / 工具轮次用尽）：引擎发 retry_confirmation ──
@@ -529,22 +927,66 @@ export function applyEventToMessages(
     const rounds = used !== null && limit !== null ? '（已用 ' + used + '/' + limit + ' 轮工具）' : ''
     const tool = str(ev.last_tool) ? '，最后在跑 ' + str(ev.last_tool) : ''
     const detail = str(ev.detail).split('\n')[0].slice(0, 220)
-    return [...list, {
-      kind: 'notice', id: 'n' + seq,
-      text: str(ev.message, '本轮被中断') + rounds + tool + (detail ? '：' + detail : ''),
-      tone: 'error',
-      retryable: true,
-      resume: true,
-    }]
+    // 事件带 attempt / max_attempts 时把「第 X/Y 次」带给卡片；delay_ms 可能缺失，
+    // 缺失时渲染端不倒数、只显示「第 X/Y 次」（见 MessageList 的 Notice）。
+    const retryInfo: NoticeRetryInfo | undefined = num(ev.attempt, 0) > 0
+      ? { attempt: num(ev.attempt, 1), maxAttempts: num(ev.max_attempts, 1), delayMs: num(ev.delay_ms, 0) || undefined }
+      : undefined
+    // 族键用事件的结构化 reason 字段：同一中断原因连续出现时合并成一条，不再一条条堆。
+    return pushErrorNotice(
+      list, seq,
+      str(ev.reason),
+      str(ev.message, '本轮被中断') + rounds + tool + (detail ? '：' + detail : ''),
+      true,
+      true,
+      nextAnchor(list, ev, seq),
+      undefined,
+      retryInfo,
+    )
   }
 
-  /* ── turn_end 收尾：当前这条助手消息的流式光标停掉。 ── */
+  /* ── turn_end 收尾：当前这条助手消息的流式光标停掉，并结算本轮遗留状态。 ── */
   if (type === 'turn_end') {
     const idx = findCurrentAssistant(list)
     if (idx < 0) return messages as ChatItem[]
     const copy = list.slice()
     const host = copy[idx] as Extract<ChatItem, { kind: 'assistant' }>
-    copy[idx] = { ...host, streaming: false, reasoningStreaming: false }
+
+    /* ① 工具强制结算：本轮已经结束，工具不可能还在跑 —— tool_done 若丢了 / 没发（引擎异常、
+       取消路径），running / queued 的工具会永远停在「进行中」，折叠面板就收不起来。
+       这里把当前助手条目里仍为 running / queued 的工具一律改成 done（轮已结束 = 已执行完）。 */
+    const needsSettle = host.tools.some((t) => t.status === 'running' || t.status === 'queued')
+    const tools = needsSettle
+      ? host.tools.map((t) => (
+          t.status === 'running' || t.status === 'queued'
+            ? { ...t, status: 'error' as const, preview: t.preview || '回合结束但未收到工具成功回执，执行结果未确认', elapsedMs: t.elapsedMs }
+            : t
+        ))
+      : host.tools
+
+    /* ② 成功时「吸收」本轮错误条（B-3）：这一轮有正文产出（或事件自报 ok）＝错误已经被后续
+       成功吸收 —— 把**本轮内**（上一个 user 条目之后、到当前助手条目）所有 error notice
+       标成 resolved: true，渲染端据此降级（不再当「当前失败」高亮）。
+       若 turn_end 本身是失败（没有正文产出）则不标 —— 那些错误仍然有效。 */
+    const produced = ev.ok === true && ev.status !== 'failed' && ev.status !== 'canceled'
+    if (produced) {
+      // 与 findCurrentAssistant 同一套分界：跳过排队中的插话，到「已开跑的用户消息」为止。
+      let from = 0
+      for (let i = idx - 1; i >= 0; i -= 1) {
+        const item = copy[i]
+        if (item.kind === 'user' && !item.queued) { from = i + 1; break }
+      }
+      for (let i = from; i < idx; i += 1) {
+        const item = copy[i]
+        // 只标 error 条；info / ask 不是错误。resolved 是纯展示降级，不动正文与锚。
+        if (item.kind === 'notice' && item.tone === 'error' && !item.resolved) {
+          copy[i] = { ...item, resolved: true }
+        }
+      }
+    }
+
+    // 收尾（streaming 停）＋ 工具结算一起提交；锚不改写（见 nextAnchor 上方的取值规则）。
+    copy[idx] = { ...host, streaming: false, reasoningStreaming: false, tools }
     return copy
   }
 
@@ -554,7 +996,7 @@ export function applyEventToMessages(
     if (idx < 0) return messages as ChatItem[]
     const copy = list.slice()
     const host = copy[idx] as Extract<ChatItem, { kind: 'assistant' }>
-    copy[idx] = { ...host, text: '', reasoning: '', reasoningStreaming: false }
+    copy[idx] = { ...host, text: '', reasoning: '', reasoningStreaming: false, segments: host.segments?.filter((segment) => segment.kind === 'tools') }
     return copy
   }
 
@@ -830,8 +1272,8 @@ export function applyHistoryItems(
     }
   }
 
-  if (!tail.length) return out
-  return [...out, ...tail]
+  if (!tail.length) return fillMissingAnchors(out)
+  return fillMissingAnchors([...out, ...tail])
 }
 
 /** 回合级对账：引擎已经把「最后一轮」落库了，本地那一轮还没落库（没有 msgId）的助手副本一律作废。

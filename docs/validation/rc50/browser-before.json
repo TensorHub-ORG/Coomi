@@ -1,0 +1,30 @@
+{
+  "url": "http://127.0.0.1:5273/",
+  "idle": {
+    "nodes": 339,
+    "animations": [],
+    "longTasks": 0,
+    "longTaskMs": 0,
+    "maxFrameMs": 17,
+    "p95FrameMs": 17,
+    "mainThreadMs": 73
+  },
+  "history": {
+    "nodes": 21169,
+    "toolDetails": 1440,
+    "longTasks": 5,
+    "longTaskMs": 3277,
+    "maxFrameMs": 3100,
+    "p95FrameMs": 17
+  },
+  "stream": {
+    "streamingTables": 0,
+    "textPresent": true,
+    "longTasks": 4,
+    "longTaskMs": 222,
+    "maxFrameMs": 67,
+    "p95FrameMs": 50
+  },
+  "completedTables": 1,
+  "errors": []
+}

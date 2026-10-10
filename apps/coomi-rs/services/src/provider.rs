@@ -849,52 +849,8 @@ impl HttpModelProvider {
             .await
             .map_err(|error| transport_error("response_body", error))?;
 
-        // 阶梯：记录每次递减的 body，去重后依次尝试。
-        let mut steps: Vec<Value> = Vec::new();
-        let mut push_step = |value: Value, steps: &mut Vec<Value>| {
-            if value != *body {
-                steps.push(value);
-            }
-        };
-        push_step(
-            {
-                let mut value = body.clone();
-                remove_reasoning_fields(&mut value);
-                value
-            },
-            &mut steps,
-        );
-        push_step(
-            {
-                let mut value = body.clone();
-                remove_reasoning_fields(&mut value);
-                remove_json_field(&mut value, "top_k");
-                value
-            },
-            &mut steps,
-        );
-        push_step(
-            {
-                let mut value = body.clone();
-                remove_reasoning_fields(&mut value);
-                remove_json_field(&mut value, "top_k");
-                remove_json_field(&mut value, "parallel_tool_calls");
-                value
-            },
-            &mut steps,
-        );
-        push_step(
-            {
-                let mut value = body.clone();
-                remove_reasoning_fields(&mut value);
-                remove_json_field(&mut value, "top_k");
-                remove_json_field(&mut value, "parallel_tool_calls");
-                remove_optional_capability_fields(&mut value);
-                value
-            },
-            &mut steps,
-        );
-
+        // Only retry parameters explicitly rejected by this response. Preserve tools.
+        let steps = parameter_fallbacks(body, &first_body);
         for fallback in &steps {
             let retry = request()
                 .json(fallback)
@@ -921,6 +877,28 @@ impl HttpModelProvider {
     }
 }
 
+/// Describes configured wire behavior, not a claim of upstream support.
+pub fn reasoning_parameter_status(config: &ProviderConfig, effort: &str) -> Value {
+    let parameters = config.model_parameters.get(&config.model);
+    let field = parameters.and_then(|p| p.get("reasoningField")).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let mapping = parameters.and_then(|p| p.get("reasoningMapping")).and_then(Value::as_object);
+    let levels: Vec<&str> = if field.is_some() {
+        ["low", "medium", "high", "xhigh", "ultra"].into_iter()
+            .filter(|level| mapping.and_then(|m| m.get(*level)).and_then(parameter_value).is_some()).collect()
+    } else if matches!(config.kind, ProviderKind::OpenAiCompatible | ProviderKind::OpenAiResponses) {
+        vec!["low", "medium", "high", "xhigh", "ultra"]
+    } else { Vec::new() };
+    let configured = field.is_some();
+    let eligible = levels.contains(&effort);
+    let value = if effort == "auto" || !eligible { Value::Null }
+        else if configured { mapping.and_then(|m| m.get(effort)).and_then(parameter_value).unwrap_or(Value::Null) }
+        else { json!(if matches!(effort, "xhigh" | "ultra") { "high" } else { effort }) };
+    json!({"providerId":config.id,"model":config.model,"requested":effort,
+        "mode":if configured { "configured" } else if levels.is_empty() { "unconfigured" } else { "standard-unverified" },
+        "selectableLevels":levels,"field":field.unwrap_or(if config.kind == ProviderKind::OpenAiResponses { "reasoning.effort" } else { "reasoning_effort" }),
+        "wireValue":value,"sent":effort != "auto" && eligible,"verified":false})
+}
+
 fn apply_model_parameters(
     config: &ProviderConfig,
     body: &mut Value,
@@ -928,6 +906,17 @@ fn apply_model_parameters(
     standard_reasoning: Option<bool>,
 ) {
     let parameters = config.model_parameters.get(&config.model);
+    if let Some(limit) = parameters.and_then(|value| {
+        ["max_output_tokens", "maxOutputTokens", "max_completion_tokens", "max_tokens"]
+            .iter().find_map(|key| value.get(*key).and_then(Value::as_u64))
+    }).filter(|limit| *limit > 0) {
+        match config.kind {
+            ProviderKind::GeminiNative => set_json_path(body, "generationConfig.maxOutputTokens", json!(limit)),
+            ProviderKind::OpenAiResponses => body["max_output_tokens"] = json!(limit),
+            ProviderKind::AnthropicMessages => body["max_tokens"] = json!(limit),
+            ProviderKind::OpenAiCompatible => body["max_tokens"] = json!(limit),
+        }
+    }
     if let Some(temperature) = parameters
         .and_then(|value| value.get("temperature"))
         .and_then(Value::as_f64)
@@ -1026,23 +1015,15 @@ fn apply_reasoning_effort(body: &mut Value, effort: Option<&str>, responses_api:
     let Some(effort) = effort.filter(|value| *value != "auto") else {
         return;
     };
-    // 厂商约定枚举通常是 low/medium/high（OpenAI/Anthropic 等都不认 xhigh/ultra）。
-    // ultra/xhigh 归一化到 high 并额外拉高预算/输出，避免 400 后被 fallback 剥成「没开思考」。
+    // Legacy global extra levels map to high unless an explicit per-model
+    // reasoningMapping supplies a protocol-supported value. Do not inject
+    // another protocol's thinking object or an undocumented budget field.
     let wire = match effort {
         "ultra" | "xhigh" => "high",
         other => other,
     };
     if responses_api {
-        let mut reasoning = json!({"effort": wire});
-        if matches!(effort, "ultra" | "xhigh") {
-            // OpenAI Responses reasoning.budget 支持 auto/low/medium/high
-            reasoning["budget"] = json!("high");
-        }
-        body["reasoning"] = reasoning;
-    } else if matches!(effort, "ultra" | "xhigh") {
-        // 需要思考预算的厂商（Anthropic thinking 等）在标准字段外给足预算：
-        body["reasoning_effort"] = Value::String(wire.to_owned());
-        body["thinking"] = json!({"type": "enabled", "budget_tokens": 32_768});
+        body["reasoning"] = json!({"effort": wire});
     } else {
         body["reasoning_effort"] = Value::String(wire.to_owned());
     }
@@ -1114,6 +1095,19 @@ fn remove_optional_capability_fields(body: &mut Value) {
             object.remove(key);
         }
     }
+}
+
+fn parameter_fallbacks(body: &Value, detail: &str) -> Vec<Value> {
+    let lower = detail.to_ascii_lowercase();
+    let rejected = lower.contains("unsupported") || lower.contains("unknown")
+        || lower.contains("unrecognized") || lower.contains("not allowed")
+        || lower.contains("invalid parameter") || lower.contains("extra field");
+    let mut fallback = body.clone();
+    if rejects_reasoning_field(detail) { remove_reasoning_fields(&mut fallback); }
+    for field in ["top_k", "parallel_tool_calls"] {
+        if rejected && lower.contains(field) { remove_json_field(&mut fallback, field); }
+    }
+    if fallback != *body { vec![fallback] } else { Vec::new() }
 }
 
 fn has_optional_capability_fields(body: &Value) -> bool {
@@ -1270,6 +1264,10 @@ fn retryable_transport_kind(kind: ProviderErrorKind) -> bool {
             | ProviderErrorKind::Dns
             | ProviderErrorKind::Request
             | ProviderErrorKind::Stream
+            // Tls/Proxy 也是瞬时性的（握手被对端/代理中断、上游抖动），
+            // 不应一报错就让整轮死掉：交给自动恢复重试（次数由设置页可配）。
+            | ProviderErrorKind::Tls
+            | ProviderErrorKind::Proxy
     )
 }
 
@@ -1377,8 +1375,32 @@ fn consume_sse_line(
     if chunk_carries_terminal_signal(&value) {
         *saw_terminal_chunk = true;
     }
+    let terminal_error = incomplete_completion_reason(&value);
     consume(value)?;
+    if let Some(reason) = terminal_error {
+        return Err(anyhow::Error::new(ProviderRequestError {
+            phase, kind: ProviderErrorKind::Decode, status: None, retry_after_ms: None,
+            request_id: request_id.clone(), retryable: false,
+            detail: format!("provider completion was not successful ({reason}); partial output is preserved; check output limit or provider policy"),
+        }));
+    }
     Ok(false)
+}
+
+fn incomplete_completion_reason(value: &Value) -> Option<String> {
+    let reason = value.pointer("/choices/0/finish_reason").and_then(Value::as_str)
+        .or_else(|| value.get("stop_reason").and_then(Value::as_str))
+        .or_else(|| value.pointer("/delta/stop_reason").and_then(Value::as_str))
+        .or_else(|| value.pointer("/candidates/0/finishReason").and_then(Value::as_str));
+    if let Some(reason) = reason {
+        if matches!(reason, "length" | "max_tokens" | "MAX_TOKENS" | "content_filter" | "SAFETY" | "RECITATION") {
+            return Some(reason.to_owned());
+        }
+    }
+    if value.get("type").and_then(Value::as_str) == Some("response.incomplete") {
+        return Some(value.pointer("/response/incomplete_details/reason").and_then(Value::as_str).unwrap_or("response.incomplete").to_owned());
+    }
+    None
 }
 
 /// 读取 SSE 流。
@@ -1963,7 +1985,7 @@ async fn checked_json(response: Response, phase: &'static str) -> Result<Value> 
         }
         .into());
     }
-    serde_json::from_str(&body).map_err(|_| {
+    let value: Value = serde_json::from_str(&body).map_err(|_| -> anyhow::Error {
         ProviderRequestError {
             phase,
             kind: ProviderErrorKind::Decode,
@@ -1974,7 +1996,19 @@ async fn checked_json(response: Response, phase: &'static str) -> Result<Value> 
             detail: "provider returned invalid JSON".into(),
         }
         .into()
-    })
+    })?;
+    if let Some(reason) = incomplete_completion_reason(&value) {
+        return Err(ProviderRequestError {
+            phase, kind: ProviderErrorKind::Decode, status: Some(status.as_u16()), retry_after_ms: None,
+            request_id: response_request_id_from_value(&value), retryable: false,
+            detail: format!("provider completion was not successful ({reason}); check output limit or provider policy"),
+        }.into());
+    }
+    Ok(value)
+}
+
+fn response_request_id_from_value(value: &Value) -> Option<String> {
+    value.get("id").and_then(Value::as_str).filter(|id| id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-.:".contains(&b))).map(str::to_owned)
 }
 
 fn retry_after_ms(headers: &HeaderMap) -> Option<u64> {
@@ -2850,6 +2884,8 @@ mod tests {
             ProviderErrorKind::Connect,
             ProviderErrorKind::Dns,
             ProviderErrorKind::Request,
+            ProviderErrorKind::Tls,
+            ProviderErrorKind::Proxy,
         ] {
             assert!(retryable_transport_kind(kind), "{kind:?} should retry");
         }
@@ -2892,6 +2928,91 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_stream_is_not_success_and_last_delta_is_preserved() {
+        for value in [json!({"choices":[{"finish_reason":"length","delta":{"content":"partial"}}]}),
+            json!({"type":"message_delta","delta":{"stop_reason":"max_tokens"}}),
+            json!({"candidates":[{"finishReason":"MAX_TOKENS"}]}),
+            json!({"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}})] {
+            assert!(incomplete_completion_reason(&value).is_some());
+            let line = format!("data: {}", value).into_bytes();
+            let mut consumed = false;
+            let result = consume_sse_line(line,"response_stream",&None,&mut |_| { consumed = true; Ok(()) },&mut false);
+            assert!(consumed, "last delta must be processed before termination error");
+            assert!(result.is_err());
+        }
+        assert!(incomplete_completion_reason(&json!({"choices":[{"finish_reason":"stop"}]})).is_none());
+        assert!(incomplete_completion_reason(&json!({"choices":[{"finish_reason":"tool_calls"}]})).is_none());
+    }
+
+    #[test]
+    fn reasoning_status_matches_real_payload_mapping() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("providers.json");
+        std::fs::write(&path, serde_json::to_vec(&json!({"active":"test", "providers":{"test":{
+            "type":"openai", "base_url":"https://example.test/v1", "model":"m"}}})).unwrap()).unwrap();
+        let mut config = crate::ProviderRegistry::load(&path).unwrap().resolve(None).unwrap();
+        let status = reasoning_parameter_status(&config, "ultra");
+        let mut body = json!({});
+        apply_model_parameters(&config, &mut body, Some("ultra"), Some(false));
+        assert_eq!(status["wireValue"], body["reasoning_effort"]);
+        assert_eq!(status["mode"], "standard-unverified");
+        assert_eq!(reasoning_parameter_status(&config, "auto")["sent"], false);
+        config.kind = ProviderKind::AnthropicMessages;
+        assert_eq!(reasoning_parameter_status(&config, "high")["mode"], "unconfigured");
+        config.model_parameters.insert("m".into(), json!({"reasoningField":"thinking.budget_tokens",
+            "reasoningMapping":{"high":4096}}));
+        let status = reasoning_parameter_status(&config, "high");
+        let mut body = json!({});
+        apply_model_parameters(&config, &mut body, Some("high"), None);
+        assert_eq!(status["wireValue"], body["thinking"]["budget_tokens"]);
+        assert_eq!(status["selectableLevels"], json!(["high"]));
+        assert_eq!(reasoning_parameter_status(&config, "ultra")["sent"], false);
+    }
+
+    #[test]
+    fn configured_output_limit_is_used_by_each_protocol() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("providers.json");
+        std::fs::write(&path, serde_json::to_vec(&json!({
+            "active":"test", "providers":{"test":{
+                "type":"openai", "base_url":"https://example.test/v1", "model":"m",
+                "modelParameters":{"m":{"max_output_tokens":12345}}
+            }}
+        })).expect("json")).expect("write");
+        let registry = crate::ProviderRegistry::load(&path).expect("registry");
+        let mut config = registry.resolve(None).expect("config");
+        for (kind, pointer) in [
+            (ProviderKind::OpenAiCompatible, "/max_tokens"),
+            (ProviderKind::OpenAiResponses, "/max_output_tokens"),
+            (ProviderKind::AnthropicMessages, "/max_tokens"),
+            (ProviderKind::GeminiNative, "/generationConfig/maxOutputTokens"),
+        ] {
+            config.kind = kind;
+            let mut body = json!({});
+            apply_model_parameters(&config, &mut body, None, None);
+            assert_eq!(body.pointer(pointer).and_then(Value::as_u64), Some(12345));
+        }
+    }
+
+    #[test]
+    fn fallback_preserves_agent_tools_and_only_rejected_parameters() {
+        let original = json!({"tools":[{"type":"function"}], "tool_choice":"auto",
+            "reasoning_effort":"high", "top_k":10, "parallel_tool_calls":true});
+        assert!(parameter_fallbacks(&original, "invalid image_url").is_empty());
+        assert!(parameter_fallbacks(&original, "model capability not supported").is_empty());
+        let retry = parameter_fallbacks(&original, "unknown field reasoning_effort");
+        assert_eq!(retry.len(), 1);
+        assert_eq!(retry[0]["tools"], original["tools"]);
+        assert_eq!(retry[0]["tool_choice"], "auto");
+        assert_eq!(retry[0]["top_k"], 10);
+        assert!(retry[0].get("reasoning_effort").is_none());
+        let retry = parameter_fallbacks(&original, "unsupported parallel_tool_calls");
+        assert!(retry[0].get("parallel_tool_calls").is_none());
+        assert_eq!(retry[0]["reasoning_effort"], "high");
+        assert_eq!(retry[0]["tools"], original["tools"]);
+    }
+
+    #[test]
     fn reasoning_fields_are_mapped_and_removed_for_fallback() {
         let mut chat = json!({"model": "m"});
         apply_reasoning_effort(&mut chat, Some("high"), false);
@@ -2902,7 +3023,7 @@ mod tests {
         // xhigh/ultra 归一化为厂商可接受的 high，并拉高预算（避免 400 后被 fallback 剥成没开思考）。
         let mut responses = json!({"model": "m"});
         apply_reasoning_effort(&mut responses, Some("xhigh"), true);
-        assert_eq!(responses["reasoning"], json!({"effort": "high", "budget": "high"}));
+        assert_eq!(responses["reasoning"], json!({"effort": "high"}));
         assert!(rejects_reasoning_field(
             r#"{"error":{"message":"Unknown field reasoning.effort"}}"#
         ));
@@ -2910,8 +3031,7 @@ mod tests {
         let mut ultra = json!({"model": "m"});
         apply_reasoning_effort(&mut ultra, Some("ultra"), false);
         assert_eq!(ultra["reasoning_effort"], "high");
-        assert_eq!(ultra["thinking"]["budget_tokens"], 32_768);
-        assert_eq!(ultra["thinking"]["type"], "enabled");
+        assert!(ultra.get("thinking").is_none(), "chat effort must not inject Anthropic thinking");
 
         let mut automatic = json!({"model": "m"});
         apply_reasoning_effort(&mut automatic, Some("auto"), false);

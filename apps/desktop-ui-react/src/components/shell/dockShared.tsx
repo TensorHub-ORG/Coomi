@@ -64,11 +64,11 @@ export const DOCK_BAR_W = 40
 export const LIST_W = 264
 export const PANEL_DEFAULT_W = 340
 export const PANEL_MIN_W = 240
-export const PANEL_MAX_W = 560
+export const PANEL_MAX_W = 1600
 /** 主内容列最小宽度：Composer 整行（工具按钮 + 发送按钮）必须放得下。 */
-export const MAIN_MIN_W = 560
+export const MAIN_MIN_W = 320
 /** 左侧会话列表的保留阈值：低于它就不再内嵌占位，改降级成抽屉浮层。 */
-export const LIST_MIN_VIEWPORT = RAIL_W + LIST_W + MAIN_MIN_W + PANEL_MIN_W + DOCK_BAR_W
+export const LIST_MIN_VIEWPORT = RAIL_W + LIST_W + 560 + PANEL_MIN_W + DOCK_BAR_W
 /** 会话列表宽度：内嵌 240–420，抽屉 264–360（抽屉是浮层，别一开就压掉半屏内容）。 */
 export const LIST_MIN_W = 240
 export const LIST_MAX_W = 420
@@ -148,7 +148,7 @@ export function useListPaneLayout(): {
     列表在抽屉/隐藏形态下不占布局宽度，此时不预留它的 264px。 */
 export function panelMaxWidth(viewport: number, listInline = listPaneVisible(viewport)): number {
   const reserved = RAIL_W + DOCK_BAR_W + MAIN_MIN_W + (listInline ? LIST_W : 0)
-  return Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, viewport - reserved))
+  return Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, Math.floor((viewport - RAIL_W - DOCK_BAR_W - (listInline ? LIST_W : 0)) / 2), viewport - reserved))
 }
 
 /* ── 会话列表宽度 ──

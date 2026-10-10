@@ -1,7 +1,7 @@
 {
   "name": "coomi-desktop-ui",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.0-test.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

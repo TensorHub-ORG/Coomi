@@ -425,7 +425,7 @@ function StatusLight({ status }: { status: MirrorItem['status'] }) {
       : status === 'testing' ? '正在测速'
         : '还没有测速结果'
   return (
-    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', dot)}>
+    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', dot)} data-loop-anim={status === 'testing' ? '' : undefined}>
       <span className='sr-only'>{label}</span>
     </span>
   )

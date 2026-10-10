@@ -32,6 +32,15 @@ use tokio::time::Duration;
 /// 没有它，一个卡住的 npx（首次下载包、等待网络）会把引擎启动整个拖死。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// 握手时容忍的「非 JSON 输出」上限。
+///
+/// stdout 里混入 npm 警告 / npx 提示 / 服务器横幅是**常态**，不是协议错误：
+/// 用户从市场装的 revolutionary-ui 其实是个 CLI，把 `Usage: ...` 打到 stdout，
+/// 引擎读到第一行非 JSON 就报 "invalid MCP JSON-RPC response: expected value at line 1"。
+/// 先容忍噪声、超限再带着**原始输出**报错，才能真正定位问题。
+const MAX_HANDSHAKE_NOISE_LINES: usize = 50;
+const MAX_HANDSHAKE_NOISE_BYTES: usize = 64 * 1024;
+
 /// 解析 stdio 启动命令的真实路径。
 ///
 /// Windows 上 Rust 的 Command::new 只会给无扩展名的名字补 .exe，而 Node 工具只
@@ -607,12 +616,24 @@ impl StdioClient {
         Ok(())
     }
 
+    /// 握手时容忍的噪声行上限。
+    ///
+    /// stdout 里混入 npm 警告 / npx 提示 / 服务器横幅是**常态**，不是协议错误。
+    /// 用户真实案例：从市场装的 revolutionary-ui 根本不是 MCP 服务器（它是个 CLI，
+    /// 把 `Usage: ...` 打到 stdout），引擎读到第一行非 JSON 就报
+    /// "invalid MCP JSON-RPC response: expected value at line 1 column 1" —— 既没定位、
+    /// 也没拦在安装前。这里先容忍噪声，超限再带着**原始输出**报错。
     async fn read(&mut self) -> Result<Value> {
         let mut line = String::new();
+        // 被跳过的非 JSON 行：用于超限时给出**可操作**的诊断（而不是"expected value"）。
+        let mut skipped: Vec<String> = Vec::new();
+        let mut skipped_bytes = 0usize;
         loop {
             line.clear();
             if self.stdout.read_line(&mut line).await? == 0 {
-                return Err(self.process_closed_error("MCP process closed stdout").await);
+                return Err(self
+                    .process_closed_error("MCP process closed stdout", &skipped)
+                    .await);
             }
             let trimmed = line.trim();
             if trimmed.is_empty() {
@@ -623,7 +644,10 @@ impl StdioClient {
                     line.clear();
                     if self.stdout.read_line(&mut line).await? == 0 {
                         return Err(self
-                            .process_closed_error("MCP process closed during frame headers")
+                            .process_closed_error(
+                                "MCP process closed during frame headers",
+                                &skipped,
+                            )
                             .await);
                     }
                     if line.trim().is_empty() {
@@ -636,18 +660,63 @@ impl StdioClient {
                 return serde_json::from_slice(&body)
                     .context("invalid framed MCP JSON-RPC response");
             }
+            if serde_json::from_str::<Value>(trimmed).is_err() {
+                skipped.push(trimmed.to_owned());
+                skipped_bytes += trimmed.len();
+                let looks_like_cli = skipped.iter().any(|row| {
+                    let row = row.to_ascii_lowercase();
+                    row.contains("usage:")
+                        || row.contains("commands:")
+                        || row.contains("options:")
+                        || row.contains("ok to proceed")
+                });
+                anyhow::ensure!(
+                    skipped.len() <= MAX_HANDSHAKE_NOISE_LINES
+                        && skipped_bytes <= MAX_HANDSHAKE_NOISE_BYTES,
+                    "MCP 进程连续输出 {} 行非 JSON 输出（累计 {} 字节）仍未出现 JSON-RPC。{}原始输出前几行：{}",
+                    skipped.len(),
+                    skipped_bytes,
+                    if looks_like_cli {
+                        "**它看起来不是 MCP 服务器，而是一个普通命令行工具**（输出里含 Usage:/Commands:/Options:）。\
+                         请确认要装的包名是否正确，或从 MCP 配置中移除它。"
+                    } else {
+                        "常见原因：npx 在等确认（启动命令加 -y）、首个包还在下载、或该命令并不实现 MCP 协议。"
+                    },
+                    skipped.iter().take(5).cloned().collect::<Vec<_>>().join(" | ")
+                );
+                continue;
+            }
             return serde_json::from_str(trimmed).context("invalid MCP JSON-RPC response");
         }
     }
 
-    async fn process_closed_error(&self, message: &str) -> anyhow::Error {
+    /// 进程提前关闭时的错误。
+    ///
+    /// 以前只拼 **stderr** —— 而现实里"这不是 MCP 服务器"的证据（`Usage: ...`）常常打在
+    /// **stdout**，于是用户只看到一句 "MCP process closed stdout"，完全无从下手。
+    /// 现在把已经读到的 stdout 噪声也带出来。
+    async fn process_closed_error(&self, message: &str, noise: &[String]) -> anyhow::Error {
         tokio::task::yield_now().await;
         let stderr = self.stderr.lock().await;
         let diagnostic = String::from_utf8_lossy(&stderr).trim().to_owned();
-        if diagnostic.is_empty() {
-            anyhow::anyhow!(message.to_owned())
+        let stdout_noise = noise
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let hint = if stdout_noise.contains("Usage:") || stdout_noise.contains("Commands:") {
+            "（stdout 输出含 Usage:/Commands:，**该命令看起来不是 MCP 服务器**，而是普通 CLI）"
         } else {
-            anyhow::anyhow!("{message}: {diagnostic}")
+            ""
+        };
+        match (diagnostic.is_empty(), stdout_noise.is_empty()) {
+            (true, true) => anyhow::anyhow!("{message}{hint}"),
+            (false, true) => anyhow::anyhow!("{message}: {diagnostic}{hint}"),
+            (true, false) => anyhow::anyhow!("{message}{hint}；进程已输出的内容：{stdout_noise}"),
+            (false, false) => {
+                anyhow::anyhow!("{message}: {diagnostic}{hint}；进程已输出的内容：{stdout_noise}")
+            }
         }
     }
 }

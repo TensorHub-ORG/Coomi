@@ -107,7 +107,10 @@ export function ContextMenuHost() {
       // 底色/高程与 Menu 一致（--surface-overlay + --elev-3），两套右键菜单看起来是同一个东西。
       className={cn(
         'fixed z-[60] min-w-[184px] rounded-lg border border-line bg-overlay p-1 shadow-elev-3',
-        closing ? 'fade-exit' : 'pop-surface',
+        // 只要进入关闭流程（!open），class 就**一直是** menu-fade-out，
+        // 不会再切回 pop-surface —— 否则 closing 变 false（卸载前那帧）
+        // 动画名从 menu-fade-out 换回 pop-in，浏览器重启动画，菜单消失前又弹入一次（闪一下）。
+        !open || closing ? 'menu-exit' : 'pop-surface',
       )}
     >
       {shown.map((item, i) =>

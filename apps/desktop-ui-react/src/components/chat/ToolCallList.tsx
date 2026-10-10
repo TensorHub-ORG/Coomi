@@ -130,7 +130,7 @@ export function ToolCallList({ tools, streaming, toolFresh, renderTool, onToggle
       <div id={panelId} className='collapse' data-open={open} inert={!open}>
         <div>
           <div className='flex flex-col'>
-            {tools.map((tool) => renderTool(tool, toolFresh(tool.callId), isFailure(tool)))}
+            {open ? tools.map((tool) => renderTool(tool, toolFresh(tool.callId), isFailure(tool))) : null}
           </div>
         </div>
       </div>

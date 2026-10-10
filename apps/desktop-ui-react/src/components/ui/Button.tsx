@@ -99,7 +99,7 @@ function ButtonSpinner() {
       aria-hidden
       className='pointer-events-none absolute inset-0 grid place-items-center motion-safe:animate-[fade-in_var(--motion-fast)_var(--ease-out-quint)]'
     >
-      <span className='inline-block size-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent opacity-80' />
+      <span className='inline-block size-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent opacity-80' data-loop-anim />
     </span>
   )
 }

@@ -1,0 +1,10 @@
+{
+  "url": "https://raw.githubusercontent.com/google-research/google-research/master/mbpp/sanitized-mbpp.json",
+  "sha256": "ca95deaa9a01ef0a6f439f88bcf0dd3db3563d22f22aad6cae04ebb9a8d8c8e9",
+  "selected_ids": [
+    2,
+    3,
+    4
+  ],
+  "note": "Evaluator retains gold code/tests; agent sees task prompt and function signature only"
+}

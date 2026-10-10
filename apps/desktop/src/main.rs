@@ -10,6 +10,7 @@ use std::os::windows::process::CommandExt;
 mod engine_bridge;
 // 壳侧环境诊断：WebView/IPC 全断时，只有壳还能查清原因并写给用户（见 diagnostics.rs）。
 mod diagnostics;
+mod taskbar_icon;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -60,6 +61,8 @@ const ENGINE_EVENT_RESTARTED: &str = "engine:restarted";
 struct PrefsState {
     close_to_tray: Mutex<bool>,
     autostart: Mutex<bool>,
+    /// 启动时静默检查更新（默认开）：有新版本才提示，设置里可关。
+    check_updates_on_startup: Mutex<bool>,
 }
 
 impl Default for PrefsState {
@@ -68,6 +71,7 @@ impl Default for PrefsState {
             // 关闭窗口保留后台任务，完全退出从托盘菜单执行。
             close_to_tray: Mutex::new(true),
             autostart: Mutex::new(false),
+            check_updates_on_startup: Mutex::new(true),
         }
     }
 }
@@ -177,6 +181,15 @@ fn read_close_to_tray() -> bool {
     true
 }
 
+/// 「启动时静默检查更新」开关（默认开）：每次启动自动查一次，发现新版本才提示。
+/// 与 PrefsState::default 保持一致。
+fn read_check_updates_on_startup() -> bool {
+    read_ui_prefs()
+        .get("checkUpdatesOnStartup")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
 /* ── 「另存为」的默认落点 ──
    原生保存对话框每次都要我们给一个「默认目录 + 默认文件名」，这里就是那两样的来源：
    · 默认目录 = 上一次另存成功的目录（持久化在 desktop-ui.json 的 lastSaveDir），
@@ -262,12 +275,6 @@ fn open_external(url: String) {
     }
 }
 
-/// 数据目录：`%APPDATA%\Coomi`。
-///
-/// 品牌从 CoomiPlus 改成 Coomi 之后，老安装的数据（provider 密钥、会话、记忆、
-/// 插件）还留在 `%APPDATA%\CoomiPlus`。这里做一次性改名把它接过来：同盘 rename 是
-/// 原子的，不复制字节，也不受数据量影响；失败（老目录被占用、跨盘、没权限）就原样
-/// 放弃——老目录一个字节都不会动，用户也可以手工改名。
 fn adopt_legacy_home(appdata: &std::path::Path, dir: &std::path::Path) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -950,11 +957,10 @@ fn data_home() -> String {
 }
 
 /* ── 更新检查（壳命令 update_check）──
-   主源：GitHub 更新仓库（https://github.com/TensorHub-ORG/Coomi）coomi-desktop 分支的
-   windows/latest.json：{ code, name, url, size, sha256, channel }。仓库公开、raw 链接匿名可读；
-   下载地址用 refs/heads 全引用形态（raw 对短分支名有 CDN 缓存 404 的坑）。
-   兜底：老发布服务形态（{base}/api/v1/info）的解析分支仍在，但 Coomi 已不自建该服务；
-   留给自建/自管更新源按同形态接管（见下方两分支）。
+   主源：GitHub 更新仓库（https://github.com/pucha201/coomiplus-updates）的 windows/latest.json：
+   { code, name, url, size, sha256, channel }。仓库公开、raw 链接匿名可读；
+   下载地址用 refs/heads/main 全引用形态（raw 对短分支名有 CDN 缓存 404 的坑）。
+   兜底：老发布服务（coomiplus.monai.cc.cd/api/v1/info）的形态仍能解析（见下方两分支）。
    服务端少给东西不算错误，一律在壳里降级：
      · 缺 changelog / release_notes → notes 用固定文案「服务端未提供更新说明」；
      · 缺 sha256 与下载地址 → 按 {base}/api/v1/download/{code}/windows 拼一条；
@@ -970,6 +976,18 @@ const RELEASE_INFO_URL_PROXY: &str = "https://gh-proxy.com/https://raw.githubuse
 const RELEASE_INFO_URL_JSDELIVR: &str = "https://cdn.jsdelivr.net/gh/TensorHub-ORG/Coomi@coomi-desktop/windows/latest.json";
 /// 下载链接里的平台段（服务端 platforms 的键名）。
 const RELEASE_PLATFORM: &str = "windows";
+/// GitHub Releases 主源：发布侧在 pucha201/coomiplus-updates 发 desktop-v* 标签，
+/// 资产名固定 Coomi_{ver}_x64-setup.exe，SHA-256 写在 release notes 的 `SHA-256: <hex>`。
+const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/TensorHub-ORG/Coomi/releases?per_page=30";
+/// GitHub Releases 的加速前缀（国内直连 api.github.com 常超时/被拒）：直连失败再试它。
+const GITHUB_RELEASES_URL_PROXY: &str = "https://gh-proxy.com/https://api.github.com/repos/TensorHub-ORG/Coomi/releases?per_page=30";
+/// 只认以 desktop-v 开头的发布标签。
+const GITHUB_TAG_PREFIX: &str = "desktop-v";
+/// 安装包资产名模板：Coomi_{版本号}_x64-setup.exe。
+const GITHUB_ASSET_PREFIX: &str = "Coomi_";
+const GITHUB_ASSET_SUFFIX: &str = "_x64-setup.exe";
+/// 下载加速前缀：`{GH_PROXY_BASE}{原始下载直链}`。
+const GH_PROXY_BASE: &str = "https://gh-proxy.com/";
 /// 服务端没写更新说明时给用户看的固定文案。
 const RELEASE_NOTES_MISSING: &str = "服务端未提供更新说明";
 /// 单次请求的超时（秒）：检查更新是点一下就要有结果的交互，长超时不如早报错。
@@ -1001,12 +1019,11 @@ struct UpdateCheckReport {
     urls: Vec<String>,
 }
 
-/// 更新包相关的三个动作（下载 / 校验 / 安装）本轮的占位返回：
-/// 签名先定下来（前端与后续实现都按它对接），逻辑留给后面的版本。
+/// 更新包相关的三个动作（下载 / 校验 / 安装）的返回。
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateActionReport {
-    /// ok / not_implemented / error 这类状态词。
+    /// ok / error 这类状态词。
     status: String,
     /// 给用户看的一句说明。
     message: String,
@@ -1016,16 +1033,6 @@ struct UpdateActionReport {
     /// 实际用的下载地址（镜像改写后）：出问题时能一眼看出走的是哪条链路。
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
-}
-
-/// 占位返回：三个命令共用一份文案，别各写一遍。
-fn not_implemented(action: &str) -> UpdateActionReport {
-    UpdateActionReport {
-        status: "not_implemented".to_string(),
-        message: format!("{action}尚未实现：当前版本只提供「检查更新」，安装流程会在后续版本接入。"),
-        path: None,
-        url: None,
-    }
 }
 
 /// 大小写不敏感地从 JSON 对象里取第一个存在的键（null 一律当作没有）：
@@ -1308,8 +1315,21 @@ fn release_json_best(urls: &[&str]) -> Result<serde_json::Value, String> {
     Err(format!("无法连接发布服务：{}", errors.join("；")))
 }
 
-/// 把发布服务的响应整理成前端要的那一份（缺字段一律降级，不报错）。
+/// 检查更新入口（主源 = GitHub Releases，兜底 = windows/latest.json 清单）。
+/// GitHub 有可用的 desktop-v* 发布时以它为准（含「没有新版本」的结论）；
+/// 接口不可达或仓库还没发 desktop-v* 发布时才落回清单。
 fn build_update_report(current: &str) -> Result<UpdateCheckReport, String> {
+    match github_releases_report(current) {
+        Ok(Some(report)) => return Ok(report),
+        Ok(None) => { /* 可达但没有可用发布：交给清单兜底 */ }
+        Err(error) => eprintln!("[coomi-desktop] GitHub Releases 检查不可用，改用清单兜底：{error}"),
+    }
+    manifest_update_report(current)
+}
+
+/// 把 windows/latest.json 清单整理成前端要的那一份（缺字段一律降级，不报错）。
+/// 这是更新通道的兜底源：GitHub Releases 不可用 / 还没有 desktop-v* 发布时走这里。
+fn manifest_update_report(current: &str) -> Result<UpdateCheckReport, String> {
     let payload = release_json_best(&[
         RELEASE_INFO_URL_PROXY,
         RELEASE_INFO_URL_JSDELIVR,
@@ -1342,7 +1362,7 @@ fn build_update_report(current: &str) -> Result<UpdateCheckReport, String> {
         });
     }
 
-    // 老发布服务形态（{base}/api/v1/info）——保留为兜底（Coomi 未自建该服务）。
+    // 老发布服务形态（coomiplus.monai.cc.cd）——保留为兜底。
     let platform = json_field(&payload, &["platforms"]).and_then(|value| json_field(value, &["windows"]));
 
     // 版本号：服务端的 latest_version 最准（Beta0.8.6 这种前缀会被版本比较忽略），
@@ -1419,6 +1439,154 @@ fn json_str_list(value: &serde_json::Value, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// 从 release notes 正文解析 SHA-256：`SHA-256: <64位hex>`（大小写均可）。
+/// 逐行找带 sha-256 / sha256 字样的那一行，**从标记之后**取 64 位十六进制 ——
+/// 直接从整行里筛 hex 会把 "SHA256" 里的 A256 一起算进去，摘要就错了。
+fn parse_sha256_from_notes(notes: &str) -> Option<String> {
+    for line in notes.lines() {
+        let lower = line.to_ascii_lowercase();
+        // 注意 "sha-256" 与 "sha256" 是两个不同的子串，find 哪一个要看行里实际出现的是哪个。
+        let (marker, marker_len) = if lower.contains("sha-256") {
+            ("sha-256", 7)
+        } else if lower.contains("sha256") {
+            ("sha256", 6)
+        } else {
+            continue;
+        };
+        // 找到标记位置（lower 与 line 同为 ASCII，字节偏移通用），只取标记之后的部分。
+        let Some(marker_pos) = lower.find(marker) else { continue };
+        let after = &line[(marker_pos + marker_len).min(line.len())..];
+        let hex: String = after.chars().filter(|ch| ch.is_ascii_hexdigit()).take(64).collect();
+        if hex.len() == 64 {
+            return Some(hex.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+/// GitHub Releases 检查（主源）：
+/// 拉 https://api.github.com/repos/TensorHub-ORG/Coomi/releases（直连失败走 gh-proxy 前缀），
+/// 过滤 desktop-v* 标签 → 按数字段解析版本 → 与当前版本比较；
+/// 取版本最大的那条发布的 Coomi_{ver}_x64-setup.exe 资产，SHA-256 从 release notes 解析。
+///
+/// 返回：
+/// · Ok(Some(report)) —— GitHub 可用且给出了权威结论（含「没有新版本」）；
+/// · Ok(None) —— 接口可达但还没有可用的 desktop-v* 发布（交给 latest.json 清单兜底）；
+/// · Err —— 网络 / 解析失败（调用方落回清单并把错误记日志）。
+fn github_releases_report(current: &str) -> Result<Option<UpdateCheckReport>, String> {
+    // 直连优先，失败再试 gh-proxy 前缀；两个都失败才报错。
+    let text = match http_get_text(GITHUB_RELEASES_URL) {
+        Ok(text) => text,
+        Err(direct) => match http_get_text(GITHUB_RELEASES_URL_PROXY) {
+            Ok(text) => text,
+            Err(proxy) => {
+                return Err(format!(
+                    "无法连接 GitHub Releases：{direct}；gh-proxy 加速也失败：{proxy}"
+                ))
+            }
+        },
+    };
+    let releases: Vec<serde_json::Value> = serde_json::from_str(&text)
+        .map_err(|error| format!("GitHub Releases 返回的不是合法 JSON：{error}"))?;
+
+    // 过滤 desktop-v* 且能解析出版本号的发布，按数字段取最大（GitHub 本身按时间倒序，
+    // 同版本的重复发布只留先读到的那一条）。
+    let mut best: Option<(Vec<u64>, &serde_json::Value)> = None;
+    for release in releases.iter() {
+        let tag = release.get("tag_name").and_then(serde_json::Value::as_str).unwrap_or("");
+        let Some(version_text) = tag.strip_prefix(GITHUB_TAG_PREFIX) else {
+            continue;
+        };
+        // 渠道规则：beta 渠道看全部（含 -rc 测试版）；release 渠道只看无 -rc 的正式版标签。
+        let is_release_only = read_ui_prefs()
+            .get("updateChannel")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("beta")
+            == "release";
+        if is_release_only && version_text.contains("-rc") {
+            continue;
+        }
+        let Some(numbers) = version_numbers(version_text) else {
+            continue;
+        };
+        let better = best.as_ref().map(|(seen, _)| numbers > *seen).unwrap_or(true);
+        if better {
+            best = Some((numbers, release));
+        }
+    }
+    let Some((_, release)) = best else {
+        return Ok(None); // 可达但没有 desktop-v* 发布：让清单兜底
+    };
+
+    let tag = release
+        .get("tag_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let latest = tag.strip_prefix(GITHUB_TAG_PREFIX).unwrap_or(&tag).to_string();
+
+    // 资产：Coomi_{ver}_x64-setup.exe（优先精确匹配版本号；找不到就收任意一个
+    // 以 _x64-setup.exe 结尾的资产 —— 发布侧改过命名时也能下）。
+    let expected_asset = format!("{GITHUB_ASSET_PREFIX}{latest}{GITHUB_ASSET_SUFFIX}");
+    let mut download_url = String::new();
+    let mut size: Option<u64> = None;
+    if let Some(assets) = release.get("assets").and_then(serde_json::Value::as_array) {
+        for asset in assets {
+            let name = asset.get("name").and_then(serde_json::Value::as_str).unwrap_or("");
+            let url = asset
+                .get("browser_download_url")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if name == expected_asset {
+                download_url = url.to_string();
+                size = asset.get("size").and_then(serde_json::Value::as_u64);
+                break;
+            }
+            // 兜底：精确匹配没中，先记下第一个 x64 setup 资产，最后没有精确匹配就用它。
+            if download_url.is_empty()
+                && name.starts_with(GITHUB_ASSET_PREFIX)
+                && name.ends_with(GITHUB_ASSET_SUFFIX)
+            {
+                download_url = url.to_string();
+                size = asset.get("size").and_then(serde_json::Value::as_u64);
+            }
+        }
+    }
+    if download_url.is_empty() {
+        // 这条发布没有可下载的 x64 安装包：返回 None 交给清单兜底（清单信息可能更全）。
+        return Ok(None);
+    }
+
+    let notes = release
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or(RELEASE_NOTES_MISSING);
+    let sha256 = parse_sha256_from_notes(notes);
+    // 下载候选：gh-proxy 加速优先（约定下载走 gh-proxy），原直链兜底。
+    let urls = vec![
+        format!("{GH_PROXY_BASE}{download_url}"),
+        download_url.clone(),
+    ];
+    let has_update = match version_greater(&latest, current) {
+        Some(has_update) => has_update,
+        None => !latest.is_empty() && latest != current,
+    };
+    Ok(Some(UpdateCheckReport {
+        current: current.to_string(),
+        latest,
+        has_update,
+        name: json_str(release, &["name"]).unwrap_or_else(|| "Coomi".to_string()),
+        notes: notes.to_string(),
+        download_url,
+        size,
+        published_at: json_str(release, &["published_at"]),
+        sha256,
+        urls,
+    }))
 }
 
 /// 用户在设置里选中的 GitHub 镜像前缀（settings.json → mirrors.github）。
@@ -1520,6 +1688,23 @@ fn emit_progress(app: &tauri::AppHandle, progress: UpdateProgress) {
     let _ = app.emit(UPDATE_EVENT_PROGRESS, progress);
 }
 
+/// 更新包落点：系统「下载」目录（没有就建；建不了再回落 default_save_dir）。
+/// 与「另存为」共用同一套目录解析（default_save_dir 的 Downloads 分支），
+/// 但**不**优先用上次另存目录 —— 安装包是给用户看的，放 Downloads 最直观。
+fn update_download_dir() -> PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| dirs_home().parent().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let downloads = home.join("Downloads");
+    if downloads.is_dir() || std::fs::create_dir_all(&downloads).is_ok() {
+        return downloads;
+    }
+    default_save_dir()
+}
+
 /// 下载更新包（**优先走用户在设置里选的 GitHub 镜像**）。
 ///
 /// 为什么下载也走壳而不是丢给浏览器：浏览器下载既不认镜像，也不会校验摘要，
@@ -1539,19 +1724,27 @@ fn download_update_sync(
 ) -> Result<UpdateActionReport, String> {
     let hint = url_hint.map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
     let current = app.package_info().version.to_string();
-    let candidates = match hint {
-        Some(url) => vec![url],
-        None => {
-            let report = build_update_report(&current)?;
-            download_candidates(&report, &dirs_home())
-        }
+    // 没给显式 URL 时先做一次检查：拿到最新版本与它的下载候选（gh-proxy 优先）。
+    let report = if hint.is_some() { None } else { Some(build_update_report(&current)?) };
+    let candidates = match &report {
+        Some(report) => download_candidates(report, &dirs_home()),
+        None => vec![hint.clone().unwrap_or_default()],
     };
-    if candidates.is_empty() {
+    if candidates.is_empty() || candidates.iter().all(|url| url.trim().is_empty()) {
         return Err("清单里没有可用的下载地址".to_string());
     }
-    let dest = std::env::temp_dir().join(format!("Coomi_update_{current}.exe"));
+    // 安装包落到系统「下载」目录（用户一眼能找到，装完也方便手动重装），
+    // 文件名按要装的新版本号来：Coomi_{ver}_x64-setup.exe（与发布资产同名）。
+    let version_label = report
+        .as_ref()
+        .map(|report| report.latest.trim_start_matches('v').to_string())
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| current.clone());
+    let dest = update_download_dir().join(format!("Coomi_{version_label}_x64-setup.exe"));
     let mut errors: Vec<String> = Vec::new();
-    for url in &candidates {
+    for url in candidates.iter().filter(|url| !url.trim().is_empty()) {
+        // 换一条候选链路前清掉旧的部分文件：不同 URL 的内容可能不同，续传会拼出坏包。
+        let _ = std::fs::remove_file(&dest);
         match fetch_to_file(app, url, &dest) {
             Ok(()) => {
                 let size = std::fs::metadata(&dest).map(|meta| meta.len()).unwrap_or(0);
@@ -1577,15 +1770,18 @@ fn download_update_sync(
 
 /// 用 curl 把 url 下到 dest，边下边按文件大小发进度
 /// （curl 自己的进度条是回车刷新的，解析它不如直接看目标文件长了多少）。
+/// 断点续传（-C - 接着已有部分文件下）+ 失败重试一次（--retry 1，别过度）：
+/// 国内网络下 40MB+ 的安装包一次下完常常不现实，续传比「从头再来」省得多。
 fn fetch_to_file(app: &tauri::AppHandle, url: &str, dest: &std::path::Path) -> Result<(), String> {
-    let _ = std::fs::remove_file(dest);
     let mut child = std::process::Command::new(CURL_BIN)
-        .args(["-fL", "--ssl-no-revoke", "--retry", "2", "--connect-timeout", "10", "-o"])
+        .args(["-fL", "--ssl-no-revoke", "--retry", "1", "-C", "-", "--connect-timeout", "10", "-o"])
         .arg(dest)
         .arg(url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
+        // 下载不要弹 curl 黑框：与检查更新那条同一写法（CREATE_NO_WINDOW）
+        .creation_flags(0x0800_0000)
         .spawn()
         .map_err(|error| format!("无法启动下载：{error}"))?;
     let started = std::time::Instant::now();
@@ -1642,15 +1838,17 @@ fn verify_sha256_sync(path: &str, expected: Option<String>) -> Result<UpdateActi
     }
     let expected = expected.map(|text| text.trim().to_lowercase()).filter(|text| !text.is_empty());
     let Some(expected) = expected else {
-        // 更新契约：清单必须带 sha256。缺摘要曾经是「跳过校验并继续安装」——
-        // 那等于把「镜像/清单被换掉」直接变成静默安装任意 exe，这里改成硬拒绝。
+        // 更新契约：发布方必须给 sha256。缺摘要曾经是「跳过校验并继续安装」——
+        // 那等于把「镜像 / 发布被换掉」直接变成静默安装任意 exe，这里改成硬拒绝。
         return Err(
-            "更新清单没有提供 sha256，已拒绝安装（缺少摘要的清单不允许安装）".to_string(),
+            "发布方没有提供 SHA-256 摘要，已拒绝安装（缺少摘要的安装包不允许安装）".to_string(),
         );
     };
     let actual = sha256_file(&file)?;
     if actual != expected {
-        return Err(format!("安装包校验失败（可能没下完或被改动）：期望 {expected}，实际 {actual}"));
+        // 校验失败：删掉安装包，用户不会拿「没下完 / 被改过」的 exe 去装。
+        let _ = std::fs::remove_file(&file);
+        return Err(format!("安装包校验失败，可能被篡改或下载损坏（期望 {expected}，实际 {actual}）"));
     }
     Ok(UpdateActionReport {
         status: "ok".to_string(),
@@ -1677,11 +1875,12 @@ fn sha256_file(path: &std::path::Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// 安装更新包：NSIS 静默安装（/S）。
+/// 安装更新包：**可见启动安装程序（不静默装）**。
 ///
-/// perMachine 安装需要管理员权限，所以先试**提权启动**（会弹一次 UAC，用户点「是」即可）；
-/// 用户拒绝或提权失败时退回「正常启动安装程序」—— 让安装界面自己出来，用户点完照样能升级，
-/// 比卡在一个没有反馈的错误上好。装完由安装程序自己覆盖文件并重启应用。
+/// 校验在这里再守一道（不假设前端一定校验过），通过后由 install_update_sync
+/// 用 std::process::Command 直接拉起 setup.exe；前端在调用前会让用户确认。
+/// 拉起后提示「安装完成后请重启应用」，壳不自动退出 —— 安装程序需要替换
+/// 正在运行的 exe 时会自己关掉旧进程。
 #[tauri::command]
 async fn install_update(
     app: tauri::AppHandle,
@@ -1694,7 +1893,6 @@ async fn install_update(
     tauri::async_runtime::spawn_blocking(move || verify_sha256_sync(&verify_path, sha256))
         .await
         .map_err(|error| format!("校验安装包失败：{error}"))??;
-    let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || install_update_sync(&path))
         .await
         .map_err(|error| format!("启动安装程序失败：{error}"))?;
@@ -1706,44 +1904,49 @@ async fn install_update(
             speed: 0,
             message: "安装程序已启动".into(),
         });
-        // 交给安装程序接管：它要替换正在运行的 exe，先把本进程收掉
-        // （1.5 秒后，让前端把「即将重启」那一帧画出来）。
-        let handle = handle.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            handle.exit(0);
-        });
     }
     result
 }
 
+/// 拉起安装程序（**可见，不静默**）：校验由 install_update 命令先把关、用户也在界面上
+/// 确认过，这里只负责把安装程序拉起来。拉起后由安装程序接管 —— 它要替换正在运行的
+/// exe 时会自己处理（Tauri NSIS 模板会先关掉旧进程），壳不在这里退出；
+/// 前端收到回执后提示「安装完成后请重启应用」。
 fn install_update_sync(path: &str) -> Result<UpdateActionReport, String> {
     let file = std::path::PathBuf::from(path);
     if !file.is_file() {
         return Err(format!("安装包不存在：{path}"));
     }
-    // ① 提权静默安装（Start-Process -Verb RunAs 会弹 UAC）。
-    let quoted = file.display().to_string().replace('\'', "''");
-    let script = format!(
-        "$p = Start-Process -FilePath '{quoted}' -ArgumentList '/S' -Verb RunAs -PassThru; if ($p) {{ Write-Output $p.Id }}"
-    );
-    if let Ok(text) = run_capture("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", &script])
-        && !text.trim().is_empty()
+    #[cfg(target_os = "windows")]
     {
-        return Ok(UpdateActionReport {
-            status: "ok".to_string(),
-            message: "安装程序已以管理员身份静默启动，装完会自动打开".to_string(),
-            path: Some(path.to_string()),
-            url: None,
+        // 安装包是 perMachine（需要管理员）：直接 Command 拉起会报 ERROR_ELEVATION_REQUIRED
+        // （"请求操作需要提升" 740）。改用 PowerShell Start-Process -Verb RunAs 弹 UAC 提权安装；
+        // 外层同样加 CREATE_NO_WINDOW 不闪黑框（黑的是 PowerShell 本身，RunAs 弹的是系统 UAC）。
+        let path_arg = file.display().to_string().replace('\'', "''");
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command",
+                &format!("Start-Process -FilePath '{}' -Verb RunAs", path_arg)])
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .map_err(|error| format!("无法启动安装程序：{error}"))?;
+        // 安装包要替换正在运行的 exe：让本进程稍后退出，放掉文件锁，
+        // 否则 NSIS 无法覆盖 coomi-desktop.exe（这是「装完不打开主界面」的直接原因）。
+        // UAC 弹窗属于独立的提权进程，本进程退出不影响它；
+        // 安装完成后 NSIS_HOOK_POSTINSTALL 会启动新版本。
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            std::process::exit(0);
         });
     }
-    // ② 可见安装：直接启动安装程序，让用户点下一步。
-    std::process::Command::new(&file)
-        .spawn()
-        .map_err(|error| format!("无法启动安装程序：{error}"))?;
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new(&file)
+            .spawn()
+            .map_err(|error| format!("无法启动安装程序：{error}"))?;
+    }
     Ok(UpdateActionReport {
         status: "ok".to_string(),
-        message: "已启动安装程序（需要你点几下完成）".to_string(),
+        message: "已请求管理员安装（如弹出 UAC 请确认）；安装完成后将自动打开新版本。".to_string(),
         path: Some(path.to_string()),
         url: None,
     })
@@ -2188,9 +2391,13 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 struct DesktopPrefs {
     close_to_tray: bool,
     autostart: bool,
+    /// 启动时静默检查更新（默认开）：只有发现新版本才提示。
+    check_updates_on_startup: bool,
     /// 上一次「另存为」选中的目录（没另存过就是空串）：前端只做展示，真正用它的是
     /// save_file_as 的默认目录，所以这里如实回读磁盘上那一份。
     last_save_dir: String,
+    /// 更新渠道：beta（默认，含 -rc 测试版）或 release（只看正式版）。
+    update_channel: String,
 }
 
 #[tauri::command]
@@ -2198,10 +2405,33 @@ fn desktop_prefs(state: State<'_, PrefsState>) -> DesktopPrefs {
     DesktopPrefs {
         close_to_tray: *state.close_to_tray.lock().unwrap(),
         autostart: *state.autostart.lock().unwrap(),
+        check_updates_on_startup: *state.check_updates_on_startup.lock().unwrap(),
         last_save_dir: read_last_save_dir()
             .map(|dir| dir.to_string_lossy().into_owned())
             .unwrap_or_default(),
+        update_channel: read_ui_prefs()
+            .get("updateChannel")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("beta")
+            .to_string(),
     }
+}
+
+/// 更新渠道：beta（默认，含 -rc 测试版）或 release（只看正式版标签）。
+#[tauri::command]
+fn set_update_channel(channel: String) -> Result<(), String> {
+    let channel = channel.trim().to_lowercase();
+    if channel != "beta" && channel != "release" {
+        return Err("update channel must be beta or release".into());
+    }
+    write_ui_prefs(serde_json::json!({ "updateChannel": channel }))
+}
+
+#[tauri::command]
+fn set_check_updates_on_startup(state: State<'_, PrefsState>, enabled: bool) -> Result<(), String> {
+    *state.check_updates_on_startup.lock().unwrap() = enabled;
+    write_ui_prefs(serde_json::json!({ "checkUpdatesOnStartup": enabled }))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3189,7 +3419,62 @@ fn remove_plugin_views(plugin_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 注册插件声明的能力（skills / mcp / persona / subagents / views）。任一步失败返回可读中文，
+/// 写 / 更新插件**客户端模块**注册：plugin-clients.json 的 clients。
+///
+/// 清单里的 `client` 是**插件目录内的相对路径**（如 "client.js"），这里存绝对路径。
+/// 前端不直接读这个文件：它走 GET /api/plugins/client 拿清单、走
+/// GET /api/plugins/client/source?id= 拿源码 —— 路径只从这份注册表里来，
+/// 因此**不开任意路径读取的口子**（`..` 与绝对路径在这里就被挡掉）。
+fn write_plugin_clients(
+    dir: &std::path::Path,
+    plugin_id: &str,
+    manifest: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let path = dirs_home().join("plugin-clients.json");
+    let mut doc = read_home_json(&path, serde_json::json!({ "version": 1, "clients": [] }));
+    let list = doc
+        .get_mut("clients")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| "plugin-clients.json 里缺少 clients 数组".to_string())?;
+    list.retain(|item| item.get("pluginId").and_then(serde_json::Value::as_str) != Some(plugin_id));
+    if let Some(raw) = manifest.get("client").and_then(serde_json::Value::as_str) {
+        let normalized = raw.trim().replace('\\', "/");
+        if !normalized.is_empty() {
+            if normalized.starts_with('/') || normalized.split('/').any(|seg| seg == "..") {
+                return Err("插件 client 入口必须是插件目录内的相对路径".to_string());
+            }
+            let full = dir.join(normalized.replace('/', std::path::MAIN_SEPARATOR_STR));
+            list.push(serde_json::json!({
+                "pluginId": plugin_id,
+                "name": manifest.get("name").and_then(serde_json::Value::as_str).unwrap_or(plugin_id),
+                "entry": full.to_string_lossy(),
+            }));
+        }
+    }
+    write_home_json(&path, &doc)
+}
+
+/// 撤销插件客户端模块：从 plugin-clients.json 移除该插件的条目。
+fn remove_plugin_clients(plugin_id: &str) -> Result<(), String> {
+    let path = dirs_home().join("plugin-clients.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut doc = read_home_json(&path, serde_json::json!({ "version": 1, "clients": [] }));
+    let changed = if let Some(list) = doc.get_mut("clients").and_then(serde_json::Value::as_array_mut) {
+        let before = list.len();
+        list.retain(|item| item.get("pluginId").and_then(serde_json::Value::as_str) != Some(plugin_id));
+        before != list.len()
+    } else {
+        false
+    };
+    if changed {
+        write_home_json(&path, &doc)?;
+    }
+    Ok(())
+}
+
+/// 注册插件声明的能力（skills / mcp / persona / subagents / views / client）。任一步失败返回可读中文，
 /// 调用方负责回滚（unregister_plugin 按前缀/键幂等清理）。
 fn register_plugin(
     dir: &std::path::Path,
@@ -3201,6 +3486,7 @@ fn register_plugin(
     write_plugin_persona(plugin_id, manifest)?;
     write_plugin_subagents(plugin_id, manifest)?;
     write_plugin_views(dir, plugin_id, manifest)?;
+    write_plugin_clients(dir, plugin_id, manifest)?;
     Ok(())
 }
 
@@ -3223,6 +3509,9 @@ fn unregister_plugin(
         errors.push(error);
     }
     if let Err(error) = remove_plugin_views(plugin_id) {
+        errors.push(error);
+    }
+    if let Err(error) = remove_plugin_clients(plugin_id) {
         errors.push(error);
     }
     if errors.is_empty() {
@@ -3776,6 +4065,7 @@ fn main() {
                 let prefs: State<PrefsState> = app.state();
                 *prefs.close_to_tray.lock().unwrap() = read_close_to_tray();
                 *prefs.autostart.lock().unwrap() = autostart_enabled();
+                *prefs.check_updates_on_startup.lock().unwrap() = read_check_updates_on_startup();
             }
             // 窗口在代码里创建：只有这样才能按用户上次选的主题给首帧背景色，
             // 否则浅色用户会先看到一帧深色、深色用户先看到一帧白。
@@ -3823,7 +4113,7 @@ fn main() {
             let win_h = 780.0_f64.min(work_h - 48.0).max(520.0);
             let min_w = (work_w - 80.0).clamp(720.0, 940.0).min(win_w);
             let min_h = (work_h - 80.0).clamp(460.0, 620.0).min(win_h);
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+            let main_window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                 // 页面脚本执行前注入连接信息（见 boot_script 的说明）。
                 .initialization_script(boot.as_str())
                 // 浏览器参数：见 webview_browser_args 的说明（本地网络访问 + 免代理）。
@@ -3838,6 +4128,7 @@ fn main() {
                 .visible(!start_hidden)
                 .background_color(background)
                 .build()?;
+            taskbar_icon::apply(&main_window);
 
             // 系统托盘：没有它「隐藏到后台」就等于把自己关在门外。
             // 托盘建不起来（极罕见）时必须把「隐藏到托盘」关掉，否则窗口一关就再也叫不回来。
@@ -3908,6 +4199,34 @@ fn main() {
                     }
                 });
             }
+
+            // 启动静默检查更新：延迟 12 秒（让引擎冷启动与首屏先过去，别跟启动抢带宽），
+            // 默认开（设置里可关）。只有发现新版本才 emit update:available，前端据此弹提示；
+            // 没有新版本 / 网络不通都静默 —— 不打扰启动。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(12));
+                    let state: State<PrefsState> = handle.state();
+                    if !*state.check_updates_on_startup.lock().unwrap() {
+                        return; // 用户在设置里关掉了启动检查
+                    }
+                    let current = handle.package_info().version.to_string();
+                    match build_update_report(&current) {
+                        Ok(report) if report.has_update => {
+                            log_engine_note(&format!(
+                                "启动静默检查更新：发现新版本 {}（当前 {current}），已通知前端",
+                                report.latest
+                            ));
+                            let _ = handle.emit("update:available", report);
+                        }
+                        Ok(_) => { /* 已是最新：静默 */ }
+                        Err(error) => {
+                            eprintln!("[coomi-desktop] 启动静默检查更新失败（已忽略）：{error}");
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3924,8 +4243,9 @@ fn main() {
             engine_log_path,
             app_version,
             data_home,
-            // 更新检查：壳直连发布服务 /api/v1/info（缺字段一律在壳里降级，见 update_check）；
-            // 下载 / 校验 / 安装三个是**占位签名**，本轮统一返回 not_implemented。
+            // 更新通道（检查 → 下载 → 校验 → 拉起安装）：检查主源为 GitHub Releases
+            // （desktop-v* 标签），兜底 windows/latest.json 清单；下载走 gh-proxy 加速并
+            // 断点续传；sha256 校验失败删包；安装由用户确认后可见拉起安装程序。
             update_check,
             download_update,
             verify_sha256,
@@ -3937,6 +4257,7 @@ fn main() {
             open_external,
             // 传输兜底：直连失败时前端改走这两个命令（HTTP 转发 + WS 桥）。
             engine_bridge::engine_http,
+            engine_bridge::engine_file_read,
             // 前端报到（证明 IPC 活着）+ 手动/自动写诊断文件。
             diagnostics::frontend_hello,
             diagnostics::frontend_status,
@@ -3955,6 +4276,8 @@ fn main() {
             desktop_prefs,
             set_close_to_tray,
             set_autostart,
+            set_check_updates_on_startup,
+            set_update_channel,
             // 插件系统（v2）：列表（含 skills/mcp/subagents/persona/slash 声明）/ 启停（注册/撤销能力）/
             // 从文件夹或 zip URL 安装 / 卸载 / 插件市场清单。数据见 %APPDATA%\Coomi\plugins。
             plugin_list,

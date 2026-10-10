@@ -1,0 +1,346 @@
+{
+  "date": "2026-10-10T14:15:42.847Z",
+  "model": "dots3-note-prev",
+  "engine": "F:\\_WorkSpace\\Projects\\Coomi-Desktop\\apps\\coomi-rs\\target\\debug\\coomi.exe",
+  "engineSha256": "d23b4f0fa6bfe0e4465f42ca6c9d675cbabd75a95d88ca6a963cfb4f9c3bfccf",
+  "suite": "Coomi bounded regression v1; custom tasks plus MBPP; NOT a standardized leaderboard score",
+  "limits": {
+    "requests": 70,
+    "outputTokens": 70000,
+    "estimatedInputTokens": 650000,
+    "perCaseRequests": 8,
+    "perRequestOutputTokens": 4096,
+    "caseTimeoutMs": 180000
+  },
+  "usage": {
+    "requests": 13,
+    "reportedInputTokens": 99424,
+    "reportedOutputTokens": 1609,
+    "requestsWithUsage": 13,
+    "estimatedInputTokens": 127459,
+    "outputBudgetCharged": 1609
+  },
+  "results": [
+    {
+      "id": "01-chinese-exact",
+      "category": "instructions",
+      "pass": true,
+      "elapsedMs": 1473,
+      "requests": 1,
+      "engineOk": true,
+      "answer": "\n\n测试连接正常",
+      "toolCalls": [],
+      "errors": [],
+      "gradePassed": true
+    },
+    {
+      "id": "02-json-arithmetic",
+      "category": "instructions",
+      "pass": true,
+      "elapsedMs": 2593,
+      "requests": 1,
+      "engineOk": true,
+      "answer": "\n\n{\"total\":400,\"items\":[2,4,9]}",
+      "toolCalls": [],
+      "errors": [],
+      "gradePassed": true
+    },
+    {
+      "id": "03-no-fabrication",
+      "category": "instructions",
+      "pass": true,
+      "elapsedMs": 2110,
+      "requests": 1,
+      "engineOk": true,
+      "answer": "\n\n{\"known\":false,\"total\":null}",
+      "toolCalls": [],
+      "errors": [],
+      "gradePassed": true
+    },
+    {
+      "id": "04-read-file",
+      "category": "files",
+      "pass": true,
+      "elapsedMs": 3665,
+      "requests": 2,
+      "engineOk": true,
+      "answer": "\n\n\n\n\nQ7M4-6821",
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "error": false
+        }
+      ],
+      "errors": [],
+      "gradePassed": true
+    },
+    {
+      "id": "05-unicode-path",
+      "category": "files",
+      "pass": false,
+      "elapsedMs": 180149,
+      "requests": 3,
+      "error": "case timeout"
+    }
+  ],
+  "calls": [
+    {
+      "case": "01-chinese-exact",
+      "started": "2026-10-10T14:12:20.180Z",
+      "estimatedInput": 9342,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 2,
+      "status": 200,
+      "elapsedMs": 1048,
+      "usage": {
+        "prompt_tokens": 7248,
+        "completion_tokens": 41,
+        "total_tokens": 7289
+      },
+      "finishReasons": [
+        "stop"
+      ]
+    },
+    {
+      "case": "02-json-arithmetic",
+      "started": "2026-10-10T14:12:21.971Z",
+      "estimatedInput": 9363,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 2,
+      "status": 200,
+      "elapsedMs": 2029,
+      "usage": {
+        "prompt_tokens": 7280,
+        "completion_tokens": 117,
+        "total_tokens": 7397
+      },
+      "finishReasons": [
+        "stop"
+      ]
+    },
+    {
+      "case": "03-no-fabrication",
+      "started": "2026-10-10T14:12:24.752Z",
+      "estimatedInput": 9363,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 2,
+      "status": 200,
+      "elapsedMs": 1530,
+      "usage": {
+        "prompt_tokens": 7266,
+        "completion_tokens": 73,
+        "total_tokens": 7339
+      },
+      "finishReasons": [
+        "stop"
+      ]
+    },
+    {
+      "case": "04-read-file",
+      "started": "2026-10-10T14:12:27.069Z",
+      "estimatedInput": 9608,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 2,
+      "status": 200,
+      "elapsedMs": 2018,
+      "usage": {
+        "prompt_tokens": 7486,
+        "completion_tokens": 128,
+        "total_tokens": 7614
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "04-read-file",
+      "started": "2026-10-10T14:12:29.131Z",
+      "estimatedInput": 9778,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 4,
+      "status": 200,
+      "elapsedMs": 990,
+      "usage": {
+        "prompt_tokens": 7633,
+        "prompt_tokens_details": {
+          "cached_read_tokens": 7168,
+          "cached_tokens": 7168
+        },
+        "completion_tokens": 39,
+        "total_tokens": 7672
+      },
+      "finishReasons": [
+        "stop"
+      ]
+    },
+    {
+      "case": "05-unicode-path",
+      "started": "2026-10-10T14:12:31.231Z",
+      "estimatedInput": 9780,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 2,
+      "status": 200,
+      "elapsedMs": 2293,
+      "usage": {
+        "prompt_tokens": 7592,
+        "completion_tokens": 174,
+        "total_tokens": 7766
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "05-unicode-path",
+      "started": "2026-10-10T14:12:33.551Z",
+      "estimatedInput": 9968,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 4,
+      "status": 200,
+      "elapsedMs": 2484,
+      "usage": {
+        "prompt_tokens": 7775,
+        "prompt_tokens_details": {
+          "cached_read_tokens": 7168,
+          "cached_tokens": 7168
+        },
+        "completion_tokens": 184,
+        "total_tokens": 7959
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "05-unicode-path",
+      "started": "2026-10-10T14:12:36.057Z",
+      "estimatedInput": 10160,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 6,
+      "status": 200,
+      "elapsedMs": 2477,
+      "usage": {
+        "prompt_tokens": 7969,
+        "prompt_tokens_details": {
+          "cached_read_tokens": 7680,
+          "cached_tokens": 7680
+        },
+        "completion_tokens": 154,
+        "total_tokens": 8123
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "06-targeted-edit",
+      "started": "2026-10-10T14:15:31.202Z",
+      "estimatedInput": 9628,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 2,
+      "status": 200,
+      "elapsedMs": 2047,
+      "usage": {
+        "prompt_tokens": 7495,
+        "completion_tokens": 129,
+        "total_tokens": 7624
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "06-targeted-edit",
+      "started": "2026-10-10T14:15:33.287Z",
+      "estimatedInput": 9807,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 4,
+      "status": 200,
+      "elapsedMs": 3314,
+      "usage": {
+        "prompt_tokens": 7641,
+        "completion_tokens": 144,
+        "total_tokens": 7785
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "06-targeted-edit",
+      "started": "2026-10-10T14:15:36.616Z",
+      "estimatedInput": 10036,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 6,
+      "status": 200,
+      "elapsedMs": 1460,
+      "usage": {
+        "prompt_tokens": 7862,
+        "prompt_tokens_details": {
+          "cached_read_tokens": 7168,
+          "cached_tokens": 7168
+        },
+        "completion_tokens": 102,
+        "total_tokens": 7964
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "06-targeted-edit",
+      "started": "2026-10-10T14:15:38.084Z",
+      "estimatedInput": 10221,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 8,
+      "status": 200,
+      "elapsedMs": 2795,
+      "usage": {
+        "prompt_tokens": 8013,
+        "prompt_tokens_details": {
+          "cached_read_tokens": 7680,
+          "cached_tokens": 7680
+        },
+        "completion_tokens": 183,
+        "total_tokens": 8196
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    },
+    {
+      "case": "06-targeted-edit",
+      "started": "2026-10-10T14:15:40.901Z",
+      "estimatedInput": 10405,
+      "outputCap": 4096,
+      "tools": 53,
+      "messages": 10,
+      "status": 200,
+      "elapsedMs": 1945,
+      "usage": {
+        "prompt_tokens": 8164,
+        "prompt_tokens_details": {
+          "cached_read_tokens": 7680,
+          "cached_tokens": 7680
+        },
+        "completion_tokens": 141,
+        "total_tokens": 8305
+      },
+      "finishReasons": [
+        "tool_calls"
+      ]
+    }
+  ]
+}

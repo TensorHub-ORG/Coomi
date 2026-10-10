@@ -19,6 +19,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -54,6 +55,10 @@ struct AgentRecord {
     task: String,
     status: String,
     output: Arc<Mutex<String>>,
+    /// 完整对话（fork 来的历史 + 本轮产出）：run_agent 收尾时把 session 的最终
+    /// 消息序列写进来，供 GET /api/agents/{id}/messages 只读展示。record 与
+    /// 后台任务共享同一个 Arc，所以接口侧随时能读到（运行中为空，结束后为完整序列）。
+    messages: Arc<Mutex<Vec<ChatMessage>>>,
     started: Instant,
     abort: Option<AbortHandle>,
 }
@@ -111,6 +116,35 @@ static LIVE_SCHEDULERS: OnceLock<StdMutex<Vec<Weak<AgentScheduler>>>> = OnceLock
 
 fn live_scheduler_registry() -> &'static StdMutex<Vec<Weak<AgentScheduler>>> {
     LIVE_SCHEDULERS.get_or_init(|| StdMutex::new(Vec::new()))
+}
+
+/// 子 Agent 的提供商重试偏好：settings.json 的 provider_retry_count / reconnect_max_delay_ms
+/// （设置页 preferences 与连接设置页写的是同一份键）。默认 (2, 10_000)，与引擎
+/// Agent::new 的默认一致；文件缺失/损坏/键缺失一律回落默认，行为与主对话一致。
+///
+/// u8 哨兵语义沿引擎：0=关闭、1..=254=次数、255=无限（u8 本身已封顶 255，不再
+/// min(10) 截断）。这里读到的 retry_count 只作为 Agent「构造时的回落基值」：
+/// 实际的重试决策由 with_live_provider_retry_count 在每次失败时实时读取，改设置
+/// 对正在运行的轮也立即生效。
+///
+/// 为什么不用缓存：run_agent 每个子 Agent 实例只执行一轮，这里只在创建时读一次磁盘，
+/// 代价可忽略；设置页改完下次创建立即生效，不需要会话级缓存。
+fn sub_agent_retry_policy(home: &Path) -> (u8, u64) {
+    let settings = std::fs::read(home.join("config").join("settings.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .unwrap_or_else(|| json!({}));
+    let retry_count = settings
+        .get("provider_retry_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+        .unwrap_or(2);
+    let reconnect_max_delay_ms = settings
+        .get("reconnect_max_delay_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(10_000)
+        .clamp(1_000, 120_000);
+    (retry_count, reconnect_max_delay_ms)
 }
 
 impl AgentScheduler {
@@ -385,12 +419,16 @@ impl AgentScheduler {
 
         let id = Uuid::new_v4().to_string();
         let output = Arc::new(Mutex::new(String::new()));
+        // 完整对话的落盘位置：record 与后台任务共享同一个 Arc，
+        // run_agent 收尾后把最终消息序列写进来，接口侧随时可读。
+        let messages_out = Arc::new(Mutex::new(Vec::<ChatMessage>::new()));
         let messages = fork_history(parent_messages, fork_turns)?;
         let scheduler = Arc::clone(self);
         let task_for_run = task.clone();
         let sub_agent_id = sub_agent_id.map(str::to_owned);
         let id_for_run = id.clone();
         let output_for_run = Arc::clone(&output);
+        let messages_out_for_run = Arc::clone(&messages_out);
         let join = tokio::spawn(async move {
             let reasoning = Arc::new(Mutex::new(String::new()));
             let result = scheduler
@@ -400,6 +438,7 @@ impl AgentScheduler {
                     task_for_run,
                     Arc::clone(&output_for_run),
                     reasoning,
+                    messages_out_for_run,
                     sub_agent_id.as_deref(),
                 )
                 .await;
@@ -426,6 +465,7 @@ impl AgentScheduler {
                 task,
                 status: "running".into(),
                 output,
+                messages: messages_out,
                 started: Instant::now(),
                 abort: Some(join.abort_handle()),
             },
@@ -444,6 +484,8 @@ impl AgentScheduler {
     ) -> Result<(String, String), String> {
         let output = Arc::new(Mutex::new(String::new()));
         let reasoning = Arc::new(Mutex::new(String::new()));
+        // run_to_completion 不落 record，这里传一个丢弃用的 Arc 满足 run_agent 签名。
+        let messages_out = Arc::new(Mutex::new(Vec::<ChatMessage>::new()));
         let messages = fork_history(parent_messages, Some("all"))?;
         self.run_agent(
             agent_id,
@@ -451,6 +493,7 @@ impl AgentScheduler {
             task,
             Arc::clone(&output),
             Arc::clone(&reasoning),
+            Arc::clone(&messages_out),
             sub_agent_id,
         )
         .await
@@ -467,6 +510,7 @@ impl AgentScheduler {
         task: String,
         output: Arc<Mutex<String>>,
         reasoning: Arc<Mutex<String>>,
+        messages_out: Arc<Mutex<Vec<ChatMessage>>>,
         sub_agent_id: Option<&str>,
     ) -> anyhow::Result<()> {
         let selected = if self.sub_agents.is_empty() {
@@ -542,11 +586,19 @@ impl AgentScheduler {
             .filter(|entry| !entry.description.is_empty())
             .map(|entry| format!(" Your configured role is: {}.", entry.description))
             .unwrap_or_default();
-        Agent::new(format!(
+        // 提供商重试策略：构造时读一次 preferences（默认 2 / 10000，读不到回落默认），
+        // 供引擎作「回落基值」；初始退避固定 1000ms（与引擎 Agent::new 的默认一致），
+        // 最大退避用用户配置（引擎侧会 clamp 并保证 max >= initial）。
+        // with_live_provider_retry_count 让重试次数在每次失败时实时重读 settings.json，
+        // 子 Agent 运行中改设置同样立即生效，不需要等下一轮重建。
+        let (retry_count, reconnect_max_delay_ms) = sub_agent_retry_policy(&self.home);
+        let run_result = Agent::new(format!(
             "{}\n\nYou are a delegated Coomi sub-agent.{role} Complete the assigned task independently and return a concise result to the parent agent.",
             self.system_prompt
         ))
         .with_input_queue(Arc::clone(&self.input_queue))
+        .with_provider_retry_policy(retry_count, 1_000, reconnect_max_delay_ms)
+        .with_live_provider_retry_count(self.home.clone())
         .run_turn(
             &mut session,
             task,
@@ -555,9 +607,15 @@ impl AgentScheduler {
             &SubagentApproval,
             &observer,
         )
-        .await?;
+        .await;
+        // 收尾：无论成败，把 session 里的最终消息序列回写进 record，
+        // 供 GET /api/agents/{id}/messages 展示完整对话（fork 来的历史 + 本轮产出）。
+        // 为什么用 session 而不是 fork 结果：运行中的模型回复/工具结果只存在于
+        // session.messages，只有跑完才能拿到完整序列。
+        *messages_out.lock().await = session.messages.clone();
         // 本轮结束时收尾该角色 spawn_agent 派生的后台子 Agent，避免残留。
         self.abort_all_sub_agents().await;
+        run_result?;
         Ok(())
     }
 
@@ -645,6 +703,34 @@ impl AgentScheduler {
             });
         }
         snapshots
+    }
+
+    /// 按 id 取单个子智能体详情（快照 + 完整对话）：在进程内注册表里找所属调度器，
+    /// 查找逻辑与 close_any 一致；找不到时返回可读错误（HTTP 层转 404）。
+    /// 返回复用已导出的 AgentSnapshot（id/status/task/output/elapsed_ms），
+    /// 外加原始 ChatMessage 序列——敏感字段的裁剪留给 HTTP 层。
+    pub async fn detail_any(id: &str) -> Result<(AgentSnapshot, Vec<ChatMessage>), String> {
+        for scheduler in Self::live() {
+            if let Ok(detail) = scheduler.detail(id).await {
+                return Ok(detail);
+            }
+        }
+        Err(format!("unknown agent: {id}"))
+    }
+
+    /// 本调度器内按 id 取详情（快照 + 完整对话）。
+    pub async fn detail(&self, id: &str) -> Result<(AgentSnapshot, Vec<ChatMessage>), String> {
+        let agents = self.agents.lock().await;
+        let record = agents.get(id).ok_or_else(|| format!("unknown agent: {id}"))?;
+        let messages = record.messages.lock().await.clone();
+        let snapshot = AgentSnapshot {
+            id: id.to_owned(),
+            status: record.status.clone(),
+            task: record.task.clone(),
+            output: record.output.lock().await.clone(),
+            elapsed_ms: record.started.elapsed().as_millis(),
+        };
+        Ok((snapshot, messages))
     }
 }
 

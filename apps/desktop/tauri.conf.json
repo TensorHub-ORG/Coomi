@@ -11,7 +11,7 @@
         "withGlobalTauri":  true,
         "windows":  [],
         "security":  {
-            "csp":  "default-src 'self'; script-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline' asset: http://asset.localhost; img-src 'self' https: asset: http://asset.localhost data: blob:; font-src 'self' data: asset: http://asset.localhost; media-src 'self' https: asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:* asset: http://asset.localhost; worker-src 'self' blob:; frame-src 'self' asset: http://asset.localhost blob: data:",
+            "csp":  "default-src 'self'; script-src 'self' blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline' asset: http://asset.localhost; img-src 'self' https: asset: http://asset.localhost data: blob:; font-src 'self' data: asset: http://asset.localhost; media-src 'self' https: asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:* asset: http://asset.localhost; worker-src 'self' blob:; frame-src 'self' asset: http://asset.localhost blob: data:",
             "assetProtocol":  {
                 "enable":  true,
                 "scope":  [
@@ -25,7 +25,10 @@
         "active":  true,
         "targets":  [ "nsis" ],
         "icon":  [ "icons/icon.ico" ],
-        "windows":  { "nsis":  { "installMode":  "perMachine" } },
+        "windows":  { "nsis":  {
+            "installMode":  "perMachine",
+            "installerHooks":  "windows/installer-hooks.nsh"
+        } },
         "resources":  [ "coomi.exe", "ui-dist" ]
     }
 }

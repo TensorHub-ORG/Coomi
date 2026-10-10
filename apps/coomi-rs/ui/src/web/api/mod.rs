@@ -1,4 +1,5 @@
 //! API handlers 按职责拆分的子模块。
+pub(super) mod agents;
 pub(super) mod cognitive;
 pub(super) mod collab;
 pub(super) mod group;

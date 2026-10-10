@@ -5,7 +5,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 
-const out = new URL('../../../docs/design/screenshots/', import.meta.url)
+const out = new URL(process.env.COOMI_REVIEW_OUTPUT || '../../../docs/design/screenshots/', import.meta.url)
 await mkdir(out, { recursive: true })
 const browserPort = process.env.COOMI_REVIEW_PORT || '9337'
 const target = await (await fetch(`http://127.0.0.1:${browserPort}/json/new?about:blank`, { method: 'PUT' })).json()
@@ -68,7 +68,7 @@ try {
     localStorage.removeItem('coomi.theme');
     localStorage.setItem('coomi.prefs.v2', JSON.stringify({ minimalUi:true, motion:false, fontFamily:'harmony' }));
   ` })
-  await send('Page.navigate', { url: 'http://127.0.0.1:5273/' })
+  await send('Page.navigate', { url: process.env.COOMI_REVIEW_URL || 'http://127.0.0.1:5273/' })
   await until(`!!document.querySelector('.welcome-title')`)
   await evaluate(`(async () => {
     const loaded = (file) => performance.getEntriesByType('resource').find(e => new URL(e.name).pathname === '/src/stores/' + file + '.ts')?.name || '/src/stores/' + file + '.ts';
@@ -108,12 +108,12 @@ try {
   assert.equal(await evaluate(`document.querySelector('.welcome-wordmark').getBoundingClientRect().width`), 104)
   assert.equal(await evaluate(`document.querySelector('.welcome-description').textContent`), '准备好了，就告诉我想做什么')
   assert.equal(await evaluate(`document.querySelector('[data-shell-part="rail"] img')`), null)
+  assert.equal(await evaluate(`(() => { const buttons=[...document.querySelectorAll('[data-shell-part="rail"] button')];return buttons.indexOf(document.querySelector('[data-plugins-entry]')) === buttons.indexOf(document.querySelector('[data-nav-key="artifacts"]')) + 1 })()`), true, 'plugins follow artifacts')
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('.desktop-menu-trigger'), e => e.textContent)`), ['文件','编辑','视图','帮助'])
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('.window-control svg'), e => e.getAttribute('width'))`), ['16','16','16'])
-  await click('.welcome-suggestion')
-  await until(`document.activeElement.tagName === 'TEXTAREA'`)
-  assert.match(await evaluate('document.querySelector("textarea").value'), /实现一个功能/)
-  assert.equal(await evaluate('document.activeElement.tagName'), 'TEXTAREA')
+  assert.equal(await evaluate('document.querySelectorAll(".welcome-suggestions, .welcome-suggestion").length'), 0, 'welcome suggestions are removed')
+  assert.equal(await evaluate('document.querySelectorAll("[aria-label=\\"极简界面模式\\"]").length'), 0, 'minimal mode control is removed')
+  // The welcome page intentionally has no suggestion cards.
   await evaluate(`review.useSession.getState().setDraft(''); review.useUi.getState().setThemeMode('dark')`)
   await shot('02-welcome-dark')
   await evaluate(`review.useUi.getState().setThemeMode('light')`)
@@ -121,8 +121,8 @@ try {
   await until(`!!document.querySelector('[data-testid="settings-body"]')`)
   await wait(500)
   await shot('03-settings')
+  assert.equal(await evaluate(`document.querySelector('[data-settings-group="general"]').getAttribute('aria-current')`), 'page')
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-settings-cell]')).borderRadius`), '0px')
-  await click('[role="switch"][aria-label="极简界面模式"]')
   for (const group of ['general', 'models', 'workspace', 'ai', 'life', 'engine', 'about']) {
     await click(`[data-settings-group="${group}"]`)
     await wait(300)
@@ -130,10 +130,14 @@ try {
     assert.ok(await evaluate(`(() => { const e = document.querySelector('[data-testid="settings-body"]'); return e.scrollWidth <= e.clientWidth + 1 })()`), `${group} settings fit`)
     await shot('settings-' + group)
   }
-  await click('[data-settings-group="appearance"]')
-  await until(`document.documentElement.dataset.minimalUi === 'false'`)
-  assert.equal(await evaluate(`JSON.parse(localStorage.getItem('coomi.prefs.v2')).minimalUi`), false)
-  await click('[role="switch"][aria-label="极简界面模式"]')
+  assert.equal(await evaluate(`document.documentElement.dataset.minimalUi`), 'false')
+  await click('[data-nav-key="chat"]')
+  await until(`!!document.querySelector('[data-view-state="active"] [data-chat-col]')`)
+  await evaluate(`review.useUi.getState().setSettingsGroup('models'); review.useUi.getState().setView('settings')`)
+  await until(`document.querySelector('[data-settings-group="models"]')?.getAttribute('aria-current') === 'page'`)
+  await click('[data-nav-key="chat"]')
+  await click('[data-nav-key="settings"]')
+  await until(`document.querySelector('[data-settings-group="general"]')?.getAttribute('aria-current') === 'page'`)
   await click('[data-nav-key="chat"]')
   await until(`!!document.querySelector('[data-view-state="active"] [data-chat-col]')`)
   await evaluate(String.raw`review.useSession.setState({messages:[
@@ -141,10 +145,20 @@ try {
     {kind:'assistant',id:'a1',text:'## 让每一次对话，都更专注\n\n以移动端的**蓝白配色**为起点，让内容成为界面的主角。\n\n- 清晰的层次：浅灰侧栏、白色画布与轻盈的输入区。\n- 适度的留白：让长文本更易读，让操作更容易找到。\n- 按需展开：工具执行收为小块，细节随时可查。\n\n接下来，我们可以从首页与对话体验开始。',reasoning:'先检查现有组件，再梳理移动端的设计令牌。',tools:[{callId:'t1',name:'read_file',args:'{"path":"src/styles/theme.css"}',status:'done',elapsedMs:240,preview:'Design tokens loaded'},{callId:'t2',name:'list_directory',args:'{}',status:'done',elapsedMs:180,preview:'12 components'}],streaming:false,at:Date.now()}
   ]})`)
   await until(`!!document.querySelector('[data-tool-group] .tool-summary')`)
+  assert.equal(await evaluate(`document.querySelector('[data-chat-toolbar]').textContent.includes('工作区') || document.querySelector('[data-chat-toolbar]').textContent.includes('DeepSeek V3.2')`), false, 'toolbar shows title without stacked metadata')
+  await until(`!!document.querySelector('[data-nav-point]')`)
+  assert.equal(await evaluate(`document.querySelector('[data-nav-point]').querySelectorAll('button').length`), 1, 'one navigation tick per turn')
+  const tickBefore = await evaluate(`document.querySelector('[data-nav-point] button').getBoundingClientRect().width`)
+  const tickPosition = await evaluate(`(() => { const r=document.querySelector('[data-nav-point] button').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2} })()`)
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...tickPosition })
+  await wait(500)
+  assert.ok(await evaluate(`document.querySelector('[data-nav-point] button').getBoundingClientRect().width`) > tickBefore, 'hover extends the single tick')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1400, y: 20 })
   assert.equal(await evaluate(`document.querySelector('[data-tool-group] button').getAttribute('aria-expanded')`), 'false')
   await shot('04-conversation')
   await click('[data-tool-group] button')
   assert.equal(await evaluate(`document.querySelector('[data-tool-group] button').getAttribute('aria-expanded')`), 'true')
+  await until(`!!document.querySelector('[data-tool-group] [data-tool-group]')`)
   await click('[data-tool-group] button')
   await evaluate(`review.useUi.getState().openPanel('stats')`)
   await until(`document.querySelector('[data-dock-panel]')?.getBoundingClientRect().width > 200`)
@@ -224,7 +238,9 @@ try {
   // Exercise initial consent without touching any real user's storage.
   await evaluate(`(async()=>{const url=performance.getEntriesByType('resource').find(e=>new URL(e.name).pathname==='/src/components/onboarding/store.ts').name;const {useOnboarding}=await import(url);useOnboarding.getState().show(true)})()`)
   await until(`!!document.querySelector('[data-onboarding-agree]')`)
-  await click('[data-onboarding-agree]')
+  assert.equal(await evaluate(`document.querySelector('[data-onboarding-agree]').checked`), false, 'consent is never preselected')
+  assert.equal(await evaluate(`document.activeElement===document.querySelector('[data-onboarding] [aria-expanded]')`), false, 'privacy link is not autofocused')
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-onboarding]')).outlineStyle`), 'none', 'dialog does not receive a default blue selection outline')
   assert.equal(await evaluate(`document.querySelector('[data-onboarding-enter]').disabled`), true)
   await send('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
   assert.ok(await evaluate(`!!document.querySelector('[data-onboarding]')`), 'initial consent stays open on Escape')

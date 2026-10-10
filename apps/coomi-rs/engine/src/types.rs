@@ -405,6 +405,12 @@ pub struct ChatMessage {
     pub compaction_summary: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub internal: bool,
+    /// 引擎注入的**非用户输入**标记（机器可读）：目前只有 "goal"（目标复述）。
+    /// 前端据此不把它当成用户消息渲染，改成一条轻量系统行。
+    /// 之前只有 internal 这一个布尔（且前端忽略了它），于是每 6 轮注入一次的目标复述
+    /// 会以一个「用户气泡」的样子突然出现在对话里 —— 看起来像用户自己发了一条控制台指令。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminder: Option<String>,
     /// 数字生命体主动消息（气泡/开场问候）：由生命体队列直接写入，不来自模型。
     #[serde(default, skip_serializing_if = "is_false")]
     pub life_proactive: bool,
@@ -466,6 +472,7 @@ impl ChatMessage {
             tool_call_id: None,
             compaction_summary: false,
             internal: false,
+            reminder: None,
             life_proactive: false,
             pinned: false,
             draft: false,
@@ -495,6 +502,7 @@ impl ChatMessage {
             tool_call_id: Some(call_id.into()),
             compaction_summary: false,
             internal: false,
+            reminder: None,
             life_proactive: false,
             pinned: false,
             draft: false,
@@ -516,6 +524,7 @@ impl ChatMessage {
             tool_call_id: None,
             compaction_summary: false,
             internal: false,
+            reminder: None,
             life_proactive: false,
             pinned: false,
             draft: false,
@@ -537,6 +546,14 @@ impl ChatMessage {
     pub fn internal_user(content: impl Into<String>) -> Self {
         let mut message = Self::user(content);
         message.internal = true;
+        message
+    }
+
+    /// 带**机器可读种类**的内部消息（引擎注入：目标复述 / 上下文尾巴 …）。
+    /// 前端按 `reminder` 决定怎么渲染，不再去猜正文前缀。
+    pub fn internal_reminder(content: impl Into<String>, kind: &str) -> Self {
+        let mut message = Self::internal_user(content);
+        message.reminder = Some(kind.to_owned());
         message
     }
 

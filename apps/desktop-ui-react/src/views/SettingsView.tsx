@@ -41,7 +41,7 @@ import { Input, Badge } from '../components/ui/Input'
 import { Segmented, Skeleton, SkeletonRows, Spinner, Switch } from '../components/ui/Controls'
 // 注：AI 状态动效（AgentState）由 components/ai/AgentState.tsx 提供，本页此刻还没有该文件，
 // 「加载中」一律先用骨架屏占位。TODO(components/ai/AgentState)：就绪后换成 <AgentState state="running" size="sm" />。
-import { useAgent, EFFORT_LABELS, PERMISSION_LABELS, type PermissionMode, type ReasoningEffort } from '../stores/agent'
+import { useAgent, PERMISSION_LABELS, type PermissionMode } from '../stores/agent'
 import { useCapabilities, type Capabilities } from '../stores/capabilities'
 import { Menu } from '../components/ui/Menu'
 import { Select } from '../components/ui/Select'
@@ -145,6 +145,23 @@ const GROUPS = [
 /** 分组 key 的联合类型（表在上面，类型跟着表走）。 */
 type GroupKey = (typeof GROUPS)[number]['key']
 
+
+const RETRY_COUNT_PRESETS: Array<{ value: number; label: string }> = [
+  { value: 0, label: '关闭' },
+  { value: 1, label: '1' },
+  { value: 2, label: '2' },
+  { value: 3, label: '3' },
+  { value: 5, label: '5' },
+  { value: 10, label: '10' },
+  { value: 255, label: '无限' },
+]
+function retryCountOptions(current: number): Array<{ value: string; label: string }> {
+  const has = RETRY_COUNT_PRESETS.some((o) => o.value === current)
+  const list = has
+    ? RETRY_COUNT_PRESETS
+    : [...RETRY_COUNT_PRESETS, { value: current, label: String(current) }].sort((a, b) => a.value - b.value)
+  return list.map((o) => ({ value: String(o.value), label: o.label }))
+}
 
 const RECENT_KEY = 'coomi.recentCwd.v1'
 
@@ -257,15 +274,20 @@ export function SettingsView() {
   const agentPermission = useAgent((s) => s.permission)
   const agentEffort = useAgent((s) => s.effort)
   const agentMaxToolRounds = useAgent((s) => s.maxToolRounds)
+  const agentProviderRetryCount = useAgent((s) => s.providerRetryCount)
+  const agentReconnectMaxDelayMs = useAgent((s) => s.reconnectMaxDelayMs)
   const agent = useMemo(() => ({
     permission: agentPermission,
     effort: agentEffort,
     maxToolRounds: agentMaxToolRounds,
+    providerRetryCount: agentProviderRetryCount,
+    reconnectMaxDelayMs: agentReconnectMaxDelayMs,
     setPermission: useAgent.getState().setPermission,
     setEffort: useAgent.getState().setEffort,
     setMaxToolRounds: useAgent.getState().setMaxToolRounds,
-  }), [agentPermission, agentEffort, agentMaxToolRounds])
-
+    setProviderRetryCount: useAgent.getState().setProviderRetryCount,
+    setReconnectMaxDelayMs: useAgent.getState().setReconnectMaxDelayMs,
+  }), [agentPermission, agentEffort, agentMaxToolRounds, agentProviderRetryCount, agentReconnectMaxDelayMs])
   const [providers, setProviders] = useState<Provider[]>([])
   /// 每个 Provider 拉到的模型列表（自动获取，不再手打模型名）。
   const [modelMap, setModelMap] = useState<Record<string, string[]>>({})
@@ -297,13 +319,15 @@ export function SettingsView() {
   const [recent, setRecent] = useState<string[]>(readRecent())
   const [notice, setNotice] = useState('')
   /// 桌面壳行为（关闭到托盘 / 开机自启），由 Tauri 侧持久化在 desktop-ui.json。
-  const [desktopPrefs, setDesktopPrefs] = useState({ closeToTray: true, autostart: false })
+  const [desktopPrefs, setDesktopPrefs] = useState({ closeToTray: true, autostart: false, checkUpdatesOnStartup: true, updateChannel: 'beta' as 'beta' | 'release' })
   const caps = useCapabilities((s) => s.caps)
   const setCaps = useCapabilities((s) => s.set)
   /// 设置分组：左列导航，右侧只渲染当前组（分组表在文件顶部，静态一份）。
   /// 空态那句话每 14 秒换一组（默认开）。刻意**不**并进 ui.prefs：它落在自己的
   /// localStorage 键上（coomi.rotateCopy.v1），偏好结构不动，空态那边按订阅即时跟上。
-  const [group, setGroup] = useState<GroupKey>('appearance')
+  const requestedGroup = useUi((s) => s.settingsGroup)
+  const clearRequestedGroup = useUi((s) => s.setSettingsGroup)
+  const [group, setGroup] = useState<GroupKey>('general')
   /// 分组切换方向：1＝往后面的分组切（内容向上走）。GroupTransition 依据它决定进出场方向。
   const [groupDir, setGroupDir] = useState(1)
   /// 分组内容共用一个滚动容器，所以**每个分组各自记一份滚动位置**：
@@ -319,6 +343,11 @@ export function SettingsView() {
     scrollMemo.current[group] = bodyRef.current?.scrollTop ?? 0
     setGroup(next)
   }
+  useEffect(() => {
+    if (!requestedGroup) return
+    if (GROUPS.some((item) => item.key === requestedGroup)) setGroup(requestedGroup as GroupKey)
+    clearRequestedGroup(null)
+  }, [requestedGroup, clearRequestedGroup])
   /// 「模型与厂商」首次加载：接口回来之前铺骨架，避免闪一下空面板。
   const [providersPending, setProvidersPending] = useState(false)
 
@@ -491,8 +520,13 @@ export function SettingsView() {
     void ipc<string>('data_home').then(setDataHome).catch(() => {})
     void ipc<string | null>('engine_log_path').then((p) => setLogPath(p ?? '')).catch(() => {})
     // 桌面壳的后台运行开关（老版本壳没有这个命令，失败时保持默认值即可）。
-    void ipc<{ closeToTray: boolean; autostart: boolean }>('desktop_prefs')
-      .then((prefs) => setDesktopPrefs({ closeToTray: prefs?.closeToTray ?? true, autostart: prefs?.autostart ?? false }))
+    void ipc<{ closeToTray: boolean; autostart: boolean; checkUpdatesOnStartup?: boolean; updateChannel?: 'beta' | 'release' }>('desktop_prefs')
+      .then((prefs) => setDesktopPrefs({
+        closeToTray: prefs?.closeToTray ?? true,
+        autostart: prefs?.autostart ?? false,
+        checkUpdatesOnStartup: prefs?.checkUpdatesOnStartup ?? true,
+          updateChannel: prefs?.updateChannel ?? 'beta',
+      }))
       .catch(() => {})
   }, [engine.ready])
 
@@ -539,7 +573,7 @@ export function SettingsView() {
             className='settings-content'
           >
           <div className='flex max-w-[860px] flex-col gap-5'>
-          <Section className={group === 'general' ? '' : 'hidden'}>
+          {group === 'general' ? (<Section className={group === 'general' ? '' : 'hidden'}>
           <StaggerGrid>
             <Cell label='启动时打开的页面' hint='下次启动默认进入这个页面'>
               <Segmented<ViewKey>
@@ -605,10 +639,24 @@ export function SettingsView() {
                 }}
               />
             </Cell>
+            <Cell label='启动时检查更新' hint='发现新版本时提示'>
+              <Switch checked={desktopPrefs.checkUpdatesOnStartup} onCheckedChange={(enabled) => {
+                const previous = desktopPrefs.checkUpdatesOnStartup
+                setDesktopPrefs((prefs) => ({ ...prefs, checkUpdatesOnStartup: enabled }))
+                void ipc('set_check_updates_on_startup', { enabled }).catch(() => setDesktopPrefs((prefs) => ({ ...prefs, checkUpdatesOnStartup: previous })))
+              }} />
+            </Cell>
+            <Cell label='更新渠道' hint='测试版包含 rc 版本；正式版只接收正式发布'>
+              <Segmented<'beta' | 'release'> value={desktopPrefs.updateChannel} options={[{ value: 'beta', label: '测试版' }, { value: 'release', label: '正式版' }]} onChange={(channel) => {
+                const previous = desktopPrefs.updateChannel
+                setDesktopPrefs((prefs) => ({ ...prefs, updateChannel: channel }))
+                void ipc('set_update_channel', { channel }).catch(() => setDesktopPrefs((prefs) => ({ ...prefs, updateChannel: previous })))
+              }} />
+            </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
 
-          <Section className={group === 'appearance' ? '' : 'hidden'}>
+          {group === 'appearance' ? (<Section className={group === 'appearance' ? '' : 'hidden'}>
           <StaggerGrid>
             <Cell label='字体' hint='选择界面字体'>
               <Segmented<'harmony' | 'system'>
@@ -667,9 +715,6 @@ export function SettingsView() {
                 options={[{ value: 'compact', label: '紧凑' }, { value: 'cozy', label: '舒适' }]}
               />
             </Cell>
-            <Cell wide label='极简界面模式' hint='收起工具调用详情，失败时自动展开。'>
-              <Switch aria-label='极简界面模式' checked={ui.prefs.minimalUi} onCheckedChange={(v) => ui.setPrefs({ minimalUi: v })} />
-            </Cell>
             <MessageWidthField
               wide
               mode={ui.prefs.messageWidthMode}
@@ -695,11 +740,11 @@ export function SettingsView() {
               />
             </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
 
           {/* 插件中心已移到左侧导航栏（Rail → 插件 图标），设置页不再内嵌。 */}
 
-          <Section
+          {group === 'models' ? (<Section
             className={group === 'models' ? '' : 'hidden'}
             title='服务与模型'
             description='配置模型服务与连接方式。'
@@ -711,9 +756,6 @@ export function SettingsView() {
               data-testid='providers-panel'
             >
               <div data-testid='providers-top'>
-                <Cell label='思考强度' hint={EFFORT_LABELS.find((e) => e.value === agent.effort)?.hint}>
-                  <Select value={agent.effort} width={160} onChange={(v) => void agent.setEffort(v as ReasoningEffort)} options={EFFORT_LABELS.map((e) => ({ value: e.value, label: e.label }))} />
-                </Cell>
                 <Cell label='单轮工具调用上限' hint='复杂任务可调高，范围 1–512'>
                   <Input aria-label='单轮工具调用上限' className='w-[96px]' type='number' min={1} max={512} value={agent.maxToolRounds} onChange={(e) => void agent.setMaxToolRounds(Number(e.target.value))} />
                 </Cell>
@@ -771,9 +813,9 @@ export function SettingsView() {
                 <Cell label='还没有模型服务商' hint='添加一个 OpenAI 兼容接口即可开始会话' />
               ) : null}
             </div>
-          </Section>
+          </Section>) : null}
 
-          <Section className={group === 'workspace' ? '' : 'hidden'} title='文件与目录'>
+          {group === 'workspace' ? (<Section className={group === 'workspace' ? '' : 'hidden'} title='文件与目录'>
           <StaggerGrid>
             <Cell
               label='默认工作目录'
@@ -797,9 +839,9 @@ export function SettingsView() {
               <span className='text-12 text-ink-4'>{recent.length} 个</span>
             </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
 
-          <Section className={group === 'ai' ? '' : 'hidden'} title='能力偏好' description='按需开启，修改立即生效。'>
+          {group === 'ai' ? (<Section className={group === 'ai' ? '' : 'hidden'} title='能力偏好' description='按需开启，修改立即生效。'>
           <StaggerGrid>
             {([
               ['memory', '长期记忆', '跨会话记住事实与偏好，相关时自动注入'],
@@ -892,8 +934,14 @@ export function SettingsView() {
                 ]}
               />
             </Cell>
+            <Cell label='瞬时故障重试次数' hint='0 关闭；无限会持续重试瞬时错误'>
+              <Segmented<string> value={String(agent.providerRetryCount)} onChange={(value) => void agent.setProviderRetryCount(Number(value))} options={retryCountOptions(agent.providerRetryCount)} />
+            </Cell>
+            <Cell label='重试等待上限' hint='以秒为单位，范围 1–120 秒'>
+              <Input className='w-[92px]' type='number' min={1} max={120} value={Math.round(agent.reconnectMaxDelayMs / 1000)} onChange={(event) => void agent.setReconnectMaxDelayMs(Number(event.target.value) * 1000)} />
+            </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
 
           {/* 上下文压缩：跟在「AI 能力」分组后面的一小节，只在这一组显示（自己拉引擎有效值）。 */}
           <CompactionPanel active={group === 'ai'} />
@@ -906,7 +954,7 @@ export function SettingsView() {
               与旁边几块同一套时机：只在这一组显示，active 时才去拉数据。 */}
           <TrajectoryPanel active={group === 'ai'} />
 
-          <Section className={group === 'life' ? '' : 'hidden'} title='数字生命体' description='常驻伙伴的主动问候与免打扰策略。'>
+          {group === 'life' ? (<Section className={group === 'life' ? '' : 'hidden'} title='数字生命体' description='常驻伙伴的主动问候与免打扰策略。'>
           <StaggerGrid>
             <Cell label='启用数字生命体' hint='拥有情绪、羁绊与长期记忆的常驻伙伴'>
               {/* 载入时用同尺寸的骨架占位（开关形状），而不是一个小转圈把行高顶来顶去 */}
@@ -940,9 +988,9 @@ export function SettingsView() {
               <Switch checked={!!life?.globalMode} onCheckedChange={(v) => void patchLife({ globalMode: v })} />
             </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
 
-          <Section className={group === 'engine' ? '' : 'hidden'} title='引擎与诊断' description='后台引擎进程的状态与维护。'>
+          {group === 'engine' ? (<Section className={group === 'engine' ? '' : 'hidden'} title='引擎与诊断' description='后台引擎进程的状态与维护。'>
           <StaggerGrid>
             <Cell
               label='运行状态'
@@ -993,7 +1041,7 @@ export function SettingsView() {
               >清理缓存</Button>
             </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
 
           {/* 两个数据面板：跟着分组一起挂载/隐藏，切到「引擎与诊断」时才各自去拉数据。 */}
           <MirrorPanel active={group === 'engine'} />
@@ -1001,7 +1049,7 @@ export function SettingsView() {
 
           <DeveloperPanel active={group === 'engine'} />
 
-          <Section className={group === 'about' ? '' : 'hidden'} title='应用信息'>
+          {group === 'about' ? (<Section className={group === 'about' ? '' : 'hidden'} title='应用信息'>
           <StaggerGrid>
             <Cell wide className='items-start'>
               <div className='flex w-full items-start gap-4'>
@@ -1128,7 +1176,7 @@ export function SettingsView() {
               </div>
             </Cell>
           </StaggerGrid>
-          </Section>
+          </Section>) : null}
           </div>
           </GroupTransition>
         </div>

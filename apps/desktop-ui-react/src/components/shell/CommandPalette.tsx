@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { usePluginClientCommands } from '../plugins/clientRuntime'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
-  ArrowLeft, Brain, ChevronRight, FolderOpen, MessageSquare, Package, Plus, Search, Settings, Shield, Sparkles, UserRound,
+  ArrowLeft, Brain, ChevronRight, FolderOpen, MessageSquare, Package, Plus, Puzzle, Search, Settings, Shield, Sparkles, UserRound,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { ipc } from '../../lib/ipc'
@@ -67,6 +68,9 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     exitTimer.current = window.setTimeout(() => { setSub(null); exitTimer.current = null }, SUB_EXIT_MS)
   }
 
+  /* 客户端插件注册的命令（订阅式：插件热加载后这里自动跟着变）。 */
+  const pluginCommands = usePluginClientCommands()
+
   const root = useMemo<Command[]>(() => {
     const view = (key: ViewKey, label: string, icon: React.ReactNode): Command => ({
       id: 'view:' + key, label, icon, run: () => setView(key),
@@ -123,9 +127,18 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           run: () => { setView('chat'); void openSession(s.id) },
         })),
       },
+      /* 客户端插件注册的命令：排在核心命令之后，hint 标出来源，便于分辨是谁提供的。
+         插件热加载后这份列表会自动跟着变（useSyncExternalStore 订阅运行时）。 */
+      ...pluginCommands.map((cmd) => ({
+        id: 'plugin:' + cmd.pluginId + ':' + cmd.id,
+        label: cmd.title,
+        hint: '插件 · ' + cmd.pluginId,
+        icon: <Puzzle size={15} />,
+        run: cmd.run,
+      })),
     ]
     return list
-  }, [sessions, meta, cwd, effort, permission, newSession, openSession, setView, setEffort, setPermission])
+  }, [sessions, meta, cwd, effort, permission, newSession, openSession, setView, setEffort, setPermission, pluginCommands])
 
   /// 当前层自己的列表；搜索时把子层摊平一起搜（层级只负责浏览，搜索保持全局）。
   const needle = query.trim().toLowerCase()

@@ -125,9 +125,9 @@ export function frameHarness(token: string): string {
 
 /** 组装 srcdoc。 */
 export function buildFrameDocument(options: FrameDocOptions): string {
-  const head = [frameHarness(options.token), options.headHtml ?? ''].join('')
+  const head = [inlineScript(frameHarness(options.token)), options.headHtml ?? ''].join('')
   const scripts = (options.scripts ?? []).map((s) => inlineScript(s.code, s.module === true)).join('')
-  const bodyStyle = options.bodyStyle ?? 'margin:0;padding:12px;font:13px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#111;background:#fff'
+  const bodyStyle = options.bodyStyle ?? 'margin:0;padding:0'
   return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
     + '<meta http-equiv="Content-Security-Policy" content="' + CSP + '">'
     + '<title>' + (options.title ?? 'Coomi 预览') + '</title>'
@@ -138,6 +138,10 @@ export function buildFrameDocument(options: FrameDocOptions): string {
 
 /** 从完整的 HTML 文档里抽出 head / body 片段：抽不出来时整份当 body（照样能渲染）。 */
 export function splitHtmlDocument(code: string): { headHtml: string; bodyHtml: string } {
+  if (typeof DOMParser !== 'undefined') {
+    const document = new DOMParser().parseFromString(code, 'text/html')
+    return { headHtml: document.head.innerHTML, bodyHtml: document.body.innerHTML }
+  }
   if (!/<html|<head|<body/i.test(code)) return { headHtml: '', bodyHtml: code }
   const head = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(code)
   const body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(code)

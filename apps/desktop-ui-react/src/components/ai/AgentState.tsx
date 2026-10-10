@@ -206,9 +206,9 @@ const DOTS = [0, 1, 2, 3, 4, 5]
 
 function CssDots() {
   return (
-    <span className='ai-ring' aria-hidden='true'>
+    <span className='ai-ring' aria-hidden='true' data-loop-anim>
       {DOTS.map((i) => (
-        <span key={i} className='ai-dot' style={{ '--i': String(i) } as CSSProperties} />
+        <span key={i} className='ai-dot' data-loop-anim style={{ '--i': String(i) } as CSSProperties} />
       ))}
     </span>
   )

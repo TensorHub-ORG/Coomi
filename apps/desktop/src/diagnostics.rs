@@ -31,6 +31,8 @@ static FRONTEND_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String:
 /// 前端每 10 秒上报一次：壳据此判断「界面自己认为自己连上了没有」。
 #[tauri::command]
 pub fn frontend_status(status: String) {
+    #[cfg(debug_assertions)]
+    eprintln!("[coomi-desktop] frontend status: {status}");
     FRONTEND_TALKED.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Ok(mut slot) = FRONTEND_STATUS.lock() {
         *slot = status;

@@ -27,7 +27,7 @@ const LEVEL_CLASS: Record<ConsoleLevel, string> = {
   system: 'text-ink-4',
 }
 
-export function SandboxFrame({ doc, token, title, reloadSignal = 0, height = 260, className }: {
+export function SandboxFrame({ doc, token, title, reloadSignal = 0, height = 260, fill = false, className }: {
   /** srcdoc 全文（buildFrameDocument 生成）。 */
   doc: string
   /** 帧标识：父页面只认这个 token 的消息，多帧同时存在也不会串台。 */
@@ -36,6 +36,7 @@ export function SandboxFrame({ doc, token, title, reloadSignal = 0, height = 260
   /** 外部「刷新」按钮：+1 即重建 iframe（doc 不变，重新跑一遍）。 */
   reloadSignal?: number
   height?: number
+  fill?: boolean
   className?: string
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null)
@@ -97,7 +98,7 @@ export function SandboxFrame({ doc, token, title, reloadSignal = 0, height = 260
   }, [])
 
   return (
-    <div className={cn('flex min-h-0 min-w-0 flex-col', className)}>
+    <div className={cn('flex min-h-0 min-w-0 flex-col', fill && 'flex-1', className)}>
       <div className='flex h-7 shrink-0 items-center gap-1.5 border-b border-line px-2'>
         <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full',
           status === 'ok' ? 'bg-ok' : status === 'timeout' ? 'bg-warn' : 'bg-ink-4')} />
@@ -119,7 +120,7 @@ export function SandboxFrame({ doc, token, title, reloadSignal = 0, height = 260
         <Button variant='ghost' size='icon-sm' className='h-6 w-6' title='刷新' onClick={restart}><RotateCcw size={12} /></Button>
       </div>
 
-      <div className='relative min-h-0 flex-1' style={{ height }}>
+      <div className='relative min-h-0 flex-1' style={fill ? undefined : { height, flex: 'none' }}>
         {closed ? (
           <div className='flex h-full flex-col items-center justify-center gap-2 text-12 text-ink-3'>
             <Ban size={16} />

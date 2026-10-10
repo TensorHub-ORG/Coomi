@@ -6,6 +6,7 @@ import {
 import { cn } from '../../lib/cn'
 import { useUi, type ViewKey } from '../../stores/ui'
 import { usePluginViews } from '../../stores/pluginViews'
+import { usePluginClientViews } from '../plugins/clientRuntime'
 import { useEngine } from '../../stores/engine'
 // 插件主题 parts（v1.7）：侧栏 logo 圆角 / 导航图标颜色经它订阅。
 import { useThemeParts } from '../plugins/PluginThemeEngine'
@@ -62,6 +63,7 @@ export function Rail() {
   // 插件页面：引擎就绪后拉一次（老引擎没有这个接口时保持空表，侧边栏与以前一模一样）。
   const engineReady = useEngine((s) => s.ready)
   const pluginViews = usePluginViews((s) => s.views)
+  const clientViews = usePluginClientViews()
   const loadPluginViews = usePluginViews((s) => s.load)
   useEffect(() => { if (engineReady) void loadPluginViews() }, [engineReady, loadPluginViews])
 
@@ -96,26 +98,20 @@ export function Rail() {
       className='flex h-full w-full flex-col items-center gap-1 border-r border-line bg-side py-3'
       style={iconColor ? ({ '--rail-icon': iconColor } as React.CSSProperties) : undefined}
     >
-      {/* data-theme-mascot=logo：插件主题 mascot.logo 替换侧栏 logo 的挂点（引擎缓存原 src，卸载恢复）。
-          v1.7：parts.rail.logoRadius 覆盖 logo 圆角（内联样式优先于内置 rounded-xl）。 */}
       {NAV.map((n) => item(n.key, n.label, n.icon))}
-      {/* 插件注册的页面：分隔线只在真的有插件页时出现，平时一个像素都不多。 */}
-      {pluginViews.length ? <div className='my-1 h-px w-6 shrink-0 bg-line-soft' /> : null}
-      {pluginViews.map((v) => item(v.key, v.title, pluginIcon(v.icon)))}
-      <div className='flex-1' />
-      {item('settings', '设置', <Settings size={18} />)}
       <Tip label='插件' side='right'>
-        <button
-          type='button'
-          data-plugins-entry
-          aria-expanded={pluginsOpen}
-          onClick={() => setPluginsOpen(true)}
-          className={navBtn(pluginsOpen)}
-          aria-label='插件'
-        >
+        <button type='button' data-plugins-entry aria-expanded={pluginsOpen} onClick={() => setPluginsOpen(true)} className={navBtn(pluginsOpen)} aria-label='插件'>
           <Puzzle size={18} />
+          <span className='rail-label'>插件</span>
         </button>
       </Tip>
+      {/* 插件注册的页面：分隔线只在真的有插件页时出现，平时一个像素都不多。 */}
+      {(pluginViews.length || clientViews.length) ? <div className='my-1 h-px w-6 shrink-0 bg-line-soft' /> : null}
+      {pluginViews.map((v) => item(v.key, v.title, pluginIcon(v.icon)))}
+      {/* 客户端插件注册的页面：与声明式插件页并排，图标同样按名字映射。 */}
+      {clientViews.map((v) => item(v.key, v.title, pluginIcon(v.icon)))}
+      <div className='flex-1' />
+      {item('settings', '设置', <Settings size={18} />)}
       {pluginsReady ? (
         <Suspense fallback={null}>
           <PluginsView open={pluginsOpen} onClose={() => setPluginsOpen(false)} />

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Database, Globe, ShieldCheck, X } from 'lucide-react'
 import { Button } from '../ui/Button'
@@ -25,13 +25,15 @@ function DetailsGroup({ group }: { group: GuideGroup }) {
 
 export function OnboardingGuide({ open, blocking, agreed, onAgreedChange, onAccept, onClose }: OnboardingGuideProps) {
   const uid = useId()
+  const contentRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
   useEffect(() => { if (open) setExpanded(false) }, [open])
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next && !blocking) onClose() }}>
     <Dialog.Portal>
       <Dialog.Overlay className='dialog-scrim fixed inset-0 z-40 bg-black/35' />
-      <Dialog.Content data-onboarding data-blocking={String(blocking)}
-        className='dialog-surface fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-elev-4'
+      <Dialog.Content ref={contentRef} data-onboarding data-blocking={String(blocking)}
+        onOpenAutoFocus={(event) => { event.preventDefault(); contentRef.current?.focus() }}
+        className='dialog-surface outline-none fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-elev-4'
         onEscapeKeyDown={(e) => { if (blocking) e.preventDefault() }}
         onPointerDownOutside={(e) => { if (blocking) e.preventDefault() }}>
         <header className='flex items-start gap-4 px-8 pt-8 pb-5'>

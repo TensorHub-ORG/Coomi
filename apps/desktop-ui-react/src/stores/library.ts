@@ -223,6 +223,28 @@ interface LibraryState {
 /** 切页回看时的数据保鲜期：这么久以内的结果直接复用，不再打网络（见 ensureCatalog）。 */
 const VIEW_DATA_MAX_AGE_MS = 60_000
 
+/* ── 「重新检测」的两道刹车（见 recheckEnvironment） ──
+   背景：这两个接口都不便宜 —— /api/runtime/runtimes 实测约 2.3s（逐个 fork 子进程探测 10 个
+   运行时），/api/catalog 实测约 3.3s。而「重新检测」在界面上有多个入口（运行环境状态条、灰显
+   条目卡片、帮助弹窗、一键安装卡），连点几次就是十几条重请求、几十次进程创建，机器会被瞬时
+   打满，界面上看起来就是「卡死」。 */
+
+/** 最短重检间隔：5 秒。
+ *
+ *  为什么是这个数：一次**完整**重检自己就要约 5.6s（2.3 + 3.3），人的连点间隔远小于它；
+ *  而真正想要新结论的场景（去装完一个运行时再回来点）所花的墙钟时间通常是几十秒到几分钟。
+ *  5 秒既吞得掉连点，又不会把「我确实刚装好，快再检测一次」这个意图误判成无操作。
+ *
+ *  语义选择：**同一个 5 秒窗口内直接复用现有数据、一个请求都不发；超过窗口才真打网络。**
+ *  理由：另一条路是「用户点重新检测就永远强制刷新」，但那等于让上面那几个入口继续各自制造
+ *  并发峰值；而且 Windows 上装运行环境改的是 PATH，不重开应用本来就检测不到差别，
+ *  强刷给不出新结论 —— 反而把引擎的看门狗逼到误判卡死。 */
+const ENV_RECHECK_MIN_MS = 5_000
+
+/** 正在飞的那一次 recheckEnvironment。模块级即可：同一页面只会有一个 store 实例。
+ *  连点两次时第二次复用这个 Promise，而不是再发一轮请求（见 recheckEnvironment）。 */
+let environmentRecheckInFlight: Promise<void> | null = null
+
 const TEXT_EXT = /\.(md|txt|json|ya?ml|toml|js|ts|tsx|jsx|css|html|py|rs|go|java|sh|ps1|c|cpp|h|sql|log|csv)$/i
 
 export const useLibrary = create<LibraryState>((set, get) => ({
@@ -323,8 +345,33 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     await state.loadRuntimes()
   },
 
+  /* ── 「重新检测」：两道刹车 + 串行 ──
+     调用方（SkillsView 的 recheckAll / 状态条 / 灰显卡片 / 帮助弹窗）不需要任何改动。 */
   recheckEnvironment: async () => {
-    await Promise.all([get().loadCatalog(), get().loadRuntimes()])
+    // ① 在飞复用（in-flight 去重）：同一时刻只允许一次重检在网络上。
+    //    连点两次 → 第二次拿到的是第一次那个 Promise，不会产生第二条 /api/runtime/runtimes。
+    if (environmentRecheckInFlight) return environmentRecheckInFlight
+
+    const run = (async () => {
+      // ② 最短间隔（见 ENV_RECHECK_MIN_MS）：数据还热就直接复用，一个请求都不发。
+      //    两条数据源**各自**判断新鲜度，与 ensureCatalog / ensureRuntimes 同一口径：
+      //    只有真的过期的那个才重拉 —— 若用「任一新鲜就全都跳过」，一次只刷过 runtimes 的
+      //    调用就会把更过期的 catalog 一起吞掉，界面上会留下对不上的可用性标记。
+      const now = Date.now()
+      // ③ 串行而不是 Promise.all：见 SkillsView.recheckAll 的取舍注释。
+      //    先 runtimes（缺哪个运行环境是最受关注的信息），再 catalog。
+      if (now - get().runtimesCheckedAt >= ENV_RECHECK_MIN_MS) await get().loadRuntimes()
+      if (now - get().catalogCheckedAt >= ENV_RECHECK_MIN_MS) await get().loadCatalog()
+    })()
+
+    environmentRecheckInFlight = run
+    try {
+      await run
+    } finally {
+      // 无论成功失败都要清空：留着一个已 settle 的旧 Promise，后续每次「重新检测」都会
+      // 立刻拿到它而什么都不做 —— 那就从「去重」变成了「永久失效」。
+      if (environmentRecheckInFlight === run) environmentRecheckInFlight = null
+    }
   },
 
   /* ── 运行环境一键安装 ── */

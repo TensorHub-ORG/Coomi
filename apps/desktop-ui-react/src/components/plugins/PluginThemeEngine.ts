@@ -383,6 +383,8 @@ function ensureMascotObserver(): void {
 /** 摘掉 mascot 形象：logo / avatar 挂点按缓存的 themeOrig 恢复原 src，
     composer 挂点里注入的 img 移除（卸载 / 切回内置主题时调用）。 */
 export function clearMascot(): void {
+  mascotObserver?.disconnect()
+  mascotObserver = null
   activeMascot = null
   activeMascotOwner = ''
   document.querySelectorAll('[' + MASCOT_LOGO_ATTR + ']').forEach((el) => restoreMascotImg(el))

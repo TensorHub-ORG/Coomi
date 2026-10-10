@@ -72,7 +72,7 @@ export function PageHeader({ title, description, actions, sticky, className }: {
     <header
       data-page-header
       className={cn(
-        'flex items-start gap-4 border-b px-8 pt-7 pb-5',
+        'workbench-page-header flex items-start gap-4 border-b px-8 pt-7 pb-5',
         sticky ? 'glass-bar sticky top-0 z-20 border-line-soft' : 'border-transparent',
         className,
       )}

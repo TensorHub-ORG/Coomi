@@ -10,6 +10,7 @@ import { Input, Field } from '../ui/Input'
 import { Switch, Spinner } from '../ui/Controls'
 import { Select } from '../ui/Select'
 import { withDisplayName } from '../../lib/stormProbe'
+import { modelContextDefault } from '../../lib/modelContextDefaults'
 
 /**
  * 厂商向导：两步 —— ①连通性与基本信息 ②模型清单与能力。
@@ -172,9 +173,9 @@ function toDraft(id: string, provider: Provider | null): ModelDraft {
     uid: nextUid(),
     id,
     name: provider?.modelDescriptions?.[id] ?? '',
-    context: provider?.modelContextWindows?.[id] ? String(provider.modelContextWindows[id]) : '',
+    context: String(provider?.modelContextWindows?.[id] || modelContextDefault(id)),
     maxOutput: provider?.modelParameters?.[id]?.max_output_tokens ? String(provider.modelParameters[id]?.max_output_tokens) : '',
-    caps: { ...(provider?.capabilityOverrides?.[id] ?? {}) },
+    caps: { ...Object.fromEntries(CAPS.map(cap => [cap.key, cap.key !== "vision"])), ...(provider?.capabilityOverrides?.[id] ?? {}) },
   }
 }
 
@@ -237,7 +238,14 @@ const ModelRow = (props: {
           <Input
             value={local.id}
             onKeyDown={onKey}
-            onChange={(e) => setLocal((s) => ({ ...s, id: e.target.value }))}
+            onChange={(e) => {
+              const id = e.target.value
+              setLocal((s) => {
+                const next = { ...s, id, context: !s.context || Number(s.context) === modelContextDefault(s.id) ? String(modelContextDefault(id)) : s.context }
+                onPatch(row.uid, next)
+                return next
+              })
+            }}
             onBlur={flush}
             className='h-8 font-mono text-12'
             aria-label='模型 ID'
@@ -336,6 +344,7 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
   const [model, setModel] = useState('')
   const [modelIds, setModelIds] = useState<string[]>([])
   const [rows, setRows] = useState<ModelDraft[]>([])
+  const discoveredEfforts = useRef<Record<string, string[]>>({})
   const [expanded, setExpanded] = useState<string>('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -405,11 +414,20 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type, baseUrl: baseUrl.trim(), apiKey: apiKey.trim() }),
           })
+      const metadata = (res as { metadata?: Record<string, { contextWindow?: number; maxOutputTokens?: number; vision?: boolean; reasoningEfforts?: string[] }> }).metadata ?? {}
+      for (const [id, meta] of Object.entries(metadata)) { if (meta.reasoningEfforts?.length) discoveredEfforts.current[id] = meta.reasoningEfforts }
       const ids = res.models ?? []
       setModelIds(ids)
       setRows((list) => {
         const known = new Set(list.map((r) => r.id))
-        const added = ids.filter((id) => !known.has(id)).map((id) => toDraft(id, editing))
+        const added = ids.filter((id) => !known.has(id)).map((id) => {
+          const row = toDraft(id, editing)
+          const meta = metadata[id]
+          if (meta?.contextWindow && !editing?.modelContextWindows?.[id]) row.context = String(meta.contextWindow)
+          if (meta?.maxOutputTokens && !row.maxOutput) row.maxOutput = String(meta.maxOutputTokens)
+          if (typeof meta?.vision === "boolean") row.caps.vision = meta.vision
+          return row
+        })
         return [...list, ...added]
       })
       const note = (res as { note?: string }).note ?? ''
@@ -457,7 +475,7 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
 
     const modelDescriptions: Record<string, string> = {}
     const modelContextWindows: Record<string, number> = {}
-    const modelParameters: Record<string, { max_output_tokens?: number }> = {}
+    const modelParameters: Record<string, { max_output_tokens?: number }> = { ...(editing?.modelParameters ?? {}) }
     const capabilityOverrides: Record<string, Record<string, boolean>> = {}
     /// 被夹紧过的上下文窗口（保存后如实告诉用户改了哪几个）。
     const adjusted: string[] = []
@@ -465,7 +483,7 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
       const id = r.id.trim()
       if (!id) continue
       if (r.name.trim()) modelDescriptions[id] = r.name.trim()
-      const ctx = Number(r.context)
+      const ctx = Number(r.context || modelContextDefault(id))
       if (Number.isFinite(ctx) && ctx > 0) {
         // 引擎只接受 32000~1048576，越界以前直接 400（用户完全看不出是哪一格的问题）。
         // 现在按区间夹紧，并把「改过哪几个模型」在保存后如实提示。
@@ -482,6 +500,13 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
         const all: Record<string, boolean> = {}
         for (const c of CAPS) all[c.key] = !!r.caps[c.key]
         capabilityOverrides[id] = all
+      }
+    }
+    for (const id of ids) {
+      const levels = discoveredEfforts.current[id]
+      if (levels?.length && type.startsWith("openai") && !(modelParameters[id] as Record<string, unknown> | undefined)?.reasoningMapping) {
+        const mapping = Object.fromEntries(levels.filter(level => ["low", "medium", "high", "xhigh", "ultra"].includes(level)).map(level => [level, level]))
+        if (Object.keys(mapping).length) modelParameters[id] = { ...modelParameters[id], reasoningField: type.includes("responses") ? "reasoning.effort" : "reasoning_effort", reasoningMapping: mapping } as typeof modelParameters[string]
       }
     }
     const current = model.trim() && ids.includes(model.trim()) ? model.trim() : ids[0]

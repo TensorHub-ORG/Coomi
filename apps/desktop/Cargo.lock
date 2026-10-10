@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "coomi-desktop"
-version = "1.0.2"
+version = "1.0.0-test.1"
 dependencies = [
  "anyhow",
  "serde",

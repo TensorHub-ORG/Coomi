@@ -1,10 +1,11 @@
 /**
- * 对话页顶部的「子智能体」面板：可折叠，没有子智能体时整块隐藏。
+ * 顶栏「子智能体」popover 里的面板内容：数据全部来自引擎（见 ./subagents.ts 的说明）。
  *
- * 数据全部来自引擎（见 ./subagents.ts 的说明）：
+ * 原来的版本常驻在对话页主列顶部（进对话页就展开一大块、占掉对话空间），现在搬进
+ * 顶栏按钮弹出的 popover —— 不常驻展开、不占对话空间；点开才出现，还是同一块内容。
  * - GET /api/settings/subagents：已配置的子智能体（名称 / 模型），把 sub_agent_id 变成人话；
  * - 当前对话的 spawn_agent / wait_agent / close_agent 工具调用：谁被派发、什么状态、耗时、最近输出。
- * 这里不合成任何条目：一条都没有就不渲染。
+ * 这里不合成任何条目：一条都没有就不渲染（popover 形态下渲染 empty 占位，按钮点开不落白板）。
  *
  * 中断：引擎目前没有「单独终止某个子智能体」的 HTTP/WS 接口（spawn_agent 派生的子 Agent
  * 由调度器持有，只能通过模型侧的 close_agent 工具关闭），所以这里的中断按钮走的是引擎
@@ -16,14 +17,15 @@ import { toast } from 'sonner'
 import { cn } from '../../lib/cn'
 import { fmtDuration } from '../../lib/format'
 import { ipc } from '../../lib/ipc'
-import type { ChatItem } from '../../lib/chat'
 import { useEngine } from '../../stores/engine'
-import { useSession } from '../../stores/session'
+import { useChatItems, useSession } from '../../stores/session'
 import { Badge } from '../ui/Input'
 import { Tip } from '../ui/Overlay'
 import { secondNow, useStableTick } from '../ui/stableTick'
 import { AgentState } from '../ai/AgentState'
 import { deriveSubagents, isLive, type ConfiguredSubagent, type SubagentEntry, type SubagentStatus } from './subagents'
+// 子智能体对话详情：点开条目后按 id 拉 GET /api/agents/{id}/messages（见组件内说明）。
+import { SubagentDetail } from './SubagentDetail'
 // 插件子智能体模板：新建区（名称 + 描述，点击即建；systemPrompt 由壳/引擎侧保存）。
 import { describeIpcError, usePluginStore } from '../plugins/pluginStore'
 import { collectPluginSubagentTemplates, type PluginSubagentTemplateItem } from '../plugins/subagentTemplates'
@@ -70,19 +72,24 @@ function durationLabel(entry: SubagentEntry, now: number, streaming: boolean, tu
   return entry.elapsedMs === null ? '—' : fmtDuration(entry.elapsedMs)
 }
 
-export function SubagentPanel({ items }: { items: ChatItem[] }) {
+/** 子智能体派生数据的共享订阅：顶栏角标（SubagentPopover）与面板内容（SubagentPanel）
+ *  各挂一份自己的实例，数据源与判定口径完全一致 —— 配置列表、entries 折算、「运行中」
+ *  判定都收在这一个 hook 里，两块 UI 不会各算各的。 */
+export function useSubagentDerived(): {
+  entries: SubagentEntry[]
+  live: SubagentEntry[]
+  streaming: boolean
+  turnIdle: boolean
+} {
   const ready = useEngine((s) => s.ready)
+  const items = useChatItems()
   const streaming = useSession((s) => s.streaming)
   /// 本轮是否真的已经收尾：streaming=false 且没有待审批/待回答。
   /// 这是「状态条与子智能体面板同步收尾」的判据——turn_end 一到两边一起停。
   const runState = useSession((s) => s.runState)
   const approval = useSession((s) => s.approval)
   const question = useSession((s) => s.question)
-  const turnIdle = !streaming && runState === 'idle' && !approval && !question
-  const cancel = useSession((s) => s.cancel)
   const [configured, setConfigured] = useState<ConfiguredSubagent[]>([])
-  const [collapsed, setCollapsed] = useState(false)
-  const [openId, setOpenId] = useState('')
   /// 计时起点：只在「第一次看见这个子智能体」时记一次（每次渲染都会重折列表）。
   const observed = useRef(new Map<string, number>())
   const observedAt = useCallback((id: string): number => {
@@ -109,11 +116,27 @@ export function SubagentPanel({ items }: { items: ChatItem[] }) {
     return () => { alive = false }
   }, [ready])
 
+  const turnIdle = !streaming && runState === 'idle' && !approval && !question
   const entries = useMemo(
     () => deriveSubagents(items, configured, observedAt),
     [items, configured, observedAt],
   )
-  const live = entries.filter((entry) => isRunningView(entry, streaming, turnIdle))
+  const live = useMemo(
+    () => entries.filter((entry) => isRunningView(entry, streaming, turnIdle)),
+    [entries, streaming, turnIdle],
+  )
+  return { entries, live, streaming, turnIdle }
+}
+
+export function SubagentPanel({ empty }: { empty?: React.ReactNode }) {
+  const { entries, live, streaming, turnIdle } = useSubagentDerived()
+  const cancel = useSession((s) => s.cancel)
+  const [collapsed, setCollapsed] = useState(false)
+  const [openId, setOpenId] = useState('')
+  /// 正在查看对话详情的条目 id：非空时面板切换到详情视图（详情数据由 SubagentDetail 自己拉取）。
+  const [detailId, setDetailId] = useState('')
+  /// 详情视图对应的条目：列表变化（快照到达换真实 id）后找不到就自动退回概览。
+  const detailEntry = detailId ? entries.find((entry) => entry.id === detailId) : undefined
   /// 插件子智能体模板：新建区（已启用插件声明的 subagents 项）。
   /// 只订阅 store 的稳定引用，派生结果用 useMemo 缓存，引用只在真正变化时更新。
   const pluginEntries = usePluginStore((s) => s.plugins)
@@ -145,9 +168,6 @@ export function SubagentPanel({ items }: { items: ChatItem[] }) {
      见 components/ui/stableTick.ts 的三条硬规矩。 */
   const now = useStableTick(live.length > 0, 1000, secondNow, secondNow())
 
-  // 一条都没有就不渲染；有插件子智能体模板时面板照常显示（新建区在展开区里）。
-  if (!entries.length && !pluginTemplates.length) return null
-
   const onInterrupt = (): void => {
     // 引擎没有「终止单个子智能体」的接口，这里是真实存在的「取消本轮任务」，
     // 与输入框的停止按钮同一条路径（引擎在父任务取消/结束时收尾派生的子 Agent）。
@@ -155,9 +175,22 @@ export function SubagentPanel({ items }: { items: ChatItem[] }) {
     toast.message('已请求中断本轮任务')
   }
 
+  // 一条都没有就不渲染；有插件子智能体模板时面板照常显示（新建区在展开区里）。
+  // popover 形态下由调用方传一段空态文案（empty）：整块空的时候按钮点开也不落白板。
+  if (!entries.length && !pluginTemplates.length) {
+    if (!empty) return null
+    return (
+      <div className='grid w-[min(92vw,400px)] place-items-center px-5 py-6 text-center text-12 leading-relaxed text-ink-4'>
+        {empty}
+      </div>
+    )
+  }
+
   return (
-    <div className='shrink-0 border-b border-line bg-surface/60 px-3 py-1.5'>
-      <div className='mx-auto w-full max-w-[var(--content-w)]'>
+    <div className='flex max-h-[min(70vh,560px)] min-h-0 w-[min(92vw,440px)] flex-col overflow-hidden'>
+      {/* 面板头：标题 + 数量 + 运行中徽标；点击收起/展开列表（详情视图时不可收起）。
+          从整行常驻面板搬进 popover 后，这一行保留，折叠功能也原样保留。 */}
+      <div className='shrink-0 px-2 pb-1 pt-2'>
         <button
           type='button'
           onClick={() => setCollapsed((v) => !v)}
@@ -176,93 +209,108 @@ export function SubagentPanel({ items }: { items: ChatItem[] }) {
             className={cn('ml-auto shrink-0 text-ink-4 transition-transform duration-[var(--motion-base)] ease-[var(--ease-spring)]', collapsed ? '-rotate-90' : '')}
           />
         </button>
-
-        {collapsed ? null : (
-          <>
-            {/* 插件子智能体模板：名称 + 描述，点击即建；systemPrompt 由壳/引擎侧保存。 */}
-            {pluginTemplates.length ? (
-              <div className='mt-1.5 rounded-lg border border-dashed border-line-strong bg-muted/50 px-2.5 py-2'>
-                <p className='mb-1 flex items-center gap-1.5 text-11 text-ink-4'>
-                  <Sparkles size={11} className='text-primary' /> 插件子智能体模板
-                </p>
-                <div className='flex min-w-0 flex-wrap gap-1.5'>
-                  {pluginTemplates.map((t) => (
-                    <button
-                      key={t.key}
-                      type='button'
-                      disabled={creatingKey !== ''}
-                      title={t.description || ('来自插件 ' + t.plugin)}
-                      onClick={() => void createFromTemplate(t)}
-                      className={cn(
-                        'flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-left text-11 text-ink-2',
-                        'transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:border-primary/40 hover:text-ink',
-                        'disabled:cursor-not-allowed disabled:opacity-50',
-                      )}
-                    >
-                      <Plus size={11} className='shrink-0 text-primary' />
-                      <span className='min-w-0 truncate font-medium'>{t.name}</span>
-                      {t.description ? <span className='hidden min-w-0 max-w-[180px] truncate text-ink-4 lg:inline'>— {t.description}</span> : null}
-                      <span className='shrink-0 text-ink-4'>{t.plugin}</span>
-                      {creatingKey === t.key ? <span className='shrink-0 text-primary'>创建中…</span> : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <ul className='mt-1.5 flex flex-col gap-1.5'>
-            {entries.map((entry) => {
-              const expanded = openId === entry.id
-              const canInterrupt = streaming && isLive(entry) && !turnIdle
-              const view = statusView(entry, streaming, turnIdle)
-              const spinning = isRunningView(entry, streaming, turnIdle)
-              return (
-                <li key={entry.id} className='rounded-lg border border-line bg-surface shadow-elev-1'>
-                  <div className='flex items-center gap-2 px-2.5 py-1.5'>
-                    {spinning
-                      ? <AgentState state='subagents' size='xs' tone='primary' className='shrink-0' />
-                      : <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', entry.status === 'failed' ? 'bg-danger' : entry.status === 'completed' ? 'bg-ok' : 'bg-ink-4')} />}
-                    <span className='min-w-0 flex-1 truncate text-12 text-ink' title={entry.task || entry.name}>{entry.name}</span>
-                    {entry.model ? <span className='hidden shrink-0 text-11 text-ink-4 sm:inline'>{entry.model}</span> : null}
-                    <span className='shrink-0 tabular-nums text-11 text-ink-3'>{durationLabel(entry, now, streaming, turnIdle)}</span>
-                    <Badge tone={view.tone}>{view.text}</Badge>
-                    <button
-                      type='button'
-                      onClick={() => setOpenId(expanded ? '' : entry.id)}
-                      className='shrink-0 rounded px-1.5 py-0.5 text-11 text-ink-3 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:bg-hover hover:text-ink'
-                    >
-                      {expanded ? '收起' : '输出'}
-                    </button>
-                    {canInterrupt ? (
-                      <Tip label='中断本轮任务（引擎在父任务取消/结束时收尾派生的子 Agent）'>
-                        <button
-                          type='button'
-                          onClick={() => onInterrupt()}
-                          className='shrink-0 rounded px-1.5 py-0.5 text-11 text-danger transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:bg-danger-soft'
-                        >
-                          <Square size={10} className='inline-block align-[-1px]' /> 中断
-                        </button>
-                      </Tip>
-                    ) : null}
-                  </div>
-                  {expanded ? (
-                    <div className='border-t border-line-soft px-2.5 py-2'>
-                      {entry.task ? (
-                        <p className='mb-1.5 text-11 leading-relaxed text-ink-2'><span className='text-ink-4'>任务：</span>{entry.task}</p>
-                      ) : null}
-                      {entry.output ? (
-                        <pre className='max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-2 py-1.5 font-mono text-11 leading-relaxed text-code-fg'>{entry.output}</pre>
-                      ) : (
-                        <p className='text-11 text-ink-4'>还没有拿到输出：子智能体的输出要等 wait_agent / close_agent 把引擎快照带回来。</p>
-                      )}
-                    </div>
-                  ) : null}
-                </li>
-              )
-            })}
-            </ul>
-          </>
-        )}
       </div>
+
+      {collapsed ? null : detailEntry ? (
+        // 详情视图：面板内切换（头部「返回」回到概览列表）。
+        // 详情数据是接口真数据（GET /api/agents/{id}/messages），不是这里的派生概览。
+        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2'>
+          <SubagentDetail key={detailEntry.id} entry={detailEntry} onBack={() => setDetailId('')} />
+        </div>
+      ) : (
+        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2'>
+          {/* 插件子智能体模板：名称 + 描述，点击即建；systemPrompt 由壳/引擎侧保存。 */}
+          {pluginTemplates.length ? (
+            <div className='mt-1.5 rounded-lg border border-dashed border-line-strong bg-muted/50 px-2.5 py-2'>
+              <p className='mb-1 flex items-center gap-1.5 text-11 text-ink-4'>
+                <Sparkles size={11} className='text-primary' /> 插件子智能体模板
+              </p>
+              <div className='flex min-w-0 flex-wrap gap-1.5'>
+                {pluginTemplates.map((t) => (
+                  <button
+                    key={t.key}
+                    type='button'
+                    disabled={creatingKey !== ''}
+                    title={t.description || ('来自插件 ' + t.plugin)}
+                    onClick={() => void createFromTemplate(t)}
+                    className={cn(
+                      'flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-left text-11 text-ink-2',
+                      'transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:border-primary/40 hover:text-ink',
+                      'disabled:cursor-not-allowed disabled:opacity-50',
+                    )}
+                  >
+                    <Plus size={11} className='shrink-0 text-primary' />
+                    <span className='min-w-0 truncate font-medium'>{t.name}</span>
+                    {t.description ? <span className='hidden min-w-0 max-w-[180px] truncate text-ink-4 lg:inline'>— {t.description}</span> : null}
+                    <span className='shrink-0 text-ink-4'>{t.plugin}</span>
+                    {creatingKey === t.key ? <span className='shrink-0 text-primary'>创建中…</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <ul className='mt-1.5 flex flex-col gap-1.5'>
+          {entries.map((entry) => {
+            const expanded = openId === entry.id
+            const canInterrupt = streaming && isLive(entry) && !turnIdle
+            const view = statusView(entry, streaming, turnIdle)
+            const spinning = isRunningView(entry, streaming, turnIdle)
+            return (
+              <li key={entry.id} className='rounded-lg border border-line bg-surface shadow-elev-1'>
+                <div className='flex items-center gap-2 px-2.5 py-1.5'>
+                  {spinning
+                    ? <AgentState state='subagents' size='xs' tone='primary' className='shrink-0' />
+                    : <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', entry.status === 'failed' ? 'bg-danger' : entry.status === 'completed' ? 'bg-ok' : 'bg-ink-4')} />}
+                  <span className='min-w-0 flex-1 truncate text-12 text-ink' title={entry.task || entry.name}>{entry.name}</span>
+                  {entry.model ? <span className='hidden shrink-0 text-11 text-ink-4 sm:inline'>{entry.model}</span> : null}
+                  <span className='shrink-0 tabular-nums text-11 text-ink-3'>{durationLabel(entry, now, streaming, turnIdle)}</span>
+                  <Badge tone={view.tone}>{view.text}</Badge>
+                  <button
+                    type='button'
+                    onClick={() => setOpenId(expanded ? '' : entry.id)}
+                    className='shrink-0 rounded px-1.5 py-0.5 text-11 text-ink-3 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:bg-hover hover:text-ink'
+                  >
+                    {expanded ? '收起' : '输出'}
+                  </button>
+                  {/* 查看对话：面板内切换到详情视图（详情用接口真数据；占位 id 未拿到真 id 时会 404，
+                      详情页会给提示 + 重试，不在这里拦）。 */}
+                  <button
+                    type='button'
+                    onClick={() => setDetailId(entry.id)}
+                    className='shrink-0 rounded px-1.5 py-0.5 text-11 text-primary transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:bg-primary-soft'
+                  >
+                    查看对话
+                  </button>
+                  {canInterrupt ? (
+                    <Tip label='中断本轮任务（引擎在父任务取消/结束时收尾派生的子 Agent）'>
+                      <button
+                        type='button'
+                        onClick={() => onInterrupt()}
+                        className='shrink-0 rounded px-1.5 py-0.5 text-11 text-danger transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:bg-danger-soft'
+                      >
+                        <Square size={10} className='inline-block align-[-1px]' /> 中断
+                      </button>
+                    </Tip>
+                  ) : null}
+                </div>
+                {expanded ? (
+                  <div className='border-t border-line-soft px-2.5 py-2'>
+                    {entry.task ? (
+                      <p className='mb-1.5 text-11 leading-relaxed text-ink-2'><span className='text-ink-4'>任务：</span>{entry.task}</p>
+                    ) : null}
+                    {entry.output ? (
+                      <pre className='max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-2 py-1.5 font-mono text-11 leading-relaxed text-code-fg'>{entry.output}</pre>
+                    ) : (
+                      <p className='text-11 text-ink-4'>还没有拿到输出：子智能体的输出要等 wait_agent / close_agent 把引擎快照带回来。</p>
+                    )}
+                  </div>
+                ) : null}
+              </li>
+            )
+          })}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

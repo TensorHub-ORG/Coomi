@@ -1,6 +1,6 @@
 ﻿Add-Type -AssemblyName System.Drawing
-$logo='G:/DSH/coomi-full-project/.apk-full/res/drawable-nodpi-v4/coomi_logo.png'
-$iconDir='G:/DSH/coomi-full-project/apps/desktop/icons'
+$iconDir=Join-Path $PSScriptRoot '../icons'
+$logo=Join-Path $iconDir 'icon.png'
 $source=[System.Drawing.Image]::FromFile($logo)
 function PngBytes($img,$size){
   $bmp=New-Object System.Drawing.Bitmap $size,$size
@@ -17,7 +17,10 @@ function PngBytes($img,$size){
   $ms.Dispose()
   return ,$bytes
 }
-$sizes=@(16,32,48,64,128,256)
+# Tauri 2 decodes the FIRST ICO entry as the window/tray image.
+# Keep the largest frame first so Windows never enlarges a 16px image.
+# Smaller frames remain available to Explorer and the installer.
+$sizes=@(256,128,64,48,32,16)
 $blobs=New-Object System.Collections.ArrayList
 foreach($s in $sizes){ [void]$blobs.Add((PngBytes $source $s)) }
 Write-Output ('blob count=' + $blobs.Count + ' sizes=' + (($blobs | ForEach-Object { $_.Length }) -join ','))

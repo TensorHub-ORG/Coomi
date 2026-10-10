@@ -6,6 +6,10 @@
 
 /* ── 语义令牌：同一套名字，明暗两套值 ── */
 :root {
+  /* Desktop workbench scale: stable spacing and semantic layers. */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+  --z-base: 0; --z-sticky: 10; --z-header: 20; --z-drawer: 30; --z-sheet: 40; --z-toast: 50; --z-modal: 60;
+  --inset: var(--sp-4); --gap: var(--sp-3); --section: var(--sp-6);
   /* 版面底色：canvas 最底、surface 面、card 卡片 */
   --canvas: #ffffff;
   --canvas-side: #f7f8fa;
@@ -119,7 +123,11 @@
   /* 焦点环：全站只有 base.css 那一处用，组件里不要再自己写 outline */
   --focus-ring-w: 2px;
   --focus-ring-offset: 1px;
-  --focus-ring: color-mix(in srgb, var(--primary) 70%, transparent);
+  /* v3：焦点环是不透明描边但带 alpha，口径是「环色先与相邻底色合成、再和该底色比」。
+     70% 时实测 2.48~2.77（最不利 --active #e6eaf2 只有 2.48，--surface 2.77），
+     作为非文本指示要 3:1 → 提到 88%：3.19~3.73（最不利 --active 3.19、
+     --surface 3.73、--canvas 3.53）。 */
+  --focus-ring: color-mix(in srgb, var(--primary) 88%, transparent);
 
   /* 滚动条：轨道宽度固定，滑块靠「边框宽度」做细→粗，hover 时内容不会横跳 */
   --sb-size: 10px;
@@ -269,13 +277,27 @@
   --list-w: 264px;
   --panel-w: 340px;
   --topbar-h: 44px;
-  --content-w: 900px;
+  /* Message rows and the composer use the available main column on wide screens.
+     Markdown itself remains limited by --reading-w for comfortable reading. */
+  --content-w: min(1180px, calc(100% - 48px));
   --page-pad-x: 32px;
   --page-pad-y: 24px;
-  /* 界面字号基线：1 = 100%。默认 1.08 —— 正文 12px→约 13px、13px→约 14px。
+  /* ── 密度令牌 v1（可选小节，随本轮对比度审计一起立）──
+     现状实测：控件高度在组件里是硬编码 Tailwind 类，共三档 —— h-7(28px) 30 处、
+     h-8(32px) 30 处、h-9(36px) 14 处，同一个「控件高度」语义散在 70+ 处；
+     列表/表格行高则没有硬编码（由 py-* + 内容撑开，min-h-7/min-h-8 各 2~3 处）。
+     谁该用它：**新写或要改控件的同学** —— 按钮/输入框/分段控件取 --control-h-*，
+     列表行上下留白取 --row-pad-y。已存在的组件不在本次改动范围内，所以这几个
+     令牌当前暂无消费者，是刻意预留（迁移时逐组件替换 h-7/h-8/h-9）。
+     高度跟着 --ui-font-scale 缩放，与既有 h-[calc(2rem*var(--ui-font-scale))] 同口径。 */
+  --control-h-sm: calc(28px * var(--ui-font-scale));
+  --control-h-md: calc(32px * var(--ui-font-scale));
+  --control-h-lg: calc(36px * var(--ui-font-scale));
+  --row-pad-y: 8px;
+  /* 界面字号基线：1 = 100%。默认 1.18 —— 正文 12px→约 14px、13px→约 15px。
      运行时的真实值由 stores/ui.ts 的 setFontScale/applyStoredAppearance 写进 <html> 的内联样式，
      这里只是 CSS 兜底：还没被外观设置写过时的第一帧，以及给 --ui-font-scale 一个可读的默认语义。 */
-  --ui-font-scale: 1.08;
+  --ui-font-scale: 1.18;
 
   color-scheme: light;
 }

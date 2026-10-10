@@ -6,11 +6,11 @@
  *     所以它不占首屏主包，也不占启动请求。首帧判断走 store 的初值（同步读一次 localStorage）。
  *  ② **挂载一次、之后常驻**：Radix 的退场动画要靠「关闭时组件还在」才播得出来，
  *     所以第一次打开之后就保持挂着，只用 open 控制显示（关掉再把 DOM 摘掉就等于没有退场）。
- *  ③ **勾选状态放在这里**：它要跨「关掉 → 从设置页再看一次」保持勾上（同意过就是同意过），
- *     而「进入」的落盘与关闭是一件事，所以 onAccept 一并写在这里。
+ *  ③ **勾选状态放在这里**：每次要求确认时默认不勾选，必须由用户主动确认；
+ *     「进入」的落盘与关闭是一件事，所以 onAccept 一并写在这里。
  */
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { acceptOnboarding, hasAccepted } from './state'
+import { acceptOnboarding } from './state'
 import { useOnboarding } from './store'
 
 /** 只有真的要显示引导时才会被请求到（见上面第 ① 条）。 */
@@ -20,11 +20,13 @@ export function OnboardingGate() {
   const open = useOnboarding((s) => s.open)
   const blocking = useOnboarding((s) => s.blocking)
   const hide = useOnboarding((s) => s.hide)
-  /// 初值直接取「同意过没有」：首次启动是未勾选，回看时是已勾选。
-  const [agreed, setAgreed] = useState(() => hasAccepted())
+  /// 需要确认时默认未勾选；普通回看不会显示确认框。
+  const [agreed, setAgreed] = useState(false)
   /// 打开过就常驻（见上面第 ② 条）；没打开过则是纯 null，连 chunk 都不请求。
   const [loaded, setLoaded] = useState(open)
-  useEffect(() => { if (open) setLoaded(true) }, [open])
+  useEffect(() => {
+    if (open) { setLoaded(true); if (blocking) setAgreed(false) }
+  }, [open, blocking])
 
   if (!loaded) return null
   return (

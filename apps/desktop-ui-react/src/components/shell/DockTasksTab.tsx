@@ -334,7 +334,7 @@ export function DockTasksTab({ refresh, onRefresh }: { refresh: number; onRefres
               return (
                 <li key={id} className='mb-1 min-w-0 rounded-md border border-line-soft bg-muted/60 px-2 py-1.5'>
                   <div className='flex items-center gap-1.5'>
-                    <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', task.running ? 'animate-pulse bg-primary' : 'bg-ink-4')} />
+                    <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', task.running ? 'animate-pulse bg-primary' : 'bg-ink-4')} data-loop-anim={task.running ? '' : undefined} />
                     <span className='min-w-0 flex-1 truncate text-12 text-ink' title={String(task.session_title ?? '')}>
                       {task.session_title || task.task_kind || '任务'}
                     </span>
