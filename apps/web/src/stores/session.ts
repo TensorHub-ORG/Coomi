@@ -394,6 +394,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         }
         break
       }
+      case 'compression_started': pushNotice('info', ev.automatic ? '正在自动压缩上下文…' : '正在手动压缩上下文，完整历史将保留…'); break
       case 'compression': pushNotice('info', `上下文已压缩 ${fmtTokens(ev.before)} → ${fmtTokens(ev.after)}`); break
       case 'connection_retry': connection.setRetry(`${ev.message}（${ev.attempt}/${ev.max_attempts}）`); break
       case 'stream_reset':
@@ -700,14 +701,17 @@ function defineSessionStore(storeId: string, auxiliary = false) {
       sessions.setMode(id, mode.value)
       const messages = (session.messages ?? []) as ChatMessageJson[]
       if (messages.length === 0 && !((session.archive ?? []) as ChatMessageJson[]).length) return false
-      if (messages.some(m => m.compaction_summary)) {
+      if (messages.some(m => m.compaction_summary) || ((session.archive ?? []) as ChatMessageJson[]).length > 0) {
         // 上下文已压缩：引擎磁盘 archive 保留压缩前完整历史（新增字段），
         // 其次本机 localStorage 缓存，两者都拿不到才退回摘要。
         const archive = (session.archive ?? []) as ChatMessageJson[]
         if (archive.length > 0) {
           const detail = messages.find(m => m.compaction_summary)?.content ?? ''
           timeline.value = [
-            ...messagesToTimeline(archive),
+            ...messagesToTimeline([
+              ...archive,
+              ...messages.filter(m => !m.compaction_summary && !archive.some(a => a.id && a.id === m.id)),
+            ]),
             { kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 完整历史已保留）', detail },
           ]
           return true

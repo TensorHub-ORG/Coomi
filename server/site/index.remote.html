@@ -659,7 +659,7 @@
             <span class="download-arrow" aria-hidden="true">↓</span>
             <span data-download-label="desktop">下载 Windows 版</span>
           </a>
-          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.4.9-test.2.apk" data-stat-action="download-test">下载测试版</a>
+          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.5.0-test.1.apk" data-stat-action="download-test">下载测试版</a>
         </div>
         <p class="star-link"><a href="https://github.com/TensorHub-ORG/Coomi" target="_blank" rel="noreferrer">去 GitHub 上为我们点颗星 →</a></p>
       </div>
@@ -989,6 +989,23 @@
               </details>
       </div>
       <div data-channel-panel="test" hidden>
+<h2 class="changelog-title">v1.5.0-test.1 更新说明【测试】</h2>
+<p class="changelog-sub">2026-10-10 发布</p>
+<ul class="changelog-list">
+<li>全面修复 Agent 上下文管理：移除完整会话历史的重复注入，手动压缩不再将私人会话写入项目持久记忆，旧版自动生成的会话记忆不再自动加载。</li>
+<li>会话设置新增自动上下文压缩百分比阈值，默认 80%，可自定义 10–95%；接近模型容量上限时提前保护。</li>
+<li>重构手动 /compact：长历史按顺序分段总结、保留完整存档，空摘要或压缩失败时保留原历史；远程压缩接口不支持时切换本地摘要，界面显示压缩进度。</li>
+<li>修复压缩后重新打开会话遗漏后续消息的问题，完整历史与压缩后的新消息合并展示并去重。</li>
+<li>每个工具完成后立即保存结果，检查点写入失败时停止任务；未确认结果的中断操作明确标记为结果未知，恢复前检查实际状态，降低重复执行风险。</li>
+<li>修复父任务结束或取消后子 Agent 继续运行的问题，同步取消子任务并清理其工具进程，不影响其他会话；修复子任务立即失败时状态残留和并发输出缺字。</li>
+<li>子 Agent 与笔记读取权限随当前会话及追加用户消息同步，修复继承过期上下文和笔记授权不更新的问题；子 Agent 并发数遵循设置。</li>
+<li>修复工具执行后 Hook 报错导致成功操作被误报为失败的问题；含修改操作的工具批次串行执行，避免路径别名或目录关系造成读写冲突。</li>
+<li>收紧文本 XML 工具调用识别，只接受独立的调用封装，普通回答、引用和代码示例不再自动触发工具执行。</li>
+<li>这是测试版本，建议先备份重要数据。测试版与正式版下载入口独立，应用内更新页面会明确标注测试通道。</li>
+</ul>
+<details class="changelog-history">
+<summary>展开全部更新记录</summary>
+<div class="history-inner">
 <h2 class="changelog-title">v1.4.9-test.2 更新说明【测试】</h2>
 <p class="changelog-sub">2026-10-08 发布 · 基于 1.5.1o2 底座，仅测试通道</p>
 <ul class="changelog-list">
@@ -1002,9 +1019,7 @@
 <li>恢复用户体验改进计划，移除会话页自动邀请及其开关；只能通过设置或控制台主动进入，仍由用户选择加入、退出与上传授权；恢复已有画像且启用自动更新时的每周更新检查。</li>
 <li>修复流式工具调用兼容性：函数名称缺失且调用信息包装在 arguments 中时，正确恢复函数名并提取真正的参数对象；支持嵌套 function 与字符串参数，非法数组参数仍拒绝执行。</li>
 </ul>
-<details class="changelog-history">
-<summary>展开全部更新记录</summary>
-<div class="history-inner">
+
 <h3 class="history-version">v1.4.9-test.1 更新说明【测试】</h3>
 <p class="changelog-sub">2026-10-07 发布</p>
 <div style="white-space:pre-wrap">本版基于 Comax 1.5.1o2 社区魔改底座（鸣谢 晚风 / maxtwin114514）合并 1.4.8 官方功能层，重点优化交互与修复引擎缺陷。

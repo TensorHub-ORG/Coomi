@@ -214,7 +214,7 @@ impl MemoryManager {
 
     pub fn prompt_context(&self) -> String {
         let mut output = String::new();
-        for memory in self.list().into_iter().filter(|memory| !memory.stale) {
+        for memory in self.list().into_iter().filter(|memory| !memory.stale && !(memory.name.starts_with("session-") && memory.description == "会话压缩前的完整工作进度，用于压缩后恢复上下文方向")) {
             let entry = format!(
                 "### {} [{:?}, {} hits]\n_{}_\n\n{}\n\n",
                 memory.name, memory.lifecycle, memory.hit_count, memory.description, memory.content

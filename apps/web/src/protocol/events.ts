@@ -38,6 +38,7 @@ export interface UsageUpdateEvent {
 export interface ConnectionRetryEvent { event_type: 'connection_retry'; attempt: number; max_attempts: number; delay?: number; delay_ms?: number; message: string }
 export interface StreamResetEvent { event_type: 'stream_reset' }
 export interface CompressionEvent { event_type: 'compression'; before: number; after: number }
+export interface CompressionStartedEvent { event_type: 'compression_started'; automatic: boolean }
 export interface AgentErrorEvent { event_type: 'agent_error'; message: string; is_fatal: boolean; captcha_required?: boolean }
 export interface ConfigurationRequiredEvent { event_type: 'configuration_required'; message: string; route: '/providers' }
 export interface RetryConfirmationEvent { event_type: 'retry_confirmation'; message: string }
@@ -73,7 +74,7 @@ export interface LifeDeliveredEvent {
 export type AgentEvent = (
   | TextChunkEvent | ReasoningChunkEvent | ToolStartEvent | ToolRunningEvent
   | ToolDoneEvent | ToolCacheHitEvent | UsageUpdateEvent | ConnectionRetryEvent | StreamResetEvent
-  | CompressionEvent | AgentErrorEvent | ConfigurationRequiredEvent | AgentCancelledEvent | BgTaskDetachedEvent
+  | CompressionEvent | CompressionStartedEvent | AgentErrorEvent | ConfigurationRequiredEvent | AgentCancelledEvent | BgTaskDetachedEvent
   | BgTaskCompletedEvent | LoopStepStartEvent | LoopStepDoneEvent | LoopProgressEvent
   | LoopIssueCreatedEvent | RetryConfirmationEvent | ToolApprovalRequestEvent | UserQuestionRequestEvent
   | FileTransferRequestEvent

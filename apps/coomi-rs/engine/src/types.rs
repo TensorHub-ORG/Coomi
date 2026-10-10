@@ -1103,6 +1103,8 @@ pub struct ContextStatus {
 #[async_trait]
 pub trait ToolRuntime: Send + Sync {
     fn specs(&self) -> Vec<ToolSpec>;
+    /// Refresh task context before each model/tool round, including queued input.
+    fn update_history(&self, _messages: &[ChatMessage]) {}
     async fn call(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult;
 
     async fn lifecycle(&self, _event: &str, _payload: Value) -> Result<Option<String>, String> {

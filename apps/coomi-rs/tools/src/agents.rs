@@ -19,7 +19,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use crate::ProcessManager;
 use tokio::task::AbortHandle;
 use uuid::Uuid;
 
@@ -47,6 +48,7 @@ struct AgentRecord {
     output: Arc<Mutex<String>>,
     started: Instant,
     abort: Option<AbortHandle>,
+    processes: Option<Arc<ProcessManager>>,
 }
 
 pub struct AgentScheduler {
@@ -59,6 +61,7 @@ pub struct AgentScheduler {
     system_prompt: String,
     persistent_memory: bool,
     max_agents: usize,
+    auto_compact_percent: u8,
     agents: Mutex<BTreeMap<String, AgentRecord>>,
 }
 
@@ -80,6 +83,7 @@ impl AgentScheduler {
             system_prompt,
             persistent_memory: true,
             max_agents: 3,
+            auto_compact_percent: 80,
             agents: Mutex::new(BTreeMap::new()),
         })
     }
@@ -93,6 +97,13 @@ impl AgentScheduler {
             .expect("agent scheduler must be configured before it is shared");
         scheduler.sub_agents = sub_agents;
         scheduler.fallback_sub_agent_id = fallback_sub_agent_id;
+        self
+    }
+
+    pub fn with_limits(mut self: Arc<Self>, max_agents: usize, auto_compact_percent: u8) -> Arc<Self> {
+        let scheduler = Arc::get_mut(&mut self).expect("configure scheduler before sharing");
+        scheduler.max_agents = max_agents.clamp(1, 20);
+        scheduler.auto_compact_percent = auto_compact_percent.clamp(10, 95);
         self
     }
 
@@ -143,23 +154,18 @@ impl AgentScheduler {
         if task.trim().is_empty() {
             return Err("agent task must not be empty".into());
         }
-        {
-            let agents = self.agents.lock().await;
-            let running = agents
-                .values()
-                .filter(|record| record.status == "running")
-                .count();
-            if running >= self.max_agents {
-                return Err(format!(
-                    "agent concurrency limit reached ({})",
-                    self.max_agents
-                ));
-            }
-        }
-
         let id = Uuid::new_v4().to_string();
         let output = Arc::new(Mutex::new(String::new()));
         let messages = fork_history(parent_messages, fork_turns)?;
+        {
+            let mut agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
+            let running = agents.values().filter(|r| r.status == "running").count();
+            if running >= self.max_agents { return Err(format!("agent concurrency limit reached ({})", self.max_agents)); }
+            agents.insert(id.clone(), AgentRecord {
+                task: task.clone(), status: "running".into(), output: Arc::clone(&output),
+                started: Instant::now(), abort: None, processes: None,
+            });
+        }
         let scheduler = Arc::clone(self);
         let task_for_run = task.clone();
         let sub_agent_id = sub_agent_id.map(str::to_owned);
@@ -168,14 +174,15 @@ impl AgentScheduler {
         let join = tokio::spawn(async move {
             let result = scheduler
                 .run_agent(
+                    &id_for_run,
                     messages,
                     task_for_run,
                     Arc::clone(&output_for_run),
                     sub_agent_id.as_deref(),
                 )
                 .await;
-            let mut agents = scheduler.agents.lock().await;
-            if let Some(record) = agents.get_mut(&id_for_run) {
+            let mut agents = scheduler.agents.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(record) = agents.get_mut(&id_for_run).filter(|r| r.status == "running") {
                 record.status = if result.is_ok() {
                     "completed".into()
                 } else {
@@ -184,28 +191,26 @@ impl AgentScheduler {
                 record.abort = None;
             }
             if let Err(error) = result {
-                let mut output = output_for_run.lock().await;
+                let mut output = output_for_run.lock().unwrap_or_else(|e| e.into_inner());
                 if !output.is_empty() {
                     output.push_str("\n\n");
                 }
                 output.push_str(&format!("agent failed: {error:#}"));
             }
         });
-        self.agents.lock().await.insert(
-            id.clone(),
-            AgentRecord {
-                task,
-                status: "running".into(),
-                output,
-                started: Instant::now(),
-                abort: Some(join.abort_handle()),
-            },
-        );
+        {
+            let mut agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(record) = agents.get_mut(&id) {
+                if record.status == "running" { record.abort = Some(join.abort_handle()); }
+                else if record.status == "closed" { join.abort(); }
+            }
+        }
         Ok(id)
     }
 
     async fn run_agent(
         self: &Arc<Self>,
+        id: &str,
         messages: Vec<ChatMessage>,
         task: String,
         output: Arc<Mutex<String>>,
@@ -242,6 +247,13 @@ impl AgentScheduler {
         if self.persistent_memory {
             tools = tools.with_memory(Arc::new(MemoryManager::new(&self.home, &self.cwd)));
         }
+        let processes = tools.process_manager();
+        {
+            let mut records = self.agents.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(record) = records.get_mut(id).filter(|r| r.status == "running") else { return Ok(()); };
+            record.processes = Some(Arc::clone(&processes));
+        }
+        let _process_guard = SubagentProcessGuard(processes);
         let observer = AgentOutputObserver { output };
         let role = selected
             .filter(|entry| !entry.description.is_empty())
@@ -251,6 +263,7 @@ impl AgentScheduler {
             "{}\n\nYou are a delegated Coomi sub-agent.{role} Complete the assigned task independently and return a concise result to the parent agent.",
             self.system_prompt
         ))
+        .with_auto_compact_percent(self.auto_compact_percent)
         .run_turn(
             &mut session,
             task,
@@ -280,17 +293,18 @@ impl AgentScheduler {
     }
 
     pub async fn close(&self, id: &str) -> Result<AgentSnapshot, String> {
-        let abort = {
-            let mut agents = self.agents.lock().await;
+        let (abort, processes) = {
+            let mut agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
             let record = agents
                 .get_mut(id)
                 .ok_or_else(|| format!("unknown agent: {id}"))?;
             record.status = "closed".into();
-            record.abort.take()
+            (record.abort.take(), record.processes.take())
         };
         if let Some(abort) = abort {
             abort.abort();
         }
+        if let Some(processes) = processes { processes.terminate_all().await; }
         self.snapshots(&[id.to_owned()])
             .await
             .into_iter()
@@ -298,8 +312,23 @@ impl AgentScheduler {
             .ok_or_else(|| format!("unknown agent: {id}"))
     }
 
+    /// Abort only this parent's children, synchronously, and reap their shell groups.
+    pub fn cancel_all(&self) {
+        let processes = {
+            let mut records = self.agents.lock().unwrap_or_else(|e| e.into_inner());
+            records.values_mut().filter_map(|record| {
+                if record.status == "running" { record.status = "closed".into(); }
+                if let Some(abort) = record.abort.take() { abort.abort(); }
+                record.processes.take()
+            }).collect::<Vec<_>>()
+        };
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move { for manager in processes { manager.terminate_all().await; } });
+        }
+    }
+
     pub async fn snapshots(&self, ids: &[String]) -> Vec<AgentSnapshot> {
-        let agents = self.agents.lock().await;
+        let agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
         let selected = if ids.is_empty() {
             agents.keys().cloned().collect::<Vec<_>>()
         } else {
@@ -325,7 +354,7 @@ impl AgentScheduler {
                 id,
                 status,
                 task,
-                output: output.lock().await.clone(),
+                output: output.lock().unwrap_or_else(|e| e.into_inner()).clone(),
                 elapsed_ms,
             });
         }
@@ -363,6 +392,16 @@ fn fork_history(
     }
 }
 
+struct SubagentProcessGuard(Arc<ProcessManager>);
+impl Drop for SubagentProcessGuard {
+    fn drop(&mut self) {
+        let processes = Arc::clone(&self.0);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move { processes.terminate_all().await; });
+        }
+    }
+}
+
 struct AgentOutputObserver {
     output: Arc<Mutex<String>>,
 }
@@ -374,7 +413,7 @@ impl AgentObserver for AgentOutputObserver {
             _ => None,
         };
         if let Some(delta) = delta
-            && let Ok(mut output) = self.output.try_lock()
+            && let Ok(mut output) = self.output.lock()
         {
             output.push_str(delta);
         }
@@ -409,4 +448,49 @@ pub fn snapshots_json(snapshots: &[AgentSnapshot]) -> Value {
             })
             .collect(),
     )
+}
+#[cfg(test)]
+mod reliability_tests {
+    use super::*;
+    use coomi_services::{ProviderKind,RemoteCompactionMode};
+    use std::sync::atomic::{AtomicBool,Ordering};
+    fn config()->ProviderConfig {ProviderConfig{
+        id:"mock".into(),display:"mock".into(),kind:ProviderKind::OpenAiCompatible,api_key:String::new(),api_keys:vec![],
+        base_url:"http://127.0.0.1:1/v1".into(),model:"mock".into(),fast_model:None,models:vec!["mock".into()],
+        model_context_windows:BTreeMap::new(),model_vision_support:BTreeMap::new(),model_parameters:BTreeMap::new(),
+        capabilities:Default::default(),remote_compaction_mode:RemoteCompactionMode::default(),extra_headers:BTreeMap::new(),
+        deepseek_thinking_enabled:false,deepseek_search_enabled:false,
+    }}
+    #[tokio::test]
+    async fn immediate_subagent_failure_cannot_leave_running_record() {
+        let home=tempfile::tempdir().unwrap();
+        let scheduler=AgentScheduler::new(home.path().into(),home.path().into(),config(),AccessMode::WorkspaceWrite,"test".into())
+            .with_sub_agents(vec![ConfiguredSubAgent{id:"known".into(),provider:config(),description:String::new()}],Some("known".into()));
+        for _ in 0..20 {
+            let id=scheduler.spawn("task".into(),&[],Some("none"),Some("unknown")).await.unwrap();
+            let status=scheduler.wait(&[id],1000).await;
+            assert_eq!(status[0].status,"failed");assert!(status[0].output.contains("unknown configured sub-agent"));
+        }
+    }
+    #[tokio::test]
+    async fn dropping_parent_tools_aborts_children_and_keeps_other_parent_isolated() {
+        let home=tempfile::tempdir().unwrap();
+        let scheduler=AgentScheduler::new(home.path().into(),home.path().into(),config(),AccessMode::WorkspaceWrite,"test".into());
+        let ran=Arc::new(AtomicBool::new(false));let flag=Arc::clone(&ran);
+        let child=tokio::spawn(async move {tokio::time::sleep(std::time::Duration::from_millis(100)).await;flag.store(true,Ordering::SeqCst);});
+        scheduler.agents.lock().unwrap().insert("child".into(),AgentRecord{task:"task".into(),status:"running".into(),output:Arc::new(Mutex::new(String::new())),started:Instant::now(),abort:Some(child.abort_handle()),processes:None});
+        let other=AgentScheduler::new(home.path().into(),home.path().into(),config(),AccessMode::WorkspaceWrite,"other".into());
+        other.agents.lock().unwrap().insert("other".into(),AgentRecord{task:"task".into(),status:"running".into(),output:Arc::new(Mutex::new(String::new())),started:Instant::now(),abort:None,processes:None});
+        let policy=SecurityPolicy::new(home.path(),AccessMode::WorkspaceWrite).unwrap();
+        let tools=CoreTools::new(home.path().into(),policy).with_agent_scheduler(Arc::clone(&scheduler),vec![]);
+        drop(tools);assert!(child.await.unwrap_err().is_cancelled());assert!(!ran.load(Ordering::SeqCst));
+        assert_eq!(scheduler.snapshots(&[]).await[0].status,"closed");assert_eq!(other.snapshots(&[]).await[0].status,"running");
+    }
+    #[test]
+    fn concurrent_output_collection_keeps_every_delta() {
+        let output=Arc::new(Mutex::new(String::new()));
+        let handles=(0..4).map(|_|{let output=Arc::clone(&output);std::thread::spawn(move ||{let observer=AgentOutputObserver{output};for _ in 0..1000 {observer.on_event(&AgentEvent::TextDelta("x".into()));}})}).collect::<Vec<_>>();
+        for handle in handles {handle.join().unwrap();}
+        assert_eq!(output.lock().unwrap().len(),4000);
+    }
 }

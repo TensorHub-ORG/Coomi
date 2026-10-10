@@ -14,6 +14,7 @@ import { authedFetch } from '@/bridge/http'
 import { hasNativeTts } from '@/bridge/tts'
 import { settingsTab, settingsScroll } from '@/stores/viewState'
 import type { PermissionMode } from '@/protocol/commands'
+import AutoCompactionSettings from '@/components/AutoCompactionSettings.vue'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
 
@@ -245,6 +246,8 @@ onMounted(async () => {
       <p class="option-note">默认 192，256 为进阶选项，512 为硬上限。</p>
 
 </template>
+
+<template v-if="activeTab === 'chat'"><AutoCompactionSettings /></template>
 
 <template v-if="activeTab === 'link'">
       <p class="sec-label">连接、重试与并发</p>

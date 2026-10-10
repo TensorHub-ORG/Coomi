@@ -1326,7 +1326,11 @@ struct ConnectionSettings {
     reconnect_max_delay_ms: u64,
     #[serde(default = "default_max_concurrent_tasks")]
     max_concurrent_tasks: usize,
+    #[serde(default = "default_auto_compact_percent")]
+    auto_compact_percent: u8,
 }
+
+const fn default_auto_compact_percent() -> u8 { 80 }
 
 const fn default_max_concurrent_tasks() -> usize {
     DEFAULT_MAX_CONCURRENT_SESSION_TASKS
@@ -1340,6 +1344,7 @@ impl Default for ConnectionSettings {
             reconnect_initial_delay_ms: DEFAULT_RECONNECT_INITIAL_DELAY_MS,
             reconnect_max_delay_ms: DEFAULT_RECONNECT_MAX_DELAY_MS,
             max_concurrent_tasks: DEFAULT_MAX_CONCURRENT_SESSION_TASKS,
+            auto_compact_percent: default_auto_compact_percent(),
         }
     }
 }
@@ -1365,6 +1370,7 @@ fn configured_connection_settings(home: &Path) -> ConnectionSettings {
             .and_then(|value| u8::try_from(value).ok())
             .unwrap_or(defaults.ws_retry_count)
             .min(100),
+        auto_compact_percent: settings.get("auto_compact_percent").and_then(Value::as_u64).and_then(|v| u8::try_from(v).ok()).unwrap_or(defaults.auto_compact_percent).clamp(10,95),
         reconnect_initial_delay_ms: initial,
         reconnect_max_delay_ms: settings
             .get("reconnect_max_delay_ms")
@@ -1389,6 +1395,7 @@ async fn set_connection_settings(
     State(state): State<AppState>,
     Json(body): Json<ConnectionSettings>,
 ) -> Result<Json<ConnectionSettings>, ApiError> {
+    if !(10..=95).contains(&body.auto_compact_percent) { return Err(ApiError::bad_request("autoCompactPercent must be between 10 and 95")); }
     if body.provider_retry_count > 10 {
         return Err(ApiError::bad_request(
             "providerRetryCount must be between 0 and 10",
@@ -1417,6 +1424,7 @@ async fn set_connection_settings(
         ));
     }
     let mut settings = read_settings(&state.home);
+    settings["auto_compact_percent"] = json!(body.auto_compact_percent);
     settings["provider_retry_count"] = json!(body.provider_retry_count);
     settings["ws_retry_count"] = json!(body.ws_retry_count);
     settings["reconnect_initial_delay_ms"] = json!(body.reconnect_initial_delay_ms);
@@ -2118,21 +2126,6 @@ async fn studio_approve(
 }
 
 // ── work[会话id].md 持久化：每轮读取 + 末尾追加 + 生成/修补 ──
-fn work_md_path(home: &std::path::Path, session_key: &str) -> std::path::PathBuf {
-    home.join("work").join(format!("work[{session_key}].md"))
-}
-
-fn read_work_md(home: &std::path::Path, session_key: &str) -> String {
-    let path = work_md_path(home, session_key);
-    std::fs::read_to_string(&path).unwrap_or_default()
-}
-
-fn write_work_md(home: &std::path::Path, session_key: &str, content: &str) {
-    let path = work_md_path(home, session_key);
-    if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
-    let _ = std::fs::write(path, content);
-}
-
 async fn studio_send_message(
     State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
@@ -6486,10 +6479,8 @@ async fn handle_command(
                     if let Err(error) = result {
                         compact_context.task.push_event(json!({"event_type":"agent_error","message":format!("上下文压缩失败：{error:#}"),"is_fatal":false}));
                     }
-                    compact_context
-                        .task
-                        .push_event(json!({"event_type":"turn_end"}));
                     compact_task.finish(if failed { "failed" } else { "completed" });
+                    compact_context.task.push_event(json!({"event_type":"turn_end"}));
                     persist_task_checkpoints(&compact_state);
                     compact_task
                         .abort
@@ -7358,32 +7349,6 @@ async fn compact_web_session(
         session.usage.output_tokens,
         BTreeMap::new(),
     ).with_billing(session_id, &billing_provider, &billing_model);
-    // 需求 9：压缩前把当前进度写入 work.md 与持久记忆，压缩后仍可读取。
-    {
-        let mut work = String::new();
-        work.push_str(&format!("# work-{}\n\n", session_id));
-        for m in &session.messages {
-            let role = match m.role {
-                coomi_engine::Role::User => "用户",
-                coomi_engine::Role::Assistant => "助手",
-                coomi_engine::Role::System => "系统",
-                coomi_engine::Role::Tool => "工具结果",
-            };
-            if m.content.trim().is_empty() { continue; }
-            work.push_str(&format!("## {role}\n{}\n\n", m.content));
-        }
-        write_work_md(&state.home, session_id, &work);
-        // 写入持久记忆（project 作用域）：压缩后下一轮通过记忆上下文恢复方向。
-        let memory = MemoryManager::new(&state.home, &cwd);
-        let name = format!("session-{}", session_id.chars().take(24).collect::<String>());
-        let _ = memory.save(
-            coomi_services::MemoryScope::Project,
-            &name,
-            "会话压缩前的完整工作进度，用于压缩后恢复上下文方向",
-            coomi_services::MemoryType::Project,
-            &work,
-        );
-    }
     Agent::new(prompt)
         .compact_session(&mut session, &provider, &tools, &observer)
         .await?;
@@ -7646,6 +7611,7 @@ async fn run_turn(
         prompt_context.clone(),
     )
     .with_sub_agents(sub_agents, fallback_sub_agent_id)
+    .with_limits(read_subagent_settings(&state.home).max_agents, configured_connection_settings(&state.home).auto_compact_percent)
     .without_persistent_memory();
     let tools = CoreTools::new(cwd.clone(), policy)
         .with_skills_directory(state.home.join("skills"))
@@ -7711,16 +7677,8 @@ async fn run_turn(
         session.usage.output_tokens,
         context_categories,
     ).with_billing(session_id, &billing_provider, &billing_model);
-    // 第 6 项：本轮开始自动读取 work[会话id].md（上一轮产出的工作进度），
-    // 作为额外上下文注入，节省 tokens 且保持跨轮连续性。
-    {
-        let work_md = read_work_md(&state.home, session_id);
-        if !work_md.trim().is_empty() {
-            let work_note = format!("\n\n<work_md_history>\n以下是本会话历史工作进度（work-md），供你延续上下文：\n{}\n</work_md_history>\n", work_md);
-            prompt_context.push_str(&work_note);
-        }
-    }
     let agent = Agent::new(prompt_context)
+        .with_auto_compact_percent(connection_settings.auto_compact_percent)
         .with_max_tool_rounds(effective_max_tool_rounds)
         .with_provider_retry_policy(
             connection_settings.provider_retry_count,
@@ -7750,12 +7708,10 @@ async fn run_turn(
         })
         // 上下文检查点：任务执行中（用户消息/模型回复/每轮工具后）落盘会话，
         // 意外中断、进程被杀、断线重连后都能从磁盘恢复完整上下文。
-        .with_checkpoint({
+        .with_durable_checkpoint({
             let checkpoint_store = SessionStore::new(&state.home);
             Arc::new(move |session: &Session| {
-                if let Err(error) = checkpoint_store.save(session) {
-                    eprintln!("[checkpoint] failed to save session: {error}");
-                }
+                checkpoint_store.save(session).map_err(|error| error.to_string())
             })
         });
     // 无论成败都先保存会话：报错/中断时本轮已产生的消息（用户提问、工具结果、
@@ -7784,23 +7740,6 @@ async fn run_turn(
         maybe_degrade_vision(state, session_id, &session, error);
     }
     store.save(&session)?;
-    // 第 6 项：每轮结束自动生成/修补 work[会话id].md，下一轮开始自动读取。
-    // 单会话固定一个文件，不随轮次新建；把本会话消息序列化为工作进度。
-    {
-        let mut work = String::new();
-        work.push_str(&format!("# work-{}\n\n", session_id));
-        for m in &session.messages {
-            let role = match m.role {
-                coomi_engine::Role::User => "用户",
-                coomi_engine::Role::Assistant => "助手",
-                coomi_engine::Role::System => "系统",
-                coomi_engine::Role::Tool => "工具结果",
-            };
-            if m.content.trim().is_empty() { continue; }
-            work.push_str(&format!("## {role}\n{}\n\n", m.content));
-        }
-        write_work_md(&state.home, session_id, &work);
-    }
     let mut assistant_text = turn_result?;
 
     while session
@@ -8655,7 +8594,10 @@ impl AgentObserver for BrowserObserver {
                 }
                 self.send_usage();
             }
-            AgentEvent::CompactionStarted { .. } | AgentEvent::QueuedInputAccepted(_) => {}
+            AgentEvent::CompactionStarted { automatic } => {
+                self.task.push_event(json!({"event_type":"compression_started", "automatic":automatic}));
+            }
+            AgentEvent::QueuedInputAccepted(_) => {}
         }
     }
 }

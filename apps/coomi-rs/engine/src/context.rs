@@ -64,9 +64,11 @@ impl ContextState {
         let local_tokens = estimate_request_tokens(system_prompt, messages, tools);
         self.estimated_active_tokens =
             if self.last_usage.total_tokens() > 0 && self.server_observed_local_tokens > 0 {
-                self.last_usage
-                    .total_tokens()
-                    .saturating_add(local_tokens.saturating_sub(self.server_observed_local_tokens))
+                if local_tokens >= self.server_observed_local_tokens {
+                    self.last_usage.total_tokens().saturating_add(local_tokens - self.server_observed_local_tokens)
+                } else {
+                    self.last_usage.total_tokens().saturating_sub(self.server_observed_local_tokens - local_tokens)
+                }
             } else {
                 local_tokens
             };
@@ -171,7 +173,7 @@ pub fn normalize_history(messages: &[ChatMessage]) -> Vec<ChatMessage> {
         if message.role == Role::Assistant {
             for call in &message.tool_calls {
                 if !output_ids.contains(&call.id) {
-                    output.push(ChatMessage::tool(&call.id, "error: aborted"));
+                    output.push(ChatMessage::tool(&call.id, "error: interrupted before a durable result was recorded; this operation may already have taken effect. Verify its state with read-only tools before retrying any mutation."));
                 }
             }
         }
@@ -288,7 +290,7 @@ fn estimate_text_tokens(value: &str) -> u64 {
         / 4
 }
 
-fn truncate_text_to_tokens(value: &str, max_tokens: u64) -> String {
+pub(crate) fn truncate_text_to_tokens(value: &str, max_tokens: u64) -> String {
     let max_bytes = usize::try_from(max_tokens.saturating_mul(4)).unwrap_or(usize::MAX);
     if value.len() <= max_bytes {
         return value.to_owned();
@@ -324,7 +326,7 @@ mod tests {
         let normalized = normalize_history(&messages);
         assert_eq!(normalized.len(), 2);
         assert_eq!(normalized[1].tool_call_id.as_deref(), Some("one"));
-        assert!(normalized[1].content.contains("aborted"));
+        assert!(normalized[1].content.contains("may already have taken effect"));
     }
 
     #[test]

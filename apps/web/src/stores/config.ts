@@ -41,6 +41,7 @@ export interface ConnectionSettings {
   reconnectInitialDelayMs: number
   reconnectMaxDelayMs: number
   maxConcurrentTasks: number
+  autoCompactPercent: number
 }
 
 export const DEFAULT_CONNECTION_SETTINGS: ConnectionSettings = {
@@ -49,6 +50,7 @@ export const DEFAULT_CONNECTION_SETTINGS: ConnectionSettings = {
   reconnectInitialDelayMs: 500,
   reconnectMaxDelayMs: 10_000,
   maxConcurrentTasks: 5,
+  autoCompactPercent: 80,
 }
 
 export interface ProviderPreset {
@@ -254,6 +256,7 @@ export const useConfigStore = defineStore('config', () => {
     reconnectInitialDelayMs: readStoredInt('coomi.reconnectInitialDelayMs', 500, 60_000, DEFAULT_CONNECTION_SETTINGS.reconnectInitialDelayMs),
     reconnectMaxDelayMs: readStoredInt('coomi.reconnectMaxDelayMs', 1_000, 120_000, DEFAULT_CONNECTION_SETTINGS.reconnectMaxDelayMs),
     maxConcurrentTasks: readStoredInt('coomi.maxConcurrentTasks', 1, 20, DEFAULT_CONNECTION_SETTINGS.maxConcurrentTasks),
+    autoCompactPercent: readStoredInt('coomi.autoCompactPercent', 10, 95, DEFAULT_CONNECTION_SETTINGS.autoCompactPercent),
   })
 
   const providers = ref<ProviderConfig[]>([])
@@ -325,12 +328,13 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   function cacheConnectionSettings(value: ConnectionSettings) {
-    connectionSettings.value = { ...value }
+    connectionSettings.value = { ...DEFAULT_CONNECTION_SETTINGS, ...value }
     localStorage.setItem('coomi.providerRetryCount', String(value.providerRetryCount))
     localStorage.setItem('coomi.wsRetryCount', String(value.wsRetryCount))
     localStorage.setItem('coomi.reconnectInitialDelayMs', String(value.reconnectInitialDelayMs))
     localStorage.setItem('coomi.reconnectMaxDelayMs', String(value.reconnectMaxDelayMs))
     localStorage.setItem('coomi.maxConcurrentTasks', String(value.maxConcurrentTasks))
+    localStorage.setItem('coomi.autoCompactPercent', String(connectionSettings.value.autoCompactPercent))
   }
 
   async function fetchConnectionSettings(): Promise<boolean> {
@@ -350,11 +354,13 @@ export const useConfigStore = defineStore('config', () => {
       reconnectInitialDelayMs: Math.trunc(value.reconnectInitialDelayMs),
       reconnectMaxDelayMs: Math.trunc(value.reconnectMaxDelayMs),
       maxConcurrentTasks: Math.trunc(value.maxConcurrentTasks),
+      autoCompactPercent: Math.trunc(value.autoCompactPercent),
     }
     if (normalized.providerRetryCount < 0 || normalized.providerRetryCount > 10
       || normalized.wsRetryCount < 0 || normalized.wsRetryCount > 100
       || normalized.reconnectInitialDelayMs < 500 || normalized.reconnectInitialDelayMs > 60_000
       || normalized.reconnectMaxDelayMs < 1_000 || normalized.reconnectMaxDelayMs > 120_000
+      || !Number.isFinite(normalized.autoCompactPercent) || normalized.autoCompactPercent < 10 || normalized.autoCompactPercent > 95
       || normalized.maxConcurrentTasks < 1 || normalized.maxConcurrentTasks > 20
       || normalized.reconnectMaxDelayMs < normalized.reconnectInitialDelayMs) return false
     try {

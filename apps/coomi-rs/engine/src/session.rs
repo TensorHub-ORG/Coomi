@@ -257,8 +257,13 @@ impl SessionStore {
         // 原子写：先写临时文件再 rename，避免崩溃/断电留下截断的 JSON，
         // 防止会话记录“莫名消失”（损坏文件此前会被 load 失败后静默丢弃）。
         let tmp = self.directory.join(format!("{}.json.tmp", session.id));
-        fs::write(&tmp, &bytes)
-            .with_context(|| format!("failed to write session {}", tmp.display()))?;
+        {
+            use std::io::Write;
+            let mut file = fs::File::create(&tmp)
+                .with_context(|| format!("failed to write session {}", tmp.display()))?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+        }
         fs::rename(&tmp, &path).with_context(|| {
             format!(
                 "failed to commit session {} ({} -> {})",
@@ -266,7 +271,10 @@ impl SessionStore {
                 tmp.display(),
                 path.display()
             )
-        })
+        })?;
+        #[cfg(unix)]
+        fs::File::open(&self.directory)?.sync_all()?;
+        Ok(())
     }
 
     pub fn load(&self, id: Uuid) -> Result<Session> {

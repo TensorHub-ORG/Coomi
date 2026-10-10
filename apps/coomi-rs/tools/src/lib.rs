@@ -69,7 +69,7 @@ pub struct CoreTools {
     mcp_runtime: Option<Arc<McpRuntime>>,
     memory: Option<Arc<MemoryManager>>,
     hooks: Option<Arc<HookRunner>>,
-    parent_history: Vec<coomi_engine::ChatMessage>,
+    parent_history: std::sync::RwLock<Vec<coomi_engine::ChatMessage>>,
     shell_only: bool,
 }
 
@@ -89,7 +89,7 @@ impl CoreTools {
             mcp_runtime: None,
             memory: None,
             hooks: None,
-            parent_history: Vec::new(),
+            parent_history: std::sync::RwLock::new(Vec::new()),
             shell_only: false,
         }
     }
@@ -100,7 +100,7 @@ impl CoreTools {
         parent_history: Vec<coomi_engine::ChatMessage>,
     ) -> Self {
         self.agent_scheduler = Some(scheduler);
-        self.parent_history = parent_history;
+        self.parent_history = std::sync::RwLock::new(parent_history);
         self
     }
 
@@ -133,11 +133,11 @@ impl CoreTools {
         self
     }
     pub fn with_note_context(mut self, history: Vec<coomi_engine::ChatMessage>) -> Self {
-        self.parent_history = history;
+        self.parent_history = std::sync::RwLock::new(history);
         self
     }
     pub fn with_note_request(mut self, request: &str) -> Self {
-        self.parent_history.push(coomi_engine::ChatMessage::user(request));
+        self.parent_history.get_mut().unwrap().push(coomi_engine::ChatMessage::user(request));
         self
     }
 
@@ -207,7 +207,7 @@ impl CoreTools {
             "read_note" => {
                 let Some(home)=self.config_home.as_ref() else { return ToolResult::error("notes unavailable"); };
                 let Some(id)=string_arg(&call.arguments,"id") else { return ToolResult::error("missing note id"); };
-                if !self.parent_history.iter().rev().find(|m| m.role == coomi_engine::Role::User && !m.internal)
+                if !self.parent_history.read().unwrap().iter().rev().find(|m| m.role == coomi_engine::Role::User && !m.internal)
                     .is_some_and(|m| m.content.contains(id)) {
                     return ToolResult::error("personal notes require an explicit note reference from the user");
                 }
@@ -439,10 +439,11 @@ impl CoreTools {
         };
         let fork_turns = string_arg(arguments, "fork_turns");
         let sub_agent_id = string_arg(arguments, "sub_agent_id");
+        let history = self.parent_history.read().unwrap().clone();
         match scheduler
             .spawn(
                 task.to_owned(),
-                &self.parent_history,
+                &history,
                 fork_turns,
                 sub_agent_id,
             )
@@ -2188,6 +2189,9 @@ impl CoreTools {
 
 #[async_trait]
 impl ToolRuntime for CoreTools {
+    fn update_history(&self, messages: &[coomi_engine::ChatMessage]) {
+        *self.parent_history.write().unwrap() = messages.to_vec();
+    }
     fn specs(&self) -> Vec<ToolSpec> {
         // Notes are not included in model context or enumerated automatically.
         let mut specs = vec![
@@ -2806,7 +2810,10 @@ impl ToolRuntime for CoreTools {
             {
                 Ok(outcome) => outcome,
                 Err(error) => {
-                    return ToolResult::error(format!("PostToolUse hook failed: {error:#}"));
+                    // The operation already ran: preserve its result so recovery cannot mistake it for an unexecuted failure.
+                    let warning = format!("PostToolUse hook failed after tool execution: {error:#}. The original tool result is authoritative; do not repeat a successful operation.");
+                    result.additional_context = Some(warning);
+                    return result;
                 }
             };
             if let Some(value) = outcome.result {
@@ -3379,13 +3386,37 @@ mod tests {
         assert!(result.output.contains("note body"));
         let mut recovery=coomi_engine::ChatMessage::user("internal completion check");
         recovery.internal=true;
-        let mut history=allowed.parent_history.clone();
+        let mut history=allowed.parent_history.read().unwrap().clone();
         history.push(recovery);
         let allowed=allowed.with_note_context(history).shell_only();
         assert!(allowed.specs().iter().any(|spec| spec.name=="read_note"));
         assert!(allowed.call(&call,&Deny).await.output.contains("note body"));
         let later=allowed.with_note_request("unrelated task");
         assert!(later.call(&call,&Deny).await.output.contains("explicit note reference"));
+    }
+
+    #[tokio::test]
+    async fn refreshed_history_updates_note_authorization() {
+        let home=tempfile::tempdir().unwrap();let id=uuid::Uuid::new_v4().to_string();
+        coomi_services::save_personal_note(home.path(),&id,"note","private",0).unwrap();
+        let policy=SecurityPolicy::new(home.path(),AccessMode::WorkspaceWrite).unwrap();
+        let tools=CoreTools::new(home.path().into(),policy).with_config_home(home.path().into());
+        let call=ToolCall{id:"read".into(),name:"read_note".into(),arguments:json!({"id":id})};
+        tools.update_history(&[coomi_engine::ChatMessage::user(format!("read {id}"))]);
+        assert!(tools.call(&call,&Deny).await.success);
+        tools.update_history(&[coomi_engine::ChatMessage::user("do not read my notes")]);
+        assert!(!tools.call(&call,&Deny).await.success);
+    }
+
+    #[tokio::test]
+    async fn failed_post_hook_keeps_the_successful_file_write_result() {
+        let home=tempfile::tempdir().unwrap();std::fs::create_dir_all(home.path().join("config")).unwrap();
+        std::fs::write(home.path().join("config/hooks.json"),serde_json::to_vec(&json!({"hooks":{"post_tool_use":[{"command":"coomi-nonexistent-hook-executable","matcher":"write_file"}]}})).unwrap()).unwrap();
+        let policy=SecurityPolicy::new(home.path(),AccessMode::FullAccess).unwrap();
+        let tools=CoreTools::new(home.path().into(),policy).with_hooks(Arc::new(HookRunner::load(home.path()).unwrap()));
+        let result=tools.call(&ToolCall{id:"write".into(),name:"write_file".into(),arguments:json!({"path":"result.txt","content":"saved"})},&Deny).await;
+        assert!(result.success);assert_eq!(std::fs::read_to_string(home.path().join("result.txt")).unwrap(),"saved");
+        assert!(result.additional_context.unwrap().contains("after tool execution"));
     }
 
     #[tokio::test]
@@ -3711,6 +3742,14 @@ mod tests {
         for value in allowed {
             let ip: std::net::IpAddr = value.parse().expect("valid IP");
             assert!(!ip_is_blocked(&ip), "{value} must be allowed");
+        }
+    }
+}
+
+impl Drop for CoreTools {
+    fn drop(&mut self) {
+        if let Some(scheduler) = &self.agent_scheduler {
+            scheduler.cancel_all();
         }
     }
 }
