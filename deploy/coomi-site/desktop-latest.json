@@ -1,10 +1,12 @@
-﻿{
-    "size":  256050040,
-    "version":  "0.1.0",
-    "arch":  "x64",
-    "file":  "Coomi-Setup-0.1.0.exe",
-    "publishedAt":  "2026-08-16T23:30:00Z",
-    "platform":  "windows",
-    "minWindows":  "10",
-    "sha256":  "3534a8bedfca2930f6ddcb430ce0d68ffbc837392f6bd8efafbc9225adb0cc25"
+{
+  "version": "1.0.0-test.1",
+  "channel": "beta",
+  "platform": "windows",
+  "arch": "x64",
+  "file": "Coomi_1.0.0-test.1_x64-setup.exe",
+  "url": "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.1_x64-setup.exe",
+  "publishedAt": "2026-10-11T00:00:00Z",
+  "minWindows": "10",
+  "size": 42793025,
+  "sha256": "9490864693e8c99766411c747aeb2b0d1a32835c60b995656f57a8c78181b41c"
 }

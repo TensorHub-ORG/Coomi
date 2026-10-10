@@ -566,6 +566,11 @@
     .download-card h2 { margin-bottom: 8px; }
     .download-card .hint { margin: 0 0 30px; color: var(--quiet); font-size: 13.5px; }
     .download-card .cta-row { justify-content: center; }
+    .desktop-release { margin-top: 24px; }
+    .desktop-release h3 { margin: 0 0 6px; font-size: 18px; }
+    .desktop-release .hint { margin-bottom: 18px; }
+    .desktop-release .btn[aria-disabled='true'] { opacity: .42; cursor: not-allowed; pointer-events: none; filter: grayscale(1); }
+    .desktop-release .meta { margin-top: 20px; }
     .meta { margin: 32px auto 0; padding-top: 22px; border-top: 1px solid var(--line); display: grid; gap: 10px; max-width: 640px; color: var(--quiet); font-size: 12.6px; }
     .meta .row { display: flex; justify-content: space-between; gap: 14px; }
     .meta .row > span:first-child { flex: none; letter-spacing: .06em; }
@@ -854,7 +859,7 @@
     <div class="narrow">
       <div class="sec-head">
         <span class="kicker">Changelog</span>
-        <h2 id="notes-title" data-split>1.5.0o3 更新说明</h2>
+        <h2 id="notes-title" data-split>v1.0.0-test.1 发布说明【测试】</h2>
         <p id="notes-sub">2026-09-21 发布 · 制作人：晚风</p>
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
           </svg>
@@ -867,6 +872,10 @@
         <div class="tl-item">
           <h4>控制模式重做</h4>
           <p>新增主动申请无障碍权限；桌面悬浮层显示正在调用的工具与思考过程，不用时可拖动缩成小球。</p>
+        </div>
+        <div class="tl-item">
+          <h4>v1.0.0-test.1 发布说明【测试】</h4>
+          <p>桌面端 rc50 合并测试版：修复任务完成状态误报、断线恢复与重复恢复，优化流式渲染和思考区贴底；模型发现自动补全上下文与输出能力，MCP 启动参数可编辑；改进原生文件预览、插件加载、全屏布局和输入栏统计，降低空闲与流式渲染压力。</p>
         </div>
         <div class="tl-item">
           <h4>上下文压缩不再重复执行已完成任务</h4>
@@ -883,8 +892,9 @@
       </div>
 
       <details class="history">
-        <summary>历史版本安装包</summary>
+        <summary>展开全部更新记录</summary>
         <div id="history-list">
+          <div class="ver-row"><span class="name">v1.0.0-test.1 发布说明【测试】</span><a href="#desktop-download">桌面端测试版</a></div>
           <div class="ver-row"><span class="name">1.5.0o3（当前）</span><a href="#download">下载 ↓</a></div>
           <div class="ver-row"><span class="name">1.5.0o2</span><a href="/coomi/download/Comax-1.5.0o2-complete-signed.apk" download>下载 ↓</a></div>
         </div>
@@ -911,6 +921,21 @@
           <div class="row"><span>包大小</span><span class="val" id="meta-size">192 MB</span></div>
           <div class="row"><span>SHA-256</span><span class="val" id="meta-sha">读取中…</span></div>
           <div class="row"><span>下载次数</span><span class="val count" id="meta-count" aria-live="polite">读取中…</span></div>
+        </div>
+      </div>
+      <div class="download-card desktop-release" id="desktop-download">
+        <img class="icon" src="site_assets/icons/app-icon.png" alt="Coomi Desktop 图标">
+        <h2>桌面端下载</h2>
+        <p class="hint">Windows 桌面端分为正式版与测试版，测试版包含本轮稳定性与界面修复。</p>
+        <div class="cta-row">
+          <a class="btn ghost" aria-disabled="true" tabindex="-1" href="#desktop-download">桌面端正式版</a>
+          <a class="btn primary" id="desktop-beta-link" href="https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.1_x64-setup.exe" download>
+            <span class="arrow" aria-hidden="true">↓</span><span>桌面端测试版</span>
+          </a>
+        </div>
+        <div class="meta">
+          <div class="row"><span>测试版本</span><span class="val" id="desktop-version">v1.0.0-test.1</span></div>
+          <div class="row"><span>校验</span><span class="val" id="desktop-sha">9490864693e8c99766411c747aeb2b0d1a32835c60b995656f57a8c78181b41c</span></div>
         </div>
       </div>
     </div>
@@ -1092,6 +1117,15 @@
       }
     })
     .catch(() => { /* 保留静态兜底 */ });
+
+  fetch('desktop-latest.json', { cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then(data => {
+      if (data.version) set('desktop-version', `v${data.version}`.replace('vv', 'v'));
+      if (data.sha256) set('desktop-sha', data.sha256);
+      if (data.url) { const link = $('#desktop-beta-link'); if (link) link.href = data.url; }
+    })
+    .catch(() => { /* 保留测试版静态兜底 */ });
 
   function loadCount(file) {
     fetch(`/coomi/download-stats?file=${encodeURIComponent(file)}`, { cache: 'no-store' })
