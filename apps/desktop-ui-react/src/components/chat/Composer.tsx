@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { motionOn } from '../../lib/motionPref'
 import { EASE_IN_QUAD, RISE_IN, RISE_SHOWN, SEC_FAST, SPRING_SNAP } from '../ui/motion'
-import { AlertTriangle, ArrowUp, ChevronRight, FolderOpen, KeyRound, ListOrdered, Paperclip, Shield, ShieldAlert, Slash, Sparkles, Square, Wand2, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowUp, AtSign, ChevronRight, FolderOpen, KeyRound, ListOrdered, Paperclip, Plus, Shield, ShieldAlert, Slash, Sparkles, Square, Wand2, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '../../lib/cn'
 import { ipc } from '../../lib/ipc'
@@ -20,10 +20,10 @@ import { FileBadge } from '../ui/FileBadge'
 import { attachmentName } from './AttachmentCard'
 import { QuoteChip } from './QuoteBlock'
 import { StatsBar } from './StatsBar'
-import { Menu } from '../ui/Menu'
+import { Menu, type MenuEntry } from '../ui/Menu'
 import { EffortPicker } from '../ui/EffortSlider'
-import { Tip } from '../ui/Overlay'
-import { statPath } from '../shell/dockShared'
+import { Dialog, Tip } from '../ui/Overlay'
+import { openDockTab, statPath } from '../shell/dockShared'
 // 插件：斜杠命令（输入 / 弹出、选中填模板）与人设提示条共用一份 store 与纯逻辑。
 import {
   effectiveEnabled,
@@ -140,6 +140,10 @@ export function Composer({ hero }: { hero?: boolean }) {
   const streaming = useSession((s) => s.streaming)
   const hasMessages = useSession((s) => s.messages.length > 0)
   const connected = useSession((s) => s.connected)
+  const sessionId = useSession((s) => s.sessionId)
+  const sessionMessageCount = useSession((s) => s.messages.length)
+  const addQuote = useSession((s) => s.addQuote)
+  const sendCommand = useSession((s) => s.sendCommand)
   const selectModel = useSession((s) => s.selectModel)
   // 当前模型以会话 store 为准（引擎回读校验过）：切换模型后立刻换名字。
   // 之前用的是 /api/providers 的本地副本 p.model，切完名字不变，要重启才更新。
@@ -161,6 +165,17 @@ export function Composer({ hero }: { hero?: boolean }) {
   /// 三态里的「已加载」：没拉到 ≠ 拉到但一条都没有。
   const providersLoaded = useAgent((s) => s.providersLoaded)
   const loadProviders = useAgent((s) => s.loadProviders)
+
+  useEffect(() => {
+    if (!ready || !sessionId) { setGoal(''); return }
+    let current = true
+    void api<{ goal?: string }>('/api/sessions/' + encodeURIComponent(sessionId) + '/goal')
+      .then((result) => { if (current) setGoal(result.goal ?? '') })
+      .catch(() => { if (current) setGoal('') })
+    return () => { current = false }
+  }, [ready, sessionId, api])
+
+  useEffect(() => { setPlanMode(false) }, [sessionId])
 
   /// 引用芯片（可多条）：发送时走结构化 quotes 字段，不再把引用文字拼进正文。
   /// 附件与引用都放在 session store 里、按**会话 id 分桶**（见 lib/sessionInput）：
@@ -199,11 +214,23 @@ export function Composer({ hero }: { hero?: boolean }) {
   const pluginEntries = usePluginStore((s) => s.plugins)
   const pluginPrefs = usePluginStore((s) => s.prefs)
   const pluginSetEnabled = usePluginStore((s) => s.setEnabled)
-  const allSlash = useMemo(() => collectPluginSlash(pluginEntries, pluginPrefs), [pluginEntries, pluginPrefs])
+  const allSlash = useMemo(() => [
+    { key: 'coomi:/goal', command: '/goal', plugin: 'Coomi', description: '设置本会话目标', template: '/goal {{cursor}}' },
+    { key: 'coomi:/compact', command: '/compact', plugin: 'Coomi', description: '压缩当前上下文', template: '/compact' },
+    { key: 'coomi:/init', command: '/init', plugin: 'Coomi', description: '初始化当前工作区', template: '/init' },
+    { key: 'coomi:/plan', command: '/plan', plugin: 'Coomi', description: '进入计划模式', template: '/plan' },
+    { key: 'coomi:/side', command: '/side', plugin: 'Coomi', description: '打开辅助会话', template: '/side' },
+    ...collectPluginSlash(pluginEntries, pluginPrefs),
+  ], [pluginEntries, pluginPrefs])
   const [slashQuery, setSlashQuery] = useState('')
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashIndex, setSlashIndex] = useState(0)
   const slashItems = useMemo(() => filterSlash(allSlash, slashQuery), [allSlash, slashQuery])
+  const [goal, setGoal] = useState('')
+  const [goalDraft, setGoalDraft] = useState('')
+  const [goalOpen, setGoalOpen] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false)
+  const [planMode, setPlanMode] = useState(false)
   /// 启用了带 persona 的插件：Composer 上方显示「插件人设已生效」并可一键关闭。
   const personaPlugin = useMemo(() => {
     for (const p of pluginEntries) {
@@ -213,9 +240,6 @@ export function Composer({ hero }: { hero?: boolean }) {
   }, [pluginEntries, pluginPrefs])
   /// 引用芯片是否展开（>QUOTE_COLLAPSE_AT 条时默认折叠成 +N）。
   const [quotesOpen, setQuotesOpen] = useState(false)
-  /// 芯片（引用 / 技能 / 附件）的退场标记：打上标记的元素由 AnimatePresence 播完
-  /// --motion-fast 的缩放淡出，再在 onExitComplete 里真正摘掉（见 settle）。
-  const [leaving, setLeaving] = useState<string[]>([])
   const area = useRef<HTMLTextAreaElement>(null)
   /// 关掉动效（[data-motion=off] / 系统 prefers-reduced-motion）时，芯片的整条动画链路都要让路：
   /// initial / exit 全关、dismiss 直接摘——否则会卡在「等一个永远不播的退场」上（这是 JS 动画，
@@ -229,10 +253,6 @@ export function Composer({ hero }: { hero?: boolean }) {
   const toolbarParts = themeParts?.composer?.toolbar
   const sendLeft = sendBtn?.position === 'left'
 
-  /// 退场交给 AnimatePresence：标记成 leaving 让它播 exit，动画播完（onExitComplete）
-  /// 才真正从列表里摘掉，不再手写 setTimeout 对时间。
-  /// 回调不带参数，所以「刚退场的是谁」按点击顺序记在一个队列里，settle 时出队一个。
-  const exitQueue = useRef<string[]>([])
   /// 真正把某一枚芯片从数据里摘掉。
   const applyRemoval = (key: string): void => {
     if (key.startsWith('file:')) removeAttachment(key.slice(5))
@@ -240,16 +260,7 @@ export function Composer({ hero }: { hero?: boolean }) {
     else if (key === 'skill') setSkill('')
   }
   const dismiss = (key: string): void => {
-    if (leaving.includes(key)) return
-    // 关了动效：没有退场可等，直接摘。
-    if (!animated) { applyRemoval(key); return }
-    exitQueue.current.push(key)
-    setLeaving((l) => [...l, key])
-  }
-  const settle = (): void => {
-    const key = exitQueue.current.shift()
-    if (!key) return
-    setLeaving((l) => l.filter((x) => x !== key))
+    // 先删除数据，AnimatePresence 才能检测到子节点退出并播放退场。
     applyRemoval(key)
   }
   /// 入场：8px 上浮 + 淡入，**duration 交给 spring**（芯片是「被放进来」的小东西，
@@ -357,14 +368,69 @@ export function Composer({ hero }: { hero?: boolean }) {
     return { groups, recentItems }
   }, [providers, modelQuery, recentModels, discovered, sessionProviderId, sessionModel])
 
+  const recentContextItems = useMemo<MenuEntry[]>(() => {
+    const recent = useSession.getState().messages
+      .filter((item): item is Extract<typeof item, { kind: 'user' | 'assistant' }> => item.kind === 'user' || item.kind === 'assistant')
+      .slice(-6).reverse()
+    return recent.length ? recent.map((item) => ({
+      label: (item.kind === 'user' ? '你：' : 'Coomi：') + (item.text.replace(/\s+/g, ' ').slice(0, 54) || '（空内容）'),
+      icon: <AtSign size={14} />,
+      onSelect: () => addQuote({ text: item.text, msgId: item.msgId, at: item.at }),
+    })) : [{ label: '当前会话还没有可引用内容', disabled: true, icon: <AtSign size={14} /> }]
+  }, [sessionMessageCount, addQuote])
+
   const hasProvider = providers.length > 0
   const openProviderSettings = (): void => {
     useUi.getState().setSettingsGroup('models')
     setView('settings')
   }
 
+  const updateGoal = async (objective: string): Promise<void> => {
+    if (!sessionId) return
+    const result = await api<{ goal?: string }>('/api/sessions/' + encodeURIComponent(sessionId) + '/goal', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objective }),
+    })
+    if (useSession.getState().sessionId === sessionId) setGoal(result.goal ?? '')
+  }
+
+  const saveGoal = async (): Promise<void> => {
+    try {
+      await updateGoal(goalDraft.trim())
+      setGoalOpen(false)
+      toast.success(goalDraft.trim() ? '目标模式已更新' : '目标模式已关闭')
+    } catch (error) {
+      toast.error('目标模式更新失败：' + (error instanceof Error ? error.message : String(error)))
+    }
+  }
+
   const submit = (): void => {
     if (!draft.trim()) return
+    const command = draft.trim()
+    if (/^\/goal(?:\s|$)/i.test(command)) {
+      const objective = command.replace(/^\/goal\s*/i, '').trim()
+      if (objective) {
+        void updateGoal(objective).then(() => toast.success('目标模式已更新')).catch((error) => toast.error('目标模式更新失败：' + (error instanceof Error ? error.message : String(error))))
+        setDraft('')
+      } else {
+        setGoalDraft(goal)
+        setGoalOpen(true)
+      }
+      setSlashOpen(false)
+      return
+    }
+    if (command === '/side') {
+      openDockTab('side')
+      setDraft('')
+      return
+    }
+    if (command === '/plan') {
+      const next = !planMode
+      if (!connected) { reconnect(); toast.error('连接恢复后再切换计划模式'); return }
+      sendCommand({ command: next ? 'enter_plan_mode' : 'exit_plan_mode' })
+      setPlanMode(next)
+      setDraft('')
+      return
+    }
     // 没连上时不再静默丢弃：明确告诉用户并自动重连。
     if (!connected) { toast.error('连接已断开，正在重连…'); reconnect(); return }
     // 没配模型时不要发出去（引擎会立刻失败），直接引导去设置。
@@ -373,14 +439,14 @@ export function Composer({ hero }: { hero?: boolean }) {
     if (providersLoaded && !hasProvider && !streaming) { toast.error('还没有配置模型，先去设置里添加 Provider'); openProviderSettings(); return }
     // 技能仍然是「提示优先使用」，照旧拼在正文最前面；
     // 附件与引用改走结构化字段（见 stores/session.ts 的 send），正文保持用户原样。
+    const prompt = command === '/init'
+      ? '请分析当前工作区并初始化项目说明：检查目录结构、常用命令和现有约定，创建或更新 AGENTS.md，内容应准确简洁。'
+      : command
     const prefix = skill ? '[使用技能 ' + skill + '] ' : ''
     // 清空交给 store：它只清**当前会话**的那三个桶（别的会话的待发送内容一个字不动）。
-    send(prefix + draft, { attachments, quotes })
+    if (planMode) sendCommand({ command: 'enter_plan_mode' })
+    send(prefix + prompt, { attachments, quotes })
     setQuotesOpen(false)
-    // 附件与引用是被整条清掉的（不是逐个退场）：把它们的退场标记与队列一起收回，
-    // 否则标记会留在 leaving / 队列里，下次退场时把不相干的键算进来。
-    exitQueue.current = []
-    setLeaving((l) => l.filter((k) => !k.startsWith('file:') && !k.startsWith('quote:')))
   }
 
   /** 收下一批附件路径：store 立刻上屏并按当前会话落盘，大小由引擎的 stat 端点补。 */
@@ -438,6 +504,25 @@ export function Composer({ hero }: { hero?: boolean }) {
     const tokenStart = idx >= 0 ? idx : pos
     // 先把「/查询」整段摘掉，再让纯逻辑负责插入模板与 {{cursor}} 落点。
     const cleaned = draft.slice(0, tokenStart) + draft.slice(pos)
+    if (item.command === '/side') {
+      openDockTab('side')
+      setDraft(cleaned)
+      setSlashOpen(false)
+      return
+    }
+    if (item.command === '/plan') {
+      const next = !planMode
+      if (connected) {
+        sendCommand({ command: next ? 'enter_plan_mode' : 'exit_plan_mode' })
+        setPlanMode(next)
+      } else {
+        reconnect()
+        toast.error('连接恢复后再切换计划模式')
+      }
+      setDraft(cleaned)
+      setSlashOpen(false)
+      return
+    }
     const applied = applySlashTemplate(cleaned, tokenStart, item.template)
     setDraft(applied.text)
     setSlashOpen(false)
@@ -450,6 +535,14 @@ export function Composer({ hero }: { hero?: boolean }) {
         next.setSelectionRange(applied.cursor, applied.cursor)
       }
     })
+  }
+
+  const openSlashMenu = (): void => {
+    setDraft('/')
+    setSlashQuery('')
+    setSlashIndex(0)
+    setSlashOpen(true)
+    window.requestAnimationFrame(() => area.current?.focus())
   }
 
   /// 输入框内容变化：顺带检测斜杠命令（光标前最近的 / 后面是否只有命令名字符）。
@@ -638,6 +731,12 @@ export function Composer({ hero }: { hero?: boolean }) {
           </Button>
         </div>
       ) : null}
+      {goal || planMode ? (
+        <div className='flex min-w-0 items-center gap-2 px-1 text-11 text-ink-3'>
+          {goal ? <><span className='shrink-0 text-primary'>目标模式</span><span className='min-w-0 flex-1 truncate' title={goal}>{goal}</span><button type='button' className='shrink-0 hover:text-ink' onClick={() => { setGoalDraft(goal); setGoalOpen(true) }}>编辑</button><button type='button' className='shrink-0 hover:text-ink' onClick={() => { void updateGoal('').then(() => toast.success('目标模式已关闭')).catch((error) => toast.error(String(error))) }}>结束</button></> : null}
+          {planMode ? <><span className='shrink-0 rounded bg-muted px-1.5 py-0.5'>计划模式</span><button type='button' className='shrink-0 hover:text-ink' onClick={() => { sendCommand({ command: 'exit_plan_mode' }); setPlanMode(false) }}>退出</button></> : null}
+        </div>
+      ) : null}
       <div
         data-composer-box
         onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
@@ -689,8 +788,8 @@ export function Composer({ hero }: { hero?: boolean }) {
           {/* 芯片（引用 / 技能 / 附件）：入场 8px 上浮 + 淡入，退场缩到 0.88 再淡出，
               两段都只动 transform / opacity，所以这段延迟里输入区不会被顶得上下跳一下。
               入场是 motion 的**真弹性**（SPRING_SNAP），退场 140ms + in-quad（SEC_FAST / EASE_IN_QUAD）；
-              退场由 AnimatePresence 播完再摘元素（onExitComplete），不再手写定时器。 */}
-          <AnimatePresence initial={false} onExitComplete={settle}>
+              数据先删除，AnimatePresence 保留退出元素直到退场播完。 */}
+          <AnimatePresence initial={false}>
             {/* 引用芯片：每条两行摘要 + ×。超过 QUOTE_COLLAPSE_AT 条只平铺前两条，
                 其余折成「+N」（引用都是长文本，全铺开会把输入框顶出视野）。 */}
             {shownQuotes.map((q) => (
@@ -727,7 +826,7 @@ export function Composer({ hero }: { hero?: boolean }) {
                 transition={chipMotion}
               >
                 {skill}
-                <button type='button' onClick={() => dismiss('skill')} className='opacity-70 transition-opacity duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:opacity-100'>×</button>
+                <button type='button' aria-label='移除技能' onClick={() => dismiss('skill')} className='opacity-70 transition-opacity duration-[var(--motion-fast)] ease-[var(--ease-spring)] hover:opacity-100'>×</button>
               </m.span>
             ) : null}
             {/* 附件芯片：徽标（图标 + 扩展名）+ 文件名 + 大小 + ×，
@@ -777,27 +876,20 @@ export function Composer({ hero }: { hero?: boolean }) {
         </div>
         {/* flex-wrap：窄窗口 / 右侧栏展开时，工具按钮换行而不是被挤出输入栏外。 */}
         <div data-composer-tools className='mt-1 flex flex-wrap items-center gap-0.5'>
-          {toolbarParts?.showAttach === false ? null : (
-          <Tip label='上传文件'>
-            <Button
-              variant='ghost' size='icon-sm'
-              aria-label='上传文件'
-              onClick={() => void attach()}
-            >
-              <Paperclip size={15} />
-            </Button>
-          </Tip>
-          )}
-          {toolbarParts?.showSearch === false ? null : (
           <Menu
             align='start'
             side='top'
-            items={installedSkills.length
-              ? installedSkills.map((s) => ({ label: s.name || s.id, icon: <Wand2 size={14} />, onSelect: () => setSkill(s.name || s.id) }))
-              : [{ label: '还没有安装技能', disabled: true }]}
-            trigger={<Button variant='ghost' size='icon-sm' title='添加技能'><Sparkles size={15} /></Button>}
+            items={[
+              ...(toolbarParts?.showAttach === false ? [] : [{ label: '添加附件', icon: <Paperclip size={14} />, onSelect: () => void attach() }]),
+              { label: '@ 添加上下文', icon: <AtSign size={14} />, onSelect: () => setContextOpen(true) },
+              { label: '/ 能力与指令', icon: <Slash size={14} />, onSelect: openSlashMenu },
+              { divider: true },
+              ...(installedSkills.length
+                ? installedSkills.map((s) => ({ label: '$ ' + (s.name || s.id), icon: <Wand2 size={14} />, onSelect: () => setSkill(s.name || s.id) }))
+                : [{ label: '$ 技能（尚未安装）', icon: <Sparkles size={14} />, disabled: true }]),
+            ] as MenuEntry[]}
+            trigger={<Button variant='ghost' size='icon-sm' title='添加附件、上下文、指令或技能' aria-label='添加'><Plus size={16} /></Button>}
           />
-          )}
           {toolbarParts?.showModel === false ? null : (
           <Menu
             align='start'
@@ -829,7 +921,7 @@ export function Composer({ hero }: { hero?: boolean }) {
                 : [{ label: '正在加载厂商…', disabled: true }]
             }
             trigger={
-              <Button variant='ghost' size='sm' className='gap-1 text-ink-3' title='选择模型'>
+              <Button variant='ghost' size='sm' data-composer-model className='gap-1 text-ink-3' title='选择模型'>
                 <span className='composer-model-label flex min-w-0 max-w-[220px] items-center gap-1 truncate'>
                   {shownProvider || sessionModel ? (
                     <>
@@ -921,6 +1013,47 @@ export function Composer({ hero }: { hero?: boolean }) {
           <span>也可以拖入文件，与 Coomi 一起阅读</span>
         </div>
       ) : null}
+      <Dialog
+        open={contextOpen}
+        onOpenChange={setContextOpen}
+        title='添加上下文'
+        description='选择当前会话中的一条消息作为引用。'
+        width={520}
+        footer={<Button variant='ghost' onClick={() => setContextOpen(false)}>关闭</Button>}
+      >
+        <div className='space-y-1'>
+          {recentContextItems.map((item, index) => (
+            <button
+              key={index}
+              type='button'
+              disabled={item.disabled}
+              title={item.label}
+              onClick={() => { item.onSelect?.(); setContextOpen(false); useUi.getState().focusComposer() }}
+              className='w-full truncate rounded-md px-2.5 py-2 text-left text-12 text-ink-2 hover:bg-hover disabled:cursor-default disabled:text-ink-4'
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </Dialog>
+      <Dialog
+        open={goalOpen}
+        onOpenChange={setGoalOpen}
+        title='会话目标'
+        description='只有明确设置目标后，系统才会在长任务中复述它。'
+        width={520}
+        footer={<><Button variant='ghost' onClick={() => setGoalOpen(false)}>取消</Button><Button variant='primary' onClick={() => void saveGoal()}>保存目标</Button></>}
+      >
+        <textarea
+          value={goalDraft}
+          onChange={(event) => setGoalDraft(event.target.value)}
+          maxLength={10000}
+          rows={5}
+          autoFocus
+          placeholder='描述这次会话希望完成的目标…'
+          className='w-full resize-y rounded-md border border-line bg-control px-3 py-2 text-13 text-ink outline-none focus:border-primary'
+        />
+      </Dialog>
     </div>
   )
 }

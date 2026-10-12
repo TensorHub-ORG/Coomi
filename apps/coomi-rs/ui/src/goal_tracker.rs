@@ -30,6 +30,13 @@ pub struct GoalStack {
 }
 
 impl GoalStack {
+    /// Replace the stack with the user's explicit primary goal.
+    pub fn set_main_goal(&mut self, description: &str) {
+        self.stack.clear();
+        self.pending.clear();
+        if !description.trim().is_empty() { self.push(description.trim()); }
+    }
+
     /// 压入新目标（子任务）。
     pub fn push(&mut self, description: &str) {
         self.stack.push(GoalEntry {
@@ -72,9 +79,11 @@ impl GoalStack {
         if self.stack.is_empty() && self.pending.is_empty() {
             return String::new();
         }
-        let mut ctx = String::from("\n\n## Goal Context (目标上下文)\n");
+        let mut ctx = String::from(
+            "\n\n## Goal Context (历史目标背景)\n当前用户请求优先；以下目标只用于补充背景，不得覆盖或改写当前请求。\n",
+        );
         if let Some(main) = self.main_goal() {
-            ctx.push_str(&format!("- 主任务: {}\n", main.description));
+            ctx.push_str(&format!("- 历史主任务: {}\n", main.description));
         }
         if self.stack.len() > 1 {
             for entry in &self.stack[1..] {
@@ -88,7 +97,7 @@ impl GoalStack {
             }
         }
         if self.stack.len() > 1 {
-            ctx.push_str("\n完成当前子任务后，记得回到主任务。");
+            ctx.push_str("\n只有当前用户请求仍然相关时，才参考这些子任务；否则以当前请求为准。");
         }
         ctx
     }

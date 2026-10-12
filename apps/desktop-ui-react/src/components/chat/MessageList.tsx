@@ -2,8 +2,8 @@ import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, Check, ChevronRight, ChevronUp, Clock3, Copy, FileText, FolderOpen, GitBranch, Globe,
-  MoreHorizontal, Pencil, Play, Quote, RefreshCw, RotateCcw, Save, Search, Slash, Sparkles, ThumbsDown, ThumbsUp, Wrench,
+  AlertTriangle, Check, ChevronRight, ChevronUp, Clock3, Copy, GitBranch,
+  MoreHorizontal, Pencil, Play, Quote, RefreshCw, RotateCcw, Slash, Sparkles, ThumbsDown, ThumbsUp,
 } from 'lucide-react'
 import { m, type MotionProps } from 'motion/react'
 import { cn } from '../../lib/cn'
@@ -25,6 +25,7 @@ import { useStickToBottom } from './useStickToBottom'
 import { ArtifactList } from './ArtifactCard'
 // AI 提问卡：对话流里的一条普通条目（答完留在原地，见组件顶部说明）。
 import { AskUserCard } from './AskUserCard'
+import { ToolWaterfallRow } from './ToolWaterfallRow'
 import { ProcessBlock } from './ProcessBlock'
 import { markCollapseMotion, toggleTransition } from './collapseMotion'
 // 生成中的三点跳动：只要还在流式就挂在内容末尾，替代原来的「正在思考…」。
@@ -34,7 +35,7 @@ import { useCapabilities } from '../../stores/capabilities'
 import { Markdown } from './Markdown'
 import { AttachmentCard, parseLegacyAttachments, type AttachmentRef } from './AttachmentCard'
 import { QuoteBlock, parseLegacyQuotes, type QuoteRef } from './QuoteBlock'
-import { AgentState, type AgentStateKind } from '../ai/AgentState'
+import { AgentState } from '../ai/AgentState'
 // 助手默认头像（插件主题 mascot.avatar 的可替换挂点，见组件内 data-theme-mascot=avatar）。
 import assistantAvatar from '../../assets/coomi-logo.png'
 import { Button } from '../ui/Button'
@@ -129,254 +130,15 @@ function jumpBehavior(smooth: boolean): ScrollBehavior {
    展开后必须给高度上限：思考可以很长，不封顶会一路把正文顶出屏幕。
    框内自己滚，流式中自动贴底；用户一旦手动上滚就停止跟随（否则没法回看已经想过的部分）。 */
 
-const DOT: Record<ToolCall['status'], string> = {
-  queued: 'bg-ink-4',
-  running: 'bg-primary',
-  done: 'bg-ok',
-  error: 'bg-danger',
-  denied: 'bg-warn',
-}
-
-/* ── 「安静」类工具：读 / 写 / 改 / 搜 / 查 / 抓 用一条细信息表达，不占一个卡片 ── */
-type QuietKind = 'read' | 'write' | 'edit' | 'search' | 'find' | 'fetch'
-
-const QUIET_TOOLS: Record<string, QuietKind> = {
-  read: 'read', read_file: 'read', read_text_file: 'read', readfile: 'read', cat: 'read',
-  view: 'read', view_file: 'read', open_file: 'read', fs_read: 'read', read_multiple_files: 'read',
-  write: 'write', write_file: 'write', writefile: 'write', create_file: 'write', save_file: 'write',
-  fs_write: 'write', append_file: 'write',
-  edit: 'edit', edit_file: 'edit', replace_in_file: 'edit', str_replace: 'edit', str_replace_editor: 'edit',
-  apply_patch: 'edit', multi_edit: 'edit', patch_file: 'edit', notebook_edit: 'edit',
-  grep: 'search', search: 'search', search_files: 'search', ripgrep: 'search', code_search: 'search',
-  search_code: 'search', find_in_files: 'search', content_search: 'search', context_search: 'search',
-  glob: 'find', find: 'find', ls: 'find', list: 'find', list_dir: 'find', list_files: 'find',
-  list_directory: 'find', directory_tree: 'find', file_search: 'find',
-  web_fetch: 'fetch', fetch: 'fetch', http_get: 'fetch', read_url: 'fetch',
-}
-
-/** 工具名可能带前缀（fs.read_file / mcp__fs__read），取最后一段再判类型。 */
-function quietKind(name: string): QuietKind | null {
-  const key = name.toLowerCase().trim().replace(/[.\-/]+/g, '_').replace(/^mcp_+/, '')
-  const tail = key.split('_').slice(-2).join('_')
-  return QUIET_TOOLS[key] ?? QUIET_TOOLS[key.split('_').pop() ?? ''] ?? QUIET_TOOLS[tail] ?? null
-}
-
-/** 细条工具用哪套状态语言：读 / 写 / 搜 各有点阵自己的动效，扫一眼就能分辨。 */
-const QUIET_STATE: Record<QuietKind, AgentStateKind> = {
-  read: 'reading',
-  write: 'writing',
-  edit: 'writing',
-  search: 'searching',
-  find: 'searching',
-  fetch: 'searching',
-}
-
-const QUIET_META: Record<QuietKind, { verb: string; icon: typeof FileText }> = {
-  read: { verb: '读取', icon: FileText },
-  write: { verb: '写入', icon: Save },
-  edit: { verb: '修改', icon: Pencil },
-  search: { verb: '搜索', icon: Search },
-  find: { verb: '查找', icon: FolderOpen },
-  fetch: { verb: '抓取', icon: Globe },
-}
-
-/* ── 安静类工具的**分色** ──
-   读 / 写 / 改 / 搜 / 抓 各用一支语义色，token 全部来自 styles/theme.css 的
-   「写入类工具的语义色」（--tool-read / --tool-write / --tool-edit / --tool-search / --tool-fetch，
-   明暗两套值 + 各自的 -soft 浅底），这里只消费类名，不再自己写色值。
-   写入与修改**明显加深**：左侧 2px 色条满色 + 整行压一层同色浅底 + 图标 / 动词 / 目标都用对应色，
-   其余几类只染图标与动词（色条半透明），一眼能分出「只是看看」和「动了文件」。
-   出错一律回到 --tool-error 的那一种红，不参与分色——错误必须是全场最显眼的那个信号。 */
-const QUIET_TONE: Record<QuietKind, { text: string; bar: string; soft: string; strong: boolean }> = {
-  read: { text: 'text-tool-read', bar: 'bg-tool-read', soft: 'bg-tool-read-soft', strong: false },
-  write: { text: 'text-tool-write', bar: 'bg-tool-write', soft: 'bg-tool-write-soft', strong: true },
-  edit: { text: 'text-tool-edit', bar: 'bg-tool-edit', soft: 'bg-tool-edit-soft', strong: true },
-  search: { text: 'text-tool-search', bar: 'bg-tool-search', soft: 'bg-tool-search-soft', strong: false },
-  find: { text: 'text-tool-search', bar: 'bg-tool-search', soft: 'bg-tool-search-soft', strong: false },
-  fetch: { text: 'text-tool-fetch', bar: 'bg-tool-fetch', soft: 'bg-tool-fetch-soft', strong: false },
-}
-
-/** 从参数里挑出「对象」：文件路径 / 搜索词 / URL。 */
-function toolTarget(tool: ToolCall, kind: QuietKind): string {
-  try {
-    const args = JSON.parse(tool.args || '{}') as Record<string, any>
-    const pick = (keys: string[]): string => {
-      for (const key of keys) {
-        const value = args[key]
-        if (typeof value === 'string' && value.trim()) return value.trim()
-      }
-      return ''
-    }
-    if (kind === 'search') return pick(['pattern', 'query', 'regex', 'q', 'keyword', 'text'])
-    if (kind === 'find') return pick(['pattern', 'glob', 'path', 'dir', 'directory', 'query'])
-    if (kind === 'fetch') return pick(['url', 'uri', 'href'])
-    return pick(['path', 'file_path', 'filePath', 'filename', 'file', 'target_file', 'notebook_path'])
-  } catch { return '' }
-}
-
-function fmtSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
-}
-
-/** 状态落定时的「弹一下」：只动 transform（不再动 opacity —— 同理，打断后停在半路会发淡），行高不跳。
-    用**真弹性**（SPRING_POP = stiffness 520 / damping 30），不用 tween + duration：
-    状态是异步落定的，动画随时可能被下一次状态变化打断，spring 能从当前速度接着走。
-    动效关掉时退回普通 span —— 不再同时挂 CSS 的 animate-check-in，两套动画不并存。 */
 function Pop({ children, className }: { children: React.ReactNode; className?: string }) {
   if (!motionOn()) return <span className={className}>{children}</span>
-  return (
-    <m.span
-      className={className}
-      initial={{ scale: 0.62 }}
-      animate={{ scale: 1 }}
-      transition={SPRING_POP}
-    >
-      {children}
-    </m.span>
-  )
+  return <m.span className={className} initial={{ scale: 0.62 }} animate={{ scale: 1 }} transition={SPRING_POP}>{children}</m.span>
 }
 
-/** 工具状态标记：running 交给 AgentState 的点阵（细条工具按读/写/搜分派），
-    done 播一次成功勾，error / denied 用语义色图标。
-   queued 是「还没轮到它」，给个静态点（不假装在跑）。 */
-function ToolMark({ status, kind }: { status: ToolCall['status']; kind?: QuietKind | null }) {
-  if (status === 'running') {
-    return <AgentState state={kind ? QUIET_STATE[kind] : 'running'} size='xs' tone='primary' className='shrink-0' />
-  }
-  if (status === 'done') return <Pop className='inline-flex shrink-0'><Check size={12} className='text-ok' /></Pop>
-  if (status === 'error') return <Pop className='inline-flex shrink-0'><AlertTriangle size={12} className='text-danger' /></Pop>
-  return (
-    <Pop className='inline-flex shrink-0'>
-      <span className={cn('h-1.5 w-1.5 rounded-full', DOT[status])} />
-    </Pop>
-  )
-}
-
-/* ── 工具调用：读/写/改/搜/查/抓 是一条细信息；其余工具仍然给一张可展开的卡 ── */
-function ToolRow({ tool, fresh, defaultOpen }: { tool: ToolCall; fresh: boolean; defaultOpen?: boolean }) {
-  /// 出错与被拒都算「不该被折叠藏起来」：默认摊开参数 / 结果。
-  const bad = tool.status === 'error' || tool.status === 'denied'
-  const [open, setOpen] = useState(!!defaultOpen || bad)
-  /// 只自动摊开一次：用户之后手动收起，不该被「还是失败」反复强开回来。
-  const autoOpened = useRef(bad)
-  useEffect(() => {
-    if (!bad || autoOpened.current) return
-    autoOpened.current = true
-    setOpen(true)
-  }, [bad])
-  const kind = quietKind(tool.name)
-  /// 只有「这一行是刚出现的」才播入场：滚回来 / 重挂载的旧工具行不播。
-  const enter = enterProps(fresh)
-  const detail = open ? (
-    <div className={kind ? 'mb-1 ml-2 border-l border-line pl-3' : 'border-t border-line px-3 py-2'}>
-      {tool.args && tool.args !== '{}' ? (
-        <pre className='sel-text mb-2 max-h-40 overflow-auto rounded bg-code px-2 py-1.5 font-mono text-11 leading-[1.6] text-code-fg'>{tool.args}</pre>
-      ) : null}
-      {tool.preview ? (
-        <pre className='sel-text max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-11 leading-[1.6] text-ink-2'>{tool.preview}</pre>
-      ) : <p className='text-12 text-ink-4'>没有输出</p>}
-    </div>
-  ) : null
-
-  if (kind) {
-    const meta = QUIET_META[kind]
-    const Icon = meta.icon
-    const target = toolTarget(tool, kind)
-    const tone = QUIET_TONE[kind]
-    const failed = tool.status === 'error'
-    /// 错误优先：只有这一种红，压过一切分色。
-    const textClass = failed ? 'text-tool-error' : tone.text
-    const strong = tone.strong && !failed
-    const line = tool.preview ? tool.preview.split('\n').length : 0
-    const summary = tool.status === 'running'
-      ? '进行中'
-      : tool.status === 'error'
-        ? '失败'
-        : tool.preview
-          ? line > 1 ? line + ' 行' : fmtSize(tool.preview.length)
-          : ''
-    return (
-      <m.div className='group/quiet my-0.5' {...enter}>
-        <button
-          type='button'
-          onClick={() => { markCollapseMotion(); setOpen((v) => !v) }}
-          className={cn(
-            'relative flex w-full items-center gap-1.5 overflow-hidden rounded-md py-1 pl-2.5 pr-1.5 text-left text-12 transition-colors duration-[var(--motion-hover)] ease-[var(--ease-spring)] hover:bg-hover',
-            // 整行文字继承这一支语义色：图标、动词、写入类的目标路径一起上色。
-            textClass,
-          )}
-        >
-          {/* 左侧 2px 色条：分色的主信号。写入 / 修改满色，读 / 搜 / 抓 半透明。 */}
-          <span
-            aria-hidden
-            className={cn(
-              'absolute inset-y-0 left-0 w-[2px] rounded-full transition-opacity duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
-              failed ? 'bg-tool-error' : tone.bar,
-              !failed && !strong && 'opacity-50',
-            )}
-          />
-          {/* 写入 / 修改：整行再压一层同色浅底——「这条动过文件」要一眼看出来 */}
-          {strong ? (
-            <span aria-hidden className={cn('pointer-events-none absolute inset-0', tone.soft)} />
-          ) : null}
-          <Icon size={12} className='relative shrink-0' />
-          <span className='relative shrink-0 font-medium'>{meta.verb}</span>
-          {/* 目标（路径 / 搜索词 / URL）跟着这一行的语义色走：分色要能一眼扫出「这一行在干什么」。 */}
-          {target ? <span className='relative min-w-0 truncate font-mono text-11'>{target}</span> : null}
-          {tool.cacheHit ? <span className='shrink-0 text-11 text-ink-4'>缓存命中</span> : null}
-          <span className='flex-1' />
-          {tool.elapsedMs != null ? <span className='shrink-0 text-11 text-ink-4'>{tool.elapsedMs}ms</span> : null}
-          {summary ? <span className={cn('shrink-0 text-11 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)]', failed ? 'text-tool-error' : 'text-ink-4')}>{summary}</span> : null}
-          {/* key=status：状态一变就重挂一次，Pop 的入场才会重播（正在跑 -> 完成） */}
-          <ToolMark key={tool.status} status={tool.status} kind={kind} />
-          {/* 悬停才露出的箭头：透明度走 CSS 的 hover 档，旋转走 spring（连点不卡） */}
-          <span className={cn('inline-flex shrink-0 text-ink-4 opacity-0 transition-opacity duration-[var(--motion-hover)] ease-[var(--ease-spring)] group-hover/quiet:opacity-100', open && 'opacity-100')}>
-            <m.span className='inline-flex' initial={false} animate={{ rotate: open ? 90 : 0 }} transition={toggleTransition()}>
-              <ChevronRight size={12} />
-            </m.span>
-          </span>
-        </button>
-        <div className='collapse' data-open={open}><div>{detail}</div></div>
-      </m.div>
-    )
-  }
-
-  return (
-    <m.div className='my-2 overflow-hidden rounded-lg border border-line bg-surface' {...enter}>
-      <button type='button' onClick={() => { markCollapseMotion(); setOpen((v) => !v) }} className='flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-hover'>
-        <Wrench size={13} className='shrink-0 text-ink-4' />
-        <span className='truncate font-mono text-12 text-ink-2'>{tool.name}</span>
-        {tool.cacheHit ? <span className='shrink-0 text-11 text-ink-4'>缓存</span> : null}
-        <span className='flex-1' />
-        {tool.elapsedMs != null ? <span className='shrink-0 text-11 text-ink-4'>{tool.elapsedMs}ms</span> : null}
-        <ToolMark key={tool.status} status={tool.status} />
-        <m.span className='inline-flex shrink-0 text-ink-4' initial={false} animate={{ rotate: open ? 90 : 0 }} transition={toggleTransition()}>
-          <ChevronRight size={12} />
-        </m.span>
-      </button>
-      <div className='collapse' data-open={open}><div>{detail}</div></div>
-    </m.div>
-  )
-}
-
-/** ToolCallList 的注入点：单个工具行始终交给现有 ToolRow 渲染 ——
-    `ToolMark`（状态点）、`toolTarget`（目标）以及「展开看参数 / 结果」都在它内部，
-    折叠列表只提供外壳与摘要，不重画第二套行渲染（改一处不会漏一处）。 */
 function renderToolRow(tool: ToolCall, fresh: boolean, defaultOpen: boolean): React.ReactNode {
-  return <ToolRow key={tool.callId} tool={tool} fresh={fresh} defaultOpen={defaultOpen} />
+  return <ToolWaterfallRow key={tool.callId} tool={tool} enter={enterProps(fresh)} defaultOpen={defaultOpen} />
 }
 
-/* ── 消息悬浮工具条：复制 / 引用 / 编辑重发 / 重新生成 / 分支 ── */
-/* ── 消息下方一行操作：默认半透明，hover 该消息时点亮 ──
-   宽度不够时**整组收进一个「⋯」下拉**（不是折行、也不是把按钮藏掉）：
-   元信息行因此永远单行。判据是 @container 的**容器宽度**（＝元信息行的列宽 --content-w），
-   不是窗口宽度 —— 会话列表 / 侧栏开合让正文列变窄时同样要收。
-   两套并列渲染、由 CSS 断点决定露哪一套：不跑 ResizeObserver，也就没有
-   「先画错一帧再纠正」的闪动，也不需要在渲染期间读写 DOM。
-   860px 这个值是**列宽**（不是视口）：平铺六个按钮约 380px，加上元信息里
-   永不隐藏的时间与模型名（模型名上限 12rem），两样一起放得下才值得平铺。 */
 function MsgActions({ onCopy, onQuote, onEdit, onBranch, onRegenerate, onFeedback, align }: {
   onCopy: () => void
   onQuote?: () => void
@@ -1097,9 +859,9 @@ function attrValue(id: string): string {
 
 /** 引擎注入的**目标复述**：不是用户消息，画成一条安静的系统细线。
  *
- *  为什么要有这个东西：引擎每 6 轮把「原始目标 + 未完成的计划步骤」推回上下文尾部（防止长任务跑偏）。
+ *  为什么要有这个东西：引擎每 6 轮把「当前请求 + 未完成的计划步骤」推回上下文尾部（防止长任务跑偏）。
  *  它带的是 user 角色，前端以前不认识内部的 `internal` / `reminder` 标记，就当成用户消息画了出来 ——
- *  表现是对话里突然冒出一条「用户：<goal-reminder> 原始目标……」的气泡，像用户自己发了条控制台指令。
+ *  表现是对话里出现一条引擎生成的目标提醒；它不是用户消息，也不应改变当前用户请求。
  *  现在按机器可读标记渲染成系统行，默认只占一行（每 6 轮来一次，全展开会把对话冲乱）。
  *  发给模型的上下文一个字节都没改。 */
 function ReminderNote({ item }: { item: Extract<ChatItem, { kind: 'reminder' }> }) {
@@ -1149,6 +911,7 @@ function ChatRow({ item, index, fromEnd, lastAssistantId, lastErrorNoticeId, mod
       这个 prop 与 items 无关，所以历史条目不会因为「卡片换了」而重渲染。 */
   artifacts?: TurnArtifact[]
 }) {
+  if (item.kind === 'user' && item.queued) return null
   const body =
     item.kind === 'user' ? <UserMessage item={item} />
       : item.kind === 'reminder' ? <ReminderNote item={item} />
@@ -1231,7 +994,7 @@ function sameItem(a: RenderItem, b: RenderItem): boolean {
       const right = b.tools[i]
       if (left === right) continue
       if (left.callId !== right.callId || left.name !== right.name || left.args !== right.args) return false
-      if (left.status !== right.status || left.preview !== right.preview) return false
+      if (left.status !== right.status || left.preview !== right.preview || left.output !== right.output) return false
       if (left.elapsedMs !== right.elapsedMs || left.cacheHit !== right.cacheHit) return false
       if ((left.images?.length ?? 0) !== (right.images?.length ?? 0)) return false
     }
@@ -1331,7 +1094,9 @@ export function MessageList() {
     searching,
     sessionId,
     streaming,
-    itemCount: items.length,
+    // Count the urgent store snapshot, not the deferred stream snapshot: a newly
+    // sent user row must trigger the layout-phase bottom jump in this commit.
+    itemCount: liveItems.length,
   })
 
   /** 用户一动手，立刻取消正在跑的平滑滚动。

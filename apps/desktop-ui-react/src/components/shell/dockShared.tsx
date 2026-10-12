@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { navPauseBusy, queueDuringNavPause } from './navPause'
-import { Eye, Files, Layers, ListChecks, Package, ChartNoAxesCombined } from 'lucide-react'
+import { Eye, Files, Layers, ListChecks, Package, ChartNoAxesCombined, MessagesSquare } from 'lucide-react'
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { cn } from '../../lib/cn'
@@ -25,7 +25,7 @@ import { Progress, SkeletonRows } from '../ui/Controls'
    stores/ui.ts 的 PanelTab 目前只声明了三个页签，这里按同一字段扩展到六个；
    写入时用一次断言，等 store 的类型补齐后可以直接删掉那处断言。
    preview 是「富内容预览」页签：跟随对话里最新的富块，可固定在某一块上。 */
-export type DockTab = 'artifacts' | 'preview' | 'files' | 'stats' | 'context' | 'tasks'
+export type DockTab = 'artifacts' | 'preview' | 'files' | 'stats' | 'context' | 'tasks' | 'side'
 
 export interface DockTabMeta {
   key: DockTab
@@ -42,6 +42,7 @@ export const DOCK_TABS: DockTabMeta[] = [
   { key: 'stats', label: '统计', desc: 'token 用量、速度与缓存命中', icon: <ChartNoAxesCombined size={16} /> },
   { key: 'context', label: '上下文', desc: '上下文占用与压缩情况', icon: <Layers size={16} /> },
   { key: 'tasks', label: '任务', desc: '运行中任务、引擎健康与日志', icon: <ListChecks size={16} /> },
+  { key: 'side', label: '辅助会话', desc: '独立上下文的并行对话', icon: <MessagesSquare size={16} /> },
 ]
 
 export function useDockTab(): DockTab {
@@ -146,9 +147,10 @@ export function useListPaneLayout(): {
 
 /** 侧栏面板在当前视口下的宽度上限：先扣掉固定栏与主列最小宽度，剩余空间才归侧栏。
     列表在抽屉/隐藏形态下不占布局宽度，此时不预留它的 264px。 */
-export function panelMaxWidth(viewport: number, listInline = listPaneVisible(viewport)): number {
-  const reserved = RAIL_W + DOCK_BAR_W + MAIN_MIN_W + (listInline ? LIST_W : 0)
-  return Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, Math.floor((viewport - RAIL_W - DOCK_BAR_W - (listInline ? LIST_W : 0)) / 2), viewport - reserved))
+export function panelMaxWidth(viewport: number, listInline = listPaneVisible(viewport), listWidth = LIST_W): number {
+  // 分隔条也占空间；按列表实际宽度算，不能始终假设它是默认的 264px。
+  const available = viewport - RAIL_W - DOCK_BAR_W - (listInline ? listWidth + 8 : 0) - 8
+  return Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, Math.floor(available / 2), available - MAIN_MIN_W))
 }
 
 /* ── 会话列表宽度 ──
@@ -169,13 +171,13 @@ export function useListWidth(variant: 'inline' | 'drawer'): {
   min: number
   max: number
 } {
-  const [stored, setStored] = useState<number>(() => readListWidth())
+  const stored = usePaneWidths((s) => s.list)
   const min = variant === 'drawer' ? LIST_DRAWER_MIN_W : LIST_MIN_W
   const max = variant === 'drawer' ? LIST_DRAWER_MAX_W : LIST_MAX_W
   const setWidth = (next: number): void => {
     if (!Number.isFinite(next)) return
     const clamped = Math.min(max, Math.max(min, Math.round(next)))
-    setStored(clamped)
+    usePaneWidths.setState({ list: clamped })
     try { localStorage.setItem(LIST_W_KEY, String(clamped)) } catch { /* 忽略 */ }
   }
   return { width: Math.min(max, Math.max(min, stored)), setWidth, min, max }
@@ -191,20 +193,27 @@ export function readDockWidth(): number {
   return PANEL_DEFAULT_W
 }
 
+// App 与面板预设共用宽度，避免各自 useState 导致拖动后预设/上限仍读旧值。
+const usePaneWidths = create<{ list: number; dock: number }>(() => ({
+  list: readListWidth(),
+  dock: readDockWidth(),
+}))
+
 /** 侧栏宽度：拖过的宽度记在 localStorage，展示时再按视口夹取一次。 */
 export function useDockWidth(): { width: number; setWidth: (next: number) => void; max: number } {
   const viewport = useViewportWidth()
   // 列表收起（或窄窗口下未展开）时不占布局宽度，侧栏因此可以更宽：上限得跟着列表形态走。
   const listCollapsed = useUi((s) => s.listCollapsed)
   const listInline = !listCollapsed && listPaneVisible(viewport)
-  const max = panelMaxWidth(viewport, listInline)
-  const [width, setWidthState] = useState<number>(() => readDockWidth())
+  const listWidth = usePaneWidths((s) => s.list)
+  const max = panelMaxWidth(viewport, listInline, listWidth)
+  const width = usePaneWidths((s) => s.dock)
   const setWidth = (next: number): void => {
     if (!Number.isFinite(next)) return
     // 存的就是用户当场看到的宽度：不让「存了 560、显示 516」这种不一致出现，
     // 换到更宽的窗口时也仍然是用户拖过的那个宽度。
     const clamped = Math.min(max, Math.max(PANEL_MIN_W, Math.round(next)))
-    setWidthState(clamped)
+    usePaneWidths.setState({ dock: clamped })
     try { localStorage.setItem(DOCK_W_KEY, String(clamped)) } catch { /* 忽略 */ }
   }
   return { width: Math.min(width, max), setWidth, max }

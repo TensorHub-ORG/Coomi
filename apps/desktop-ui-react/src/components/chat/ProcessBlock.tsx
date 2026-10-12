@@ -13,7 +13,6 @@ import { m } from 'motion/react'
 import { ToolCallList } from './ToolCallList'
 import { Markdown } from './Markdown'
 import { AgentState } from '../ai/AgentState'
-import { useUi } from '../../stores/ui'
 import { COLLAPSE_FREEZE_MS, markCollapseMotion, toggleTransition, useSearchableHidden } from './collapseMotion'
 
 import type { ProcessMember, ToolCall } from '../../lib/chat'
@@ -57,14 +56,11 @@ export function ProcessBlock({
   reasoning, reasoningStreaming, tools, members, live, toolFresh, renderTool, enter,
 }: ProcessBlockProps): React.ReactNode {
   const [open, setOpen] = useState(false)
-  const minimal = useUi((state) => state.prefs.minimalUi)
   const panelId = useId()
 
   const text = reasoning ?? ''
-  const steps = useMemo(() => text ? text.split(/\n{2,}/).filter(Boolean).length : 0, [text])
   const toolsById = useMemo(() => new Map(tools.map(tool => [tool.callId, tool])), [tools])
   const inFlight = tools.filter((t) => t.status === 'running' || t.status === 'queued').length
-  const done = tools.filter((t) => t.status === 'done').length
   const failed = tools.filter((t) => t.status === 'error' || t.status === 'denied').length
   const list = useMemo<ProcessMember[]>(() => members?.length ? members
     : tools.length ? [{ kind: 'tools', callIds: tools.map((tool) => tool.callId) }] : [], [members, tools])
@@ -128,7 +124,7 @@ export function ProcessBlock({
   }
 
   return (
-    <div className='mb-2' data-tool-group={minimal && tools.length ? '' : undefined} data-minimal={minimal}>
+    <div className='mb-3 min-w-0' data-work-waterfall>
       <button
         ref={headerRef}
         type='button'
@@ -136,15 +132,13 @@ export function ProcessBlock({
         disabled={!canCollapse}
         aria-expanded={hasContent ? shown : undefined}
         aria-controls={panelId}
-        className={minimal ? 'tool-summary text-left transition-colors hover:text-ink-2 disabled:cursor-default' : 'flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-12 text-ink-3 transition-colors hover:text-ink-2 disabled:cursor-default disabled:hover:text-ink-3'}
+        className='flex items-center gap-1.5 py-1 text-left text-12 text-ink-3 transition-colors hover:text-ink-2 disabled:cursor-default'
       >
         {running ? <AgentState state='reasoning' size='xs' tone='primary' /> : <Brain size={12} />}
         <span>
-          {steps > 0 ? '已思考 · ' + steps + ' 段' : '已思考'}
-          {tools.length > 0 ? ' · 使用工具 ' + tools.length + ' 次' : ''}
-          {inFlight > 0 ? '（进行中 ' + inFlight + '）' : ''}
-          {!running && done > 0 ? ' · 成功 ' + done : ''}
-          {!running && failed > 0 ? ' · 失败 ' + failed : ''}
+          {running ? '正在工作' : tools.length ? '工作过程' : '思考过程'}
+          {tools.length > 0 ? ' · ' + tools.length + ' 项操作' : ''}
+          {failed > 0 ? ' · ' + failed + ' 项异常' : ''}
         </span>
         {canCollapse ? (
           <m.span className='inline-flex shrink-0' initial={false} animate={{ rotate: shown ? 90 : 0 }} transition={toggleTransition()}>
@@ -161,7 +155,7 @@ export function ProcessBlock({
         data-until-found={settledClosed ? '1' : undefined}
       >
         <div>
-          <div ref={bodyRef} className='mt-1.5 border-l border-line pl-2.5'>
+          <div ref={bodyRef} className='mt-2 min-w-0'>
             {visited && text ? (
               <div
                 ref={reasoningRef}

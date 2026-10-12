@@ -44,6 +44,11 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<ChatMessage>,
     pub usage: TokenUsage,
+    /// Explicit goal mode; ordinary chat must never inherit a previous task goal.
+    #[serde(default)]
+    pub goal_mode: bool,
+    #[serde(default)]
+    pub goal: String,
     /// Versioned conversation mode. Missing values from older session files
     /// deserialize as Agent so long-term Life memory never enters code sessions.
     #[serde(default)]
@@ -82,6 +87,8 @@ impl Session {
             updated_at: now,
             messages: Vec::new(),
             usage: TokenUsage::default(),
+            goal_mode: false,
+            goal: String::new(),
             mode: SessionMode::Agent,
             title: String::new(),
             title_manually_set: false,
@@ -108,6 +115,8 @@ impl Session {
         self.context = ContextState::default();
         self.plan = None;
         self.loop_state = None;
+        self.goal_mode = false;
+        self.goal.clear();
         self.hooks_started = false;
         self.summary.clear();
         self.touch();

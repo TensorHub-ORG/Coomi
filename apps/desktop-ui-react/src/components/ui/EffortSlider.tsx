@@ -81,7 +81,7 @@ export function EffortSlider({ className }: { className?: string }) {
         <div className='es-groove'>
           <div className='es-track' />
           {/* 填充宽度与滑钮位置共用同一个百分比，两条都走同一条 315ms 曲线，不会脱节。 */}
-          <div className={cn('es-fill', atMax && 'es-fill-max')} style={{ width: pct + '%' }}>
+          <div className={cn('es-fill', atMax && 'es-fill-max')} style={{ width: `calc(${pct}% + ${15 - pct * 0.3}px)` }}>
             <div className='es-bloom' />
           </div>
           <div className='es-ticks'>

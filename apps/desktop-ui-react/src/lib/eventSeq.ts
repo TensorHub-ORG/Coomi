@@ -52,7 +52,8 @@ export interface SeqGate<T> {
   /** 暂存中（等缺口补齐）的帧数，用于诊断与溢出保护。 */
   buffered(): number
   /** 复位（换会话 / 引擎重启）。重连**不要**复位 —— 要留 last 给 resync 补帧。 */
-  reset(): void
+  /** Reset the gate. A persisted sequence can be supplied when reconnecting. */
+  reset(last?: number): void
   /** 送入一帧。 */
   push(seq: number, event: T): SeqGateOutcome<T>
 }
@@ -83,7 +84,10 @@ export function createSeqGate<T>(options: { maxPending?: number } = {}): SeqGate
   return {
     last: () => last,
     buffered: () => pending.size,
-    reset: () => { last = 0; pending.clear() },
+      reset: (baseline = 0) => {
+        last = Number.isSafeInteger(baseline) && baseline > 0 ? baseline : 0
+        pending.clear()
+      },
     push: (seq, event) => {
       if (seq <= last || pending.has(seq)) return { ready: [], gap: false, duplicate: true }
       // 还没有基线（首连 / 刚复位）：引擎的 seq 可能已经从别处涨上去了（会话任务被复用、

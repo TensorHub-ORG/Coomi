@@ -1,8 +1,7 @@
 import { Suspense, lazy, memo, startTransition, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { toast } from 'sonner'
-import { AppToaster } from './components/ui/AppToaster'
-import { Group, Panel, usePanelRef, type PanelSize } from 'react-resizable-panels'
+import { Group, Panel, usePanelRef } from 'react-resizable-panels'
 // motion 按需入口：全站只在根上挂一次 LazyMotion + domAnimation，
 // 组件里一律用 m.*（不要 import 全量 motion），features 不重复加载。
 import { LazyMotion, domAnimation } from 'motion/react'
@@ -15,6 +14,7 @@ import { Rail } from './components/shell/Rail'
 import { ListPane } from './components/shell/ListPane'
 import { RightDock } from './components/shell/RightDock'
 import { ContextMenuHost } from './components/ui/ContextMenuHost'
+import { AppToaster } from './components/ui/AppToaster'
 // 首次启动的三步引导（隐私与使用说明，强制勾选）：组件自身懒加载，同意过就不下载那份文案。
 import { OnboardingGate } from './components/onboarding/OnboardingGate'
 import { ChatView } from './views/ChatView'
@@ -34,7 +34,6 @@ import { useUi, type ViewKey } from './stores/ui'
 import { cn } from './lib/cn'
 // 渲染风暴探针：四个页面各挂一枚 React.Profiler，1 秒内提交超过 20 次就记录一次并自动切安全模式。
 import { profilerOf, setStormListener } from './lib/stormProbe'
-import { safeMode, setSafeMode, setSafeOverride } from './lib/guard'
 // 切页过渡的「让路」闸门与隐藏页判据：外壳级基建，App 只负责开闸（见下面的切页动效）。
 import { NAV_PAUSE_MS, PANE_ENTER_MS, PANE_EXIT_MS, PaneActiveProvider, endNavPause, markNavPause, navPauseBusy } from './components/shell/navPause'
 import {
@@ -147,17 +146,7 @@ function buildProbedPage(key: ViewKey): ComponentType {
 
 /** 探针 → 自动切安全模式并提示一次（注入点只有这一处）。 */
 function onStorm(record: { component: string; commits: number; elapsedMs: number; renderMs: number }): void {
-  if (safeMode()) return
-  // 落盘 + 进程内一起开：下一次启动第一帧就是精简模式，不会再卡一次
-  // （?safe=1 与 localStorage 两条退路见 lib/guard.ts）。
-  setSafeOverride(true)
-  setSafeMode(true)
-  toast.error('界面出现渲染风暴，已自动切到安全模式', {
-    description: record.component + ' 在 ' + Math.round(record.elapsedMs) + 'ms 内提交了 ' + record.commits
-      + ' 次，渲染耗时 ' + Math.round(record.renderMs) + 'ms。动效、富预览与语法高亮已关闭。',
-    id: 'coomi-render-storm',
-    duration: 12_000,
-  })
+  void record
 }
 
 /* ── 面板内容容器 ──
@@ -567,7 +556,7 @@ export default function App() {
   const listInlineMounted = chromeView === 'chat' && !narrow
   // 侧栏上限也跟 listWidthOpen：收起时那「多留的一拍」里列表还占着布局宽度，
   // 上限要跟着它一起留到宽度瞬切那一帧，否则右栏会提前缩 240px、整个布局提前跳一下。
-  const dockMax = DOCK_BAR_W + panelMaxWidth(viewport, listWidthOpen)
+  const dockMax = DOCK_BAR_W + panelMaxWidth(viewport, listWidthOpen, listWidth.width)
   /// 侧栏展开时的最小宽度：图标条 + 预览最小宽（PANEL_MIN_W）；收起态才允许缩到只剩图标条。
   const dockMin = DOCK_BAR_W + PANEL_MIN_W
   // 展开/收起侧栏时给 dock 面板一个 flex-grow 过渡；拖拽期间不加，否则拖起来跟手会发飘。
@@ -584,8 +573,8 @@ export default function App() {
   /// 首屏自动夹取、窗口缩放导致的尺寸变化不写：那些不是用户的选择，
   /// 写进去就等于把用户拖过的宽度悄悄冲掉了。
   const interacting = useRef(false)
-  /// 交互结束（松开/抬起方向键）后再读一次面板句柄把宽度落盘：
-  /// 谁先谁后都不影响结果（拖拽途中的每帧写入由 onResize 负责，两边写的都是同一个值）。
+  /// 松开指针/方向键后读取面板实际宽度落盘。拖动期间由面板库调整，
+  /// 不逐帧写 React 状态和 localStorage，避免 defaultSize 更新干扰拖拽。
   const persistTimer = useRef<number | null>(null)
   const persistSoon = (): void => {
     if (persistTimer.current !== null) window.clearTimeout(persistTimer.current)
@@ -605,7 +594,6 @@ export default function App() {
     // 拖拽中禁用右侧栏的宽度过渡：跟手优先，动画让位。
     // （会话列表已经不做宽度过渡了 —— 见下面那段注释，拖拽/展开都只有一次重排。）
     setDockAnim(false)
-    persistSoon()
   }
   const endResize = (): void => { interacting.current = false; persistSoon() }
   const beginPointerResize = (): void => {
@@ -620,6 +608,7 @@ export default function App() {
   /// 所以在这些变化之后把两个侧栏按记住的宽度摆回去，弹性空间永远留给主列。
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
+      if (interacting.current) return
       const list = listPanel.current
       if (list) {
         // 展开 → 记住的宽度；收起 → 0（面板不卸载，只是被 min/max=0 夹成 0 宽；
@@ -691,9 +680,6 @@ export default function App() {
       document.removeEventListener('focusin', onNavIntent, true)
     }
   }, [])
-
-  const onListResize = (size: PanelSize): void => { if (interacting.current) listWidth.setWidth(size.inPixels) }
-  const onDockResize = (size: PanelSize): void => { if (interacting.current && panelOpen) dockWidth.setWidth(size.inPixels - DOCK_BAR_W) }
 
   // 窗口变宽后抽屉这个形态就不存在了：把临时态清掉，
   // 否则用户下次把窗口拖窄时抽屉会自己弹出来。listCollapsed（用户态）不动。
@@ -1095,7 +1081,6 @@ export default function App() {
                     maxSize={listWidthOpen ? LIST_MAX_W : 0}
                     defaultSize={listWidthOpen ? listWidth.width : 0}
                     groupResizeBehavior='preserve-pixel-size'
-                    onResize={onListResize}
                     // 'on' 标记「这一下是展开/收起，不是拖拽」；base.css 用它保证面板上永远没有过渡。
                     data-pane-anim='on'
                     className={PANEL_BOX}
@@ -1181,7 +1166,6 @@ export default function App() {
                     maxSize={panelOpen ? dockMax : DOCK_BAR_W}
                     defaultSize={panelOpen ? DOCK_BAR_W + dockWidth.width : DOCK_BAR_W}
                     groupResizeBehavior='preserve-pixel-size'
-                    onResize={onDockResize}
                     className={PANEL_BOX}
                     style={PANEL_CLIP}
                   >

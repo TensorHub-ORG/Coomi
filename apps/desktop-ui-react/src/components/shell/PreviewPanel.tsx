@@ -34,6 +34,7 @@ const DockContextTab = lazy(() => import('./DockContextTab').then((m) => ({ defa
 const DockFilesTab = lazy(() => import('./DockFilesTab').then((m) => ({ default: m.DockFilesTab })))
 const DockTasksTab = lazy(() => import('./DockTasksTab').then((m) => ({ default: m.DockTasksTab })))
 const DockUsageTab = lazy(() => import('./DockUsageTab').then((m) => ({ default: m.DockUsageTab })))
+const DockAuxTab = lazy(() => import('./DockAuxTab').then((m) => ({ default: m.DockAuxTab })))
 // 「富文件」预览（xlsx / pdf / zip / docx / html / 二进制）也按需加载：
 // 分发器与它背后那几个重库（SheetJS / Mammoth / fflate）都不进主包，只有真预览过这一类文件才下载。
 const FilePreview = lazy(() => import('../richtext/preview/FilePreview').then((m) => ({ default: m.FilePreview })))
@@ -125,11 +126,11 @@ export function PreviewPanel({ panelRef }: {
       data-dock-panel
       data-shell-part='dockpane'
       data-shell-frozen
-      className={cn('relative h-full w-full min-w-0 overflow-hidden bg-side')}
+      className={cn('relative h-full min-w-0 flex-1 overflow-hidden bg-side')}
     >
       {open ? (
         <div className='flex h-full w-full animate-enter flex-col'>
-          <header className='flex h-11 shrink-0 items-center gap-1 border-b border-line px-2.5'>
+          <header className='dock-panel-header flex min-h-11 shrink-0 flex-wrap items-center gap-1 border-b border-line px-2.5 py-1'>
             {previewMode ? (
               <Tip label='返回列表'>
                 <Button variant='ghost' size='icon-sm' className='h-7 w-7' onClick={back}><ArrowLeft size={14} /></Button>
@@ -137,7 +138,7 @@ export function PreviewPanel({ panelRef }: {
             ) : (
               <span className='grid h-7 w-7 shrink-0 place-items-center rounded-md bg-muted text-ink-3'>{meta.icon}</span>
             )}
-            <div className='min-w-0 flex-1'>
+            <div className='min-w-[72px] flex-1'>
               <p className='truncate text-12 font-medium text-ink' title={previewMode ? shownPath || shownName || '预览' : meta.label}>
                 {previewMode ? (shownName || '预览') : meta.label}
               </p>
@@ -222,6 +223,8 @@ export function PreviewPanel({ panelRef }: {
                   <DockUsageTab refresh={refresh} onRefresh={bump} />
                 ) : tab === 'context' ? (
                   <DockContextTab refresh={refresh} onRefresh={bump} />
+                ) : tab === 'side' ? (
+                  <DockAuxTab />
                 ) : (
                   <DockTasksTab refresh={refresh} onRefresh={bump} />
                 )}

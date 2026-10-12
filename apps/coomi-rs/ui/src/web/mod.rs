@@ -450,6 +450,7 @@ fn parse_quotes(payload: &Value) -> Vec<Quote> {
 ///   路径与引用原文内联进请求（模型必须能真的读到文件）。
 #[derive(Clone)]
 struct TurnPrompt {
+    queue_id: String,
     prompt: String,
     text: String,
     attachments: Vec<Attachment>,
@@ -460,6 +461,7 @@ impl TurnPrompt {
     fn text_only(prompt: impl Into<String>) -> Self {
         let prompt = prompt.into();
         Self {
+            queue_id: Uuid::new_v4().to_string(),
             text: prompt.clone(),
             prompt,
             attachments: Vec::new(),
@@ -805,6 +807,7 @@ fn spawn_turn_worker(
     if announce_first {
         task.push_event(json!({
             "event_type": "queued_message_started",
+            "queue_id": first.queue_id,
             "text": first.text,
         }));
     }
@@ -931,6 +934,7 @@ fn spawn_turn_worker(
                     "requeued": true,
                 }));
                 turn_task.enqueue_prompt_front(TurnPrompt {
+                    queue_id: leftover.id.clone(),
                     prompt: leftover.message.content.clone(),
                     text: leftover.message.content.clone(),
                     attachments: leftover.message.attachments.clone(),
@@ -960,6 +964,7 @@ fn spawn_turn_worker(
             persist_task_checkpoints(&turn_state);
             turn_task.push_event(json!({
                 "event_type": "queued_message_started",
+                "queue_id": next.queue_id,
                 "text": next.text,
             }));
             turn = next;
@@ -1625,6 +1630,8 @@ pub async fn serve(
                 .delete(delete_session),
         )
         .route("/api/sessions/{id}/clear", post(clear_session_data))
+        .route("/api/sessions/{id}/queue/{queue_id}", post(update_queued_prompt))
+        .route("/api/sessions/{id}/goal", get(get_session_goal).put(set_session_goal))
         .route("/api/sessions/{id}/branch", post(branch_session))
         .route("/api/sessions/{id}/cwd", post(set_session_cwd))
         .route("/api/sessions/{id}/workspace", get(ensure_session_workspace))
@@ -5952,7 +5959,7 @@ async fn stop_session_task(state: &AppState, session_id: &str, task: &Arc<Sessio
     persist_task_checkpoints(state);
     // 排队中的插话也一起作废：用户按的是「停止」，不是「换个顺序继续」。
     // 丢掉几条要报数，前端据此把「排队中」的标记摘掉并提示。
-    let dropped = task.clear_queue();
+    let dropped = task.clear_queue() + task.input_queue.drain_interjections().len();
     if dropped > 0 {
         task.push_event(json!({
             "event_type": "queue_cleared",
@@ -6100,6 +6107,7 @@ async fn task_action(
                     && let Some(text) = restore_session_prompt(&state.home, &record.session_id)
                 {
                     prompt = Some(QueuedPrompt {
+                        queue_id: Uuid::new_v4().to_string(),
                         prompt: text.clone(),
                         text,
                         attachments: Vec::new(),
@@ -6177,6 +6185,84 @@ async fn get_session(
         .load(session_id)
         .map_err(|error| ApiError::internal(format!("failed to load session {id}: {error:#}")))?;
     Ok(Json(json!(session)))
+}
+
+async fn get_session_goal(State(state): State<AppState>, AxumPath(id): AxumPath<String>) -> Result<Json<Value>, ApiError> {
+    let id = Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?;
+    let store = SessionStore::new(&state.home);
+    let goal = if store.contains(id) {
+        let session = store.load(id).map_err(|e| ApiError::internal(format!("failed to read goal: {e:#}")))?;
+        if session.goal_mode { session.goal } else { String::new() }
+    } else { String::new() };
+    Ok(Json(json!({"goal": goal})))
+}
+
+async fn set_session_goal(State(state): State<AppState>, AxumPath(id): AxumPath<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let session_id = Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?;
+    let task = state.task(&id);
+    if task.running.load(Ordering::SeqCst) {
+        return Err(ApiError::bad_request("请先停止当前任务，再修改目标"));
+    }
+    let objective = body.get("objective").and_then(Value::as_str)
+        .ok_or_else(|| ApiError::bad_request("objective must be a string"))?.trim();
+    if objective.chars().count() > 10_000 { return Err(ApiError::bad_request("目标最多 10000 字")); }
+    let store = SessionStore::new(&state.home);
+    let mut session = load_or_create_web_session(&store, session_id, "", "", &state.cwd)
+        .map_err(|e| ApiError::internal(format!("failed to load session: {e:#}")))?;
+    // Preserve existing model selection; goal editing never selects a provider.
+    if let Ok(existing) = store.load(session_id) {
+        session.provider_id = existing.provider_id;
+        session.model = existing.model;
+    }
+    session.goal_mode = !objective.is_empty();
+    session.goal = objective.to_owned();
+    let mut goal_stack = crate::goal_tracker::GoalStack::load(&state.home, &id);
+    goal_stack.set_main_goal(objective);
+    goal_stack.save(&state.home, &id);
+    session.messages.retain(|m| !(m.internal && m.reminder.as_deref() == Some("goal")));
+    session.touch();
+    store.save(&session).map_err(|e| ApiError::internal(format!("failed to save goal: {e:#}")))?;
+    Ok(Json(json!({"goal": if session.goal_mode { &session.goal } else { "" }})))
+}
+
+/// Mutate only a waiting entry under the same mutex used by the worker.
+/// A prompt already dequeued by the worker cannot be edited or deleted.
+async fn update_queued_prompt(
+    State(state): State<AppState>,
+    AxumPath((id, queue_id)): AxumPath<(String, String)>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let task = state.tasks.lock().unwrap_or_else(|p| p.into_inner())
+        .get(&id).cloned().ok_or_else(|| ApiError::not_found("会话任务不存在"))?;
+    let action = body.get("action").and_then(Value::as_str).unwrap_or_default();
+    if !matches!(action, "edit" | "delete" | "immediate") {
+        return Err(ApiError::bad_request("unsupported queue action"));
+    }
+    let mut queue = task.queued_prompts.lock().unwrap_or_else(|p| p.into_inner());
+    let index = queue.iter().position(|p| p.queue_id == queue_id)
+        .ok_or_else(|| ApiError::not_found("这条消息已开始执行或已移出队列，请刷新后重试"))?;
+    let event = if action == "edit" {
+        let text = body.get("text").and_then(Value::as_str).unwrap_or_default().trim();
+        if text.is_empty() { return Err(ApiError::bad_request("消息不能为空")); }
+        let prompt = &mut queue[index];
+        let prefix = prompt.prompt.strip_suffix(&prompt.text).unwrap_or_default().to_owned();
+        prompt.prompt = format!("{prefix}{text}");
+        prompt.text = text.to_owned();
+        json!({"event_type":"queue_updated","queue_id":queue_id,"text":text})
+    } else {
+        let prompt = queue.remove(index).expect("queue entry found while locked");
+        if action == "immediate" {
+            // Prioritize ahead of the waiting prompts. The worker takes this same mutex when
+            // it selects the next turn, so an entry can never be lost between rounds.
+            queue.push_front(prompt);
+            json!({"event_type":"queue_immediate","queue_id":queue_id})
+        } else {
+            json!({"event_type":"queue_removed","queue_id":queue_id})
+        }
+    };
+    drop(queue);
+    task.push_event(event.clone());
+    Ok(Json(event))
 }
 
 /// 删除会话磁盘记录（与会话列表权威源一致，删除后不会在刷新时“复活”）。
@@ -11498,6 +11584,7 @@ async fn handle_command(
             }
             if !acquired {
                 let position = task.enqueue_prompt(QueuedPrompt {
+                    queue_id: payload.get("queue_id").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| Uuid::new_v4().to_string()),
                     prompt: turn_prompt,
                     text: prompt.to_owned(),
                     attachments,
@@ -11506,6 +11593,7 @@ async fn handle_command(
                 context.send_ack(envelope_id);
                 context.send_event(json!({
                     "event_type": "message_queued",
+                    "queue_id": payload.get("queue_id"),
                     "index": position,
                     "text": prompt,
                 }));
@@ -11542,6 +11630,7 @@ async fn handle_command(
                 state,
                 session_id,
                 QueuedPrompt {
+                    queue_id: payload.get("queue_id").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| Uuid::new_v4().to_string()),
                     prompt: turn_prompt,
                     text: prompt.to_owned(),
                     attachments,
@@ -13478,25 +13567,31 @@ async fn run_turn(
     )?;
     session.mode = *context.session_mode.read().await;
 
-    // 端到端模式：把用户目标固化为一个活跃 Loop，让引擎自主循环（计划→执行→
-    // 自检→修复）直到模型标记 Complete / Blocked / 预算耗尽。仅在没有活跃 Loop 时
-    // 创建，避免覆盖模型已经自己建立的目标。
-    if task.end_to_end.load(Ordering::SeqCst)
-        && !recovery
-        && session
+    // 端到端模式：把当前用户目标固化为一个活跃 Loop，让引擎自主循环（计划→执行→
+    // 自检→修复）直到模型标记 Complete / Blocked / 预算耗尽。新的顶层用户消息会
+    // 刷新目标；恢复路径保留原目标以便从中断点继续。
+    if task.end_to_end.load(Ordering::SeqCst) && !recovery {
+        let should_replace = session
             .loop_state
             .as_ref()
-            .is_none_or(|loop_state| loop_state.status != LoopStatus::Active)
-    {
-        session.loop_state = Some(LoopState {
-            objective: prompt.to_owned(),
-            status: LoopStatus::Active,
-            token_budget: None,
-            tokens_used: 0,
-            time_used_seconds: 0,
-            blocked_streak: 0,
-            turns_completed: 0,
-        });
+            .is_none_or(|loop_state| loop_state.status != LoopStatus::Active);
+        if should_replace {
+            session.loop_state = Some(LoopState {
+                objective: prompt.to_owned(),
+                status: LoopStatus::Active,
+                token_budget: None,
+                tokens_used: 0,
+                time_used_seconds: 0,
+                blocked_streak: 0,
+                turns_completed: 0,
+            });
+        } else if let Some(loop_state) = session.loop_state.as_mut() {
+            loop_state.objective = prompt.to_owned();
+            loop_state.tokens_used = 0;
+            loop_state.time_used_seconds = 0;
+            loop_state.blocked_streak = 0;
+            loop_state.turns_completed = 0;
+        }
     }
 
     // Use the session's own working directory so history and context always belong
@@ -13606,8 +13701,8 @@ async fn run_turn(
             prompt_layers += 1;
         }
     }
-    // 目标栈：注入当前任务上下文，长任务能回到主目标
-    {
+    // 目标背景仅在显式活跃目标模式中注入，普通聊天不继承旧目标。
+    if session.goal_mode {
         let goal_stack = crate::goal_tracker::GoalStack::load(&state.home, &session_id);
         let goal_context = goal_stack.to_prompt_context();
         if !goal_context.is_empty() {

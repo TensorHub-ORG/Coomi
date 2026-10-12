@@ -15,6 +15,8 @@ export interface ToolCall {
   status: 'queued' | 'running' | 'done' | 'error' | 'denied'
   elapsedMs?: number
   preview?: string
+  /** Full persisted result; rendered only after the execution is expanded. */
+  output?: string
   images?: string[]
   cacheHit?: boolean
 }
@@ -52,6 +54,8 @@ export type ChatItem =
       /** 「运行中插话」：这条消息已经发给引擎、但本轮还在跑，引擎把它排在队里等这一轮结束。
           引擎开跑（queued_message_started）或队列被清空（queue_cleared）时标记被摘掉。 */
       queued?: boolean
+      queueId?: string
+      queueImmediate?: boolean
       /** 结构化附件 / 引用：发送时（乐观条目）与引擎历史里都带（见 itemsFromHistory）。 */
       attachments?: ItemAttachment[]
       quotes?: ItemQuote[]
@@ -401,13 +405,14 @@ export function itemsFromHistory(messages: Array<Record<string, any>> | undefine
       if (call) {
         call.status = failed ? 'error' : 'done'
         call.preview = text.slice(0, PREVIEW_LIMIT)
+        call.output = text
       } else if (text) {
         // 对不上调用记录（历史被截断/外部写入）：单独成条，信息不丢。
         out.push({
           kind: 'assistant', id: 'h' + out.length, text: '', reasoning: '',
           tools: [{
             callId: callId || 'h' + out.length, name: str(m.name, 'tool'), args: '',
-            status: failed ? 'error' : 'done', preview: text.slice(0, PREVIEW_LIMIT),
+            status: failed ? 'error' : 'done', preview: text.slice(0, PREVIEW_LIMIT), output: text,
           }],
           streaming: false,
           anchorSeq: messageAnchor(m, out.length),
@@ -1002,20 +1007,45 @@ export function applyEventToMessages(
 
   /* ── 排队中的插话标记 ── */
   if (type === 'message_queued') {
+    const queueId = str(ev.queue_id)
     for (let i = list.length - 1; i >= 0; i -= 1) {
       const item = list[i]
       if (item.kind !== 'user') continue
+      if (queueId && item.queueId === queueId) {
+        if (item.queued) return messages as ChatItem[]
+        const copy = list.slice(); copy[i] = {...item, queued:true}; return copy
+      }
       if (item.queued) return messages as ChatItem[]
       const copy = list.slice()
-      copy[i] = { ...item, queued: true }
+      copy[i] = { ...item, queued: true, ...(queueId ? {queueId} : {}) }
       return copy
     }
     return messages as ChatItem[]
   }
   if (type === 'queued_message_started') {
+    if (ev.queue_id) {
+      const id = str(ev.queue_id)
+      return list.map(item => item.kind === 'user' && item.queueId === id ? { ...item, queued: false } : item)
+    }
     return clearQueuedUserItems(list, str(ev.text) || undefined)
   }
-  if (type === 'queue_cleared' || type === 'turn_interrupted') {
+  if (type === 'queue_updated') {
+    return list.map(item => item.kind === 'user' && item.queueId === ev.queue_id ? { ...item, text: str(ev.text, item.text) } : item)
+  }
+  if (type === 'queue_immediate') {
+    return list.map(item => item.kind === 'user' && item.queueId === ev.queue_id ? {...item, queueImmediate: true} : item)
+  }
+  if (type === 'queue_removed') {
+    return list.filter(item => !(item.kind === 'user' && item.queued && item.queueId === ev.queue_id))
+  }
+  if (type === 'interjection_applied') {
+    const id = str(ev.id)
+    return list.map(item => item.kind === 'user' && item.queueId === id ? { ...item, queued: false } : item)
+  }
+  if (type === 'queue_cleared') {
+    return clearQueuedUserItems(list.filter(item => !(item.kind === 'user' && item.queued && item.queueId)))
+  }
+  if (type === 'turn_interrupted') {
     return clearQueuedUserItems(list)
   }
 

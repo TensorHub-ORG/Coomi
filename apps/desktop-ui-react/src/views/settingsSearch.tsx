@@ -64,7 +64,6 @@ export const E = {
   generalStartup: { key: 'g.startup', group: 'general', label: '启动时打开的页面', hint: '下次启动默认进入这个页面', keywords: ['默认页'] },
   generalInsertMode: { key: 'g.insertMode', group: 'general', label: '发送时插话模式', hint: '插队：生成中按 Enter 打断当前轮并立刻发送；排队：本轮跑完再按顺序执行（不打断、不丢内容）', keywords: ['插队', '排队'] },
   generalConfirmDanger: { key: 'g.confirmDanger', group: 'general', label: '危险操作二次确认', hint: '删除对话、卸载技能、清理缓存前先问一次', keywords: ['确认', '删除'] },
-  generalSafeMode: { key: 'g.safeMode', group: 'general', label: '安全模式', hint: '界面卡死 / 一卡一顿时打开：关掉动效、富预览、语法高亮与虚拟化，只画纯文本', keywords: ['精简模式', '自救', '纯文本'] },
   generalPermission: { key: 'g.permission', group: 'general', label: '任务放行程度', hint: '危险操作与删除类操作由谁确认：每次询问 / 自动放行 / 完全放行', keywords: ['权限', '审批'] },
   generalCloseToTray: { key: 'g.closeToTray', group: 'general', label: '关闭窗口时最小化到托盘', hint: '后台继续运行引擎与正在跑的任务；从托盘图标可以再打开或退出', keywords: ['托盘'] },
   generalAutostart: { key: 'g.autostart', group: 'general', label: '开机自动启动', hint: '登录后在后台启动 Coomi（不弹出窗口，直接进托盘）', keywords: ['自启', '开机'] },
@@ -77,7 +76,6 @@ export const E = {
   appearanceFontSize: { key: 'a.fontSize', group: 'appearance', label: '界面字号', hint: '全局缩放，中英文一起变；改完立即生效并记住', keywords: ['字体大小', '缩放'] },
   appearanceDensity: { key: 'a.density', group: 'appearance', label: '界面密度', hint: '控制页面留白与行高', keywords: ['紧凑', '舒适'] },
   appearanceMessageWidth: { key: 'a.messageWidth', group: 'appearance', label: '消息栏宽度', hint: '对话正文的宽度：固定档或自适应，另有实时预览', keywords: ['消息宽度', '自适应', '阅读上限'] },
-  appearanceMotion: { key: 'a.motion', group: 'appearance', label: '界面动效', hint: '关闭后所有过渡与动画立即完成', keywords: ['动画', '过渡'] },
   appearanceRotateCopy: { key: 'a.rotateCopy', group: 'appearance', label: '空态文案轮换', hint: '新对话首屏那句标题每 14 秒上下翻页换一组（默认开）', keywords: ['空态', '轮换'] },
   appearancePerf: { key: 'a.perf', group: 'appearance', label: '性能模式', hint: '机器吃紧或要省电时打开：关毛玻璃与点阵动效、长会话更早虚拟化（省电档）', keywords: ['省电', '性能'] },
 

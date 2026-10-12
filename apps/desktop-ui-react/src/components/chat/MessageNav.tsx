@@ -5,10 +5,10 @@
  * 这里按「轮」取刻度，给出一列可点、可悬停预览、可键盘跳转的坐标。
  *
  * 版面（这一版：**tick rail 刻度轨** —— VS Code 概览标尺 / GitHub diff minimap / 对话 tick rail 那一类做法）
- *   · 轨道 **40px 宽、透明、无边框**：左缘 6px 指示留白 + 22px 左侧刻度车道 + 2px 缝 + 10px 右侧刻度车道。
- *     整体贴内容列左缘外侧、垂直居中（top:50% + translateY(-50%)）。没有任何卡片感：轨道本身看不见，
+ *   · 轨道 **40px 宽、透明、无边框**，整体固定贴会话列左边界。
+ *     垂直居中（top:50% + translateY(-50%)）。没有任何卡片感：轨道本身看不见，
  *     刻度线就是全部内容。
- *   · 每轮**两条线**，形状只有一种：2px 高、1px 圆角（高 2px 时 rounded-full 就是 1px 半径）的细横线。
+ *   · 每轮只显示**一条线**，形状为 2px 高、1px 圆角的细横线。
  *   · **左＝AI 回复**：细线**左对齐**、往右长，长度按这一轮的体量**对数映射**
  *     （最短 4px / 基线 10px / 最长 22px，见 aiLength）；轮里有工具调用，线的**末段换一段更淡的**
  *     （opacity .5，宽度按工具占这一轮体量的比例给 2~5px）；轮里有错误，线的**最右端加 2px 红点**。
@@ -106,11 +106,10 @@ import { useViewportWidth } from '../shell/dockShared'
 export const NAV_MAX_POINTS = 60
 /** 低于这个窗口宽度整条隐藏。 */
 const NAV_MIN_VIEWPORT = 820
-/** 轨道本体宽：6px 指示留白 + 22px 左侧刻度车道 + 2px 缝 + 10px 右侧刻度车道。
-    一整条 40px 的透明轨道（无底色、无边框）—— 刻度线自己就是全部内容，没有卡片感。 */
+/** 40px 透明轨道：左缘画刻度、右缘画当前位置指示，不占正文布局。 */
 const NAV_W = 40
-/** 左缘给位置指示条留的宽（指示条不压在左侧的刻度线上）。 */
-const NAV_GUTTER = 6
+/** 刻度贴左缘，不额外缩进；位置指示条放到轨道右缘。 */
+const NAV_GUTTER = 0
 /** 刻度线只有一种形状：**2px 高**、1px 圆角（高 2px 时 rounded-full 就是 1px 半径）。 */
 const TICK_H = 2
 /** 刻度的命中高度：视觉线只有 2px，但整行 **12px** 都好点；行距不足 12px 时退到行距，绝不串到邻行。 */
@@ -135,8 +134,6 @@ const VOL_MID = 900
 const VOL_HI = 40000
 /** 一次工具调用折算成多少字符的体量（工具结果动辄上万字符，按固定权重折更稳）。 */
 const TOOL_WEIGHT = 400
-/** 导航条与内容列左缘之间的空隙。 */
-const NAV_AWAY = 6
 /** 轨道高度下限 / 上限（上限再与 70vh 取小）。 */
 const NAV_MIN_H = 48
 const NAV_MAX_H = 520
@@ -1399,11 +1396,10 @@ export const MessageNav = memo(function MessageNav() {
       data-nav-active={activeIndex}
       aria-label='消息导航'
       aria-orientation='vertical'
-      /* 贴内容列左缘外侧：留白由 --content-w 算出；空间不够（窄窗口）时退到本列左缘
-         —— 本列左缘＝窗口左缘 + Rail，所以永远不会画到一级导航上面。 */
+      /* 固定贴会话列左边界，与左侧栏衔接；不随正文居中留白漂移。 */
       style={{
         top: 'calc(50% + ' + nudge + 'px)',
-        left: 'max(0px, calc((100% - var(--content-w)) / 2 - ' + (NAV_W + NAV_AWAY) + 'px))',
+        left: 0,
         width: NAV_W,
         transform: 'translateY(-50%)',
         /* 两条车道的长度上限 + 右列那两个颜色：class 里只出现 var(...) 字面量，
@@ -1449,7 +1445,7 @@ export const MessageNav = memo(function MessageNav() {
           data-nav-marker
           aria-hidden='true'
           style={{
-            left: 0,
+            left: NAV_W - MARKER_W,
             height: markerH,
             width: MARKER_W,
             opacity: activeIndex >= 0 ? 1 : 0,

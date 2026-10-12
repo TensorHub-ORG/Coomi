@@ -94,6 +94,10 @@ const withQueued = applyEventsToMessages(
 check('message_queued·末尾用户消息挂上排队标记', withQueued[0].kind === 'user' ? !!withQueued[0].queued : false, true)
 const started = applyEventsToMessages(withQueued, [{ event_type: 'queued_message_started', text: '第一轮' }], 10)
 check('queued_message_started·按正文摘掉标记', started[0].kind === 'user' ? !!started[0].queued : true, false)
+const identified = applyEventsToMessages([{kind:'user',id:'uQ',text:'queued',queueId:'queue-1'}],[{event_type:'message_queued',queue_id:'queue-1'}])
+check('message_queued·按队列身份关联本地行', identified[0].kind==='user' ? identified[0].queued && identified[0].queueId==='queue-1' : false, true)
+const identifiedStarted = applyEventsToMessages(identified,[{event_type:'queued_message_started',queue_id:'queue-1'}])
+check('queued_message_started·按队列身份摘除标记', identifiedStarted[0].kind==='user' ? identifiedStarted[0].queued : true, false)
 const requeued = [...withQueued]
 requeued[0] = { ...requeued[0], queued: true }
 const cleared = clearQueuedUserItems(requeued)
@@ -112,6 +116,14 @@ const mapped = itemsFromHistory([
 check('itemsFromHistory·工具状态回填终态', asst(mapped[1]) && asst(mapped[1]).tools[0] ? asst(mapped[1]).tools[0].status : '', 'done')
 check('itemsFromHistory·工具预览回填', asst(mapped[1]) && asst(mapped[1]).tools[0] ? asst(mapped[1]).tools[0].preview : '', 'success: /tmp')
 check('itemsFromHistory·思考被还原', asst(mapped[1]) ? asst(mapped[1]).reasoning : '', '思考')
+
+const longOutput = 'success: ' + 'x'.repeat(12000) + 'END'
+const fullMapped = itemsFromHistory([
+  { role: 'assistant', content: '', tool_calls: [{ id: 'long', name: 'shell', arguments: {} }] },
+  { role: 'tool', tool_call_id: 'long', content: longOutput },
+])
+check('history preserves complete tool output', asst(fullMapped[0]).tools[0].output, longOutput)
+ok('history preview stays bounded', asst(fullMapped[0]).tools[0].preview.length <= 8000)
 
 if (failed === 0) {
   console.log('OK  ' + total + ' 个纯逻辑断言全部通过：流式就地追加 / 历史替换不丢尾部 / 排队标记 / 历史映射')

@@ -15,7 +15,7 @@ import {
   itemsFromHistory, nextAnchorSeq, tokenWindowMs, turnDurationFromEvent, validTurnMs,
   type AskAnswer, type AskAnswerItem, type ChatItem, type HistoryMergeOptions,
 } from '../lib/chat'
-import { notifyTurnDone } from '../lib/notify'
+import { notifyTurnDone, SCROLL_CHAT_BOTTOM_EVENT } from '../lib/notify'
 // 传输兜底：直连 WS 不通时改走壳内桥（见该文件顶部说明）。
 import { bridgeOpenState, createEngineSocket } from '../lib/engineSocket'
 // event_seq 顺序门：缺口检测 / 乱序缓冲 / 去重（字段位置与协议见该文件顶部说明）。
@@ -413,7 +413,7 @@ interface SessionState {
   loadHistory: (id: string, options?: HistoryMergeOptions) => Promise<void>
   openSession: (id: string) => Promise<void>
   /// 新建会话；传 id 时用它（启动时恢复「还没落库但存了草稿」的新会话）。
-  newSession: (id?: string) => Promise<void>
+  newSession: (id?: string, cwd?: string) => Promise<void>
   applyCwd: (dir: string) => Promise<void>
   rememberCwd: (dir: string) => void
   setDraft: (text: string) => void
@@ -446,6 +446,7 @@ interface SessionState {
   regenerate: (msgId: string) => Promise<void>
   retryLast: () => Promise<void>
   send: (text: string, extras?: SendExtras) => void
+  updateQueued: (queueId: string, action: 'edit' | 'delete' | 'immediate', text?: string) => Promise<void>
   cancel: () => void
   approve: (decision: 'allow' | 'always' | 'deny') => void
   /** 回答 AI 的提问。callId 缺省用当前挂起的那一问；payload 缺省 = 跳过。
@@ -1433,6 +1434,10 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     }
     // 运行中插话：引擎把这条消息排进队列了（界面上的乐观条目已经是「排队中」，
     // 这里只保证标记，不再重复插入一条）。
+    if (['queue_updated', 'queue_removed', 'queue_immediate', 'interjection_applied'].includes(type)) {
+      set((s) => ({ messages: applyEventsToMessages(s.messages, [ev], streamSeq++) }))
+      return
+    }
     if (type === 'message_queued') {
       set((s) => ({ messages: applyEventsToMessages(s.messages, [ev], streamSeq++) }))
       return
@@ -2071,7 +2076,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       }).catch(() => { /* 引擎未就绪时忽略 */ })
     },
 
-    newSession: async (restoredId) => {
+    newSession: async (restoredId, selectedCwd) => {
       flushChunks()
       flushDraft()
       // 与 openSession 同一条规则：先 flush 当前会话的输入区，再取目标会话的那一份。
@@ -2080,6 +2085,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       flushInput(leaving.sessionId, inputOf(leaving))
       if (leaving.sessionId) messagesBySession.set(leaving.sessionId, leaving.messages)
       const unowned = leaving.sessionId ? null : inputOf(leaving)
+      const newCwd = selectedCwd || leaving.sessions.find((s) => s.id === leaving.sessionId)?.cwd || leaving.pendingCwd || useEngine.getState().cwd
       const nextInput = adoptUnownedInput(restoredId || '', unowned, restoredId ? loadInputOf(restoredId) : { draft: '', quotes: [], attachments: [] })
       commitCritical({ connecting: true })
       get().disconnect()
@@ -2133,8 +2139,14 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         await get().loadHistory(id)
       }
       if (get().sessionId !== id) return
-      if (get().pendingCwd) {
-        try { await writeCwd(id, get().pendingCwd) } catch { /* 引擎未就绪时忽略 */ }
+      if (!restoredId && newCwd) {
+        try { await writeCwd(id, newCwd) }
+        catch (error) {
+          if (get().sessionId === id) set({ connecting: false })
+          toast.error('工作目录未保存', { description: String(error) })
+          return
+        }
+        if (get().sessionId === id) get().rememberCwd(newCwd)
       }
       if (get().sessionId === id) connect()
     },
@@ -2145,10 +2157,10 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     },
 
     applyCwd: async (dir) => {
-      get().rememberCwd(dir)
       const id = get().sessionId
-      if (!id) return
+      if (!id) { get().rememberCwd(dir); return }
       await writeCwd(id, dir)
+      if (get().sessionId === id) get().rememberCwd(dir)
       await get().loadSessions()
     },
 
@@ -2290,6 +2302,15 @@ export const useSession = create<SessionState>((applyPatch, get) => {
 
     scheduleReconnectPublic: () => scheduleReconnect(),
 
+    updateQueued: async (queueId, action, text) => {
+      const sid = get().sessionId
+      const engine = useEngine.getState()
+      const event = await engine.api<Record<string, unknown>>('/api/sessions/' + encodeURIComponent(sid) + '/queue/' + encodeURIComponent(queueId), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({action, text}),
+      })
+      if (get().sessionId !== sid || useEngine.getState().port !== engine.port || useEngine.getState().token !== engine.token) return
+      set(s => ({messages: applyEventsToMessages(s.messages, [event], streamSeq++)}))
+    },
     send: (text, extras) => {
       const trimmed = text.trim()
       if (!trimmed) return
@@ -2302,7 +2323,8 @@ export const useSession = create<SessionState>((applyPatch, get) => {
            · attachments: [{ path, name, ext, size? }] —— 引擎按 path 落盘并内联进请求；
            · quotes: [{ message_id?, text, at }]      —— 引用原文由引擎内联，界面只渲染卡片。
          size 只在拿到真值时带：0 会把引擎自己 stat 出来的大小覆盖成 0。 */
-      const payload: Record<string, unknown> = { command: 'send_message', text: trimmed }
+      const queueId = crypto.randomUUID()
+      const payload: Record<string, unknown> = { command: 'send_message', text: trimmed, interject: false, queue_id: queueId }
       if (attachments.length) {
         payload.attachments = attachments.map((a) => ({
           path: a.path,
@@ -2325,6 +2347,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         // 与事件创建的条目是同一坐标系（对话位置），回读合并后排序仍正确。
         anchorSeq: nextAnchorSeq(base),
         ...(queued ? { queued: true } : {}),
+        queueId,
         ...(attachments.length ? { attachments: attachments as Extract<ChatItem, { kind: 'user' }>['attachments'] } : {}),
         ...(quotes.length ? { quotes: quotes as Extract<ChatItem, { kind: 'user' }>['quotes'] } : {}),
         structured: true,
@@ -2382,6 +2405,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
           quotes: [],
           attachments: [],
         }))
+        window.dispatchEvent(new CustomEvent(SCROLL_CHAT_BOTTOM_EVENT))
         // 发送成功＝草稿已经变成消息：本地草稿立刻清掉。
         draftPending = { id: sid, text: '' }
         flushDraft()
@@ -2437,6 +2461,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         interrupted: false,
         crashInterrupted: false,
       }))
+      window.dispatchEvent(new CustomEvent(SCROLL_CHAT_BOTTOM_EVENT))
     },
 
     cancel: () => {

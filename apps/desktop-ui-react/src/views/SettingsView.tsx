@@ -50,7 +50,7 @@ import { usePluginStore, activeThemePluginId, pluginName, themePlugins } from '.
 // 「再看一次」入口：引导的开关在它自己的 store 里（首次启动那套强制勾选不受影响）。
 import { openOnboarding } from '../components/onboarding/store'
 import { cn } from '../lib/cn'
-import { Trash2, RefreshCw, FolderOpen, Plus, Brain, Shield, Server, LifeBuoy, Download, AlertTriangle } from 'lucide-react'
+import { Trash2, RefreshCw, FolderOpen, Plus, Brain, Shield, Server, Download, AlertTriangle } from 'lucide-react'
 
 /** 关于页显示的「构建日期」：**必须取本地日期**。
  *  用 toISOString() 拿到的是 UTC 日期 —— 东八区凌晨 0~8 点时它还是前一天，
@@ -601,19 +601,6 @@ export function SettingsView() {
             <Cell label='危险操作二次确认' hint='删除会话、卸载技能、清理缓存前先问一次'>
               <Switch checked={ui.prefs.confirmDanger} onCheckedChange={(v) => ui.setPrefs({ confirmDanger: v })} />
             </Cell>
-            {/* 安全模式（自救开关）：字段是 stores/ui.ts 的 prefs.safeMode（默认 false）。
-                打开＝精简模式 —— 动效、富预览、语法高亮、长列表虚拟化与刻度轨重算全部让路，
-                界面只画纯文本。发消息时整屏卡死的话，先靠它把界面救回来再查原因。
-                另外两个入口：启动时在地址栏加 ?safe=1，或把 localStorage 的 coomi.safe.v1 设成 1
-                （界面卡到点不动设置页时，那两条还走得通）。 */}
-            <Cell
-              label={<span className='flex items-center gap-2'><LifeBuoy size={14} className='text-ink-3' /> 安全模式</span>}
-              hint={ui.prefs.safeMode
-                ? '已使用纯文本显示。'
-                : '遇到卡顿时启用，使用纯文本显示。'}
-            >
-              <Switch checked={ui.prefs.safeMode} onCheckedChange={(v) => ui.setPrefs({ safeMode: v })} />
-            </Cell>
             <Cell
               label={<span className='flex items-center gap-2'><Shield size={14} className='text-ink-3' /> 任务放行程度</span>}
               hint={PERMISSION_LABELS.find((p) => p.value === agent.permission)?.hint}
@@ -722,9 +709,7 @@ export function SettingsView() {
               onMode={(m) => ui.setPrefs({ messageWidthMode: m })}
               onWidth={(px) => ui.setPrefs({ messageWidth: px, messageWidthMode: 'fixed' })}
             />
-            <Cell label='界面动效' hint='关闭后所有过渡与动画立即完成'>
-              <Switch checked={ui.prefs.motion} onCheckedChange={(v) => ui.setPrefs({ motion: v })} />
-            </Cell>
+            {/* 正式桌面模式固定关闭装饰性动效，避免流式输出与页面过渡争用主线程。 */}
             {/* 性能模式：字段是 stores/ui.ts 的 prefs.perf（'high' | 'low'，默认 high）。
                 打开＝省电档：html[data-perf=low]，毛玻璃、点阵循环动效与设置页错峰都收掉，
                 长会话也更早交给虚拟列表。整档只认这一处开关，组件不各存一份。 */}

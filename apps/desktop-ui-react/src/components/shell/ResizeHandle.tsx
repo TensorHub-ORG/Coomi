@@ -102,7 +102,7 @@ export function PanelSeparator({ separatorId, label, disabled, onReset, onIntera
       onDoubleClick={onReset}
       style={{ width: RESIZE_HIT_W }}
       className={cn(
-        'group/sep relative z-20 flex touch-none select-none items-center justify-center outline-none',
+        'group/sep relative z-20 flex shrink-0 cursor-col-resize touch-none select-none items-center justify-center outline-none',
         'data-[separator=disabled]:cursor-default',
         className,
       )}

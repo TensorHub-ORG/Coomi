@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { AlertTriangle, ChevronDown, Menu, PanelRight, PanelRightClose, Plus, Search } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Menu, PanelRight, PanelRightClose, Plus, Search } from 'lucide-react'
 import { useChatItems, useSession } from '../stores/session'
 import { useEngine } from '../stores/engine'
 import { MessageList } from '../components/chat/MessageList'
@@ -8,6 +8,7 @@ import { MessageNav, scrollChatToBottom, useChatAtBottom } from '../components/c
 import { MessageSkeleton } from '../components/chat/MessageSkeleton'
 import { CrashResumeBar, EngineRestartBar } from '../components/chat/RecoveryBars'
 import { Composer } from '../components/chat/Composer'
+import { QueuedMessages } from '../components/chat/QueuedMessages'
 import { ChatSearchBar } from '../components/chat/ChatSearchBar'
 // 子智能体入口已搬进顶栏（popover），主列不再常驻展开面板。
 import { SubagentPopover } from '../components/chat/SubagentPopover'
@@ -164,15 +165,14 @@ const ScrollToLatest = memo(function ScrollToLatest() {
            z-30：浮标悬在消息列表（不是滚动容器内部）之上，层级必须高过列表与导航条 ——
            否则它虽然画得出来，pointer 事件却会落到下面那层滚动容器上（看起来就是「点了没反应」）；
            在场时显式 pointer-events-auto（淡出那 140ms 里才是 none，别让 Tab 与点击落在半个浮标上）。 */
-        'absolute bottom-full right-0 z-30 mb-2 flex h-7 items-center gap-1 rounded-full border border-line bg-overlay px-2.5 text-11 text-ink-3 shadow-elev-2',
+        'absolute bottom-full left-1/2 -translate-x-1/2 z-30 mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-line bg-overlay text-ink-2 shadow-elev-2',
         'transition-[opacity,translate,scale,background-color,color,box-shadow] duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
         'hover:bg-hover hover:text-ink hover:shadow-elev-3 active:scale-95',
         shown ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0',
         bump && 'scale-110 text-primary',
       )}
     >
-      <ChevronDown size={12} className='shrink-0' />
-      <span>最新</span>
+      <ArrowDown size={18} className='shrink-0' />
     </button>
   )
 })
@@ -269,6 +269,7 @@ export function ChatView() {
         {/* relative：里面的「到最新」浮标以**这一层**（＝内容列，max-w-[var(--content-w)] 居中）为准，
             所以它对齐的是输入框的右缘，不是窗口右边。 */}
         <div className='relative mx-auto w-full max-w-[var(--content-w)]'>
+          <QueuedMessages />
           <Composer />
           <ScrollToLatest />
         </div>

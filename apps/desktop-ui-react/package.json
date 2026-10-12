@@ -1,7 +1,7 @@
 {
   "name": "coomi-desktop-ui",
   "private": true,
-  "version": "1.0.0-test.1",
+  "version": "1.0.0-test.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -37,7 +37,9 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.13.3",
     "react-virtuoso": "^4.18.15",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "shiki": "^3.13.0",
     "sonner": "^2.0.7",
     "sucrase": "^3.35.1",

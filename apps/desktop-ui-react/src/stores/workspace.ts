@@ -27,7 +27,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ meta })
   },
   renameProject: (path, name) => {
-    const key = 'proj:' + path
+    const key = 'proj:' + normPath(path)
     const meta = { ...get().meta, [key]: { ...(get().meta[key] ?? {}), projectName: name } }
     try { localStorage.setItem(META_KEY, JSON.stringify(meta)) } catch { /* 忽略 */ }
     set({ meta })
@@ -56,32 +56,32 @@ function sortSessions(list: SessionSummary[], meta: Record<string, SessionMeta>)
 
 export interface SessionGroup { key: string; label: string; path: string; sessions: SessionSummary[]; kind: 'default' | 'project' }
 
-/** 会话分组：默认目录下的进「对话」，其他工作目录各自成组。 */
+/** 会话按实际工作路径归档；同一路径的大小写/分隔符变体合并。只有无路径记录进入「会话」。 */
 export function groupSessions(
   sessions: SessionSummary[],
   defaultCwd: string,
   meta: Record<string, SessionMeta>,
 ): SessionGroup[] {
-  const def = normPath(defaultCwd)
   const visible = sessions.filter((s) => !meta[s.id]?.hidden)
   const inDefault: SessionSummary[] = []
   const byPath = new Map<string, SessionSummary[]>()
   for (const s of visible) {
-    const cwd = s.cwd ?? ''
-    if (!cwd || (def && normPath(cwd) === def)) { inDefault.push(s); continue }
-    const list = byPath.get(cwd) ?? []
+    const cwd = (s.cwd ?? '').trim()
+    if (!cwd) { inDefault.push(s); continue }
+    const key = normPath(cwd)
+    const list = byPath.get(key) ?? []
     list.push(s)
-    byPath.set(cwd, list)
+    byPath.set(key, list)
   }
   const out: SessionGroup[] = []
   if (inDefault.length) {
     out.push({ key: 'default', label: '会话', path: defaultCwd, sessions: sortSessions(inDefault, meta), kind: 'default' })
   }
   const projects = [...byPath.entries()]
-    .map(([path, list]) => ({
-      key: 'proj:' + path,
-      label: meta['proj:' + path]?.projectName || pathTail(path, 2),
-      path,
+    .map(([key, list]) => ({
+      key: 'proj:' + key,
+      label: meta['proj:' + key]?.projectName || meta['proj:' + list[0].cwd]?.projectName || pathTail(list[0].cwd || key, 1),
+      path: list[0].cwd || key,
       sessions: sortSessions(list, meta),
       kind: 'project' as const,
     }))

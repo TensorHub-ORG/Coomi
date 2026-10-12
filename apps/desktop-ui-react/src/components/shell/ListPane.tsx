@@ -303,7 +303,7 @@ export function ListPane({ variant = 'inline', onClose }: {
           {filtered.map((g) => {
             const isCollapsed = collapsed[g.key]
             return (
-              <div key={g.key} className='mb-1'>
+              <div key={g.key} data-session-group={g.key} className='mb-3'>
                 <div className='group/head flex items-center gap-1 px-1 py-1'>
                   <button
                     type='button'
@@ -315,6 +315,13 @@ export function ListPane({ variant = 'inline', onClose }: {
                     <span className='truncate'>{g.label}</span>
                     <span className='text-ink-4'>{g.sessions.length}</span>
                   </button>
+                  {g.kind === 'project' ? (
+                    <button type='button' aria-label={'在 ' + g.label + ' 新建会话'} title='在此路径新建会话'
+                      onClick={() => { setView('chat'); void newSession(undefined, g.path); dismiss?.() }}
+                      className='shrink-0 rounded p-0.5 text-ink-4 opacity-0 group-hover/head:opacity-100 focus-visible:opacity-100 hover:text-ink-2'>
+                      <Plus size={13} />
+                    </button>
+                  ) : null}
                   {g.kind === 'project' ? (
                     <button
                       type='button'

@@ -91,15 +91,17 @@ const GOAL_RECITE_MARK: &str = "<goal-reminder>";
 /// 每隔多少轮复述一次目标与计划。
 const GOAL_RECITE_EVERY: usize = 6;
 
-/// 生成本轮的目标复述：**原始用户请求**（截断）+ 计划里未完成的步骤。
+/// 生成本轮的目标提醒：**最新用户请求**（截断）+ 计划里未完成的步骤。
 ///
 /// 为什么需要：模型在几十次工具调用之后会忘记最初要干什么，转而优化眼前的子问题。
 /// 把目标重新推回注意力尾部是成本最低的纠正手段；内容刻意保持紧凑与确定
 /// （它只追加在消息尾部，不碰前缀，因此不影响缓存）。
 fn goal_recitation(session: &crate::Session) -> Option<String> {
+    if !session.goal_mode || session.goal.trim().is_empty() { return None; }
     let goal = session
         .messages
         .iter()
+        .rev()
         .find(|message| {
             message.role == crate::Role::User && !message.internal && !message.compaction_summary
         })
@@ -107,8 +109,7 @@ fn goal_recitation(session: &crate::Session) -> Option<String> {
     if goal.is_empty() {
         return None;
     }
-    let mut reminder =
-        format!("{GOAL_RECITE_MARK}\n原始目标（始终对齐它，不要被中间步骤带偏）：\n{goal}\n");
+    let mut reminder = format!("{GOAL_RECITE_MARK}\n明确设置的目标：\n{}\n当前用户请求（优先于历史目标与计划）：\n{goal}\n", session.goal.trim());
     if let Some(plan) = session.plan.as_ref()
         && !plan.steps.is_empty()
     {
@@ -131,7 +132,7 @@ fn goal_recitation(session: &crate::Session) -> Option<String> {
             }
         }
     }
-    reminder.push_str("\n如果现实与原计划不符，允许调整计划，但不要把原始目标丢掉。");
+    reminder.push_str("\n如果当前用户请求与历史计划不一致，以当前用户请求为准，并相应调整计划。");
     Some(reminder)
 }
 
@@ -754,7 +755,7 @@ impl Agent {
             self.accept_interjections(session, observer, "model_call");
             // 周期性复述目标与计划：长任务跑到后面，最初的目标会掉出注意力窗口
             // （lost-in-the-middle）。Manus 靠重读 task_plan.md，Claude Code 早期每 5 轮
-            // 注入一次目标提醒 —— 这里每 6 轮把「原始目标 + 未完成的计划步骤」推回尾部。
+            // 注入一次目标提醒 —— 每 6 轮把「当前请求 + 未完成的计划步骤」推回尾部。
             // 注意：只追加在尾部、且内容确定，不碰前缀，缓存不受影响。
             if round > 1 && round % GOAL_RECITE_EVERY == 0
                 && let Some(reminder) = goal_recitation(session)
@@ -1968,6 +1969,29 @@ fn is_context_window_error(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn goal_recitation_requires_explicit_active_goal() {
+        let mut session = Session::new("mock", "mock", PathBuf::from("."));
+        session.messages.push(ChatMessage::user("original request"));
+        session
+            .messages
+            .push(ChatMessage::assistant("progress", Vec::new()));
+        session
+            .messages
+            .push(ChatMessage::user("follow-up request"));
+
+        assert!(goal_recitation(&session).is_none(), "ordinary chat must not inject a goal");
+        session.goal_mode = true;
+        session.goal = "explicit task".into();
+        let reminder = goal_recitation(&session).expect("goal reminder");
+        assert!(reminder.contains("当前用户请求"));
+        assert!(reminder.contains("follow-up request"));
+        assert!(!reminder.contains("original request"));
+        assert!(reminder.contains("explicit task"));
+        session.goal_mode = false;
+        assert!(goal_recitation(&session).is_none());
+    }
     use crate::InvalidToolCall;
     use crate::ModelCapabilities;
     use crate::ModelResponse;

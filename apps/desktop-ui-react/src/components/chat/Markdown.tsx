@@ -15,7 +15,7 @@
  * 光标与段落动画全是纯 CSS（.md-body[data-caret] 的伪元素 + base.css 的 @starting-style），
  * 这里没有任何每帧 setState。
  */
-import { memo, useDeferredValue, useEffect, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useDeferredValue, useEffect, useRef, useState } from 'react'
 import { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown'
 import { cn } from '../../lib/cn'
 import { shouldUsePlainText } from './streamText'
@@ -23,6 +23,7 @@ import { FileChipEnabled, FileLinkAnchor } from './FileChip'
 import { ReactMarkdown, markdownComponents, remarkGfm } from './markdownComponents'
 import { filePathFromHref, remarkFilePaths } from '../richtext/fileLink'
 import { SEC_FAST } from '../ui/motion'
+const MathMarkdown = lazy(() => import('./MathMarkdown'))
 
 /** 流式光标：流停之后还要再留 160ms（够 120ms 的收束淡出播完）再摘掉，
  *  否则光标会「啪」地消失，比不显示还生硬。 */
@@ -93,16 +94,15 @@ const FILE_URL_TRANSFORM: UrlTransform = (url: string): string =>
  *  这一段解析是「每个 text 值一次」而不是「每个 chunk 一次」，所以它的成本只付一次。 */
 const MARKDOWN_PLUGINS = [remarkGfm, remarkFilePaths]
 const FullBody = memo(function FullBody({ text, enabled }: { text: string; enabled: boolean }) {
+  const plainMarkdown = <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS} urlTransform={FILE_URL_TRANSFORM} components={FILE_COMPONENTS}>{text}</ReactMarkdown>
   return (
     // 芯片在流式期间不可点：正文此时本来就是纯文本，这层 context 只是兜底。
     <FileChipEnabled enabled={enabled}>
-      <ReactMarkdown
-        remarkPlugins={MARKDOWN_PLUGINS}
-        urlTransform={FILE_URL_TRANSFORM}
-        components={FILE_COMPONENTS}
-      >
-        {text}
-      </ReactMarkdown>
+      {text.includes('$') ? (
+        <Suspense fallback={plainMarkdown}>
+          <MathMarkdown text={text} components={FILE_COMPONENTS} urlTransform={FILE_URL_TRANSFORM} />
+        </Suspense>
+      ) : plainMarkdown}
     </FileChipEnabled>
   )
 })

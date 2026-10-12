@@ -40,9 +40,7 @@ export interface Prefs {
   perf: PerfMode
   /** 运行中插话的处理方式，默认「排队」（不打断当前轮、不丢已生成内容）。 */
   insertMode: InsertMode
-  /** 安全模式（自救开关，默认关）：界面卡住时打开，动效、富预览、语法高亮、长列表虚拟化
-      与刻度轨重算全部让路，只画纯文本。它同时是 guard 的「精简模式」的人肉入口 ——
-      除了这里，URL 上的 ?safe=1 与 localStorage 也能强制打开（见 lib/guard.forcedSafeMode）。 */
+  /** 兼容旧偏好文件；正式界面始终采用轻量渲染，不再向用户展示安全模式开关。 */
   safeMode: boolean
 }
 
@@ -63,7 +61,8 @@ const DEFAULT_PREFS: Prefs = {
   messageWidth: 768,
   // 默认自适应：固定 768 在 2560 全屏下两侧各空 800+ px，白扔掉半个窗口。
   messageWidthMode: 'fluid',
-  motion: true,
+  // 正式桌面界面保持静态、轻量；用户旧版本的 motion=true 也会在读取时归一化为 false。
+  motion: false,
   confirmDanger: true,
   // 默认「一键继续」：崩溃恢复后先让用户看清发生了什么，再决定要不要接着跑。
   crashRecovery: 'manual',
@@ -71,7 +70,7 @@ const DEFAULT_PREFS: Prefs = {
   perf: 'high',
   // 默认「排队」：插话不打断当前轮、不丢已生成内容，本轮结束后按顺序执行。
   insertMode: 'queue',
-  // 默认关：安全模式是出事时的手动降级，不是常态观感。
+  // 旧版本字段保留用于迁移，不再作为用户可见设置。
   safeMode: false,
 }
 
@@ -112,8 +111,9 @@ export function virtualizeThreshold(): number {
     精简模式下**一律 off**：base.css 的 CSS 动画与 lib/motionPref.ts 的 motionOn()（JS 动画）
     读的是同一个属性，所以这一处写完，两边的动效一起停 —— 组件不必各自判断精简模式。 */
 function applyMotionAttr(prefs: Prefs): void {
-  // 动效只跟用户开关（默认 true＝全开），绝不因消息过多/精简模式自动关闭（用户明确需求）。
-  document.documentElement.dataset.motion = prefs.motion ? 'on' : 'off'
+  void prefs
+  // 正式模式固定关闭装饰性动效，避免全站动画在流式消息时争用主线程。
+  document.documentElement.dataset.motion = 'off'
 }
 
 /* 精简模式是随时可能自动进的（心跳卡顿 / 提交风暴），所以这里订阅一次：
@@ -153,7 +153,8 @@ function readPrefs(): Prefs {
     // 插话模式只认 'interrupt'，其余（含老版本没存过）一律回到默认的「排队」。
     prefs.insertMode = raw.insertMode === 'interrupt' ? 'interrupt' : 'queue'
     // 安全模式只认真正的 true（宁可不降级，也别因为一个脏值把界面变成纯文本）。
-    prefs.safeMode = raw.safeMode === true
+    prefs.safeMode = false
+    prefs.motion = false
     if (raw.messageWidthMode === 'fluid' || raw.messageWidthMode === 'fixed') {
       prefs.messageWidthMode = raw.messageWidthMode
     } else if (typeof raw.messageWidth === 'number' && Number.isFinite(raw.messageWidth)) {
@@ -255,7 +256,8 @@ const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
   }
   // 安全模式要赶在动效落地之前生效：否则 ?safe=1 启动的第一帧还是会把动效与富渲染全开一遍。
   // 这里**只开不关** —— 关的那一下是用户在设置里显式操作（setPrefs），别把启动时的强制开关撤了。
-  if (prefs.safeMode) setSafeMode(true)
+  // 正式模式默认走轻量渲染；不读取旧版本的安全模式开关。
+  setSafeMode(false)
   root.dataset.density = prefs.density
   root.dataset.minimalUi = 'false'
   applyMotionAttr(prefs)
@@ -269,7 +271,7 @@ const scale = Number(localStorage.getItem(SCALE_KEY) ?? '1.08')
 /** 右侧栏页签。'preview' 是「富内容预览」页签（跟随对话里最新的富块，可固定）。
     壳那边的 DockTab（components/shell/dockShared.tsx）与它一一对应，
     两处必须同集：少了 preview，壳只能靠一次断言把值写进来。 */
-export type PanelTab = 'artifacts' | 'preview' | 'files' | 'stats' | 'context' | 'tasks'
+export type PanelTab = 'artifacts' | 'preview' | 'files' | 'stats' | 'context' | 'tasks' | 'side'
 
 interface UiState {
   view: ViewKey
@@ -359,12 +361,11 @@ export const useUi = create<UiState>((set, get) => ({
     root.dataset.font = prefs.fontFamily
     applyPerfAttr(prefs)
     applyContentWidth(prefs)
-    // 安全模式开关：这里落盘之后立刻生效（进 / 出精简模式）。
-    // 注意先落 prefs 再同步 guard：applyMotionAttr 读的是 appliedPrefs（applyContentWidth 刚更新过）。
-    setSafeMode(prefs.safeMode)
-    // 顺手同步**启动强制开关**（coomi.safe.v1）：错误边界上的「进入安全模式并重载」会把它置上，
-    // 这里不跟着清的话，用户关掉开关、重启又会被那个键拉回安全模式 —— 成了一个关不掉的开关。
-    setSafeOverride(prefs.safeMode)
+    // 安全模式已经从正式设置移除；旧启动覆盖也清掉，避免旧版本状态改变新界面。
+    prefs.safeMode = false
+    prefs.motion = false
+    setSafeMode(false)
+    setSafeOverride(false)
     applyMotionAttr(prefs)
     set({ prefs })
   },

@@ -1,0 +1,20 @@
+{
+  "code": 1000002,
+  "name": "1.0.0-test.2",
+  "version": "1.0.0-test.2",
+  "app_name": "Coomi Desktop",
+  "channel": "beta",
+  "platform": "windows",
+  "arch": "x64",
+  "file": "Coomi_1.0.0-test.2_x64-setup.exe",
+  "url": "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.2_x64-setup.exe",
+  "urls": [
+    "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.2_x64-setup.exe"
+  ],
+  "publishedAt": "2026-10-13T00:00:00Z",
+  "published_at": "2026-10-13T00:00:00Z",
+  "minWindows": "10",
+  "size": 42910424,
+  "sha256": "8e88fa920bab0f2cf5f6f34013d913c319b7416bcc5e153654bc28095a3a4d0b",
+  "notes": "# v1.0.0-test.2 发布说明【测试】\n\n- 交互与动效：默认采用简洁、低动效的交互，不再提供安全模式开关或专门的渲染风暴提示卡片。\n- 输入指令：增加指令入口，支持 `/goal`、`/compact`、`/init`、`/plan`、`/side`，并可快速添加附件、会话引用和技能。\n- 辅助会话：右侧栏新增独立辅助会话，拥有独立上下文与连接，不覆盖当前主会话。\n- 目标模式：仅在用户明确设置目标并启用后生效；可以在会话中编辑或关闭目标。\n- 消息渲染：优化工具调用瀑布流、排队追加和自动贴底行为，并支持数学公式自动渲染。\n- 窗口布局：修复窄窗口输入区布局、会话历史导航及右侧栏尺寸调整相关问题。\n\n本版本为测试版，欢迎反馈使用问题。\n\nSHA-256: 8e88fa920bab0f2cf5f6f34013d913c319b7416bcc5e153654bc28095a3a4d0b"
+}

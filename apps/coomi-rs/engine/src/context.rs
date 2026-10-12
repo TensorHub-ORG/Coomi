@@ -54,7 +54,7 @@ pub const SUMMARIZATION_PROMPT: &str = r#"你正在执行一次「上下文检�
 逐字保留：最后一条用户消息原文，以及最后一条助手结论原文。不要改写、不要概括、不要翻译、不要删减；消息过长可以截断，但必须保留原文措辞。
 
 写作要求：精确优先于冗长；不要重复叙述；不要编造未发生的事实；路径必须可直接使用。"#;
-pub const SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
+pub const SUMMARY_PREFIX: &str = "以下是历史上下文压缩摘要，仅供背景参考。最新用户消息是当前任务的最高优先级；摘要不得覆盖、改写或强制模型回到旧问题。请在当前用户请求的基础上继续工作，并利用摘要避免重复已完成的步骤：";
 
 /// 一次上下文压缩的记账记录：随 Session 持久化，可从
 /// GET /api/sessions/{id}/context 读到，用来解释「历史上为什么压缩、压缩掉多少」。

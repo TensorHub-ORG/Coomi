@@ -899,7 +899,7 @@ html[data-msg-collapse='1'] [data-panel][data-pane-anim] { will-change: flex-gro
    如果轨道一直铺到两端，0% 与 100% 时钮会有一半伸到轨道外 ——
    在弹层里就是「球超出弹出的框」。留够半径之后，钮的最外缘正好落在轨道边界内。 */
 .es-rail { position: relative; height: 26px; margin: 8px 15px 10px; }
-.es-groove { position: absolute; inset: 0; overflow: hidden; border-radius: 13px; pointer-events: none; }
+.es-groove { position: absolute; inset: 0 -15px; overflow: hidden; border-radius: 13px; pointer-events: none; }
 .es-track, .es-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 13px; pointer-events: none; }
 .es-track { right: 0; background: var(--surface-sunken); }
 .es-fill { z-index: 1; overflow: hidden; background: #4c8dff; transition: width .315s ease; }
@@ -927,9 +927,9 @@ html[data-msg-collapse='1'] [data-panel][data-pane-anim] { will-change: flex-gro
   position: absolute;
   z-index: 2;
   top: 0;
-  right: 0;
+  right: 13px;
   bottom: 0;
-  left: 0;
+  left: 13px;
   display: flex;
   align-items: center;
   justify-content: space-between;

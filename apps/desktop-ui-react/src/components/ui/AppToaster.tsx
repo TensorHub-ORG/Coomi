@@ -10,5 +10,5 @@ export function AppToaster() {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     return () => observer.disconnect()
   }, [])
-  return <Toaster position='bottom-right' theme={theme} closeButton toastOptions={{ className: 'coomi-toast', closeButtonAriaLabel: '关闭提示' }} />
+  return <Toaster position='top-center' theme={theme} closeButton toastOptions={{ className: 'coomi-toast', closeButtonAriaLabel: '关闭提示' }} />
 }

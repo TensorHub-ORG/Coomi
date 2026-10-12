@@ -186,11 +186,13 @@
 }
 .workbench-composer { container: composer / inline-size; }
 [data-composer] { container: composer-area / inline-size; }
+.md-body .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 2px; }
 @container composer (max-width: 620px) {
   .composer-provider-name { display: none; }
   .composer-model-label { max-width: 170px; }
 }
 @container composer (max-width: 440px) {
+  [data-composer-model] { display: none; }
   .composer-control-label, [data-effort-picker] > svg:last-child { display: none; }
   .composer-model-label { max-width: 128px; }
   [data-composer-tools] { gap: 0; flex-wrap: nowrap; }

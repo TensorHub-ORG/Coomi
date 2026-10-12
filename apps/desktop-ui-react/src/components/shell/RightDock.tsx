@@ -27,7 +27,7 @@ export function RightDock({ panelRef }: {
   // 展开/收起的面板宽度同步在 App 里统一做（见那里的「面板宽度对齐」）：
   // 宽度是布局层的事，放在这儿会和列表面板的对齐抢方向盘。
   return (
-    <div data-dock-root data-shell-part='dock' data-shell-frozen className='flex h-full w-full min-w-0 items-stretch'>
+    <div data-dock-root data-shell-part='dock' data-shell-frozen className='flex h-full w-full min-w-0 items-stretch overflow-hidden'>
       <PreviewPanel panelRef={panelRef} />
       <div data-dock-bar data-shell-part='dockbar' data-shell-frozen className='flex w-10 shrink-0 flex-col items-center gap-1 border-l border-line bg-side py-3'>
         {DOCK_TABS.map((item) => {
