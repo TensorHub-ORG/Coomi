@@ -75,7 +75,7 @@ export interface ModelPending {
   prevModel: string
 }
 
-export interface Approval { callId: string; toolName: string; detail: string }
+export interface Approval { callId: string; toolName: string; detail: string; persistentTerminal?: boolean }
 export interface Question { callId: string; questions: Array<Record<string, any>> }
 
 /** 回答一张提问卡时提交的东西：items 按问题 id 存（选中值 + 自填），skipped = 整卡跳过。 */
@@ -366,6 +366,8 @@ export interface SendExtras {
 
 interface SessionState {
   sessionId: string
+  sessionSurface: 'work' | 'deck'
+  currentCwd: string
   sessions: SessionSummary[]
   /** **单一事实来源**：这一份 `messages: ChatItem[]` 就是对话的全部。
       没有「历史 vs 实时事件 vs 已展示记忆」三套状态 —— 事件就地追加、历史回读合并，
@@ -411,7 +413,7 @@ interface SessionState {
   loadSessions: () => Promise<void>
   /// 回读历史。options.replace 只给「引擎侧真的截断过」的路径用（见 lib/chat.ts）。
   loadHistory: (id: string, options?: HistoryMergeOptions) => Promise<void>
-  openSession: (id: string) => Promise<void>
+  openSession: (id: string, options?: { surface?: 'work' | 'deck'; cwd?: string }) => Promise<void>
   /// 新建会话；传 id 时用它（启动时恢复「还没落库但存了草稿」的新会话）。
   newSession: (id?: string, cwd?: string) => Promise<void>
   applyCwd: (dir: string) => Promise<void>
@@ -458,6 +460,8 @@ interface SessionState {
 
 const historyRequests = new Map<string, number>()
 let sessionsRequest = 0
+let engineSessions = new Map<string, SessionSummary>()
+const answersBySession = new Map<string, Record<string, AskAnswer>>()
 let socket: WebSocket | null = null
 let reconnectTimer: number | null = null
 let reconnectAttempt = 0
@@ -1073,7 +1077,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       「切回时 streaming 该是什么」见 openSession：引擎值 + 本地「还没收到 turn_end」的标记。 */
   const engineSaysRunning = (id: string): boolean => {
     if (!id) return false
-    const row = get().sessions.find((s) => s.id === id)
+    const row = engineSessions.get(id) ?? get().sessions.find((s) => s.id === id)
     // 列表里**没有**这个会话 = 「未知」，不是「没在跑」。
     // 以前这里返回 false，于是「刚发出去、列表还没刷新」的那一轮会被判成已结束，
     // 一条心跳或一次重连就能把正在生成的界面收掉（见 settleLog）。
@@ -1103,6 +1107,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
    *  引擎回读列表后会用自己的标题覆盖这一行（rename 过的话尤其重要）。 */
   const publishFirstMessage = (id: string, text: string): void => {
     if (!id) return
+    if (get().sessionSurface === 'deck') return
     // 名单里记着的（新建未发）就此落地：下面摘掉标记后，下次 /api/sessions 回来它就是普通会话。
     unhideEmptySession(id)
     // 引擎那边这条已经不算空了：列表的「空会话」占位跟着撤掉（见 currentSessionIsEmpty）。
@@ -1172,6 +1177,11 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         at: Date.now(),
       })
     } catch { /* 诊断缓冲失败不影响主流程 */ }
+    if (type === 'assistant_final') {
+      flushChunks()
+      commitCritical({ messages: applyEventsToMessages(get().messages, [ev], streamSeq++) })
+      return
+    }
     // ① 流式文本：只进缓冲，同一帧内的多个 chunk 合并成一次 state 更新。
     //    这里必须直接 return，落到末尾的逐事件 set 就等于「每个 chunk set 一次」。
     if (type === 'text_chunk' || type === 'reasoning_chunk') {
@@ -1220,12 +1230,14 @@ export const useSession = create<SessionState>((applyPatch, get) => {
           callId: String(ev.call_id ?? ''),
           toolName: String(ev.tool_name ?? 'tool'),
           detail: String(ev.risk_summary ?? '') || JSON.stringify(ev.arguments ?? {}).slice(0, 300),
+          persistentTerminal: ev.tool_name === 'deck_cli' && ev.arguments?.operation === 'start',
         },
       })
       return
     }
     if (type === 'user_question_request') {
       const callId = String(ev.call_id ?? ev.callId ?? ev.id ?? '')
+      if (callId && get().askAnswers[callId]) return
       // 落卡（对话流里一条 ask 条目）+ 挂起状态，必须同一拍落地。
       const nextMessages = applyEventsToMessages(get().messages, [ev], streamSeq++)
       commitCritical({
@@ -1787,6 +1799,8 @@ export const useSession = create<SessionState>((applyPatch, get) => {
 
   return {
     sessionId: '',
+    sessionSurface: 'work',
+    currentCwd: '',
     sessions: [],
     messages: [],
     streaming: false,
@@ -1835,13 +1849,15 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       const request = ++sessionsRequest
       const engine = useEngine.getState()
       const endpoint = engine.port + ':' + engine.token
-      const data = await engine.api<{ sessions?: SessionSummary[] }>('/api/sessions')
+      const data = await engine.api<{ sessions?: SessionSummary[]; deck_sessions?: SessionSummary[] }>('/api/sessions')
       const currentEngine = useEngine.getState()
       if (request !== sessionsRequest || endpoint !== currentEngine.port + ':' + currentEngine.token) return
       const sessions = data.sessions ?? []
+      const allSessions = [...sessions, ...(data.deck_sessions ?? [])]
+      engineSessions = new Map(allSessions.map((one) => [one.id, one]))
       // 引擎的会话列表是权威：上次在列表里、这次不在了 = 被删了，把它的输入区桶一起清掉。
       // 对账一律用**原始**列表：可见性过滤只是界面的事，不影响「哪些会话真的没了」的判定。
-      forgetMissingSessions(sessions, get().sessionId)
+      forgetMissingSessions(allSessions, get().sessionId)
       // 引擎原始列表里「没有任何内容」的那些（title / preview 都空）：老版本留下的空记录就混在其中。
       // 这份集合只用于回答「当前会话是不是空会话」（列表要给它一行灰色占位，见 currentSessionIsEmpty）；
       // 列表本身的可见性判据在下一步，直接落在同一条纯函数上。
@@ -1882,7 +1898,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 模型名以引擎为准：切换/重开会话后立刻回填，不依赖后续事件。
       // 但在途的模型切换没确认前，引擎这里给的还是旧值，不能覆盖（否则就是切完闪回旧模型）。
       // 会话被过滤掉（＝新建未发）时也要照样回填：模型显示跟列表可见性是两件事。
-      const current = sessions.find((s) => s.id === get().sessionId)
+      const current = engineSessions.get(get().sessionId)
       if (current) applyEngineModel(current.provider_id, current.model)
     },
 
@@ -1968,6 +1984,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         }))
         // 会话里的厂商/模型是权威值，顺手对齐（切模型后显示不更新的根因之一）。
         const conversation = data as unknown as Record<string, any>
+        if (typeof conversation.cwd === 'string') set({ currentCwd: conversation.cwd })
         const provider = typeof conversation.provider_id === 'string' ? conversation.provider_id : ''
         const model = typeof conversation.model === 'string' ? conversation.model : ''
         applyEngineModel(provider, model)
@@ -1978,7 +1995,8 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       }
     },
 
-    openSession: async (id) => {
+    openSession: async (id, options) => {
+      const surface = options?.surface ?? 'work'
       if (id === get().sessionId && get().connected) return
       // **同一个会话的「重开」**（断线重连 / 引擎重启后回来）：绝不动 messages ——
       // 那只是把连接接回来，不是换会话。以前这里会用「该会话的缓存」重置 messages，
@@ -1995,6 +2013,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 草稿另有 350ms 防抖，所以这里的 flush 在切会话时是必须的；引用与附件是改一下就写一次，
       // 这一句对它们是幂等兜底。
       const leaving = get()
+      if (leaving.sessionId) answersBySession.set(leaving.sessionId, leaving.askAnswers)
       flushInput(leaving.sessionId, inputOf(leaving))
       // 新建后**没发过消息**就切走：这条空会话就此丢弃 —— 名单不动，它不会以「未命名对话」
       // 的样子回到列表；草稿桶一个字都不动，按同一个 id 还能恢复。
@@ -2004,7 +2023,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 缓存当前会话的消息：切走再切回时，历史里还没有的本地尾部（乐观条目 / 还在流式的
       // 回复）就靠它兜住 —— 绝不因为「切走一次」丢掉已经显示出来的内容。
       if (leaving.sessionId) messagesBySession.set(leaving.sessionId, leaving.messages)
-      rememberLastSession(id)
+      if (surface === 'work') rememberLastSession(id)
       // 引擎就绪与「打开某个会话」之间有一小段空窗（sessionId 还是空串），
       // 那时用户可能已经开始打字 / 加附件了——这段输入没有归属会话，要带着走，不能丢。
       const unowned = leaving.sessionId ? null : inputOf(leaving)
@@ -2021,6 +2040,10 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 切会话必须换统计：否则新页面会显示上一个会话的用量（之前的 bug）。
       set((s) => ({
         sessionId: id,
+        sessionSurface: surface,
+        currentCwd: options?.cwd || get().sessions.find((one) => one.id === id)?.cwd || '',
+        currentModel: sameSession ? s.currentModel : '',
+        currentProviderId: sameSession ? s.currentProviderId : '',
         // 同一会话：原样保留已有消息（只有换会话才用缓存）。
         messages: sameSession ? s.messages : journaledSwap(s.messages, cached, 'open', { id: id.slice(0, 8) }),
         // 切到非运行中的会话时 streaming 必须立刻是 false：留着上一个会话的 true
@@ -2039,11 +2062,12 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         runState: 'idle',
         // 上一个会话挂着的那一问跟着会话走：计时器一起停掉，否则它会在新会话里误收一张卡。
         question: null,
+        approval: null,
         // 本轮产出同样属于会话：切走就清掉，绝不让上一个会话的产物卡片跟到新会话里
         // （清成那个共享常量，而不是每次一个新数组）。
         turnArtifacts: NO_ARTIFACTS,
         // 提问卡的回答同样是会话级的：切走就清，绝不让上一个会话的问答跟到新会话里。
-        askAnswers: {},
+        askAnswers: answersBySession.get(id) ?? {},
         // 在途的模型切换属于上一个会话，切走就作废：否则它会挡住新会话的引擎回填。
         modelPending: null,
         stats: loadStats(id),
@@ -2082,6 +2106,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       // 与 openSession 同一条规则：先 flush 当前会话的输入区，再取目标会话的那一份。
       // 全新 uuid 没有桶 → 空输入区（新会话必须是干净的）；按 restoredId 恢复时读回它自己的桶。
       const leaving = get()
+      if (leaving.sessionId) answersBySession.set(leaving.sessionId, leaving.askAnswers)
       flushInput(leaving.sessionId, inputOf(leaving))
       if (leaving.sessionId) messagesBySession.set(leaving.sessionId, leaving.messages)
       const unowned = leaving.sessionId ? null : inputOf(leaving)
@@ -2116,6 +2141,8 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       }
       set((s) => ({
         sessionId: id,
+        sessionSurface: 'work',
+        currentCwd: newCwd,
         // 新会话从空开始；带 restoredId 恢复时先取它自己的缓存，历史回读跟上后换成权威版本。
         messages: restoredId ? (messagesBySession.get(id) ?? []) : [],
         draft: nextInput.draft,
@@ -2126,6 +2153,7 @@ export const useSession = create<SessionState>((applyPatch, get) => {
         historyLoaded: { ...s.historyLoaded, [id]: true },
         runState: 'idle',
         question: null,
+        approval: null,
         askAnswers: {},
         stats: { ...EMPTY_STATS },
         pendingFirstTokenMs: 0,
@@ -2160,7 +2188,11 @@ export const useSession = create<SessionState>((applyPatch, get) => {
       const id = get().sessionId
       if (!id) { get().rememberCwd(dir); return }
       await writeCwd(id, dir)
-      if (get().sessionId === id) get().rememberCwd(dir)
+      if (get().sessionId === id) { get().rememberCwd(dir); set({ currentCwd: dir }) }
+      if (get().sessionSurface === 'deck') {
+        const { useDeck } = await import('./deck')
+        await useDeck.getState().refresh()
+      }
       await get().loadSessions()
     },
 
@@ -2246,11 +2278,19 @@ export const useSession = create<SessionState>((applyPatch, get) => {
     /// 从某条消息分支：引擎复制该消息（含）之前的上下文到新会话。
     branchFrom: async (msgId) => {
       const engine = useEngine.getState()
-      const data = await engine.api<{ id?: string }>(
-        '/api/sessions/' + get().sessionId + '/branch',
+      const sourceId = get().sessionId
+      const data = await engine.api<{ id?: string; deck_task?: import('./deck').DeckTask }>(
+        '/api/sessions/' + sourceId + '/branch',
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ atMsgId: msgId }) },
       )
       if (!data?.id) throw new Error('分支失败：引擎没有返回新会话')
+      if (data.deck_task) {
+        const { useDeck } = await import('./deck')
+        await useDeck.getState().refresh()
+        if (get().sessionId === sourceId) useDeck.getState().select(data.deck_task.id)
+        return
+      }
+      if (get().sessionId !== sourceId) return
       await get().loadSessions()
       await get().openSession(data.id)
     },

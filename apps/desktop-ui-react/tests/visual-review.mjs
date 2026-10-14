@@ -85,7 +85,7 @@ try {
     ];
     useSession.setState({sessionId:'',sessions,historyLoaded:{welcome:true},messages:[],connected:true,connecting:false,loadSessions:async()=>{},currentModel:'DeepSeek V3.2',currentProviderId:'deepseek'});
     useEngine.setState({ready:true,status:'running',lastError:'',cwd:'C:/Projects/coomi',api:async(path)=>{
-      if(path.includes('providers')) return {providers:[{id:'deepseek',name:'DeepSeek',model:'DeepSeek V3.2',active:true}],models:['DeepSeek V3.2']};
+      if(path.includes('providers')) return {providers:[{id:'deepseek',name:'DeepSeek',model:'DeepSeek V3.2',models:['DeepSeek V3.2'],type:'openai_compatible',baseUrl:'https://example.com/v1',active:true,hasKey:true,modelContextWindows:{'DeepSeek V3.2':262144}}],models:['DeepSeek V3.2']};
       if(path.includes('sessions')) return {sessions};
       if(path === '/api/catalog') return {skills:[],mcp:[
         {id:'filesystem',name:'文件管理',description:'读取与整理本地文件，让工作目录井井有条。',installed:true,enabled:true},
@@ -133,6 +133,44 @@ try {
     await shot('settings-' + group)
   }
   assert.equal(await evaluate(`document.documentElement.dataset.minimalUi`), 'false')
+  await click('[data-nav-key="chat"]')
+  await until(`!!document.querySelector('[data-view-state="active"] [data-chat-col]')`)
+  // Editing preserves the stored key and activation, while reveal/copy use the
+  // authenticated endpoint. This entire provider is a fixture, never a user key.
+  await evaluate(`(() => {
+    const original = review.useEngine.getState().api;
+    window.providerSave = null;
+    window.copiedKey = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable:true, value:{ writeText:async(value)=>{window.copiedKey=value} } });
+    review.useEngine.setState({api:async(path,options)=>{
+      if(path.endsWith('/reveal')) return {apiKey:'fixture-key'};
+      if(path==='/api/providers' && options?.method==='POST') {window.providerSave=JSON.parse(options.body);return {ok:true}};
+      if(path==='/api/providers') return {providers:[{id:'deepseek',name:'DeepSeek',model:'DeepSeek V3.2',models:['DeepSeek V3.2'],type:'openai_compatible',baseUrl:'https://example.com/v1',active:true,hasKey:true,modelContextWindows:{'DeepSeek V3.2':262144}}]};
+      if(path.endsWith('/context')) return {context_window:262144,used_tokens:60678};
+      return original(path,options);
+    }});
+  })()`)
+  await evaluate(`review.useUi.getState().setSettingsGroup('models'); review.useUi.getState().setView('settings')`)
+  await until(`Array.from(document.querySelectorAll('[data-testid="settings-body"] button')).some(e=>e.textContent==='编辑')`)
+  await evaluate(`Array.from(document.querySelectorAll('[data-testid="settings-body"] button')).find(e=>e.textContent==='编辑').click()`)
+  await until(`!!document.querySelector('[title="显示密钥"]')`)
+  assert.equal(await evaluate(`document.querySelector('input[type="password"]').placeholder`), '已保存密钥（留空保留）')
+  await click('[title="显示密钥"]')
+  await until(`!!document.querySelector('[title="隐藏密钥"]')`)
+  assert.equal(await evaluate(`document.querySelector('input[autocomplete="off"]').value`), 'fixture-key')
+  await click('[title="隐藏密钥"]')
+  await until(`document.querySelector('input[autocomplete="off"]').type==='password'`)
+  assert.equal(await evaluate(`document.querySelector('input[autocomplete="off"]').type`), 'password')
+  await click('[title="复制密钥"]')
+  await until(`window.copiedKey==='fixture-key'`)
+  await evaluate(`(() => {const input=document.querySelector('input[autocomplete="off"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'');input.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  await evaluate(`Array.from(document.querySelectorAll('[role="dialog"] button')).find(e=>e.textContent.includes('下一步')).click()`)
+  await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(e=>e.textContent.trim()==='保存')`)
+  await evaluate(`Array.from(document.querySelectorAll('[role="dialog"] button')).find(e=>e.textContent.trim()==='保存').click()`)
+  await until(`window.providerSave!==null`)
+  assert.equal(await evaluate(`window.providerSave.apiKey`), undefined, 'blank key is omitted on edit')
+  assert.equal(await evaluate(`window.providerSave.activate`), true, 'active provider stays active')
+  assert.equal(await evaluate(`window.providerSave.modelContextWindows['DeepSeek V3.2']`), 262144)
   await click('[data-nav-key="chat"]')
   await until(`!!document.querySelector('[data-view-state="active"] [data-chat-col]')`)
   await evaluate(`review.useUi.getState().setSettingsGroup('models'); review.useUi.getState().setView('settings')`)
@@ -285,6 +323,28 @@ try {
   await until(`document.querySelector('[data-dock-panel]')?.getBoundingClientRect().width > 200`)
   const dockLayout = await evaluate(`(() => {const c=document.querySelector('[data-composer-box]').getBoundingClientRect();const d=document.querySelector('[data-dock-panel]').getBoundingClientRect();return {right:c.right,dockLeft:d.left}})()`)
   assert.ok(dockLayout.right <= dockLayout.dockLeft, 'dock does not cover composer')
+  await evaluate(`review.useEngine.setState({ready:false}); review.useUi.getState().openPanel('side')`)
+  await until(`!!document.querySelector('[data-aux-composer] textarea')`)
+  await evaluate(`document.activeElement?.blur()`)
+  await wait(250)
+  assert.ok(await evaluate(`(() => {
+    const main=document.querySelector('[data-chat-col] [data-composer-box]');
+    const side=document.querySelector('[data-aux-composer] [data-composer-box]');
+    const properties=['borderRadius','padding','borderColor','boxShadow'];
+    return properties.every(key=>getComputedStyle(main)[key]===getComputedStyle(side)[key])
+      && getComputedStyle(main.querySelector('textarea')).fontSize===getComputedStyle(side.querySelector('textarea')).fontSize;
+  })()`), 'auxiliary composer shares the main surface and text styles')
+  assert.ok(await evaluate(`(() => {
+    const side=document.querySelector('[data-aux-composer]');
+    const row=side.querySelector('[data-composer-tools]');
+    const send=side.querySelector('[data-composer-send]');
+    return !!side.querySelector('[data-effort-picker]') && !!side.querySelector('[data-aux-model]')
+      && !!side.querySelector('[title="任务放行程度"]') && row.scrollWidth<=row.clientWidth+1
+      && send.getBoundingClientRect().right<=row.getBoundingClientRect().right+1;
+  })()`), 'auxiliary controls and fixed send fit the narrow dock')
+  await shot('aux-composer-shared-design')
+  await evaluate(`review.useUi.getState().openPanel('stats'); review.useEngine.setState({ready:true})`)
+  await until(`!!document.querySelector('[data-dock-tab="stats"]') || !document.querySelector('[data-aux-composer]')`)
   await wait(400)
   const dockWidthBefore = await evaluate(`document.querySelector('[data-dock-panel]').getBoundingClientRect().width`)
   const divider = await evaluate(`(() => {const r=document.querySelector('#coomi-dock-sep').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
@@ -343,6 +403,7 @@ try {
   await evaluate(`review.useUi.getState().setFontScale(1.18)`)
   await wait(300)
   assert.ok(await evaluate(`(() => {const e=document.querySelector('[data-composer-tools]');return e.scrollWidth <= e.clientWidth + 1})()`), 'large font toolbar fits')
+  assert.ok(await evaluate(`(() => {const row=document.querySelector('[data-composer-tools]');const send=row.querySelector('[data-composer-send]');const r=row.getBoundingClientRect();const s=send.getBoundingClientRect();return getComputedStyle(row).flexWrap==='nowrap' && s.right<=r.right+1 && s.top>=r.top && s.bottom<=r.bottom+1})()`), 'send stays on the same toolbar row')
   await shot('08-large-font')
   await evaluate(`review.useUi.getState().setFontScale(1.08); review.useUi.getState().setPrefs({motion:true})`)
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
@@ -383,6 +444,7 @@ try {
   await until(`!!document.querySelector('[data-help-doc="shortcuts"]')`)
   await shot('10-help')
   await click('[aria-label="关闭帮助"]')
+  await until(`!document.querySelector('[data-help-center]')`)
   await menuAction('帮助', '隐私与使用说明')
   await until(`!!document.querySelector('[data-onboarding]')`)
   assert.equal(await evaluate(`document.querySelector('[data-onboarding] [aria-expanded]').getAttribute('aria-expanded')`), 'false')

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useUi, type ViewKey } from '../../stores/ui'
+import { useDeck } from '../../stores/deck'
 import { usePluginViews } from '../../stores/pluginViews'
 import { usePluginClientViews } from '../plugins/clientRuntime'
 import { useEngine } from '../../stores/engine'
@@ -44,6 +45,7 @@ function pluginIcon(name: string): React.ReactNode {
     但收放属于对话页自己的事，入口已经跟着对话页工具栏走了，这里删掉，免得同一个开关两处都有。
     宽度由外层 Panel 固定成 60px，导航自己铺满。 */
 export function Rail() {
+  const deckMode = useDeck((s) => s.mode === 'deck')
   const view = useUi((s) => s.view)
   const setView = useUi((s) => s.setView)
   // v1.7：parts.rail —— logoRadius 给 logo 圆角；iconColor 经 CSS 变量 --rail-icon 下发图标颜色。
@@ -98,7 +100,7 @@ export function Rail() {
       className='flex h-full w-full flex-col items-center gap-1 border-r border-line bg-side py-3'
       style={iconColor ? ({ '--rail-icon': iconColor } as React.CSSProperties) : undefined}
     >
-      {NAV.map((n) => item(n.key, n.label, n.icon))}
+      {NAV.map((n) => item(n.key, deckMode && n.key === 'chat' ? '任务' : n.label, n.icon))}
       <Tip label='插件' side='right'>
         <button type='button' data-plugins-entry aria-expanded={pluginsOpen} onClick={() => setPluginsOpen(true)} className={navBtn(pluginsOpen)} aria-label='插件'>
           <Puzzle size={18} />

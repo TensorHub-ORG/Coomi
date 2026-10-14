@@ -8,6 +8,8 @@ import { cn } from '../../lib/cn'
 import { ipc } from '../../lib/ipc'
 import { useSession } from '../../stores/session'
 import { useEngine } from '../../stores/engine'
+import { useDeck } from '../../stores/deck'
+import { newDeckTask } from '../deck/TaskPane'
 import { useUi, type ViewKey } from '../../stores/ui'
 import { EFFORT_LABELS, PERMISSION_LABELS, useAgent } from '../../stores/agent'
 import { sessionTitle, useWorkspace } from '../../stores/workspace'
@@ -37,7 +39,11 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const openSession = useSession((s) => s.openSession)
   const newSession = useSession((s) => s.newSession)
   const setView = useUi((s) => s.setView)
-  const cwd = useEngine((s) => s.cwd)
+  const defaultCwd = useEngine((s) => s.cwd)
+  const deckMode = useDeck((s) => s.mode === 'deck')
+  const tasks = useDeck((s) => s.tasks)
+  const selected = useDeck((s) => s.selected)
+  const cwd = deckMode ? tasks.find((task) => task.id === selected)?.cwd || '' : defaultCwd
   const meta = useWorkspace((s) => s.meta)
   const effort = useAgent((s) => s.effort)
   const permission = useAgent((s) => s.permission)
@@ -76,8 +82,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       id: 'view:' + key, label, icon, run: () => setView(key),
     })
     const list: Command[] = [
-      { id: 'new', label: '新建会话', icon: <Plus size={15} />, run: () => { setView('chat'); void newSession() } },
-      view('chat', '前往 会话', <MessageSquare size={15} />),
+      { id: 'new', label: deckMode ? '新建任务' : '新建会话', icon: <Plus size={15} />, run: () => { setView('chat'); if (deckMode) void newDeckTask(); else void newSession() } },
+      view('chat', deckMode ? '前往 任务' : '前往 会话', <MessageSquare size={15} />),
       view('skills', '前往 技能中心', <Sparkles size={15} />),
       view('artifacts', '前往 产物中心', <Package size={15} />),
       view('settings', '前往 设置', <Settings size={15} />),
@@ -116,10 +122,16 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       },
       {
         id: 'group:sessions',
-        label: '切换会话',
-        hint: sessions.length + ' 个',
+        label: deckMode ? '切换任务' : '切换会话',
+        hint: (deckMode ? tasks.length : sessions.length) + ' 个',
         icon: <UserRound size={15} />,
-        children: () => sessions.map((s) => ({
+        children: () => deckMode ? tasks.map((task) => ({
+          id: 'task:' + task.id,
+          label: task.title,
+          hint: task.cwd,
+          icon: <UserRound size={15} />,
+          run: () => { setView('chat'); useDeck.getState().select(task.id) },
+        })) : sessions.map((s) => ({
           id: 'session:' + s.id,
           label: sessionTitle(s, meta),
           hint: s.cwd ?? '',
@@ -138,7 +150,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       })),
     ]
     return list
-  }, [sessions, meta, cwd, effort, permission, newSession, openSession, setView, setEffort, setPermission, pluginCommands])
+  }, [sessions, meta, cwd, deckMode, tasks, effort, permission, newSession, openSession, setView, setEffort, setPermission, pluginCommands])
 
   /// 当前层自己的列表；搜索时把子层摊平一起搜（层级只负责浏览，搜索保持全局）。
   const needle = query.trim().toLowerCase()

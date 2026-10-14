@@ -20,6 +20,7 @@ import { FileBadge } from '../ui/FileBadge'
 import { attachmentName } from './AttachmentCard'
 import { QuoteChip } from './QuoteBlock'
 import { StatsBar } from './StatsBar'
+import { composerBoxClass, composerInputClass, composerToolsClass, composerSendClass, composerSendState } from './composerDesign'
 import { Menu, type MenuEntry } from '../ui/Menu'
 import { EffortPicker } from '../ui/EffortSlider'
 import { Dialog, Tip } from '../ui/Overlay'
@@ -56,11 +57,29 @@ const discoveredCache = new Map<string, string[]>()
 
 function ContextRing() {
   const u = useEngine((s) => s.usage)
-  const ratio = Math.min(1, u.contextRatio || (u.contextWindow ? u.contextUsed / u.contextWindow : 0))
+  const sessionId = useSession((s) => s.sessionId)
+  const streaming = useSession((s) => s.streaming)
+  const providerRevision = useAgent((s) => s.providerRevision)
+  const ready = useEngine((s) => s.ready)
+  const port = useEngine((s) => s.port)
+  const token = useEngine((s) => s.token)
+  const [context, setContext] = useState<{ window: number; used: number } | null>(null)
+  useEffect(() => {
+    setContext(null)
+    if (!ready || !sessionId) return
+    let active = true
+    void useEngine.getState().api<{ context_window: number; used_tokens: number }>('/api/sessions/' + encodeURIComponent(sessionId) + '/context')
+      .then((value) => { if (active && value.context_window > 0) setContext({ window: value.context_window, used: value.used_tokens }) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [ready, sessionId, streaming, providerRevision, port, token])
+  const windowSize = context?.window ?? u.contextWindow
+  const used = streaming ? u.contextUsed : (context?.used ?? u.contextUsed)
+  const ratio = Math.min(1, windowSize ? used / windowSize : 0)
   const r = 7
   const c = 2 * Math.PI * r
   return (
-    <Tip label={u.contextWindow ? '上下文 ' + fmtTokens(u.contextUsed) + ' / ' + fmtTokens(u.contextWindow) : '上下文用量'}>
+    <Tip label={windowSize ? '上下文 ' + fmtTokens(used) + ' / ' + fmtTokens(windowSize) : '上下文用量'}>
       <span className='flex items-center gap-1.5 px-1 text-11 text-ink-3'>
         <svg width='18' height='18' viewBox='0 0 18 18' className='-rotate-90'>
           <circle cx='9' cy='9' r={r} fill='none' stroke='currentColor' strokeWidth='2' className='text-line' />
@@ -71,7 +90,7 @@ function ContextRing() {
             strokeDashoffset={c * (1 - ratio)}
           />
         </svg>
-        {u.contextWindow ? Math.round(ratio * 100) + '%' : '—'}
+        {windowSize ? Math.round(ratio * 100) + '%' : '—'}
       </span>
     </Tip>
   )
@@ -80,6 +99,7 @@ function ContextRing() {
 /** 工作目录：会话级 cwd，随时可改；空态下放大成主操作。 */
 export function WorkdirBar({ prominent }: { prominent?: boolean }) {
   const pendingCwd = useSession((s) => s.pendingCwd)
+  const currentCwd = useSession((s) => s.currentCwd)
   const sessionId = useSession((s) => s.sessionId)
   const sessions = useSession((s) => s.sessions)
   const applyCwd = useSession((s) => s.applyCwd)
@@ -87,7 +107,7 @@ export function WorkdirBar({ prominent }: { prominent?: boolean }) {
   const engineCwd = useEngine((s) => s.cwd)
 
   const current = sessions.find((s) => s.id === sessionId)
-  const path = prettyPath(current?.cwd || pendingCwd || engineCwd || '')
+  const path = prettyPath(currentCwd || current?.cwd || pendingCwd || engineCwd || '')
   const isDefault = !path || samePath(path, engineCwd)
 
   const pick = async (): Promise<void> => {
@@ -629,14 +649,12 @@ export function Composer({ hero }: { hero?: boolean }) {
       className={cn(
         'relative shrink-0 overflow-hidden rounded-full border',
         'transition-[background-color,border-color,color,box-shadow,scale] duration-[var(--motion-base)] ease-[var(--ease-spring)]',
-        sendBtn?.label ? 'flex h-9 min-w-9 items-center justify-center gap-1.5 px-3' : 'grid h-9 w-9 place-items-center',
+        sendBtn?.label ? 'flex h-9 min-w-9 items-center justify-center gap-1.5 px-3' : composerSendClass,
         streaming
-          ? 'border-danger/40 bg-surface text-danger'
+          ? composerSendState(true, !!draft.trim())
           : sendBtn?.accent
             ? 'border-transparent bg-primary text-white shadow-[0_4px_14px_rgba(47,111,237,0.35)] hover:bg-primary-hover active:scale-95' + (draft.trim() ? '' : ' opacity-70')
-            : draft.trim()
-              ? 'border-transparent bg-primary text-white shadow-[0_4px_14px_rgba(47,111,237,0.35)] hover:bg-primary-hover active:scale-95'
-              : 'border-line-strong bg-control-2 text-ink-4',
+            : composerSendState(false, !!draft.trim()),
       )}
     >
       {streaming ? (
@@ -744,7 +762,7 @@ export function Composer({ hero }: { hero?: boolean }) {
         onDrop={onDrop}
         className={cn(
           // relative：斜杠命令弹层以输入框为定位基准（absolute bottom-full 浮在上方）。
-          'workbench-composer relative rounded-2xl border bg-surface p-2.5 elev-2 transition-colors duration-[var(--motion-fast)] ease-[var(--ease-spring)]',
+          composerBoxClass,
           dragging ? 'border-primary bg-primary-soft' : 'border-line',
         )}
         style={{
@@ -866,7 +884,7 @@ export function Composer({ hero }: { hero?: boolean }) {
                 ? (insertMode === 'interrupt' ? '正在生成：Enter 打断本轮并发送新消息' : '正在生成：Enter 插话（排队，本轮结束后立刻执行）')
                 : '告诉 Coomi，你想做些什么…')}
             disabled={!ready}
-            className='max-h-[168px] min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-13 leading-[1.65] text-ink placeholder:text-ink-4'
+            className={composerInputClass}
             style={{
               borderRadius: inputParts?.radius != null ? inputParts.radius + 'px' : undefined,
               minHeight: inputParts?.minHeight != null ? inputParts.minHeight + 'px' : undefined,
@@ -875,7 +893,7 @@ export function Composer({ hero }: { hero?: boolean }) {
           <div data-theme-composer-mascot className='shrink-0' />
         </div>
         {/* flex-wrap：窄窗口 / 右侧栏展开时，工具按钮换行而不是被挤出输入栏外。 */}
-        <div data-composer-tools className='mt-1 flex flex-wrap items-center gap-0.5'>
+        <div data-composer-tools className={composerToolsClass}>
           <Menu
             align='start'
             side='top'
@@ -996,14 +1014,14 @@ export function Composer({ hero }: { hero?: boolean }) {
               )}
             >
               {insertMode === 'interrupt' ? <Zap size={15} /> : <ArrowUp size={15} />}
-              <span>{insertMode === 'interrupt' ? '打断发送' : '插话'}</span>
+              <span className='composer-control-label'>{insertMode === 'interrupt' ? '打断发送' : '插话'}</span>
             </button>
           ) : null}
           {/* 发送 ↔ 停止是同一个按钮的形变：底色/描边走 --motion-base，图标 0.9→1 交叉缩放，
                不再整体替换控件（替换会「啪」一下，长度也不一样）。
                生成中有正文时它固定是「停止」，发送交给上面的插话按钮。
                v1.7：parts.composer.sendButton.position='left' 时发送键挪到输入行左侧，这里不再渲染。 */}
-          {!sendLeft ? sendBtnNode : null}
+          {!sendLeft ? <div className='ml-auto shrink-0' data-composer-send>{sendBtnNode}</div> : null}
         </div>
       </div>
       {!hero || hasMessages || streaming ? <StatsBar /> : null}

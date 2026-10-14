@@ -477,6 +477,12 @@ impl<T: ToolRuntime> ToolRuntime for OptimizedToolRuntime<T> {
     }
 
     async fn call(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
+        // Deck reads live process state and performs input side effects. Never
+        // cache by arguments or truncate its structured observations as text.
+        // The terminal runtime owns call-id deduplication and output bounds.
+        if call.name.starts_with("deck_") {
+            return self.inner.call(call, approval).await;
+        }
         // 缓存查询
         if self.config.enable_result_cache {
             let key = cache_key_of(call);

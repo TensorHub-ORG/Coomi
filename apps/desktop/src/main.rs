@@ -4111,7 +4111,7 @@ fn main() {
                 .unwrap_or((1920.0, 1080.0));
             let win_w = 1180.0_f64.min(work_w - 48.0).max(880.0);
             let win_h = 780.0_f64.min(work_h - 48.0).max(520.0);
-            let min_w = (work_w - 80.0).clamp(720.0, 940.0).min(win_w);
+            let min_w = (work_w - 80.0).clamp(880.0, 940.0).min(win_w);
             let min_h = (work_h - 80.0).clamp(460.0, 620.0).min(win_h);
             let main_window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                 // 页面脚本执行前注入连接信息（见 boot_script 的说明）。

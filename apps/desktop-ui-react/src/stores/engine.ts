@@ -361,6 +361,9 @@ export const useEngine = create<EngineState>((set, get) => ({
       if (message.startsWith('HTTP ')) throw error
       // 第一次发现直连不通就把整条链路切成壳内转发（并记住），不再每轮都先等一次超时。
       rememberIpcTransport()
+      // A terminal write may have reached the engine before its response was
+      // lost. Switch future requests to IPC, but never replay this mutation.
+      if (method !== 'GET' && path.startsWith('/api/deck/')) throw new Error('Deck 请求未收到确认，请查看终端状态。连接已切换，请重新操作；此次输入不会自动重发。')
       return viaBridge()
     }
   },

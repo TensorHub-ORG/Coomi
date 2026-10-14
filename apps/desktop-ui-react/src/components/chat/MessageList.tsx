@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { m, type MotionProps } from 'motion/react'
 import { cn } from '../../lib/cn'
+import { DeckActivity } from '../deck/DeckActivity'
 import { fmtDuration, fmtTime, fmtTokens } from '../../lib/format'
 import { motionOn, staggerSeconds } from '../../lib/motionPref'
 import { EASE_OUT_QUINT, SEC_BASE, SPRING_POP } from '../ui/motion'
@@ -216,7 +217,7 @@ function MsgActions({ onCopy, onQuote, onEdit, onBranch, onRegenerate, onFeedbac
     </div>
   )
 }
-function UserMessage({ item }: { item: UserChatItem }) {
+function UserMessage({ item, compact = false }: { item: UserChatItem; compact?: boolean }) {
   /// v1.7：parts.bubbles.user —— 用户气泡的圆角 / 阴影（内联样式覆盖内置 rounded-[18px] 等）。
   const userBubble = useThemeParts()?.bubbles?.user
   const setDraft = useSession((s) => s.setDraft)
@@ -268,7 +269,7 @@ function UserMessage({ item }: { item: UserChatItem }) {
       onContextMenu={(e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, userMenu()) }}
     >
       {/* 引用 → 正文 → 附件：与发送时的语义顺序一致，气泡本身还是原来那一个。 */}
-      <div className='flex w-full max-w-[82%] flex-col items-end gap-1.5'>
+      {compact ? <div className='w-full'><DeckActivity messages={[item]} /></div> : <div className='flex w-full max-w-[82%] flex-col items-end gap-1.5'>
         {quotes.length ? (
           <div className='flex w-full flex-col gap-1'>
             {quotes.map((quote, index) => (
@@ -300,7 +301,7 @@ function UserMessage({ item }: { item: UserChatItem }) {
             ))}
           </div>
         ) : null}
-      </div>
+      </div>}
       {/* 元信息与操作并排一行，避免在消息和下一段之间留出空档。
           与助手那条同一套规矩：@container 判**列宽**（不是窗口宽度）、永远单行、
           宽度不够把操作收进「⋯」；时间永不隐藏也不折行。 */}
@@ -357,7 +358,8 @@ function RunStateMark({ streaming, interrupted }: { streaming: boolean; interrup
   )
 }
 
-function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifacts }: {
+function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifacts, compact = false }: {
+  compact?: boolean
   item: Extract<ChatItem, { kind: 'assistant' }>
   /** 本轮产出的文件（turn_end 的 artifacts 字段，见 stores/artifacts）：
       只挂在列表里**最后一条有正文的回复**下面，历史回复一律传 undefined —— 卡片只属于刚跑完的这一轮。
@@ -429,6 +431,7 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
         {/* ── 顺序固定为：过程（思考 + 叙述 + 工具）→ 答案 → 生成物 → 元信息 ──
             ① 过程在前：它整块折在答案**上方**（对标 DSH 的 Turn process）。
                旧实现把这一块挂在正文下方，与本文件早先写下的顺序注释正好相反。 */}
+        {compact ? <DeckActivity messages={[item]} /> : <>
         {hasProcess ? (
           <ProcessBlock
             reasoning={item.reasoning}
@@ -466,6 +469,7 @@ function AssistantMessage({ item, isLast, modelLabel, fresh, toolFresh, artifact
             <TypingDots />
           </m.div>
         ) : null}
+        </>}
         {/* 元信息行搬到了这条消息的**最后**：原来是「思考 → 元信息 → 正文」，
             模型名 / 耗时 / 操作条夹在思考内容与答案中间（用户报的 bug）。
             顺序固定为：思考 → 正文 → 工具 → 生成物卡片 → 元信息 + 操作。
@@ -893,7 +897,8 @@ function ReminderNote({ item }: { item: Extract<ChatItem, { kind: 'reminder' }> 
 }
 
 /** 单条消息：index 写在 data-msg-index 上，会话内搜索跳转后要靠它找回这一条的 DOM 挂高亮。 */
-function ChatRow({ item, index, fromEnd, lastAssistantId, lastErrorNoticeId, modelLabel, streaming, fresh, toolFresh, artifacts }: {
+function ChatRow({ item, index, fromEnd, lastAssistantId, lastErrorNoticeId, modelLabel, streaming, fresh, toolFresh, artifacts, compact }: {
+  compact: boolean
   item: RenderItem
   index: number
   fromEnd: number
@@ -913,9 +918,9 @@ function ChatRow({ item, index, fromEnd, lastAssistantId, lastErrorNoticeId, mod
 }) {
   if (item.kind === 'user' && item.queued) return null
   const body =
-    item.kind === 'user' ? <UserMessage item={item} />
+    item.kind === 'user' ? <UserMessage item={item} compact={compact} />
       : item.kind === 'reminder' ? <ReminderNote item={item} />
-      : item.kind === 'assistant' ? <AssistantMessage item={item} isLast={item.id === lastAssistantId} modelLabel={modelLabel} fresh={fresh} toolFresh={toolFresh} artifacts={artifacts} />
+      : item.kind === 'assistant' ? <AssistantMessage item={item} compact={compact} isLast={item.id === lastAssistantId} modelLabel={modelLabel} fresh={fresh} toolFresh={toolFresh} artifacts={artifacts} />
         : item.kind === 'ask' ? <AskUserCard item={item} />
           : <Notice item={item} live={fromEnd === 0 && streaming} fresh={fresh} lastErrorNoticeId={lastErrorNoticeId} />
 
@@ -1010,6 +1015,7 @@ function sameItem(a: RenderItem, b: RenderItem): boolean {
     前面的条目每来一个 chunk 都会被比一次，内容没变就整棵子树原样留着（Markdown 不重解析）。 */
 const ChatRowMemo = memo(ChatRow, (prev, next) => (
   prev.index === next.index
+  && prev.compact === next.compact
   && (prev.item.kind !== 'assistant' || (
     (prev.item.id === prev.lastAssistantId) === (next.item.id === next.lastAssistantId)
     && prev.modelLabel === next.modelLabel
@@ -1036,7 +1042,7 @@ function EngineFooter({ context }: { context: boolean }) {
   )
 }
 
-export function MessageList() {
+export function MessageList({ compact = false }: { compact?: boolean } = {}) {
   const liveItems = useChatItems()
   /** 流式期间把列表更新降级成**低优先级**：每一次提交（≈30fps，见 stores/session.ts 的节流）
       都会换一份 items，同步渲染等于把这棵树顶在关键路径上。
@@ -1360,6 +1366,7 @@ export function MessageList() {
   const row = (it: RenderItem, index: number) => (
     <ChatRowMemo
       item={it}
+      compact={compact}
       index={index}
       fromEnd={items.length - 1 - index}
       lastAssistantId={lastAssistantId}

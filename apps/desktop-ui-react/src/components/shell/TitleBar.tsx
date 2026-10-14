@@ -3,8 +3,10 @@ import { Minus, Square, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ipc } from '../../lib/ipc'
 import { useSession } from '../../stores/session'
+import { useDeck } from '../../stores/deck'
 import { Button } from '../ui/Button'
 import { DesktopMenus } from './DesktopMenus'
+import { ModeSwitch } from './ModeSwitch'
 import { queueDuringNavPause } from './navPause'
 
 /** 滚动信号的空闲窗口（ms）：最后一次滚动之后再等这么久才摘掉标记。
@@ -74,6 +76,7 @@ export function TitleBar({ title }: { title?: string }) {
   /// 会话标题是跟着首条消息「长」出来的：流式期间还没有标题时先给一条骨架扫光，
   /// 标题到位后按 key 重挂一次做 180ms 淡入，切会话/改名都不会「啪」地换字。
   const streaming = useSession((s) => s.streaming)
+  const deckMode = useDeck((s) => s.mode === 'deck')
   /// 窗口按钮的按压反馈：沉 2px（--shift-press）+ --motion-press(120ms) 弹性曲线，
   /// 两个值都从令牌取（指针反馈全站只有 2~3px 这一个量级，别在这里写死 px）。 */
   const winBtn = 'window-control'
@@ -84,6 +87,7 @@ export function TitleBar({ title }: { title?: string }) {
       data-shell-part='titlebar'
       className='glass-topbar drag flex h-[var(--topbar-h)] shrink-0 items-center gap-2 border-b border-line pl-2 pr-0'
     >
+      <ModeSwitch />
       <DesktopMenus />
       {title ? (
         <>
@@ -96,7 +100,7 @@ export function TitleBar({ title }: { title?: string }) {
             {title}
           </span>
         </>
-      ) : streaming ? (
+      ) : streaming && !deckMode ? (
         <>
           <span className='text-ink-4'>/</span>
           <span role='status' aria-label='会话标题生成中' className='skeleton h-3 w-28 rounded-sm' />

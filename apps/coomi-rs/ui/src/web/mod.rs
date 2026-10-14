@@ -320,6 +320,7 @@ struct SessionTask {
     input_queue: Arc<InputQueue>,
     approvals: StdMutex<HashMap<String, oneshot::Sender<bool>>>,
     questions: StdMutex<HashMap<String, oneshot::Sender<UserInputResponse>>>,
+    pending_interactions: StdMutex<HashMap<String, Value>>,
     file_requests: StdMutex<HashMap<String, oneshot::Sender<Vec<String>>>>,
     next_event_seq: AtomicU64,
     unacked_events: StdMutex<VecDeque<Value>>,
@@ -505,6 +506,7 @@ impl SessionTask {
             input_queue: Arc::new(InputQueue::default()),
             approvals: StdMutex::new(HashMap::new()),
             questions: StdMutex::new(HashMap::new()),
+            pending_interactions: StdMutex::new(HashMap::new()),
             file_requests: StdMutex::new(HashMap::new()),
             next_event_seq: AtomicU64::new(1),
             unacked_events: StdMutex::new(VecDeque::new()),
@@ -656,6 +658,12 @@ impl SessionTask {
 
     /// 事件出口：分配稳定序号并保留到客户端确认，同时推送给当前活跃连接。
     fn push_event(&self, mut payload: Value) {
+        if matches!(payload["event_type"].as_str(), Some("tool_approval_request" | "user_question_request")) {
+            if let Some(id) = payload["call_id"].as_str() {
+                self.pending_interactions.lock().unwrap_or_else(|p| p.into_inner())
+                    .insert(id.to_owned(), payload.clone());
+            }
+        }
         // 运行态文件的 last_event_at：崩溃那一刻「这一轮还在动」的凭据。
         self.last_event_at
             .store(unix_time().max(0.0) as u64, Ordering::SeqCst);
@@ -698,6 +706,7 @@ impl SessionTask {
     }
 
     fn begin_turn(&self, task_id: String) {
+        self.pending_interactions.lock().unwrap_or_else(|p| p.into_inner()).clear();
         self.unacked_events
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1521,6 +1530,8 @@ pub async fn serve(
         });
     }
     let app = Router::new()
+        .route("/api/deck/tasks", get(api::deck::tasks).post(api::deck::create))
+        .route("/api/deck/tasks/{id}/action", post(api::deck::action))
         .route("/api/runtime/health", get(runtime_health))
         .route("/api/runtime/logs", get(runtime_logs))
         .route("/api/runtime/doctor", get(runtime_doctor))
@@ -1897,7 +1908,7 @@ pub async fn serve(
                 ])
                 .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::AUTHORIZATION]),
         )
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("Coomi Rust bridge {BRIDGE_VERSION} listening on http://127.0.0.1:{port}");
@@ -1933,6 +1944,8 @@ pub async fn serve(
             // 这一行能把「自己退出」和「被外部杀（无这行）」明确区分开。
             println!("[exit] graceful shutdown: termination signal received (Ctrl+C / terminate)");
             coomi_tools::terminate_all_managed().await;
+            let home = state.home.clone();
+            let _ = tokio::task::spawn_blocking(move || coomi_tools::deck::shutdown(&home)).await;
             println!("[exit] Coomi Rust bridge exiting; all child processes terminated");
         }
     }
@@ -5741,16 +5754,18 @@ async fn close_subagent_api(
 async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
     let store = SessionStore::new(&state.home);
     let summaries = store.list(None).unwrap_or_default();
+    let deck_sessions = coomi_tools::deck::runtime(&state.home).ok().map(|rt| rt.lock().unwrap_or_else(|p| p.into_inner()).session_ids()).unwrap_or_default();
     let tasks = state
         .tasks
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut sessions = Vec::with_capacity(summaries.len());
+    let mut deck_summaries = Vec::new();
     for summary in summaries {
         let id = summary.id.to_string();
         // 引擎重启后恢复的未完成回合：当前进程没在跑，但状态仍是「未完成」。
         let interrupted = state.runtime.is_interrupted(&id, &state);
-        sessions.push(json!({
+        let record = json!({
             "id": id,
             "provider_id": summary.provider_id,
             "model": summary.model,
@@ -5773,9 +5788,10 @@ async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
             "running": tasks.get(&id).is_some_and(|task| task.running.load(Ordering::SeqCst))
                 || interrupted,
             "interrupted": interrupted,
-        }));
+        });
+        if deck_sessions.contains(&id) { deck_summaries.push(record); } else { sessions.push(record); }
     }
-    Json(json!({ "sessions": sessions }))
+    Json(json!({ "sessions": sessions, "deck_sessions": deck_summaries }))
 }
 
 /// 任务中心标题：有会话时用会话标题，没有会话（引擎自建任务）时用 kind 的中文名，
@@ -6358,12 +6374,21 @@ async fn branch_session(
         .save(&branch)
         .map_err(|error| ApiError::internal(format!("failed to save branch: {error:#}")))?;
 
+    let deck_task = coomi_tools::deck::runtime(&state.home)?
+        .lock().unwrap_or_else(|p| p.into_inner())
+        .bind_branch(&id, &branch)
+        .map_err(|error| {
+            let _ = store.delete(branch.id);
+            ApiError::internal(format!("failed to bind Deck branch: {error:#}"))
+        })?;
+
     Ok(Json(json!({
         "ok": true,
         "id": branch.id.to_string(),
         "title": branch.title,
         "messages": cut,
         "cwd": branch.cwd.display().to_string(),
+        "deck_task": deck_task,
     })))
 }
 
@@ -9248,10 +9273,17 @@ async fn set_session_cwd(
     let path = std::path::Path::new(&cwd);
     // SAF 选择的目录对引擎进程可能暂不可见（权限/挂载时序），且用户可能选了一个新建目录；
     // 这里只做绝对路径校验，运行时会按需创建 cwd（见 run_turn 的 ensure_cwd）。
+    let old_cwd = session.cwd.clone();
     session.cwd = path.to_path_buf();
     store
         .save(&session)
         .map_err(|e| ApiError::internal(format!("failed to save session {id}: {e:#}")))?;
+    if let Err(error) = coomi_tools::deck::runtime(&state.home)?
+        .lock().unwrap_or_else(|p| p.into_inner()).update_session_cwd(&id, path) {
+        session.cwd = old_cwd;
+        let _ = store.save(&session);
+        return Err(ApiError::internal(format!("failed to update Deck cwd: {error:#}")));
+    }
     Ok(Json(json!({ "ok": true, "cwd": cwd })))
 }
 
@@ -10225,6 +10257,7 @@ async fn upsert_provider(
     };
     if let Some(windows) = input.get("modelContextWindows") {
         settings.model_context_windows = parse_model_context_windows(windows)?;
+        settings.context_window_source = Some("config".into());
     }
     settings.base_url = string_field(&input, "baseUrl")
         .filter(|value| !value.is_empty())
@@ -10243,6 +10276,10 @@ async fn upsert_provider(
     }
     if let Some(api_key) = string_field(&input, "apiKey").filter(|value| !value.is_empty()) {
         settings.api_key = api_key;
+    }
+    // Keep provider summaries aligned with the selected model's explicit window.
+    if let Some(window) = settings.model_context_windows.get(&settings.model).copied() {
+        settings.context_window = Some(window);
     }
     if let Some(enabled) = input.get("supportsWebSearch").and_then(Value::as_bool) {
         settings.supports_web_search = enabled;
@@ -11222,6 +11259,17 @@ async fn websocket_session(socket: WebSocket, state: AppState, session_id: Strin
     for event in pending {
         context.send_event(event);
     }
+    // Transport acknowledgements confirm delivery, not the user's decision.
+    // Reopening a task must restore still-pending approvals/questions even when
+    // their original event has already been acknowledged and removed.
+    let active_calls: HashSet<String> = task.approvals.lock().unwrap_or_else(|p| p.into_inner())
+        .iter().filter(|(_, sender)| !sender.is_closed()).map(|(id, _)| id.clone())
+        .chain(task.questions.lock().unwrap_or_else(|p| p.into_inner())
+            .iter().filter(|(_, sender)| !sender.is_closed()).map(|(id, _)| id.clone()))
+        .collect();
+    let interactions: Vec<Value> = task.pending_interactions.lock().unwrap_or_else(|p| p.into_inner())
+        .iter().filter(|(id, _)| active_calls.contains(*id)).map(|(_, event)| event.clone()).collect();
+    for event in interactions { context.send_event(event); }
 
     while let Some(Ok(message)) = source.next().await {
         match message {
@@ -12780,6 +12828,8 @@ fn route_tool_specs(specs: Vec<coomi_engine::ToolSpec>, prompt: &str) -> Vec<coo
     }
     let mut keep: HashSet<String> = TOOL_ROUTING_CORE.iter().map(|name| (*name).to_string()).collect();
     keep.extend(routed.selected_tools.iter().cloned());
+    // Task-scoped Deck tools supplement the standard Work tool set.
+    keep.extend(specs.iter().filter(|spec| spec.name.starts_with("deck_")).map(|spec| spec.name.clone()));
     if wants_delegation(prompt) {
         // 明确要"派生/并行/分工"时，把子代理的**配套收尾工具**也带上：
         // 派出去的子代理跑完要有办法关掉，否则会一直占着并发额度。
@@ -13565,6 +13615,12 @@ async fn run_turn(
         &provider_config.model,
         &state.cwd,
     )?;
+    let deck_task = {
+        let rt = coomi_tools::deck::runtime(&state.home)?;
+        let rt = rt.lock().unwrap_or_else(|p| p.into_inner());
+        rt.task_for_session(session_id).map(|id| rt.task(&id)).transpose()?
+    };
+    if let Some(record) = &deck_task { session.cwd = PathBuf::from(&record.cwd); }
     session.mode = *context.session_mode.read().await;
 
     // 端到端模式：把当前用户目标固化为一个活跃 Loop，让引擎自主循环（计划→执行→
@@ -13665,6 +13721,10 @@ async fn run_turn(
         skill_layer.as_ref(),
     )
     .await;
+    if deck_task.is_some() {
+        prompt_context.push_str(coomi_tools::deck::COORDINATOR_PROMPT);
+        prompt_context.push_str(coomi_tools::deck::DECK_CLI_SKILL);
+    }
     // ── 稳定前缀 / 易变尾部 的分界线（前缀缓存的关键）──
     // prompt_context 从此**只装稳定层**：身份 / 环境 / 工具说明 / 技能索引 / 用户偏好。
     // 下面这些「按当前提问检索出来的东西」（团队角色、认知上下文、记忆召回、目标栈、
@@ -13673,6 +13733,9 @@ async fn run_turn(
     // 为什么必须这样分：前缀缓存按 token 前缀匹配，系统提示在最前面，只要它每轮变一点，
     // 后面整段历史全部失效 —— 实测按轮命中率因此只有 ~50%（system 里塞了按提问召回的记忆）。
     let mut tail_context = String::new();
+    if let Some(record) = &deck_task {
+        tail_context.push_str(&format!("\n\nBound Deck task data: {}", json!({"id":record.id, "title":record.title, "cwd":record.cwd, "status":record.status})));
+    }
     // 指标（批 6）：统计真正注入的上下文层数（现在是「尾部层数」）与技能条数。
     let mut prompt_layers: u64 = 1; // 基础系统提示（稳定层）
     let mut skills_injected: u64 = 0;
@@ -13839,7 +13902,8 @@ async fn run_turn(
         // 关掉的工具直接不进工具清单（模型看不到就不会调）。
         .with_ask_user(capability_settings.ask_user)
         .with_save_as_request(capability_settings.allow_save_as_request)
-        .with_agent_scheduler(scheduler, session.messages.clone());
+        .with_agent_scheduler(scheduler, session.messages.clone())
+        .with_deck_session(&state.home, session_id);
     // Expose the turn's process manager so `cancel` can kill any shell started by tools.
     *task
         .processes
@@ -14152,6 +14216,10 @@ async fn run_turn(
                 Err(error) => eprintln!("[auto-pin] failed to persist session pin: {error:#}"),
             }
         }
+    }
+    // Repair missed deltas with an authoritative final answer before turn_end.
+    if !assistant_text.trim().is_empty() {
+        task.push_event(json!({"event_type": "assistant_final", "content": assistant_text}));
     }
     if cognitive_enabled {
         // 生命体运行记账（静默期护栏）：无论 sidecar 结果如何都刷新互动时间。
@@ -15479,6 +15547,10 @@ struct BrowserApproval {
 
 #[async_trait]
 impl ApprovalHandler for BrowserApproval {
+    async fn full_access(&self) -> bool {
+        effective_permission_mode(&self.home, *self.permission.read().await) == PermissionMode::Full
+    }
+
     async fn approve(&self, call: &ToolCall, reason: &str) -> bool {
         // 信任门控：只读档一律走人工审批，完全放行档一律放行，正常档保持原行为。
         let mode = effective_permission_mode(&self.home, *self.permission.read().await);

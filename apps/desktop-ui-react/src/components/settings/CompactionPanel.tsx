@@ -22,6 +22,7 @@ import { cn } from '../../lib/cn'
 import { fmtTokens } from '../../lib/format'
 import { useEngine } from '../../stores/engine'
 import { useSession } from '../../stores/session'
+import { useAgent } from '../../stores/agent'
 import { COMPACT_PERCENT_MAX, COMPACT_PERCENT_MIN, useCapabilities } from '../../stores/capabilities'
 import { withDisplayName } from '../../lib/stormProbe'
 
@@ -108,6 +109,9 @@ export function CompactionPanel({ active }: { active: boolean }) {
   const engineReady = useEngine((s) => s.ready)
   const usageWindow = useEngine((s) => s.usage.contextWindow)
   const sessionId = useSession((s) => s.sessionId)
+  const providerRevision = useAgent((s) => s.providerRevision)
+  const port = useEngine((s) => s.port)
+  const token = useEngine((s) => s.token)
 
   const [read, setRead] = useState<Readback>(EMPTY_READBACK)
   /** usage 没上报窗口时，用当前会话的 ContextStatus 探一次。 */
@@ -151,20 +155,21 @@ export function CompactionPanel({ active }: { active: boolean }) {
   }, [fingerprint, active, engineReady, load])
 
   useEffect(() => {
-    if (!active || !engineReady || usageWindow > 0 || !sessionId) return
+    setProbedWindow(0)
+    if (!active || !engineReady || !sessionId) return
     let alive = true
     void useEngine.getState()
       .api<{ context_window?: number }>('/api/sessions/' + encodeURIComponent(sessionId) + '/context')
       .then((data) => { if (alive) setProbedWindow(finiteOrNull(data?.context_window) ?? 0) })
       .catch(() => { if (alive) setProbedWindow(0) })
     return () => { alive = false }
-  }, [active, engineReady, usageWindow, sessionId])
+  }, [active, engineReady, sessionId, providerRevision, port, token])
 
   const payload = read.payload
-  const windowTokens = usageWindow || probedWindow
-  const windowSource = usageWindow
-    ? '引擎用量上报（usage.context_window_tokens）'
-    : probedWindow ? '引擎会话上下文（GET /api/sessions/{id}/context）' : ''
+  const windowTokens = probedWindow || usageWindow
+  const windowSource = probedWindow
+    ? '引擎会话上下文（GET /api/sessions/{id}/context）'
+    : usageWindow ? '引擎用量上报（usage.context_window_tokens）' : ''
 
   const fallbackPercent = useMemo(() => thresholdPercent(payload), [payload])
   const explicitPercent = caps.autoCompactPercent > 0 ? Math.round(caps.autoCompactPercent) : 0

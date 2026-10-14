@@ -4,6 +4,7 @@ import { ipc } from '../lib/ipc'
 import { isLean, setSafeMode, setSafeOverride, subscribeLean } from '../lib/guard'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
+export type TerminalTheme = 'interface' | 'light' | 'dark'
 /** 四个核心页 + 插件注册的页面（插件页 key 形如 `plugin:<pluginId>:<viewId>`）。
     `(string & {})` 这个写法保留四个核心值的自动补全，同时允许插件页那种动态 key。 */
 export type ViewKey = 'chat' | 'skills' | 'artifacts' | 'settings' | (string & {})
@@ -23,6 +24,7 @@ export type PerfMode = 'high' | 'low'
 export type InsertMode = 'queue' | 'interrupt'
 
 export interface Prefs {
+  terminalTheme: TerminalTheme
   /** 移动端同源的视觉精简：折叠工具详情，不影响权限、富文本与运行能力。 */
   minimalUi: boolean
   fontFamily: FontChoice
@@ -53,6 +55,7 @@ const LIST_COLLAPSED_KEY = 'coomi.list.collapsed'
 const LEGACY_LIST_MODE_KEY = 'coomi.list.mode'
 
 const DEFAULT_PREFS: Prefs = {
+  terminalTheme: 'interface',
   minimalUi: false,
   fontFamily: 'harmony',
   welcomeSloganFont: 'guofeng',
@@ -143,6 +146,7 @@ function readPrefs(): Prefs {
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<Prefs>
     const prefs: Prefs = { ...DEFAULT_PREFS, ...raw }
+    prefs.terminalTheme = raw.terminalTheme === 'light' || raw.terminalTheme === 'dark' ? raw.terminalTheme : 'interface'
     prefs.minimalUi = false
     prefs.welcomeSloganFont = raw.welcomeSloganFont === 'default' ? 'default' : 'guofeng'
     if (!Number.isFinite(prefs.messageWidth) || prefs.messageWidth <= 0) prefs.messageWidth = DEFAULT_PREFS.messageWidth

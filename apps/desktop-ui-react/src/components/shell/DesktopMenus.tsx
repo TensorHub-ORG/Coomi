@@ -3,6 +3,8 @@ import { toast } from 'sonner'
 import { Menu, type MenuEntry } from '../ui/Menu'
 import { useUi } from '../../stores/ui'
 import { useSession } from '../../stores/session'
+import { useDeck } from '../../stores/deck'
+import { newDeckTask } from '../deck/TaskPane'
 import { ipc } from '../../lib/ipc'
 import { openOnboarding } from '../onboarding/store'
 import { LIST_MIN_VIEWPORT } from './dockShared'
@@ -11,6 +13,8 @@ const HelpView = lazy(() => import('../../views/HelpView').then((m) => ({ defaul
 
 /** Remember the editing target before the menu takes focus. */
 export function DesktopMenus() {
+  const deckMode = useDeck((s) => s.mode === 'deck')
+  const taskCwd = useDeck((s) => s.tasks.find((task) => task.id === s.selected)?.cwd)
   const [help, setHelp] = useState(false)
   const target = useRef<HTMLElement | null>(null)
   const selection = useRef<Range | null>(null)
@@ -49,8 +53,10 @@ export function DesktopMenus() {
   }
   const menus: Array<{ label: string; items: MenuEntry[] }> = [
     { label: '文件', items: [
-      { label: '新建会话 · Ctrl+N', onSelect: () => run(async () => { useUi.getState().setView('chat'); await useSession.getState().newSession(); useUi.getState().focusComposer() }) },
-      { label: '打开工作目录…', onSelect: () => run(async () => { const dir = await ipc<string | null>('pick_directory'); if (dir) await useSession.getState().applyCwd(dir) }) },
+      { label: (deckMode ? '新建任务' : '新建会话') + ' · Ctrl+N', onSelect: () => run(async () => { useUi.getState().setView('chat'); if (deckMode) await newDeckTask(); else { await useSession.getState().newSession(); useUi.getState().focusComposer() } }) },
+      deckMode
+        ? { label: '打开任务工作目录', disabled: !taskCwd, onSelect: () => { if (taskCwd) run(() => ipc('open_path', { path: taskCwd })) } }
+        : { label: '打开工作目录…', onSelect: () => run(async () => { const dir = await ipc<string | null>('pick_directory'); if (dir) await useSession.getState().applyCwd(dir) }) },
       { divider: true },
       { label: '设置', onSelect: () => useUi.getState().setView('settings') },
       { label: '收起到托盘', onSelect: () => run(() => ipc('win_close')) },
@@ -65,12 +71,12 @@ export function DesktopMenus() {
       { label: '全选 · Ctrl+A', onSelect: () => edit('selectAll') },
     ] },
     { label: '视图', items: [
-      { label: '会话', onSelect: () => useUi.getState().setView('chat') },
+      { label: deckMode ? '任务' : '会话', onSelect: () => useUi.getState().setView('chat') },
       { label: '技能中心', onSelect: () => useUi.getState().setView('skills') },
       { label: '产物中心', onSelect: () => useUi.getState().setView('artifacts') },
       { divider: true },
-      { label: '显示 / 隐藏会话列表', onSelect: () => { const ui = useUi.getState(); if (window.innerWidth < LIST_MIN_VIEWPORT) ui.setListDrawerOpen(!ui.listDrawerOpen); else ui.toggleListCollapsed() } },
-      { label: '显示 / 隐藏右侧栏 · Ctrl+B', onSelect: () => useUi.getState().togglePanel() },
+      { label: '显示 / 隐藏' + (deckMode ? '任务' : '会话') + '列表' + (deckMode ? ' · Ctrl+B' : ''), onSelect: () => { const ui = useUi.getState(); if (window.innerWidth < LIST_MIN_VIEWPORT) ui.setListDrawerOpen(!ui.listDrawerOpen); else ui.toggleListCollapsed() } },
+      ...(!deckMode ? [{ label: '显示 / 隐藏右侧栏 · Ctrl+B', onSelect: () => useUi.getState().togglePanel() }] : []),
       { divider: true },
       { label: '亮色主题', onSelect: () => useUi.getState().setThemeMode('light') },
       { label: '深色主题', onSelect: () => useUi.getState().setThemeMode('dark') },

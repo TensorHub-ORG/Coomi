@@ -16,6 +16,9 @@ coomi-catalogs = { path = "../catalogs" }
 coomi-telemetry = { path = "../telemetry" }
 anyhow.workspace = true
 base64 = "0.22"
+portable-pty = "0.9"
+vt100 = "0.15"
+toml = "0.9.12"
 ignore.workspace = true
 regex.workspace = true
 reqwest.workspace = true

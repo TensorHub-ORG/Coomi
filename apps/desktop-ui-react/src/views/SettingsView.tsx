@@ -63,6 +63,7 @@ function localDateStamp(): string {
 
 interface Provider {
   id: string
+  hasKey?: boolean
   name?: string
   model?: string
   active?: boolean
@@ -299,6 +300,8 @@ export function SettingsView() {
       把整个模型表按新 uid 重建一遍（memo 行的引用全失效 → 整表重挂载）。 */
   const editingSnapshot = useMemo<Provider | null>(() => (editingProvider ? {
     id: editingProvider.id,
+    hasKey: editingProvider.hasKey,
+    active: editingProvider.active,
     name: editingProvider.name,
     model: editingProvider.model,
     type: editingProvider.type,
@@ -667,6 +670,13 @@ export function SettingsView() {
                 options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]}
               />
             </Cell>
+            <Cell label='终端主题色' hint='Deck 终端即时生效，跟随界面会同步当前深浅色'>
+              <Segmented<'interface' | 'light' | 'dark'>
+                value={ui.prefs.terminalTheme}
+                onChange={(v) => ui.setPrefs({ terminalTheme: v })}
+                options={[{ value: 'interface', label: '跟随界面' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]}
+              />
+            </Cell>
             {/* 插件主题：有「已启用且带主题」的插件才显示这一行；选「默认」恢复内置主题。 */}
             {pluginThemes.length ? (
               <Cell
@@ -772,7 +782,7 @@ export function SettingsView() {
                       </div>
                       <div className='flex shrink-0 items-center gap-1.5'>
                         {/* 这里不再提供“选择默认模型”：用哪个模型完全在对话页选。 */}
-                        <Button variant='secondary' size='sm' onClick={() => setEditingProvider({ id: p.id, name: p.name, model: p.model, type: p.type, baseUrl: p.baseUrl, models: p.models, modelContextWindows: p.modelContextWindows, modelDescriptions: p.modelDescriptions, modelParameters: p.modelParameters, capabilityOverrides: p.capabilityOverrides })}>编辑</Button>
+                        <Button variant='secondary' size='sm' onClick={() => setEditingProvider(p)}>编辑</Button>
                         <Button variant='ghost' size='icon-sm' className='text-ink-3 hover:text-danger' title='删除厂商' onClick={() => void engine.api('/api/providers/' + encodeURIComponent(p.id), { method: 'DELETE' })
                           .then(() => { void loadProviders(); useAgent.getState().bumpProviders() })
                           .catch(() => flash('删除失败'))}>

@@ -740,6 +740,21 @@ export function applyEventToMessages(
   const seq = ctx.seq ?? 0
   const list = messages as ChatItem[]
 
+  // Final snapshots replace only the answer; preserve every earlier process/tool.
+  if (type === 'assistant_final') {
+    const answer = str(ev.content)
+    if (!answer.trim()) return list
+    let idx = findCurrentAssistant(list)
+    const copy = list.slice()
+    if (idx < 0) { copy.push(freshAssistant(seq, nextAnchor(list, ev, seq))); idx = copy.length - 1 }
+    const host = copy[idx] as Extract<ChatItem, { kind: 'assistant' }>
+    const segments = host.segments?.slice() ?? []
+    if (segments.at(-1)?.kind === 'text') segments.pop()
+    const processText = segments.filter((part) => part.kind === 'text').map((part) => part.text).join('')
+    copy[idx] = { ...host, text: processText + answer, segments: [...segments, { kind: 'text', text: answer }], reasoningStreaming: false }
+    return copy
+  }
+
   /* ── 流式正文 / 思考：就地追加 ── */
   if (type === 'text_chunk' || type === 'reasoning_chunk') {
     const piece = str(ev.content ?? ev.delta ?? ev.text)
@@ -875,6 +890,7 @@ export function applyEventToMessages(
   /* ── AI 提问：对话流里的一张卡（答完不消失）。条目 id 用 call_id（重发不重复画卡）。 ── */
   if (type === 'user_question_request') {
     const callId = str(ev.call_id ?? ev.callId ?? ev.id)
+    if (callId && list.some((item) => item.kind === 'ask' && item.callId === callId)) return messages as ChatItem[]
     const questions = parseAskQuestions(ev.questions ?? ev.items)
     return [...list, {
       kind: 'ask', id: 'ask:' + (callId || 'q' + seq), callId,

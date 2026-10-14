@@ -1,20 +1,20 @@
 {
-  "code": 1000002,
-  "name": "1.0.0-test.2",
-  "version": "1.0.0-test.2",
+  "code": 1000003,
+  "name": "1.0.0-test.3",
+  "version": "1.0.0-test.3",
   "app_name": "Coomi Desktop",
   "channel": "beta",
   "platform": "windows",
   "arch": "x64",
-  "file": "Coomi_1.0.0-test.2_x64-setup.exe",
-  "url": "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.2_x64-setup.exe",
+  "file": "Coomi_1.0.0-test.3_x64-setup.exe",
+  "url": "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.3_x64-setup.exe",
   "urls": [
-    "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.2_x64-setup.exe"
+    "https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.3_x64-setup.exe"
   ],
-  "publishedAt": "2026-10-13T00:00:00Z",
-  "published_at": "2026-10-13T00:00:00Z",
+  "publishedAt": "2026-10-14T08:00:00Z",
+  "published_at": "2026-10-14T08:00:00Z",
   "minWindows": "10",
-  "size": 42910424,
-  "sha256": "8e88fa920bab0f2cf5f6f34013d913c319b7416bcc5e153654bc28095a3a4d0b",
-  "notes": "# v1.0.0-test.2 发布说明【测试】\n\n- 交互与动效：默认采用简洁、低动效的交互，不再提供安全模式开关或专门的渲染风暴提示卡片。\n- 输入指令：增加指令入口，支持 `/goal`、`/compact`、`/init`、`/plan`、`/side`，并可快速添加附件、会话引用和技能。\n- 辅助会话：右侧栏新增独立辅助会话，拥有独立上下文与连接，不覆盖当前主会话。\n- 目标模式：仅在用户明确设置目标并启用后生效；可以在会话中编辑或关闭目标。\n- 消息渲染：优化工具调用瀑布流、排队追加和自动贴底行为，并支持数学公式自动渲染。\n- 窗口布局：修复窄窗口输入区布局、会话历史导航及右侧栏尺寸调整相关问题。\n\n本版本为测试版，欢迎反馈使用问题。\n\nSHA-256: 8e88fa920bab0f2cf5f6f34013d913c319b7416bcc5e153654bc28095a3a4d0b"
+  "size": 43323687,
+  "sha256": "985cafec8254e771017ce1e3353ecd82e7f1cc96b55893a1f01705e79987b8f1",
+  "notes": "# v1.0.0-test.3 发布说明【测试】\n\n- Deck 模式：新增 Work / Deck 模式切换、任务侧栏和多 CLI 终端面板；Deck 对话复用 Work 的 Agent、权限审批与消息交互能力。\n- CLI 调度：加入 Coomi 内置 CLI 操作 Skill，按终端识别、读取、派发、等待和验收的流程控制 Codex / ZCode，减少重复授权和无效状态轮询。\n- 终端控制：改进持续接管、用户释放与 CLI 问询处理，支持安装 CLI、配置 Coomi 内部模型提供方，并显示可复制的终端编号。\n- 终端显示：归一化 Agent 读取的 CLI 文本，将终端状态与 CLI 输出分开；支持停止/关闭、主题切换、自适应重绘以及调度记录收起、半屏和全屏。\n- 对话体验：Deck 延续 Work 的工具审批、问询和消息操作，并修复输入区、消息流及窗口布局问题。\n\n本版本为测试版，欢迎反馈使用问题。\n\nSHA-256: 985cafec8254e771017ce1e3353ecd82e7f1cc96b55893a1f01705e79987b8f1"
 }

@@ -47,7 +47,8 @@ ok('保存时按区间夹紧并如实提示', wizard.includes('Math.min(CONTEXT_
 
 /* ── ③ 本机地址免 Key（两侧同判据） ── */
 ok('前端有 loopback 判据', wizard.includes('function isLoopbackBase'))
-ok('有 Key 或本机地址才自动激活', wizard.includes('const wantActivate = !!apiKey.trim() || isLoopbackBase(baseUrl)'))
+ok('编辑时保留激活状态，新建时有 Key 或本机地址才自动激活', wizard.includes('const wantActivate = editing ? !!editing.active : hasEffectiveKey || isLoopbackBase(baseUrl)'))
+ok('已保存的 Key 也参与密钥状态判断', wizard.includes('const hasEffectiveKey = !!apiKey.trim() || !!editing?.hasKey'))
 ok('引擎侧放行本机地址', engine.includes('fn is_loopback_base_url') && engine.includes('&& !is_loopback_base_url(&provider.base_url)'))
 ok('引擎有对应单测', /loopback_base_urls_are_recognized/.test(engine))
 

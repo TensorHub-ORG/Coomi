@@ -12,14 +12,14 @@ export function ApprovalDialog() {
     <Dialog
       open={!!approval}
       onOpenChange={(v) => { if (!v) approve('deny') }}
-      title='需要你的授权'
+      title={approval?.persistentTerminal ? 'CLI 控制授权' : '需要你的授权'}
       description={approval ? '即将执行：' + approval.toolName : ''}
       width={480}
       footer={
         <>
           <Button variant='ghost' onClick={() => approve('deny')}>拒绝</Button>
-          <Button variant='secondary' onClick={() => approve('always')}>本次会话总是允许</Button>
-          <Button variant='primary' onClick={() => approve('allow')}>允许一次</Button>
+          {!approval?.persistentTerminal ? <Button variant='secondary' onClick={() => approve('always')}>本次会话总是允许</Button> : null}
+          <Button variant='primary' onClick={() => approve('allow')}>{approval?.persistentTerminal ? '允许并交给 Coomi' : '允许一次'}</Button>
         </>
       }
     >
@@ -31,7 +31,7 @@ export function ApprovalDialog() {
           <AgentState state='awaiting' size='md' tone='warn' />
         </span>
         <div className='min-w-0 flex-1'>
-          <p className='mb-1 text-12 text-ink-3'>等待你选择「拒绝 / 允许一次 / 本次会话总是允许」</p>
+          <p className='mb-1 text-12 text-ink-3'>{approval?.persistentTerminal ? '授权后持续由 Coomi 控制，手动解除后才能自行输入。' : '等待你选择「拒绝 / 允许一次 / 本次会话总是允许」'}</p>
           <pre className='max-h-52 overflow-auto whitespace-pre-wrap break-words font-mono text-11 leading-[1.6] text-ink-2'>{approval?.detail}</pre>
         </div>
       </div>

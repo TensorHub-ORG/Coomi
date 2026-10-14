@@ -12,6 +12,8 @@ import { PanelSeparator } from './components/shell/ResizeHandle'
 import { TitleBar } from './components/shell/TitleBar'
 import { Rail } from './components/shell/Rail'
 import { ListPane } from './components/shell/ListPane'
+import { TaskPane, newDeckTask } from './components/deck/TaskPane'
+import { useDeck } from './stores/deck'
 import { RightDock } from './components/shell/RightDock'
 import { ContextMenuHost } from './components/ui/ContextMenuHost'
 import { AppToaster } from './components/ui/AppToaster'
@@ -86,6 +88,17 @@ const SettingsView = lazy(() => import('./views/SettingsView').then((m) => {
   chunkReady.add('settings')
   return { default: m.SettingsView }
 }))
+const DeckView = lazy(() => import('./views/DeckView').then((m) => ({ default: m.DeckView })))
+function WorkModes() {
+  const mode = useDeck((state) => state.mode)
+  const surface = useSession((state) => state.sessionSurface)
+  const [deckLoaded, setDeckLoaded] = useState(mode === 'deck')
+  useEffect(() => { if (mode === 'deck') setDeckLoaded(true) }, [mode])
+  return <div className='relative flex h-full min-h-0 flex-col'>
+    {mode === 'work' ? <div className='flex h-full min-h-0 flex-col'>{surface === 'work' ? <ChatView /> : <div className='p-6 text-ink-3'>正在打开 Work…</div>}</div> : null}
+    {deckLoaded || mode === 'deck' ? <div className='absolute inset-0' style={{ display: mode === 'deck' ? 'block' : 'none' }}><Suspense fallback={<div className='p-6 text-ink-3'>正在打开 Deck…</div>}><DeckView /></Suspense></div> : null}
+  </div>
+}
 
 /** 这一页能不能「不等动画直接出内容」：静态引入的对话页天然可以；
     懒加载页看 chunk 是否已就绪 —— 没就绪就只能先挂骨架（由 Suspense 换成正文）。 */
@@ -108,7 +121,7 @@ const CommandPalette = lazy(() => import('./components/shell/CommandPalette').th
    （长会话、长列表都在里面），挂载成本就这么被塞回过渡回调里了。
    memo 之后重渲染到这一层就停住：切页那一拍只新挂一份骨架，正文再晚一步挂。 */
 const PAGE: Record<ViewKey, ComponentType> = {
-  chat: memo(function ChatPage() { return <ChatView /> }),
+  chat: memo(WorkModes),
   skills: memo(function SkillsPage() { return <SkillsView /> }),
   artifacts: memo(function ArtifactsPage() { return <ArtifactsView /> }),
   settings: memo(function SettingsPage() { return <SettingsView /> }),
@@ -452,6 +465,7 @@ function ViewSlot({ name, active, live, anim, dir, children }: {
 }
 
 export default function App() {
+  const deckMode = useDeck((state) => state.mode) === 'deck'
   const view = useUi((s) => s.view)
   // 只订「就绪」这一个字段：原来 useEngine() 订的是整个引擎对象，而 usage 每来一个 token
   // 就会换一次引用——App（连同它下面挂着的整棵外壳）跟着每个 chunk 重渲染一次。
@@ -460,6 +474,7 @@ export default function App() {
   const sessionId = useSession((s) => s.sessionId)
   const openSession = useSession((s) => s.openSession)
   const streamTitle = useSession((s) => s.sessions.find((x) => x.id === sessionId)?.title)
+  const deckTitle = useDeck((s) => s.tasks.find((task) => task.id === s.selected)?.title)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
   /* ── 「现在在哪一页」有四个口径，按「谁先动」排开 ──
@@ -878,10 +893,11 @@ export default function App() {
   /// 全局快捷键：Ctrl/Cmd+K 命令面板、Ctrl/Cmd+N 新对话、Esc 关闭面板/抽屉。
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (e.target instanceof Element && e.target.closest('.xterm')) return
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen((v) => !v); return }
-      if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); void useSession.getState().newSession(); return }
-      if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); useUi.getState().togglePanel(); return }
+      if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); if (useDeck.getState().mode === 'deck') void newDeckTask(); else void useSession.getState().newSession(); return }
+      if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); if (useDeck.getState().mode === 'deck') useUi.getState().toggleListCollapsed(); else useUi.getState().togglePanel(); return }
       if (e.key === 'Escape') {
         setPaletteOpen(false)
         // 抽屉开着时 Esc 收掉抽屉；Rail 上的「展开会话列表」随时能再打开。
@@ -1005,12 +1021,17 @@ export default function App() {
       try {
       await loadSessions()
       if (disposed || !useEngine.getState().ready) return
+      if (useDeck.getState().mode === 'deck') {
+        await useDeck.getState().refresh()
+        if (!disposed && useDeck.getState().mode === 'deck') await useDeck.getState().activate(true)
+        return
+      }
       if (useEngine.getState().lastError.startsWith('初始化会话失败，正在重试：')) {
         useEngine.setState({ lastError: '' })
       }
       const state = useSession.getState()
       const action = pickStartupSession({
-        sessionId: state.sessionId,
+        sessionId: state.sessionSurface === 'work' ? state.sessionId : '',
         sessions: state.sessions,
         remembered: readLastSession(),
         // 上次停在「新建但还没落库」的会话上：它还不在列表里，但草稿是按它的 id 存的——
@@ -1031,13 +1052,13 @@ export default function App() {
     }
     void bootstrap()
     return () => { disposed = true; if (retry !== undefined) window.clearTimeout(retry) }
-  }, [engineReady, loadSessions, openSession])
+  }, [engineReady, deckMode, loadSessions, openSession])
 
   return (
     <LazyMotion features={domAnimation} strict>
     <TooltipProvider>
         <div className='flex h-full flex-col bg-canvas'>
-          <TitleBar title={streamTitle} />
+          <TitleBar title={deckMode ? deckTitle : streamTitle} />
           {/* 弹性布局：固定栏（导航/图标条）shrink-0，主内容列 flex-1 min-w-0，
               右侧栏是主列的兄弟节点而不是浮层，宽度不够时把会话列表降级成抽屉，绝不覆盖输入框。 */}
           <div ref={shellRef} data-shell-frozen data-app-shell className='relative flex min-h-0 min-w-0 flex-1 overflow-hidden'>
@@ -1094,7 +1115,7 @@ export default function App() {
                       data-open={listInlineOpen ? 'true' : 'false'}
                       className='flex h-full min-h-0 w-full min-w-0 flex-col'
                     >
-                      <ListPane variant='inline' onClose={closeList} />
+                      {deckMode ? <TaskPane onClose={closeList} /> : <ListPane variant='inline' onClose={closeList} />}
                     </div>
                   </Panel>
                   {listInlineOpen ? (
@@ -1193,7 +1214,7 @@ export default function App() {
                   className='absolute inset-0 cursor-default bg-black/25'
                 />
                 <div data-drawer-panel className='relative h-full w-fit shadow-elev-3'>
-                  <ListPane variant='drawer' onClose={closeList} />
+                  {deckMode ? <TaskPane onClose={closeList} /> : <ListPane variant='drawer' onClose={closeList} />}
                 </div>
               </div>
             ) : null}

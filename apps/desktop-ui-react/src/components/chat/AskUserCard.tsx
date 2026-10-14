@@ -88,6 +88,7 @@ export function AskUserCard({ item }: { item: AskItem }) {
     const onKey = (event: KeyboardEvent): void => {
       if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return
       const target = event.target as HTMLElement | null
+      if (target?.closest?.('.xterm')) return
       const typing = !!target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName || ''))
       if (event.key === 'Escape') { event.preventDefault(); skip(); return }
       if (event.key === 'Enter') {

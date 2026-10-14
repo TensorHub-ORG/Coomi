@@ -1636,6 +1636,12 @@ impl AgentObserver for NoopObserver {
 pub trait ApprovalHandler: Send + Sync {
     async fn approve(&self, call: &ToolCall, reason: &str) -> bool;
 
+    /// Effective host policy, including trust overrides. Only explicit full
+    /// access allows a child CLI to bypass its own operation approvals.
+    async fn full_access(&self) -> bool {
+        false
+    }
+
     async fn request_user_input(&self, _request: &UserInputRequest) -> Option<UserInputResponse> {
         None
     }

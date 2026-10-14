@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react'
-import { AlertTriangle, ArrowDown, Menu, PanelRight, PanelRightClose, Plus, Search } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ChevronDown, ChevronUp, Maximize2, Menu, PanelRight, PanelRightClose, Plus, Search } from 'lucide-react'
+import { DeckActivitySummary, type CoordinatorLayout } from '../components/deck/DeckActivity'
 import { useChatItems, useSession } from '../stores/session'
 import { useEngine } from '../stores/engine'
 import { MessageList } from '../components/chat/MessageList'
@@ -25,7 +26,7 @@ import logo from '../assets/coomi-logo.png'
     预览面板开关挂在标题栏上，用户找不到、也不该去那里找。现在收在这一行里：
     左＝会话列表开关（窄窗口打开抽屉），中＝会话标题 + 当前模型，右＝搜索 / 右侧栏 / 新对话。
     开关状态仍然只读改 stores/ui 的 listCollapsed / listDrawerOpen（谁都不用自己存一份）。 */
-function ChatToolbar() {
+function ChatToolbar({ deckLayout, onDeckLayout }: { deckLayout?: CoordinatorLayout; onDeckLayout?: (layout: CoordinatorLayout) => void }) {
   const { narrow, showInline, showDrawer, open, close } = useListPaneLayout()
   const panelOpen = useUi((s) => s.panelOpen)
   const togglePanel = useUi((s) => s.togglePanel)
@@ -33,6 +34,7 @@ function ChatToolbar() {
   const streaming = useSession((s) => s.streaming)
   const currentModel = useSession((s) => s.currentModel)
   const turnMeta = useSession((s) => s.turnMeta)
+  const items = useChatItems()
 
   // 会话列表可见＝内嵌展开或抽屉打开。收放走 useListPaneLayout：
   // 它按窗口宽度决定「叫回来 / 收起来」的是内嵌栏还是抽屉，应用层不用在这里再判一次。
@@ -42,9 +44,9 @@ function ChatToolbar() {
   return (
     <header
       data-chat-toolbar
-      className='workbench-toolbar glass-bar flex h-[54px] shrink-0 items-center gap-2 border-b border-line px-4'
+      className={cn('workbench-toolbar glass-bar flex shrink-0 items-center gap-2 border-b border-line px-4', deckLayout ? 'deck-coordinator-toolbar' : 'h-[54px]')}
     >
-      <Tip label={listVisible ? '收起会话列表' : narrow ? '打开会话列表' : '展开会话列表'}>
+      {!deckLayout ? <Tip label={listVisible ? '收起会话列表' : narrow ? '打开会话列表' : '展开会话列表'}>
         <Button
           variant='ghost'
           size='sm'
@@ -58,12 +60,12 @@ function ChatToolbar() {
           <Menu size={15} />
           {listVisible ? <span className='hidden truncate sm:inline'>会话列表</span> : null}
         </Button>
-      </Tip>
+      </Tip> : null}
 
       {/* 中间：会话标题 + 当前模型。窄列下两端一压，这里先截断，绝不把右侧按钮挤出去。 */}
       <div className='flex min-w-0 flex-1 items-center gap-2 px-2 text-left' title={(turnMeta?.model || currentModel || '默认模型') + ' · ' + (streaming ? '正在生成' : '就绪')}>
         {streaming ? <span className='h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary' aria-label='生成中' /> : null}
-        {title ? (
+        {deckLayout === 'compact' ? <DeckActivitySummary messages={items} streaming={streaming} /> : deckLayout ? <p className='truncate text-12 font-medium'>Coomi <span className='font-normal text-ink-3'>{streaming ? '· 调度中' : '· 调度记录'}</span></p> : title ? (
           <p className='min-w-0 truncate text-14 font-semibold leading-tight text-ink' title={title}>{title}</p>
         ) : streaming ? (
           <span role='status' aria-label='会话标题生成中' className='skeleton mx-auto block h-3 w-28 rounded-sm' />
@@ -72,7 +74,7 @@ function ChatToolbar() {
         )}
       </div>
 
-      <Tip label='搜索会话内容 · Ctrl+F'>
+      {deckLayout !== 'compact' ? <><Tip label='搜索会话内容 · Ctrl+F'>
         <Button variant='ghost' size='icon-sm' aria-label='搜索会话内容' onClick={() => useChatSearch.getState().show()}>
           <Search size={15} />
         </Button>
@@ -90,11 +92,16 @@ function ChatToolbar() {
           {panelOpen ? <PanelRightClose size={15} /> : <PanelRight size={15} />}
         </Button>
       </Tip>
-      <Tip label='新会话 · Ctrl+N'>
+      </> : null}
+      {deckLayout ? <>
+        <Button className={deckLayout === 'compact' ? 'hidden' : undefined} variant='ghost' size='sm' title='收起调度记录' aria-pressed={deckLayout === 'compact'} onClick={() => onDeckLayout?.('compact')}><ChevronDown size={14} />收起</Button>
+        <Button variant='ghost' size='sm' title='半屏调度记录' aria-pressed={deckLayout === 'half'} onClick={() => onDeckLayout?.(deckLayout === 'half' ? 'compact' : 'half')}><ChevronUp size={14} />半屏</Button>
+        <Button variant='ghost' size='sm' title='全屏调度记录' aria-pressed={deckLayout === 'full'} onClick={() => onDeckLayout?.(deckLayout === 'full' ? 'compact' : 'full')}><Maximize2 size={13} />全屏</Button>
+      </> : <Tip label='新会话 · Ctrl+N'>
         <Button variant='ghost' size='icon-sm' aria-label='新会话' onClick={() => void useSession.getState().newSession()}>
           <Plus size={15} />
         </Button>
-      </Tip>
+      </Tip>}
     </header>
   )
 }
@@ -177,7 +184,7 @@ const ScrollToLatest = memo(function ScrollToLatest() {
   )
 })
 
-export function ChatView() {
+export function ChatView({ deckLayout, onDeckLayout }: { deckLayout?: CoordinatorLayout; onDeckLayout?: (layout: CoordinatorLayout) => void } = {}) {
   const sloganFont = useUi((s) => s.prefs.welcomeSloganFont)
   const streaming = useSession((s) => s.streaming)
   const engineStatus = useEngine((s) => s.status)
@@ -216,6 +223,7 @@ export function ChatView() {
       return el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName)
     }
     const onKey = (e: KeyboardEvent): void => {
+      if ((e.target as HTMLElement | null)?.closest?.('.xterm')) return
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'f') {
         e.preventDefault()
@@ -247,19 +255,20 @@ export function ChatView() {
           data-chat-body 是导航条的定位基准（它按这一层做垂直居中），也是自检脚本量
           「轨道中心 vs 容器中心」时用的锚点——别删。 */}
       <div data-chat-body className={cn(
-        'relative flex min-h-0 flex-1 flex-col',
+        deckLayout === 'compact' ? 'hidden' : 'relative flex min-h-0 flex-1 flex-col',
         'transition-opacity duration-[var(--motion-base)] ease-[var(--ease-enter)]',
         loadingHistory && 'pointer-events-none opacity-45',
       )}
       // 侧边栏宽度变化时：消息列表内部重排不再级联到整个外壳（收侧边栏卡的主因之一）
       style={{ contain: 'layout' }}>
+        {deckLayout && empty && !loadingHistory ? <p className='mx-auto w-full max-w-[var(--content-w)] px-4 py-2 text-12 text-ink-3'>描述任务目标与约束，直接让 Coomi 操作 CLI；需要授权时会显示确认窗口。</p> : null}
         {/* 会话区**自己的一层**错误边界：消息列表崩了只让这一块换成一张小卡片 + 重试，
             导航 / 会话列表 / 输入区 / 标题栏全都照常可用 —— 绝不把整屏一起带走。
             resetKey 跟着会话走：换个会话（或新建）自动复位，不用用户去点重试。 */}
         <ErrorBoundary scope='chat.messages' variant='section' label='会话内容' resetKey={sessionId}>
-          <MessageList />
+          <MessageList compact={deckLayout === 'compact'} />
         </ErrorBoundary>
-        <MessageNav />
+        {deckLayout === 'compact' ? null : <MessageNav />}
       </div>
       {/* overflow-x-clip：只裁横向，不产生滚动条，也不影响输入框自带的阴影。
           [&_button:not(:last-child)]:min-w-0 让工具按钮在窄列里可以收缩，
@@ -283,10 +292,11 @@ export function ChatView() {
     <main
       data-chat-col
       data-panel-open={panelOpen ? 'true' : 'false'}
+      data-deck-chat={deckLayout}
       className='relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas'
     >
       {/* 对话页工具栏：本页自己的头部，跟着本页一起被裁在这条主列里（不会压到侧栏上） */}
-      <ChatToolbar />
+      <ChatToolbar deckLayout={deckLayout} onDeckLayout={onDeckLayout} />
       {/* 异常提示条：出现时走统一的 rise-soft（--motion-base），不是「啪」地插入一整行 */}
       {showError ? (
         <div className='flex animate-bar items-center gap-2 border-b border-danger/30 bg-danger-soft px-4 py-1.5 text-12 text-danger'>
@@ -309,7 +319,7 @@ export function ChatView() {
       <ChatSearchBar />
       {/* 历史没回来之前：有旧内容就让旧内容留在原位（降透明度），没内容就画骨架；
           只有「确实加载完且真的没有消息」才渲染 hero。 */}
-      {!empty ? conversation : loadingHistory ? (
+      {deckLayout || !empty ? conversation : loadingHistory ? (
         <MessageSkeleton />
       ) : (
         <div className='welcome-page min-h-0 flex-1 animate-page'>

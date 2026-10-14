@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, RefreshCw, Check } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Check, Eye, EyeOff, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { useEngine } from '../../stores/engine'
 import { ipc } from '../../lib/ipc'
@@ -25,6 +25,7 @@ interface Provider {
   name?: string
   model?: string
   active?: boolean
+  hasKey?: boolean
   type?: string
   baseUrl?: string
   models?: string[]
@@ -341,6 +342,7 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
   const [type, setType] = useState('openai_compatible')
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [keyVisible, setKeyVisible] = useState(false)
   const [model, setModel] = useState('')
   const [modelIds, setModelIds] = useState<string[]>([])
   const [rows, setRows] = useState<ModelDraft[]>([])
@@ -355,6 +357,7 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
   useEffect(() => {
     if (!open) return
     setStep(0)
+    setKeyVisible(false)
     setError('')
     setNotice('')
     setBusy('')
@@ -513,7 +516,8 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
     /* activate：有 API Key 才自动设为当前厂商；没 key 时只有**本机地址**才激活
        （引擎侧同样只对本机地址放行）—— 否则会撞上
        "provider must have an API key before activation"，本地模型这条路就堵死了。 */
-    const wantActivate = !!apiKey.trim() || isLoopbackBase(baseUrl)
+    const hasEffectiveKey = !!apiKey.trim() || !!editing?.hasKey
+    const wantActivate = editing ? !!editing.active : hasEffectiveKey || isLoopbackBase(baseUrl)
     // 生成的标识也回显一次：用户以后在配置文件 / 日志里看到的就是它。
     if (!editing?.id && currentId !== slugifyProviderId(name)) {
       setNotice('厂商标识：' + currentId + '（按名称自动生成）')
@@ -542,7 +546,7 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
       })
       onSaved()
       onOpenChange(false)
-      if (!wantActivate) {
+      if (!hasEffectiveKey && !isLoopbackBase(baseUrl)) {
         toast.message('已保存 ' + (name.trim() || '这个厂商') + '，但还没设为当前厂商', {
           description: '没填 API Key。云端接口需要 Key 才能激活；本机地址（127.0.0.1 / localhost）不需要。',
           duration: 9000,
@@ -642,7 +646,24 @@ export function ProviderWizard({ open, onOpenChange, editing, onSaved, existingI
             <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder='https://example.com/v1' className='font-mono text-12' />
           </Field>
           <Field label='API Key' hint={editing ? '留空表示不修改已保存的密钥' : undefined}>
-            <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type='password' placeholder='sk-...' className='font-mono text-12' />
+            <div className='flex min-w-0 items-center gap-1'>
+              <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type={keyVisible ? 'text' : 'password'} placeholder={editing?.hasKey ? '已保存密钥（留空保留）' : 'sk-...'} className='min-w-0 flex-1 font-mono text-12' autoComplete='off' />
+              <Button variant='ghost' size='icon-sm' title={keyVisible ? '隐藏密钥' : '显示密钥'} onClick={async () => {
+                try {
+                  if (!keyVisible && !apiKey && editing?.hasKey) {
+                    const result = await api<{ apiKey: string }>('/api/providers/' + encodeURIComponent(editing.id) + '/reveal', { method: 'POST' })
+                    setApiKey(result.apiKey)
+                  }
+                  setKeyVisible(!keyVisible)
+                } catch { setError('读取密钥失败，请重试') }
+              }}>{keyVisible ? <EyeOff size={15} /> : <Eye size={15} />}</Button>
+              <Button variant='ghost' size='icon-sm' title='复制密钥' disabled={!apiKey && !editing?.hasKey} onClick={async () => {
+                try {
+                  const key = apiKey || (await api<{ apiKey: string }>('/api/providers/' + encodeURIComponent(editing!.id) + '/reveal', { method: 'POST' })).apiKey
+                  await navigator.clipboard.writeText(key)
+                } catch { setError('复制密钥失败，请重试') }
+              }}><Copy size={15} /></Button>
+            </div>
           </Field>
         </div>
       ) : (
