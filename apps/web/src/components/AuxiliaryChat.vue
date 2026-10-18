@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { SessionScope, useAuxiliarySessionStore, type SessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { useConfigStore } from '@/stores/config'
@@ -19,7 +19,7 @@ const deleteArmed = ref(false)
 const draft = ref('')
 const scroll = ref<HTMLElement | null>(null)
 const children = computed(() => sessions.childrenOf(props.parentId))
-const blocks = computed(() => buildTimelineBlocks(current.value?.timeline ?? []))
+const blocks = computed(() => buildTimelineBlocks(current.value?.timeline ?? [], current.value?.isBusy ?? false))
 const models = computed(() => config.providers.flatMap(p => [...new Set([p.model, ...p.models].filter(Boolean) as string[])].map(model => ({ value: `${p.id}::${model}`, label: `${p.name} · ${model}` }))))
 const selectedModel = computed(() => { const m = sessions.find(current.value?.sessionId ?? ''); return m ? `${m.providerId}::${m.model}` : '' })
 let selection = 0
@@ -64,6 +64,9 @@ watch(() => {
   const tail = timeline[timeline.length - 1]
   return [timeline.length, tail && 'content' in tail ? tail.content : '', current.value?.runState]
 }, async () => { await nextTick(); if (scroll.value) scroll.value.scrollTop = scroll.value.scrollHeight })
+function resumeVisible() { current.value?.resumeFromBackground() }
+onMounted(() => document.addEventListener('visibilitychange', resumeVisible))
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', resumeVisible))
 function send() { if (!draft.value.trim() || !current.value) return; current.value.sendMessage(draft.value); draft.value = '' }
 function changeModel(event: Event) { const [provider, model] = (event.target as HTMLSelectElement).value.split('::'); if (provider && model) void current.value?.selectModel(provider, model) }
 async function removeCurrent() {
@@ -98,7 +101,7 @@ async function removeCurrent() {
       <select class="model" aria-label="辅助会话模型" :value="selectedModel" :disabled="current.isBusy" @change="changeModel">
         <option v-for="model in models" :key="model.value" :value="model.value">{{ model.label }}</option>
       </select>
-      <div :key="current.sessionId" ref="scroll" class="transcript">
+      <div :key="current.sessionId" ref="scroll" class="transcript" :style="{ visibility: current.restoring ? 'hidden' : 'visible' }" :aria-busy="current.restoring">
         <p v-if="!blocks.length" class="hint">独立执行任务，需要时可读取主对话。关闭卡片后任务继续运行。</p>
         <TimelineBlock v-for="(block, i) in blocks" :key="i" :block="block" />
         <p v-if="current.isBusy" role="status" class="hint">{{ current.runState === 'awaiting_approval' ? '等待授权' : '处理中…' }}</p>

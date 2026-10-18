@@ -2,9 +2,10 @@ import type { Timelineitem, ToolCard } from '@/stores/viewModel'
 
 export const MAX_TRANSCRIPT_ITEMS = 400
 
-export type TimelineBlockItem =
+export type TimelineLeaf =
   | { t: 'one'; key: string; item: Timelineitem }
   | { t: 'tools'; key: string; cards: ToolCard[] }
+export type TimelineBlockItem = TimelineLeaf | { t: 'process'; key: string; blocks: TimelineLeaf[]; running: boolean }
 
 function itemId(item: Timelineitem): string {
   return 'id' in item ? item.id : item.callId
@@ -26,9 +27,10 @@ type ToolsBlock = { t: 'tools'; key: string; cards: ToolCard[] }
 const oneCache = new Map<string, OneBlock>()
 const toolsCache = new Map<string, { block: ToolsBlock; members: readonly ToolCard[] }>()
 let lastBlocks: TimelineBlockItem[] = []
+const processCache = new Map<string, Extract<TimelineBlockItem, { t: 'process' }>>()
 
-export function buildTimelineBlocks(items: readonly Timelineitem[]): TimelineBlockItem[] {
-  const blocks: TimelineBlockItem[] = []
+export function buildTimelineBlocks(items: readonly Timelineitem[], running = false): TimelineBlockItem[] {
+  const blocks: TimelineLeaf[] = []
   const seenOne = new Set<string>()
   const seenTools = new Set<string>()
 
@@ -38,7 +40,7 @@ export function buildTimelineBlocks(items: readonly Timelineitem[]): TimelineBlo
     if (item.kind === 'tool') {
       // 连续的工具调用合并成一组；组内的卡片对象本身是稳定的（store 原地改属性）。
       const members: ToolCard[] = []
-      while (index < items.length && items[index].kind === 'tool') {
+      while (index < items.length && items[index].kind === 'tool' && items[index].turnId === item.turnId) {
         members.push(items[index] as ToolCard)
         index += 1
       }
@@ -67,12 +69,39 @@ export function buildTimelineBlocks(items: readonly Timelineitem[]): TimelineBlo
   for (const key of oneCache.keys()) if (!seenOne.has(key)) oneCache.delete(key)
   for (const key of toolsCache.keys()) if (!seenTools.has(key)) toolsCache.delete(key)
 
+  // Turn IDs prevent unrelated tasks being merged. The final answer, notices,
+  // questions and pending approvals remain outside the collapsible process.
+  const finalAnswers = new Map<string, Timelineitem>()
+  for (const item of items) if (item.turnId && item.kind === 'assistant') finalAnswers.set(item.turnId, item)
+  const activeTurn = running ? [...items].reverse().find(item => item.turnId)?.turnId : undefined
+  function processTurn(block: TimelineLeaf): string | undefined {
+    if (block.t === 'tools') return block.cards.some(c => c.status === 'awaiting_approval') ? undefined : block.cards[0].turnId
+    const item = block.item
+    return item.turnId && (item.kind === 'reasoning' || (item.kind === 'assistant' && finalAnswers.get(item.turnId) !== item)) ? item.turnId : undefined
+  }
+  const grouped: TimelineBlockItem[] = []
+  const seenProcess = new Set<string>()
+  for (let i = 0; i < blocks.length;) {
+    const turn = processTurn(blocks[i])
+    if (!turn) { grouped.push(blocks[i++]); continue }
+    const members: TimelineLeaf[] = []
+    while (i < blocks.length && processTurn(blocks[i]) === turn) members.push(blocks[i++])
+    const key = `process:${turn}:${members[0].key}`
+    const live = activeTurn === turn
+    const cached = processCache.get(key)
+    const same = cached && cached.running === live && cached.blocks.length === members.length && members.every((b, n) => cached.blocks[n] === b)
+    const block = same ? cached : { t: 'process' as const, key, blocks: members, running: live }
+    processCache.set(key, block)
+    seenProcess.add(key)
+    grouped.push(block)
+  }
+  for (const key of processCache.keys()) if (!seenProcess.has(key)) processCache.delete(key)
   // 结构完全没变时返回同一个数组：DynamicScroller 的 items watcher 也就不会跑。
-  if (blocks.length === lastBlocks.length && blocks.every((block, i) => block === lastBlocks[i])) {
+  if (grouped.length === lastBlocks.length && grouped.every((block, i) => block === lastBlocks[i])) {
     return lastBlocks
   }
-  lastBlocks = blocks
-  return blocks
+  lastBlocks = grouped
+  return grouped
 }
 
 export function transcriptTail(
@@ -83,8 +112,8 @@ export function transcriptTail(
   return items.slice(-limit).map(item => {
     if (item.kind !== 'user') return item
     return item.attachments?.length
-      ? { kind: item.kind, id: item.id, mid: item.mid, content: item.content, attachments: item.attachments }
-      : { kind: item.kind, id: item.id, mid: item.mid, content: item.content }
+      ? { kind: item.kind, id: item.id, mid: item.mid, content: item.content, attachments: item.attachments, ...(item.turnId ? { turnId: item.turnId } : {}) }
+      : { kind: item.kind, id: item.id, mid: item.mid, content: item.content, ...(item.turnId ? { turnId: item.turnId } : {}) }
   })
 }
 

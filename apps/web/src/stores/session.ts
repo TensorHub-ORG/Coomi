@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { RecoveryEvents } from '@/utils/sessionRecovery'
 import { buildAttachmentRequest, parseAttachmentRequest, type ChatAttachment } from '@/utils/attachments'
 import { ref, computed, shallowRef, watch, inject, hasInjectionContext, type Ref, type InjectionKey } from 'vue'
 import { createTransport, type Transport } from '@/bridge'
@@ -14,7 +15,7 @@ import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { isGlobalSession as isGlobalSessionId } from '@/bridge/life'
 import { router } from '@/router'
-import { pushStatus as pushControlStatus, pushTrace, setControlModeActive } from '@/bridge/controlFloat'
+import { pushStatus as publishControlStatus, pushTrace as publishTrace, setControlModeActive } from '@/bridge/controlFloat'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace, UserMessage } from './viewModel'
 
 function defineSessionStore(storeId: string, auxiliary = false) {
@@ -27,6 +28,18 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   const mode = ref<'agent' | 'life'>(sessions.find(sessionId.value)?.mode ?? 'agent')
   const timeline = ref<Timelineitem[]>(sessions.loadTranscript(sessionId.value))
   const runState = ref<RunState>('idle')
+  const restoring = ref(false)
+  const viewRevision = ref(0)
+  let selectionEpoch = 0
+  let restoreSerial = 0
+  let restoreAbort: AbortController | null = null
+  let pendingRestore: { id: string; epoch: number; promise: Promise<boolean> } | null = null
+  let restoreEvents = new RecoveryEvents<AgentEvent>()
+  const appliedThrough = new Map<string, number>()
+  const handledFileRequests = new Set<string>()
+  let replaying = false
+  function pushControlStatus(text: string) { if (!replaying) publishControlStatus(text) }
+  function pushTrace(title: string, text: string) { if (!replaying) publishTrace(title, text) }
   const usage = ref<{
     total: number; input: number; output: number; contextRatio: number
     contextUsed: number; contextWindow: number
@@ -67,6 +80,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   let floatReasoningTimer: ReturnType<typeof setTimeout> | null = null
 
   function queueFloatReasoning(chunk: string) {
+    if (replaying) return
     floatReasoningBuffer += chunk
     if (floatReasoningBuffer.length >= 300) { flushFloatReasoning(); return }
     if (floatReasoningTimer) return
@@ -111,7 +125,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   let failureNoticeCreated = false
   const transport = shallowRef<Transport | null>(null)
 
-  const isBusy = computed(() => runState.value !== 'idle')
+  const isBusy = computed(() => restoring.value || runState.value !== 'idle')
   const pendingApproval = computed(() => timeline.value.find((t): t is ToolCard => t.kind === 'tool' && t.status === 'awaiting_approval'))
   const pendingQuestion = computed(() => timeline.value.find((t): t is QuestionCard => t.kind === 'question' && !t.answered))
   /** 时间线里最新的用户消息（仅它可「编辑重发」）。 */
@@ -180,6 +194,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
     // 并行会话：目标会话已有活跃连接则复用（不打断后台任务），否则新建。
     // 这是并发与「切换不崩」的关键：绝不能 close 还在跑任务的旧连接。
     const targetSessionId = sessionId.value
+    if (!isDemoMode()) void restoreFromEngine(targetSessionId)
     const existing = transportPool.get(targetSessionId)
     if (existing) {
       transport.value = existing
@@ -208,11 +223,13 @@ function defineSessionStore(storeId: string, auxiliary = false) {
     transportPool.set(targetSessionId, t)
     transport.value = t
     connectedSessionId = targetSessionId
-    let lastEventSeq = 0
+    let opened = false
     t.onStateChange(async status => {
       if (transport.value !== t || sessionId.value !== targetSessionId) return
       connection.setStatus(status)
       if (status.state === 'open') {
+        if (opened && !isDemoMode()) void restoreFromEngine(targetSessionId)
+        opened = true
         await config.syncStartupPermission()
         if (transport.value !== t || sessionId.value !== targetSessionId) return
         t.send({ command: 'set_permission_mode', mode: config.permissionMode })
@@ -228,20 +245,18 @@ function defineSessionStore(storeId: string, auxiliary = false) {
       }
     })
     t.onMessage(env => {
-      // 只过滤「前台会话」：后台会话的事件照常 ack（引擎继续跑），但不刷新前台 UI。
       const isForeground = sessionId.value === targetSessionId
-      if (env.type === 'event' && env.payload.event_seq) {
+      if (env.type === 'event') {
         const seq = env.payload.event_seq
-        if (seq <= lastEventSeq) {
-          t.send({ command: 'ack_event', event_seq: seq })
-          return
+        if (isForeground && restoring.value) restoreEvents.push(env.payload)
+        else if (isForeground && (typeof document === 'undefined' || !document.hidden) && (!seq || seq > (appliedThrough.get(targetSessionId) ?? 0))) {
+          onInbound(env)
+          if (seq) appliedThrough.set(targetSessionId, seq)
         }
-        lastEventSeq = seq
-        if (isForeground) onInbound(env)
-        t.send({ command: 'ack_event', event_seq: seq })
-        return
-      }
-      if (isForeground) onInbound(env)
+        // Acknowledgements are transport-only. The engine's view journal still
+        // contains background events when this store later requests a snapshot.
+        if (seq) t.send({ command: 'ack_event', event_seq: seq })
+      } else if (isForeground && env.type === 'error') onInbound(env)
     })
     t.connect()
   }
@@ -270,9 +285,38 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   }
 
   function applyEvent(ev: AgentEvent) {
+    const before = timeline.value.length
     switch (ev.event_type) {
+      case 'assistant_message': {
+        if (ev.reasoning) {
+          const existing = timeline.value.find(item => item.kind === 'reasoning' && item.mid === ev.message_id)
+            ?? [...timeline.value].reverse().find(item => item.kind === 'reasoning' && !item.mid)
+          if (existing?.kind === 'reasoning') { existing.mid = ev.message_id; existing.content = ev.reasoning; existing.streaming = false; existing.state = ev.reasoning_state }
+          else timeline.value.push({ kind: 'reasoning', id: nextId(), mid: ev.message_id, content: ev.reasoning, streaming: false, state: ev.reasoning_state, expanded: false })
+        }
+        if (!ev.content) break
+        let item = timeline.value.find((item): item is AssistantMessage => item.kind === 'assistant' && item.mid === ev.message_id)
+        if (!item) item = [...timeline.value].reverse().find((item): item is AssistantMessage => item.kind === 'assistant' && !item.mid)
+        if (item) { item.mid = ev.message_id; item.content = ev.content }
+        else timeline.value.push({ kind: 'assistant', id: nextId(), mid: ev.message_id, content: ev.content, streaming: false })
+        endAssistantStream()
+        break
+      }
+      case 'user_message': {
+        if (timeline.value.some(item => item.kind === 'user' && item.mid === ev.message_id)) break
+        const parsed = parseAttachmentRequest(ev.content)
+        const optimistic = timeline.value.find((item): item is UserMessage => item.kind === 'user' && !item.mid && item.content === parsed.text)
+          ?? timeline.value.find((item): item is UserMessage => item.kind === 'user' && !item.mid)
+        if (optimistic) optimistic.mid = ev.message_id
+        else {
+          endAssistantStream()
+          timeline.value.push({ kind: 'user', id: nextId(), mid: ev.message_id, content: parsed.text, attachments: parsed.attachments })
+        }
+        break
+      }
       // 兜底：turn_end 之后又开始吐字（引擎续了一轮），状态得跟着回到忙。
-      case 'text_chunk': connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; appendAssistant(ev.content); pushControlStatus('正在输出'); break
+      case 'text_chunk': finishReasoning(); connection.setRetry(null); if (runState.value === 'idle') runState.value = 'thinking'; appendAssistant(ev.content); pushControlStatus('正在输出'); break
+      case 'reasoning_end': finishReasoning(); break
       case 'reasoning_chunk':
         if (runState.value === 'idle') runState.value = 'thinking'
         appendReasoning(ev.content)
@@ -361,6 +405,8 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         runState.value = 'awaiting_question'
         break
       case 'file_transfer_request':
+        if (handledFileRequests.has(ev.request_id)) break
+        handledFileRequests.add(ev.request_id)
         if (auxiliary) auxiliaryTransfers.set(ev.request_id, paths => completeFileTransfer(ev.request_id, paths))
         if (ev.operation === 'import') {
           window.CoomiAndroid?.importFilesForRequest?.(ev.request_id)
@@ -395,13 +441,19 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         break
       }
       case 'compression_started': pushNotice('info', ev.automatic ? '正在自动压缩上下文…' : '正在手动压缩上下文，完整历史将保留…'); break
-      case 'compression': pushNotice('info', `上下文已压缩 ${fmtTokens(ev.before)} → ${fmtTokens(ev.after)}`); break
+      case 'compression': {
+        const id = ev.summary_id ? `compression:${ev.summary_id}` : nextId()
+        if (!timeline.value.some(item => 'id' in item && item.id === id)) {
+          timeline.value.push({ kind: 'notice', id, tone: 'success', text: `上下文已压缩 ${fmtTokens(ev.before)} → ${fmtTokens(ev.after)}`, detail: ev.summary })
+        }
+        break
+      }
       case 'connection_retry': connection.setRetry(`${ev.message}（${ev.attempt}/${ev.max_attempts}）`); break
       case 'stream_reset':
         endAssistantStream()
         while (timeline.value.length > 0) {
           const last = timeline.value[timeline.value.length - 1]
-          if (last.kind === 'assistant' || last.kind === 'reasoning') timeline.value.pop()
+          if ((last.kind === 'assistant' || last.kind === 'reasoning') && !last.mid) timeline.value.pop()
           else break
         }
         break
@@ -418,7 +470,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         }
         break
       }
-      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); if (!auxiliary) void router.push(ev.route); break
+      case 'configuration_required': endAssistantStream(); runState.value = 'idle'; pushNotice('warn', ev.message); if (!auxiliary && !replaying) void router.push(ev.route); break
       case 'agent_cancelled': endAssistantStream(); cancelRunningTools(); pushNotice('warn', '已停止本轮执行'); break
       case 'bg_task_detached': pushNotice('info', `↪ 已转入后台任务 #${ev.task_id}（${ev.tool_name}）`); break
       case 'bg_task_completed': pushNotice(ev.is_error ? 'error' : 'success', `${ev.is_error ? '✕' : '✓'} 后台任务 #${ev.task_id} ${ev.is_error ? '失败' : '完成'}`); break
@@ -486,9 +538,16 @@ function defineSessionStore(storeId: string, auxiliary = false) {
         break
       }
     }
+    // The durable user message defines the turn boundary in both live and restored views.
+    const user = [...timeline.value].reverse().find(item => item.kind === 'user')
+    const turnId = user?.turnId || (user && 'id' in user ? user.id : '')
+    for (let i = before; i < timeline.value.length; i++) timeline.value[i].turnId ||= turnId
   }
 
   function activateSession(id: string) {
+    selectionEpoch += 1
+    restoreAbort?.abort()
+    restoring.value = !isDemoMode()
     sessionId.value = id
     mode.value = resolveLifeMode(id)
     // 顶栏模型显示跟随会话：每个会话保存自己的模型（sessions.setModel 记录在 meta）。
@@ -552,6 +611,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   }
 
   function sendMessage(text: string, displayText?: string, morph = false, attachments?: ChatAttachment[]): string | null {
+    if (restoring.value) return null
     const trimmed = buildAttachmentRequest(text, attachments ?? [])
     const visible = displayText?.trim() ?? text.trim()
     if (!trimmed) return null
@@ -691,63 +751,111 @@ function defineSessionStore(storeId: string, auxiliary = false) {
     connect()
   }
 
-  /** 从引擎 /api/sessions/{id} 恢复完整历史；成功返回 true。 */
-  async function restoreFromEngine(id: string): Promise<boolean> {
-    try {
-      const res = await authedFetch(`/api/sessions/${id}`)
-      if (!res.ok) return false
-      const session = await res.json()
-      mode.value = resolveLifeMode(id)
-      sessions.setMode(id, mode.value)
-      const messages = (session.messages ?? []) as ChatMessageJson[]
-      if (messages.length === 0 && !((session.archive ?? []) as ChatMessageJson[]).length) return false
-      if (messages.some(m => m.compaction_summary) || ((session.archive ?? []) as ChatMessageJson[]).length > 0) {
-        // 上下文已压缩：引擎磁盘 archive 保留压缩前完整历史（新增字段），
-        // 其次本机 localStorage 缓存，两者都拿不到才退回摘要。
-        const archive = (session.archive ?? []) as ChatMessageJson[]
-        if (archive.length > 0) {
-          const detail = messages.find(m => m.compaction_summary)?.content ?? ''
-          timeline.value = [
-            ...messagesToTimeline([
-              ...archive,
-              ...messages.filter(m => !m.compaction_summary && !archive.some(a => a.id && a.id === m.id)),
-            ]),
-            { kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 完整历史已保留）', detail },
-          ]
+  /** Restore one coherent view, then apply events newer than its watermark. */
+  function restoreFromEngine(id: string): Promise<boolean> {
+    const epoch = selectionEpoch
+    if (pendingRestore?.id === id && pendingRestore.epoch === epoch) return pendingRestore.promise
+    restoreAbort?.abort()
+    const controller = new AbortController()
+    restoreAbort = controller
+    const serial = ++restoreSerial
+    restoring.value = true
+    const active = () => serial === restoreSerial && epoch === selectionEpoch && id === sessionId.value
+    const promise = (async () => {
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          restoreEvents = new RecoveryEvents<AgentEvent>()
+          const timeout = setTimeout(() => controller.abort(), 15000)
+          let res: Response
+          try { res = await authedFetch(`/api/sessions/${id}/snapshot`, { signal: controller.signal }) }
+          finally { clearTimeout(timeout) }
+          if (!active()) return false
+          let snapshot: SessionSnapshot
+          if (res.status === 404) {
+            // Compatibility with an engine installed before the snapshot API.
+            res = await authedFetch(`/api/sessions/${id}`, { signal: controller.signal })
+            if (!res.ok) return false
+            snapshot = { session: await res.json(), events: [], event_seq: 0, running: false }
+          } else {
+            if (!res.ok) return false
+            const data = await res.json()
+            snapshot = data.session ? data : { session: data, events: [], event_seq: 0, running: false }
+          }
+          if (!active()) return false
+          if (restoreEvents.overflow) continue
+          endAssistantStream()
+          usage.value = null
+          retryConfirmation.value = null
+          turnToolTrace = []; consecutiveToolFailures = 0; maxConsecutiveToolFailures = 0; failureNoticeCreated = false
+          loop.value = { active: false, currentStep: 0, totalSteps: 0, status: '' }
+          const session = snapshot.session
+          const messages = session.messages ?? []
+          const archive = session.archive ?? []
+          const merged = archive.length ? [...archive, ...messages.filter(m => !m.compaction_summary && !archive.some(a => a.id && a.id === m.id))] : messages
+          timeline.value = messagesToTimeline(merged)
+          if (archive.length) {
+            timeline.value.push({ kind: 'notice', id: `compression:${messages.find(m => m.compaction_summary)?.id}`, tone: 'info', text: '（上下文已压缩 · 完整历史已保留）', detail: messages.find(m => m.compaction_summary)?.content ?? '' })
+          }
+          mode.value = resolveLifeMode(id)
+          sessions.setMode(id, mode.value)
+          replaying = true
+          try {
+            applyEvent({ event_type: 'session_loaded', session_id: id, cwd: session.cwd ?? '', usage: { input_tokens: session.usage?.input_tokens ?? 0, output_tokens: session.usage?.output_tokens ?? 0, total_tokens: session.usage?.total_tokens ?? 0 } })
+            for (const event of snapshot.events ?? []) applyEvent(event)
+            if (!snapshot.running) { endAssistantStream(); cancelRunningTools(); runState.value = 'idle' }
+            else if (pendingApproval.value) runState.value = 'awaiting_approval'
+            else if (pendingQuestion.value) runState.value = 'awaiting_question'
+            else runState.value = 'thinking'
+            const watermark = snapshot.event_seq ?? 0
+            appliedThrough.set(id, watermark)
+            for (const event of restoreEvents.after(watermark)) {
+              applyEvent(event)
+              appliedThrough.set(id, event.event_seq!)
+            }
+            if (snapshot.truncated) pushNotice('info', '运行中内容过长，部分过程预览已省略；完整结果以会话记录为准。')
+          } finally { replaying = false }
           return true
         }
-        const cached = sessions.loadTranscript(id)
-        if (cached && cached.length > 0) {
-          const detail = messages.find(m => m.compaction_summary)?.content ?? ''
-          timeline.value = [
-            ...cached,
-            { kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 点击查看摘要）', detail },
-          ]
-          return true
+        throw new Error('恢复期间事件过多，请重新打开会话')
+      } catch (error) {
+        if (active() && !controller.signal.aborted) console.warn('session restore failed', error)
+        return false
+      } finally {
+        if (active()) {
+          restoring.value = false
+          viewRevision.value += 1
+          pendingRestore = null
+          persistSoon()
         }
       }
-      timeline.value = messagesToTimeline(messages)
-      return true
-    } catch {
-      return false
-    }
+    })()
+    pendingRestore = { id, epoch, promise }
+    return promise
+  }
+
+  function resumeFromBackground() {
+    if ((typeof document === 'undefined' || !document.hidden) && !isDemoMode()) void restoreFromEngine(sessionId.value)
   }
 
   /** 把引擎磁盘会话消息转换为前端时间线（含工具调用卡片与结果回填）。 */
   function messagesToTimeline(messages: ChatMessageJson[]): Timelineitem[] {
     const items: Timelineitem[] = []
+    let turnId = ''
     const toolResults = new Map<string, string>()
     const toolImages = new Map<string, string[]>()
     for (const m of messages) {
       if (m.internal) continue
       if (m.compaction_summary) {
-        items.push({ kind: 'notice', id: nextId(), tone: 'info', text: '（上下文已压缩 · 点击查看摘要）', detail: m.content ?? '' })
+        items.push({ kind: 'notice', id: `compression:${m.id}`, tone: 'info', text: '（上下文已压缩 · 点击查看摘要）', detail: m.content ?? '' })
         continue
       }
+      const start = items.length
       if (m.role === 'user') {
+        turnId = m.id || nextId()
         const parsed = parseAttachmentRequest(m.content)
         items.push({ kind: 'user', id: nextId(), mid: m.id ?? '', content: parsed.text, attachments: parsed.attachments })
       } else if (m.role === 'assistant') {
+        if (m.reasoning) items.push({ kind: 'reasoning', id: `reasoning:${m.id || nextId()}`, mid: m.id, content: m.reasoning, expanded: false, streaming: false, state: m.reasoning_state })
         if (m.content) items.push({ kind: 'assistant', id: nextId(), mid: m.id ?? '', content: m.content, streaming: false, life: m.life_proactive === true })
         for (const tc of m.tool_calls ?? []) {
           items.push({
@@ -765,6 +873,7 @@ function defineSessionStore(storeId: string, auxiliary = false) {
             `data:${img.media_type};base64,${img.data}`))
         }
       }
+      for (let i = start; i < items.length; i++) items[i].turnId = turnId
     }
     for (const item of items) {
       if (item.kind === 'tool') {
@@ -795,29 +904,23 @@ function defineSessionStore(storeId: string, auxiliary = false) {
    * 引擎不可用才回退本机 localStorage 记录。
    */
   async function openSession(id: string) {
-    if (id === sessionId.value) return
+    if (id === sessionId.value) { resumeFromBackground(); return }
     flushPersistence()
     endAssistantStream()
     usage.value = null
     loop.value = { active: false, currentStep: 0, totalSteps: 0, status: '' }
     pendingEdit.value = null
     undoConfirm.value = null
-      // 切换会话立即回到空闲态，避免把旧会话的「正在对话」带到新会话顶部显示。
-      runState.value = 'idle'
+    runState.value = 'idle'
     const targetId = isUuid(id) ? id : sessions.migrateId(id, createSessionId())
     activateSession(targetId)
-    const restoredFromEngine = await restoreFromEngine(targetId)
-    if (!restoredFromEngine) {
-      const restored = sessions.loadTranscript(targetId)
-      timeline.value = restored
-      if (restored.length > 0) {
-        timeline.value.push({
-          kind: 'notice', id: nextId(), tone: 'info',
-          text: '已恢复本机记录。若引擎重启过，模型这边的上下文可能已经清空。',
-        })
-      }
-    }
+    const epoch = selectionEpoch
+    timeline.value = []
     connect()
+    if (isDemoMode()) { restoring.value = false; return }
+    const restored = await restoreFromEngine(targetId)
+    if (epoch !== selectionEpoch || sessionId.value !== targetId) return
+    if (!restored) timeline.value = sessions.loadTranscript(targetId)
   }
 
   function deleteSession(id: string) {
@@ -918,11 +1021,14 @@ function defineSessionStore(storeId: string, auxiliary = false) {
     }
     currentAssistant.content += content
   }
-  function endAssistantStream() { if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null } }
+  function endAssistantStream() { finishReasoning(); if (currentAssistant) { currentAssistant.streaming = false; currentAssistant = null } }
   function appendReasoning(content: string) {
     const last = timeline.value[timeline.value.length - 1]
     if (last && last.kind === 'reasoning') { (last as ReasoningBlock).content += content }
-    else { timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false }) }
+    else { timeline.value.push({ kind: 'reasoning', id: nextId(), content, expanded: false, streaming: true }) }
+  }
+  function finishReasoning() {
+    for (const item of timeline.value) if (item.kind === 'reasoning' && item.streaming) item.streaming = false
   }
   function patchTool(callId: string, fn: (c: ToolCard) => void): boolean {
     for (let i = timeline.value.length - 1; i >= 0; i--) { const t = timeline.value[i]; if (t.kind === 'tool' && t.callId === callId) { fn(t); return true } }
@@ -935,13 +1041,22 @@ function defineSessionStore(storeId: string, auxiliary = false) {
 
   function toggleLifeStats() { lifeStatsOpen.value = !lifeStatsOpen.value }
 
-  return { sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeStatsOpen, toggleLifeStats, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, completeSendMorph, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setProductionMode, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide }
+  return { restoring, viewRevision, resumeFromBackground, sessionId, mode, timeline, runState, usage, retryConfirmation, cwd, loop, isBusy, pendingEdit, undoConfirm, lastUserMessage, lastAssistantMessage, pendingApproval, pendingQuestion, lifeUnread, lifeUnreadName, lifeStatsOpen, toggleLifeStats, lifeDelivering, isGlobalSession, resolveLifeMode, syncLifeMode, refreshLifeUnread, deliverLife, autoDeliverLifeIfReady, connect, reconnect, disconnect, flushPersistence, sendMessage, completeSendMorph, cancel, approve, answerQuestion, setPermissionMode, setReasoningEffort, setProductionMode, setMaxToolRounds, setSessionMode, togglePlanMode, selectModel, retryInterruptedTurn, dismissRetry, completeFileTransfer, newSession, openSession, deleteSession, setSessionCwd, startEditMessage, cancelEditMessage, requestUndo, confirmUndo, cancelUndo, undoTurn, sendGuide }
   })
 }
 
 function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n) }
 
 /** 生命体待投递问候（/api/life/unread 返回的 pending 项）。 */
+interface SessionSnapshot {
+  session: { messages?: ChatMessageJson[]; archive?: ChatMessageJson[]; cwd?: string; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } }
+  events: AgentEvent[]
+  event_seq: number
+  running: boolean
+  phase?: string
+  truncated?: boolean
+}
+
 interface LifeUnreadItem {
   id: string
   text: string
@@ -1041,6 +1156,8 @@ function persistActiveSessionId(id: string) {
 
 /** 引擎磁盘上会话文件的原始消息结构（与 coomi-engine 的 ChatMessage 对应）。 */
 interface ChatMessageJson {
+  reasoning?: string
+  reasoning_state?: string
   id?: string
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string

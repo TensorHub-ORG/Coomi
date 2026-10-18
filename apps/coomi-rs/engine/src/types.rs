@@ -101,6 +101,11 @@ pub struct ChatMessage {
     pub id: String,
     pub role: Role,
     pub content: String,
+    /// Display-only reasoning; never replayed to a provider or summarizer.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reasoning: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_state: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCall>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,6 +147,8 @@ impl ChatMessage {
             content: sanitize_long_encoded_data(&content.into()),
             tool_calls,
             tool_call_id: None,
+            reasoning: String::new(),
+            reasoning_state: None,
             compaction_summary: false,
             internal: false,
             life_proactive: false,
@@ -157,6 +164,8 @@ impl ChatMessage {
             content: sanitize_long_encoded_data(&content.into()),
             tool_calls: Vec::new(),
             tool_call_id: Some(call_id.into()),
+            reasoning: String::new(),
+            reasoning_state: None,
             compaction_summary: false,
             internal: false,
             life_proactive: false,
@@ -172,6 +181,8 @@ impl ChatMessage {
             content: sanitize_long_encoded_data(&content.into()),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning: String::new(),
+            reasoning_state: None,
             compaction_summary: false,
             internal: false,
             life_proactive: false,
@@ -1001,6 +1012,8 @@ pub enum AgentEvent {
     Text(String),
     TextDelta(String),
     ReasoningDelta(String),
+    ReasoningCompleted,
+    PersistenceFailed(String),
     ContextUpdated(ContextStatus),
     /// Usage reported by one completed model request. This is emitted after
     /// every tool-loop model call so observers can refresh live statistics.
@@ -1015,6 +1028,8 @@ pub enum AgentEvent {
         automatic: bool,
         before_tokens: u64,
         after_tokens: u64,
+        summary_id: String,
+        summary: String,
     },
     PlanUpdated(PlanState),
     LoopUpdated(LoopState),

@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import BillingDetails from './BillingDetails.vue'
+import ContextRing from './ContextRing.vue'
+import { contextSegments, formatDurationMs as formatDuration } from '@/utils/contextUsage'
 import { useSessionStore } from '@/stores/session'
 defineProps<{ runtimeInfo: unknown; envBadgeClass: string; envBadgeLabel: string; envDetail: string }>()
 defineEmits<{ path: [] }>()
 const session = useSessionStore()
 const effortLabels = { auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高' } as const
-const categoryLabels = { system_tools: '系统工具', messages: '消息', skills: '技能', mcp_tools: 'MCP 工具', system_prompt: '系统提示', other: '其他' } as const
-const categoryTotal = computed(() => Object.values(session.usage?.contextCategories ?? {}).reduce((sum: number, value) => sum + (value ?? 0), 0))
-function categoryPercent(value: number | undefined): string {
-  return categoryTotal.value > 0 ? `${((value ?? 0) / categoryTotal.value * 100).toFixed(1)}%` : '--'
-}
+const categories = computed(() => contextSegments(session.usage?.contextUsed ?? 0, session.usage?.contextWindow ?? 0, session.usage?.contextCategories))
 
 function formatTokens(value: number): string {
   if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M'
@@ -20,16 +18,13 @@ function formatTokens(value: number): string {
 function formatPercent(value: number | null | undefined): string {
   return value == null ? '暂无缓存数据' : `${(value * 100).toFixed(1)}%`
 }
-function formatDuration(value: number | null | undefined): string {
-  if (value == null) return '--'
-  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`
-}
+
 
 </script>
 <template><div class="usage-details">
-      <p class="usage-title">上下文用量</p>
+      <div class="context-heading"><p class="usage-title">上下文用量</p><ContextRing :used="session.usage?.contextUsed ?? 0" :window="session.usage?.contextWindow ?? 0" :categories="session.usage?.contextCategories" /></div>
       <div v-if="session.usage" class="usage-stats">
-        <div><span>会话 Token</span><strong>{{ formatTokens(session.usage.total) }}</strong></div>
+        <div><span>会话累计 Token</span><strong>{{ formatTokens(session.usage.total) }}</strong></div>
         <div><span>输出速度</span><strong>{{ session.usage.turnRateTps > 0 ? `${session.usage.turnRateTps.toFixed(1)} token/s` : '--' }}</strong></div>
         <div><span>本轮耗时</span><strong>{{ session.usage.turnElapsedMs > 0 ? formatDuration(session.usage.turnElapsedMs) : '--' }}</strong></div>
         <div><span>本轮输出 token</span><strong>{{ formatTokens(session.usage.turnOutputTokens) }}</strong></div>
@@ -39,10 +34,11 @@ function formatDuration(value: number | null | undefined): string {
       </div>
       <p v-else class="usage-empty">此对话尚无用量数据</p>
       <template v-if="session.usage">
-        <p class="usage-subtitle">上下文构成</p>
+        <p class="usage-subtitle">上下文构成（估算）</p>
         <div class="category-grid">
-          <div v-for="(label, category) in categoryLabels" :key="category"><span>{{ label }}</span><strong>{{ categoryPercent(session.usage.contextCategories[category]) }}</strong></div>
+          <div v-for="category in categories" :key="category.key"><span><i :style="{ background: category.color }" />{{ category.label }}</span><strong>{{ (category.share * 100).toFixed(1) }}%</strong></div>
         </div>
+        <p class="usage-estimate">分类显示已用上下文的估算组成；环形按窗口容量绘制，灰色为剩余空间。会话累计用量单独统计。</p>
         <p class="usage-subtitle">各推理强度均轮统计</p>
         <div class="effort-table">
           <div class="effort-head"><span>强度</span><span>命中</span><span>耗时</span><span>用量</span></div>
@@ -68,6 +64,9 @@ function formatDuration(value: number | null | undefined): string {
 <BillingDetails />
 </div></template>
 <style scoped>
+.context-heading { display:flex; align-items:center; justify-content:space-between; }
+.category-grid i { display:inline-block; width:7px; height:7px; margin-right:4px; border-radius:50%; }
+.usage-estimate { font-size:11px; line-height:1.6; color:var(--text-3); }
 .usage-details { min-height:0; overflow:auto; }
 .usage-title { margin: 0 0 9px; font-size: 12px; font-weight: 650; color: var(--text-2); }
 .usage-stats { display: grid; gap: 8px; }

@@ -103,3 +103,31 @@ test('chat templates retain dynamic measurement and lazy image contracts', async
   assert.match(toolCard, /loading="lazy"\s+decoding="async"/)
   assert.match(fileInline, /loading="lazy"\s+decoding="async"/)
 })
+
+
+test('turn processes preserve final answers, pending approvals, attachments and stable references', () => {
+  const items: Timelineitem[] = [
+    { kind:'user',id:'u',mid:'u',content:'task',turnId:'u',attachments:[{name:'a',path:'/a',size:1,mimeType:'text/plain'}] },
+    { kind:'reasoning',id:'r',content:'thought',expanded:false,streaming:true,turnId:'u' },
+    { ...tool('t'),turnId:'u' },
+    { kind:'assistant',id:'middle',mid:'m',content:'working',streaming:false,turnId:'u' },
+    { ...tool('approval'),status:'awaiting_approval',turnId:'u' },
+    { kind:'question',callId:'q',questions:[],answered:false,turnId:'u' },
+    { kind:'assistant',id:'final',mid:'f',content:'answer',streaming:false,turnId:'u' },
+  ]
+  const live = buildTimelineBlocks(items, true)
+  assert.deepEqual(live.map(b=>b.t), ['one','process','tools','one','one'])
+  assert.equal(live[1].t === 'process' && live[1].running, true)
+  assert.equal(buildTimelineBlocks(items, true), live)
+  assert.equal(live.at(-1)?.t === 'one' && live.at(-1).item.content, 'answer')
+  const done = buildTimelineBlocks(items)
+  assert.equal(done[1].t === 'process' && done[1].running, false)
+  assert.equal(done[0], live[0])
+  assert.equal(items[0].attachments?.[0].name, 'a')
+})
+
+test('distinct turn IDs cannot collapse tools across task boundaries', () => {
+  const blocks = buildTimelineBlocks([{...tool('a'),turnId:'one'},{...tool('b'),turnId:'two'}])
+  assert.equal(blocks.length, 2)
+  assert.notEqual(blocks[0].key, blocks[1].key)
+})

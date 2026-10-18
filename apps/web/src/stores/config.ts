@@ -128,8 +128,8 @@ export const PERMISSION_MODES: { mode: PermissionMode; label: string; desc: stri
   { mode: 'minimal', label: '极简', desc: '只提供 shell 工具，适合纯命令行任务' },
 ]
 
-export type ThemeMode = 'system' | 'light' | 'dark' | 'book' | 'orange' | 'ink' | 'abyss' | 'ember' | 'celadon' | 'linen'
-const THEME_VALUES: ThemeMode[] = ['system', 'light', 'dark', 'book', 'orange', 'ink', 'abyss', 'ember', 'celadon', 'linen']
+export type ThemeMode = 'system' | 'light' | 'dark' | 'book' | 'orange' | 'ink' | 'abyss' | 'ember' | 'celadon' | 'linen' | 'terminal'
+const THEME_VALUES: ThemeMode[] = ['system', 'light', 'dark', 'book', 'orange', 'ink', 'abyss', 'ember', 'celadon', 'linen', 'terminal']
 export const THEME_MODES: { mode: ThemeMode; label: string; desc: string }[] = [
   { mode: 'system', label: '跟随系统', desc: '与手机系统深浅色保持一致' },
   { mode: 'light', label: '明亮模式', desc: '始终使用浅色界面' },
@@ -140,6 +140,7 @@ export const THEME_MODES: { mode: ThemeMode; label: string; desc: string }[] = [
   { mode: 'abyss', label: '深海', desc: '深海蓝黑底面与清冷青蓝点缀' },
   { mode: 'ember', label: '炭褐', desc: '炭黑褐底面与余烬铜色点缀' },
   { mode: 'celadon', label: '青瓷', desc: '青瓷浅灰底面与釉绿色点缀' },
+  { mode: 'terminal', label: '黑白终端', desc: '黑白界面与等宽字体' },
   { mode: 'linen', label: '亚麻', desc: '自然亚麻白底面与沉静靛色点缀' },
 ]
 

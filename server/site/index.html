@@ -590,6 +590,15 @@
       display: inline-flex !important;
     }
 
+    [data-test-download] {
+      display: none !important;
+    }
+
+    body[data-platform-view="android"] [data-test-download="android"],
+    body[data-platform-view="desktop"] [data-test-download="desktop"] {
+      display: inline-flex !important;
+    }
+
     [data-platform-panel] {
       display: none;
     }
@@ -655,11 +664,12 @@
             <span class="download-arrow" aria-hidden="true">↓</span>
             <span data-download-label="android">下载 APK</span>
           </a>
-          <a id="downloadButtonDesktop" class="button button-disabled" aria-disabled="true" tabindex="-1" data-download-disabled data-download-button="desktop">
+          <a id="downloadButtonDesktop" class="button button-primary" href="https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.3_x64-setup.exe" data-stat-action="download-test" data-download-button="desktop">
             <span class="download-arrow" aria-hidden="true">↓</span>
-            <span data-download-label="desktop">下载 Windows 版</span>
+            <span data-download-label="desktop">下载 Windows 测试版</span>
           </a>
-          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.5.0-test.1.apk" data-stat-action="download-test">下载测试版</a>
+          <a class="button button-secondary" href="https://updates.septemc.com/coomi/android_test/Coomi-Android-arm64-v1.5.0-test.4.apk" data-stat-action="download-test" data-test-download="android">移动端测试版 v1.5.0-test.4</a>
+          <a class="button button-secondary" href="https://updates.septemc.com/coomi/desktop/Coomi_1.0.0-test.2_x64-setup.exe" data-stat-action="download-test" data-test-download="desktop" download>桌面端测试版</a>
         </div>
         <p class="star-link"><a href="https://github.com/TensorHub-ORG/Coomi" target="_blank" rel="noreferrer">去 GitHub 上为我们点颗星 →</a></p>
       </div>
@@ -989,26 +999,44 @@
               </details>
       </div>
       <div data-channel-panel="test" hidden>
-<h2 class="changelog-title">v1.5.0-test.1 更新说明【测试】</h2>
-<p class="changelog-sub">2026-10-10 发布</p>
+<h2 class="changelog-title">v1.5.0-test.4 更新说明【测试】</h2>
+<p class="changelog-sub">2026-10-19 发布</p>
 <ul class="changelog-list">
-<li>全面修复 Agent 上下文管理：移除完整会话历史的重复注入，手动压缩不再将私人会话写入项目持久记忆，旧版自动生成的会话记忆不再自动加载。</li>
-<li>会话设置新增自动上下文压缩百分比阈值，默认 80%，可自定义 10–95%；接近模型容量上限时提前保护。</li>
-<li>重构手动 /compact：长历史按顺序分段总结、保留完整存档，空摘要或压缩失败时保留原历史；远程压缩接口不支持时切换本地摘要，界面显示压缩进度。</li>
-<li>修复压缩后重新打开会话遗漏后续消息的问题，完整历史与压缩后的新消息合并展示并去重。</li>
-<li>每个工具完成后立即保存结果，检查点写入失败时停止任务；未确认结果的中断操作明确标记为结果未知，恢复前检查实际状态，降低重复执行风险。</li>
-<li>修复父任务结束或取消后子 Agent 继续运行的问题，同步取消子任务并清理其工具进程，不影响其他会话；修复子任务立即失败时状态残留和并发输出缺字。</li>
-<li>子 Agent 与笔记读取权限随当前会话及追加用户消息同步，修复继承过期上下文和笔记授权不更新的问题；子 Agent 并发数遵循设置。</li>
-<li>修复工具执行后 Hook 报错导致成功操作被误报为失败的问题；含修改操作的工具批次串行执行，避免路径别名或目录关系造成读写冲突。</li>
-<li>收紧文本 XML 工具调用识别，只接受独立的调用封装，普通回答、引用和代码示例不再自动触发工具执行。</li>
-<li>这是测试版本，建议先备份重要数据。测试版与正式版下载入口独立，应用内更新页面会明确标注测试通道。</li>
+<li>发布日期：2026-10-19。Android 7.0+，仅 ARM64。构建号：94。</li>
+<li>本版本通过测试通道发布，包含实验性改动，可能存在不稳定情况。</li>
+<li>启动时可修复缺失的部署标记和过期引擎软链，通过健康检查后再进入运行状态；失败时提供日志信息。</li>
+<li>精确识别并清理本应用的残留引擎，保留原有会话和运行环境。</li>
+<li>修复切换会话、后台返回和断线重连后的记录缺失、重复与闪动，主会话和辅助会话均可恢复运行过程。</li>
+<li>模型等待与只读工具允许并行，内置修改型工具通过互斥执行保护共享工作区。</li>
+<li>思考随会话保存，重进会话可查看；正常停止和请求失败会保留已收到的部分思考，并标注中断或未完成状态。</li>
+<li>自动重试、图片降级和超窗恢复会清理失败尝试，避免思考和文字串段；保存的思考仅用于展示。</li>
+<li>同一轮的思考、工具和中间回复合并为执行过程，运行时展开，结束后默认折叠；最终回答、待审批工具和用户提问保持可见。</li>
+<li>思考运行时显示约 3.5 行预览，完成状态由事件驱动，支持手动展开全文。</li>
+<li>压缩完成后立即展示摘要；重连时按摘要标识去重，历史中仍能查看摘要与完整会话。</li>
+<li>新增固定分类颜色的上下文分段环和统计面板，区分窗口占用、估算组成和会话累计 Token，修正轮次耗时与输出速度的计时。</li>
+<li>较早的超长工具输出在模型请求中保留首尾，完整会话记录与最近一条工具结果继续保留；图片与结构化内容单独处理。</li>
+<li>新增黑白终端主题和等宽字体，覆盖聊天与原生界面，兼容已有自定义外观。</li>
+<li>保留模式面板及消息入场动效，统一遵循“关闭所有动画”与系统减少动态效果设置。</li>
+<li>新增更新提醒总开关，手动检查始终可用；测试版默认查看测试通道，下载前明确提示测试性质。</li>
+<li>更新说明支持 Markdown 和普通版本标题，默认只展示最新记录，历史记录点击展开。</li>
+<li>本次仅更新测试渠道，不替换正式版下载。</li>
+<li>版本名沿用 1.5.0-test.4，构建号升至 94，已安装较早构建的用户可覆盖升级。</li>
+<li>长时间运行的交互 shell 会持有修改互斥锁；外部终端和 Shizuku 进程不在内置工具锁的保护范围内。</li>
 </ul>
 <details class="changelog-history">
 <summary>展开全部更新记录</summary>
 <div class="history-inner">
-<h2 class="changelog-title">v1.4.9-test.2 更新说明【测试】</h2>
-<p class="changelog-sub">2026-10-08 发布 · 基于 1.5.1o2 底座，仅测试通道</p>
+<h2 class="changelog-title">v1.5.0-test.1 更新说明【测试】</h2>
+<p class="changelog-sub">2026-10-10 发布 · 仅测试通道</p>
 <ul class="changelog-list">
+<li>全面修复 Agent 上下文管理：移除完整会话历史的重复注入，手动压缩不再将私人会话写入项目持久记忆。</li>
+<li>会话设置新增自动上下文压缩阈值，默认 80%，接近模型容量上限时提前保护。</li>
+<li>重构手动 <code>/compact</code>：长历史按顺序分段总结并保留完整存档，压缩失败时保留原历史。</li>
+<li>修复压缩后重新打开会话遗漏后续消息的问题，完整历史与压缩后的新消息合并展示并去重。</li>
+<li>工具完成后立即保存结果；未确认结果的中断操作明确标记为结果未知，恢复前检查实际状态，降低重复执行风险。</li>
+<li>修复父任务结束或取消后子 Agent 继续运行的问题，同步取消子任务并清理其工具进程。</li>
+<li>修复工具执行后 Hook 报错导致成功操作被误报为失败的问题，并支持修改工具的批次串行执行。</li>
+<li>收紧文本 XML 工具调用识别，只接受独立调用封装，普通回答、引用和代码示例不再自动触发工具执行。</li>
 <li>修复会话最右侧的宽阴影：关闭的产物抽屉不再向页面内投射阴影，保留正常滚动条；恢复 1.4.8 的浅色表面与轻量层次，不再全局禁用卡片阴影。</li>
 <li>统一手机返回键、系统返回手势与左上角返回。提供商详情返回列表；从会话进入设置、AI 工作室、协同工作台等功能后返回原会话；从控制台进入则返回控制台，并保留未保存配置的确认流程。</li>
 <li>设置继续按“对话 / 连接与模型 / 应用”划分模块，补齐提示词库、新会话快捷指令和用户体验改进计划入口；返回设置保留模块与滚动位置，返回会话保留草稿与浏览位置。</li>
@@ -1444,9 +1472,41 @@ v1.5.1o2（Comax）合并说明【测试】
       <div class="platform-panel" data-platform="desktop">
       <div class="container">
         <div class="changelog-platform-tag"><span class="tag">桌面端</span></div>
-        <h2 class="changelog-title">v0.1.1 发布说明【测试】</h2>
-        <p class="changelog-sub">2026-08-18 发布</p>
+        <h2 class="changelog-title">v1.0.0-test.3 发布说明【测试】</h2>
+<p class="changelog-sub">2026-10-14 发布</p>
+<ul class="changelog-list">
+          <li><strong>Deck 模式与 Work 基座</strong>：新增 Work / Deck 模式切换、任务侧栏和多 CLI 终端面板；Deck 对话复用 Work 的 Agent、权限审批与消息交互能力。</li>
+          <li><strong>CLI 调度</strong>：加入 Coomi 内置 CLI 操作 Skill，按终端识别、读取、派发、等待和验收的流程控制 Codex / ZCode，减少重复授权和无效状态轮询。</li>
+          <li><strong>终端接管与配置</strong>：改进持续接管、用户释放与 CLI 问询处理，支持安装 CLI、配置 Coomi 内部模型提供方，并显示可复制的终端编号。</li>
+          <li><strong>终端显示</strong>：归一化 Agent 读取的 CLI 文本，将终端状态与 CLI 输出分开；支持停止/关闭、主题切换、自适应重绘以及调度记录收起、半屏和全屏。</li>
+          <li><strong>对话体验</strong>：Deck 延续 Work 的工具审批、问询和消息操作，并修复输入区、消息流及窗口布局问题。</li>
+</ul>
+        <details class="changelog-history">
+          <summary>展开全部更新记录</summary>
+          <div class="history-inner">
+            <h3 class="history-version">v1.0.0-test.2 发布说明【测试】</h3>
+            <p class="changelog-sub">2026-10-13 发布</p>
+            <ul class="changelog-list">
+              <li><strong>交互与动效</strong>：默认采用简洁、低动效的交互，不再提供安全模式开关或专门的渲染风暴提示卡片。</li>
+              <li><strong>输入指令</strong>：增加指令入口，支持 `/goal`、`/compact`、`/init`、`/plan`、`/side`，并可快速添加附件、会话引用和技能。</li>
+              <li><strong>辅助会话</strong>：右侧栏新增独立辅助会话，拥有独立上下文与连接，不覆盖当前主会话。</li>
+              <li><strong>目标模式</strong>：仅在用户明确设置目标并启用后生效；可以在会话中编辑或关闭目标。</li>
+              <li><strong>消息渲染</strong>：优化工具调用瀑布流、排队追加和自动贴底行为，并支持数学公式自动渲染。</li>
+              <li><strong>窗口布局</strong>：修复窄窗口输入区布局、会话历史导航及右侧栏尺寸调整相关问题。</li>
+            </ul>
+            <h3 class="history-version">v1.0.0-test.1 发布说明【测试】</h3>
+        <p class="changelog-sub">2026-10-11 发布 · rc50 合并测试版</p>
         <ul class="changelog-list">
+          <li><strong>任务结束状态修复</strong>：失败、未确认回执、输出上限和内容过滤不再伪装成成功，完成通知只在明确成功时发出。</li>
+          <li><strong>会话恢复稳定性</strong>：断线不取消后台任务，重连补帧；重复恢复只启动一次，过期响应不能覆盖新响应。</li>
+          <li><strong>流式渲染优化</strong>：重置流时清理旧正文但保留工具记录，修正工具末段时的答案判定，降低空闲和流式渲染压力。</li>
+          <li><strong>模型与工具配置</strong>：发现模型时同步上下文、最大输出、视觉和思考能力；工具目录按指纹刷新，MCP 启动参数支持编辑并校验。</li>
+          <li><strong>文件、插件与布局</strong>：原生文件预览增加鉴权兜底和大小/时间限制，插件支持热加载，修复全屏边缘和输入栏统计显示。</li>
+        </ul>
+
+            <h3 class="history-version">v0.1.1 发布说明【测试】</h3>
+            <p class="changelog-sub">2026-08-18 发布</p>
+            <ul class="changelog-list">
           <li><strong>轻量桌面壳与外部源码</strong>：安装包不再内置完整服务端源码，桌面程序直接启动和管理用户选择的外部源码工作区。</li>
           <li><strong>源码位置可配置</strong>：首次启动可选择已有源码目录或自动克隆官方源码，后续可从托盘菜单随时更换。</li>
           <li><strong>支持边用边改</strong>：源码、插件和配置可随时修改，重启运行时即可生效，保留完整的本地迭代能力。</li>
@@ -1456,10 +1516,7 @@ v1.5.1o2（Comax）合并说明【测试】
           <li><strong>完善界面文案</strong>：首页提示改为“今天有什么工作？”，版本标识改为“测试版”，设置界面的顶部标题栏同步虚化。</li>
           <li><strong>丰富运行状态</strong>：任务执行期间随机轮询展示 19 条 Coomi 中文状态文案。</li>
           <li><strong>完善启动恢复</strong>：首次准备源码失败后支持重试，并加强插件冷启动激活与残留服务进程清理。</li>
-        </ul>
-        <details class="changelog-history">
-          <summary>查看全部更新记录</summary>
-          <div class="history-inner">
+            </ul>
             <h3 class="history-version">v0.1.0 发布说明【测试】</h3>
             <p class="changelog-sub">2026-08-16 发布</p>
             <ul class="changelog-list">

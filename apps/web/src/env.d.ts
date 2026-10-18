@@ -35,6 +35,8 @@ interface Window {
     /** 小窗聊天：把当前聊天移入原生悬浮窗（本线原生提供）。 */
     openFloatingWindow?(): void
     /** 测试通道红点开关读取/写入（仅 Coomi 本线原生提供）。 */
+    getUpdateRemindersEnabled?(): boolean
+    setUpdateRemindersEnabled?(enabled: boolean): void
     getTestUpdateDotEnabled?(): boolean
     closeHostActivity?(): void
     updateTaskStatusDetails?(status: string, sessionId: string, background: boolean): void

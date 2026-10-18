@@ -57,7 +57,21 @@ const { following, follow, jumpToBottom } = useAutoScroll(scroller)
 const savedScroll = chatScroll.get(session.sessionId)
 if (savedScroll) following.value = savedScroll.following
 
-const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline))
+const positioning = ref(false)
+let positionRevision = 0
+watch([() => session.sessionId, () => session.viewRevision, () => session.restoring], async () => {
+  const revision = ++positionRevision
+  positioning.value = true
+  if (session.restoring) return
+  await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  if (revision !== positionRevision) return
+  jumpToBottom()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  if (revision === positionRevision) positioning.value = false
+}, { flush: 'sync' })
+
+const blocks = computed<TimelineBlockItem[]>(() => buildTimelineBlocks(session.timeline, session.isBusy))
 
 function syncDigitalLifeMode() {
   config.syncDigitalLifeEnabled()
@@ -80,6 +94,7 @@ onMounted(() => {
   void config.syncGlobalMemoryFromEngine()
   syncDigitalLifeMode()
   window.addEventListener('focus', syncDigitalLifeMode)
+  document.addEventListener('visibilitychange', session.resumeFromBackground)
   // 全局轮询各会话的「后台运行中」状态：切走会话后任务在引擎侧继续跑，
   // 抽屉/会话页据此显示转圈。轮询常驻（本地 API 开销极小），不依赖抽屉打开。
   void sessions.refreshRunning()
@@ -110,6 +125,8 @@ onBeforeUnmount(() => {
   unregisterOverlay('artifact-mindmap')
   window.removeEventListener('coomi:flush-persistence', session.flushPersistence)
   window.removeEventListener('focus', syncDigitalLifeMode)
+  document.removeEventListener('visibilitychange', session.resumeFromBackground)
+  positionRevision += 1
   session.flushPersistence()
   window.removeEventListener('touchstart', onMindMapTouchStart)
   window.removeEventListener('touchmove', onMindMapTouchMove)
@@ -191,7 +208,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
     <div class="shell" :class="{ pushed: drawerOpen }">
       <TopBar :menu-open="drawerOpen" @menu="openDrawer" />
 
-      <main ref="scroller" class="stream">
+      <main ref="scroller" class="stream" :style="{ visibility: session.restoring || positioning ? 'hidden' : 'visible' }" :aria-busy="session.restoring">
         <div v-if="session.timeline.length === 0" ref="content" class="inner empty-inner">
           <EmptyState v-if="session.timeline.length === 0" />
         </div>
@@ -209,7 +226,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
             <DynamicScrollerItem
               :item="item"
               :active="active"
-              :size-dependencies="item.t === 'one' ? [item.item] : [item.cards]"
+              :size-dependencies="item.t === 'one' ? [item.item] : item.t === 'tools' ? [item.cards] : [item.blocks, item.running]"
               :data-index="index"
               class="virtual-item"
             >

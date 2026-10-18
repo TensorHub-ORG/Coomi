@@ -202,7 +202,7 @@ async function copyAll() {
   max-width: 100%;
   padding: 10px 15px;
   border-radius: 19px 19px 7px 19px;
-  background: var(--blue); color: #fff;
+  background: var(--user-bubble, var(--blue)); color: var(--user-text, #fff);
   font-size: 15.5px; line-height: 1.55; word-break: break-word;
   white-space: pre-wrap; text-align: left;
 }

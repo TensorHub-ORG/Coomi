@@ -4,6 +4,7 @@ import type { ChatAttachment } from '@/utils/attachments'
 export type ToolCardStatus = 'starting' | 'running' | 'success' | 'error' | 'awaiting_approval' | 'cache_hit' | 'cancelled'
 
 export interface ToolCard {
+  turnId?: string
   kind: 'tool'
   callId: string
   toolName: string
@@ -31,7 +32,7 @@ export interface UserMessage {
   morphing?: boolean
   morphArrived?: boolean
 }
-export interface ReasoningBlock { kind: 'reasoning'; id: string; content: string; expanded: boolean }
+export interface ReasoningBlock { kind: 'reasoning'; id: string; content: string; expanded: boolean; streaming?: boolean; state?: string; mid?: string }
 
 export interface QuestionCard {
   kind: 'question'; callId: string; questions: UserQuestion[]
@@ -61,7 +62,7 @@ export interface ToolDiagnosticTrace {
   elapsedMs?: number
 }
 
-export type Timelineitem = UserMessage | AssistantMessage | ReasoningBlock | ToolCard | QuestionCard | NoticeItem
+export type Timelineitem = (UserMessage | AssistantMessage | ReasoningBlock | ToolCard | QuestionCard | NoticeItem) & { turnId?: string }
 
 export type RunState = 'idle' | 'syncing' | 'thinking' | 'executing' | 'awaiting_approval' | 'awaiting_question'
 

@@ -51,8 +51,11 @@ def update_website(website, manifest):
             website = replace_once(rf'(<[^>]+id="{element}"[^>]*>)[^<]*(</[^>]+>)',
                                    lambda m: m[1] + value + m[2], website)
     else:
-        website = replace_once(r'(<a[^>]*href=")[^"]+("[^>]*data-stat-action="download-test"[^>]*>)',
-                               lambda m: m[1] + url + m[2], website)
+        # Desktop downloads also use download-test. Restrict the replacement to
+        # the Android test URL so publishing Android cannot touch desktop assets.
+        website = replace_once(
+            r'(<a\b(?=[^>]*data-stat-action="download-test")[^>]*href=")[^"]*/android_test/[^"]+("[^>]*>)(.*?)(</a>)',
+            lambda m: m[1] + url + m[2] + "移动端测试版 v" + html.escape(manifest["version"]) + m[4], website)
     return website
 
 

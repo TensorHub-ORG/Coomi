@@ -283,6 +283,24 @@ pub fn trim_history_to_fit(
     rewritten
 }
 
+/// Trim request copies only. Keep the newest tool result intact and preserve
+/// both the opening context and final outcome of older oversized text results.
+pub fn prune_tool_output_previews(messages: &mut [ChatMessage], context_window: u64) {
+    let budget = (context_window / 16).clamp(512, 4096) as usize * 4;
+    let newest = messages.iter().rposition(|m| m.role == Role::Tool);
+    for (index, message) in messages.iter_mut().enumerate() {
+        if message.role != Role::Tool || Some(index) == newest || !message.images.is_empty()
+            || !message.provider_items.is_empty() || message.content.len() <= budget { continue; }
+        let marker = "\n[中间输出已省略；完整记录保留在会话中，需要中段证据时请定向读取原文件或日志]\n";
+        let available = budget.saturating_sub(marker.len());
+        let mut head = available * 3 / 4;
+        while !message.content.is_char_boundary(head) { head -= 1; }
+        let mut tail = message.content.len().saturating_sub(available / 4);
+        while !message.content.is_char_boundary(tail) { tail += 1; }
+        message.content = format!("{}{marker}{}", &message.content[..head], &message.content[tail..]);
+    }
+}
+
 fn estimate_text_tokens(value: &str) -> u64 {
     u64::try_from(value.len())
         .unwrap_or(u64::MAX)
@@ -309,6 +327,21 @@ mod tests {
     use super::*;
     use crate::ToolCall;
     use serde_json::json;
+
+    #[test]
+    fn preview_keeps_utf8_head_tail_latest_and_original_session() {
+        let text = format!("START{}END", "中文证据".repeat(8000));
+        let original = vec![ChatMessage::tool("old", &text), ChatMessage::tool("latest", &text)];
+        let mut request = original.clone(); prune_tool_output_previews(&mut request, 8192);
+        assert!(request[0].content.starts_with("START")); assert!(request[0].content.ends_with("END"));
+        assert!(request[0].content.contains("中间输出已省略")); assert!(request[0].content.len() <= 2048);
+        assert_eq!(request[1].content, text); assert_eq!(original[0].content, text);
+    }
+    #[test]
+    fn legacy_messages_load_without_reasoning_metadata() {
+        let message: ChatMessage = serde_json::from_str(r#"{"role":"assistant","content":"old"}"#).unwrap();
+        assert!(message.reasoning.is_empty()); assert!(message.reasoning_state.is_none());
+    }
 
     #[test]
     fn normalization_pairs_calls_and_drops_orphans() {

@@ -23,7 +23,7 @@ use futures_util::{stream::FuturesUnordered, StreamExt};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::Mutex as AsyncMutex;
@@ -449,7 +449,8 @@ impl Agent {
 
             let mut messages = Vec::with_capacity(session.messages.len() + 1);
             messages.push(ChatMessage::system(self.system_prompt.clone()));
-            messages.extend(session.messages.iter().cloned());
+            messages.extend(provider_history(&session.messages));
+            crate::context::prune_tool_output_previews(&mut messages, capabilities.context_window);
             for message in &mut messages {
                 message.content = sanitize_long_encoded_data(&message.content);
                 for item in &mut message.provider_items {
@@ -476,18 +477,25 @@ impl Agent {
                 search_enabled: false,
                 thinking_enabled: true,
             };
-            let stream_observer = ObserverStream { observer };
             let mut retry_attempt = 0_u8;
             let mut image_retry_used = false;
-            let response = loop {
-                match provider
-                    .complete_stream(request.clone(), &stream_observer)
-                    .await
-                {
-                    Ok(response) => break response,
+            let (response, reasoning) = loop {
+                let buffer = Mutex::new(String::new());
+                // Dropping this guard on task abortion saves the current attempt.
+                // Failed attempts are explicitly disarmed and discarded before retry.
+                let mut guard = ReasoningAttempt { agent: self, session, observer, buffer: &buffer, armed: true };
+                let stream_observer = ObserverStream { observer, reasoning: &buffer };
+                let result = provider.complete_stream(request.clone(), &stream_observer).await;
+                guard.armed = false;
+                drop(guard);
+                let reasoning = buffer.into_inner().unwrap_or_else(|p| p.into_inner());
+                observer.on_event(&AgentEvent::ReasoningCompleted);
+                match result {
+                    Ok(response) => break (response, reasoning),
                     Err(error)
                         if !compacted_for_provider_error && is_context_window_error(&error) =>
                     {
+                        observer.on_event(&AgentEvent::StreamReset);
                         compacted_for_provider_error = true;
                         self.compact(session, provider, &tool_specs, observer, true)
                             .await?;
@@ -533,7 +541,11 @@ impl Agent {
                         });
                         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                     }
-                    Err(error) => return Err(AgentError::Provider(error)),
+                    Err(error) => {
+                        save_partial_reasoning(session, reasoning, "failed");
+                        self.run_checkpoint(session)?;
+                        return Err(AgentError::Provider(error));
+                    },
                 }
             };
 
@@ -561,10 +573,12 @@ impl Agent {
             } else {
                 Vec::new()
             };
-            session.messages.push(ChatMessage::assistant(
-                response_content.clone(),
-                recorded_tool_calls,
-            ));
+            let mut message = ChatMessage::assistant(response_content.clone(), recorded_tool_calls);
+            if !reasoning.is_empty() {
+                message.reasoning = reasoning;
+                message.reasoning_state = Some("complete".into());
+            }
+            session.messages.push(message);
             session.context.observe_usage(
                 &response.usage,
                 &self.system_prompt,
@@ -743,7 +757,7 @@ impl Agent {
         let archive = session.archive.iter().chain(session.messages.iter())
             .filter(|message| !message.compaction_summary && archived_ids.insert(message.id.clone()))
             .cloned().collect();
-        let mut normalized = normalize_history(&session.messages);
+        let mut normalized = normalize_history(&provider_history(&session.messages));
         // Compaction endpoints are commonly text-only even when normal chat supports
         // vision. Keep the textual tool result while never replaying image payloads.
         for message in &mut normalized {
@@ -845,10 +859,13 @@ impl Agent {
         );
         session.usage.add(&compact_usage);
         let status = session.context.status(&provider.capabilities());
+        // Publish the summary only after the durable checkpoint succeeds.
+        self.run_checkpoint(session)?;
+        let summary = session.messages.iter().rev().find(|m| m.compaction_summary);
         observer.on_event(&AgentEvent::CompactionCompleted {
-            automatic,
-            before_tokens,
-            after_tokens: status.used_tokens,
+            automatic, before_tokens, after_tokens: status.used_tokens,
+            summary_id: summary.map(|m| m.id.clone()).unwrap_or_default(),
+            summary: summary.map(|m| m.content.clone()).unwrap_or_default(),
         });
         observer.on_event(&AgentEvent::ContextUpdated(status));
         Ok(())
@@ -1054,8 +1071,44 @@ fn is_usage_limit_error(error: &AgentError) -> bool {
         || text.contains("quota")
 }
 
+/// Provider input deliberately excludes local display metadata, including partial
+/// reasoning-only messages from failed/cancelled requests.
+fn provider_history(messages: &[ChatMessage]) -> Vec<ChatMessage> {
+    messages.iter().filter(|m| !(m.role == crate::Role::Assistant && m.content.is_empty()
+        && m.tool_calls.is_empty() && m.provider_items.is_empty() && !m.reasoning.is_empty()))
+        .cloned().map(|mut m| { m.reasoning.clear(); m.reasoning_state = None; m }).collect()
+}
+
+fn save_partial_reasoning(session: &mut Session, reasoning: String, state: &str) {
+    if reasoning.is_empty() { return; }
+    let mut message = ChatMessage::assistant("", Vec::new());
+    message.reasoning = reasoning;
+    message.reasoning_state = Some(state.into());
+    session.messages.push(message);
+}
+
+struct ReasoningAttempt<'a> {
+    agent: &'a Agent,
+    session: &'a mut Session,
+    observer: &'a dyn AgentObserver,
+    buffer: &'a Mutex<String>,
+    armed: bool,
+}
+impl Drop for ReasoningAttempt<'_> {
+    fn drop(&mut self) {
+        if !self.armed { return; }
+        let reasoning = self.buffer.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        save_partial_reasoning(self.session, reasoning, "interrupted");
+        if let Err(error) = self.agent.run_checkpoint(self.session) {
+            self.observer.on_event(&AgentEvent::PersistenceFailed(error.to_string()));
+        }
+        self.observer.on_event(&AgentEvent::ReasoningCompleted);
+    }
+}
+
 struct ObserverStream<'a> {
     observer: &'a dyn AgentObserver,
+    reasoning: &'a Mutex<String>,
 }
 
 impl ModelStreamObserver for ObserverStream<'_> {
@@ -1065,6 +1118,12 @@ impl ModelStreamObserver for ObserverStream<'_> {
     }
 
     fn on_reasoning_delta(&self, delta: &str) {
+        // Bound one attempt to 512 KiB and keep UTF-8 boundaries intact.
+        let mut buffer = self.reasoning.lock().unwrap_or_else(|p| p.into_inner());
+        let mut end = delta.len().min((512_usize * 1024).saturating_sub(buffer.len()));
+        while !delta.is_char_boundary(end) { end -= 1; }
+        buffer.push_str(&delta[..end]);
+        drop(buffer);
         self.observer
             .on_event(&AgentEvent::ReasoningDelta(delta.to_owned()));
     }
@@ -1122,6 +1181,60 @@ mod tests {
         async fn call(&self, call: &ToolCall, _approval: &dyn ApprovalHandler) -> ToolResult {
             ToolResult::success(call.arguments["value"].as_str().unwrap_or_default())
         }
+    }
+
+    struct ReasoningProvider { calls: AtomicUsize, mode: &'static str, started: Arc<tokio::sync::Notify> }
+    #[async_trait]
+    impl ModelProvider for ReasoningProvider {
+        fn provider_id(&self) -> &str { "reasoning-test" }
+        fn model(&self) -> &str { "test" }
+        async fn complete(&self, _: ModelRequest) -> Result<ModelResponse> { Ok(ModelResponse::default()) }
+        async fn complete_stream(&self, request: ModelRequest, observer: &dyn ModelStreamObserver) -> Result<ModelResponse> {
+            assert!(request.messages.iter().all(|m| m.reasoning.is_empty() && m.reasoning_state.is_none()));
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.mode == "pending" {
+                observer.on_reasoning_delta("cancelled partial"); self.started.notify_one();
+                std::future::pending::<()>().await;
+            }
+            if self.mode == "failure" { observer.on_reasoning_delta("failed partial"); anyhow::bail!("invalid credentials"); }
+            if call == 0 { observer.on_reasoning_delta("discarded attempt"); anyhow::bail!("connection reset by peer"); }
+            observer.on_reasoning_delta("successful reasoning");
+            Ok(ModelResponse { content: "answer".into(), ..ModelResponse::default() })
+        }
+    }
+    fn reasoning_provider(mode: &'static str) -> ReasoningProvider {
+        ReasoningProvider { calls: AtomicUsize::new(0), mode, started: Arc::new(tokio::sync::Notify::new()) }
+    }
+    #[tokio::test]
+    async fn reasoning_retry_isolated_and_roundtrips_without_provider_replay() {
+        let home = tempfile::tempdir().unwrap(); let store = crate::SessionStore::new(home.path());
+        let mut session = Session::new("mock", "test", PathBuf::from("."));
+        Agent::new("test").with_provider_retry_policy(1, 1, 1)
+            .run_turn(&mut session, "hello", &reasoning_provider("retry"), &EchoTool, &Approve, &NoopObserver).await.unwrap();
+        store.save(&session).unwrap(); let loaded = store.load(session.id).unwrap();
+        let reasoning: Vec<_> = loaded.messages.iter().filter(|m| !m.reasoning.is_empty()).collect();
+        assert_eq!(reasoning.len(), 1); assert_eq!(reasoning[0].reasoning, "successful reasoning");
+        assert_eq!(reasoning[0].reasoning_state.as_deref(), Some("complete"));
+        assert!(provider_history(&loaded.messages).iter().all(|m| m.reasoning.is_empty()));
+    }
+    #[tokio::test]
+    async fn provider_failure_preserves_partial_reasoning_with_failure_state() {
+        let mut session = Session::new("mock", "test", PathBuf::from("."));
+        let result = Agent::new("test").run_turn(&mut session, "hello", &reasoning_provider("failure"), &EchoTool, &Approve, &NoopObserver).await;
+        assert!(result.is_err()); let partial = session.messages.last().unwrap();
+        assert_eq!(partial.reasoning, "failed partial"); assert_eq!(partial.reasoning_state.as_deref(), Some("failed"));
+        assert!(provider_history(&session.messages).iter().all(|m| m.role != crate::Role::Assistant));
+    }
+    #[tokio::test]
+    async fn abort_flushes_partial_reasoning_to_disk_before_join_finishes() {
+        let home = tempfile::tempdir().unwrap(); let store = crate::SessionStore::new(home.path());
+        let mut session = Session::new("mock", "test", PathBuf::from(".")); let id = session.id;
+        let provider = reasoning_provider("pending"); let started = provider.started.clone();
+        let agent = Agent::new("test").with_durable_checkpoint(Arc::new(move |s| store.save(s).map_err(|e| e.to_string())));
+        let handle = tokio::spawn(async move { agent.run_turn(&mut session, "hello", &provider, &EchoTool, &Approve, &NoopObserver).await });
+        started.notified().await; handle.abort(); assert!(handle.await.unwrap_err().is_cancelled());
+        let loaded = crate::SessionStore::new(home.path()).load(id).unwrap(); let partial = loaded.messages.last().unwrap();
+        assert_eq!(partial.reasoning, "cancelled partial"); assert_eq!(partial.reasoning_state.as_deref(), Some("interrupted"));
     }
 
     struct MockProvider {
@@ -1832,10 +1945,31 @@ mod tests {
 
 /// 解析内容中的别名 XML 工具调用块；一个也没解析出来时返回 None。
 fn remote_compaction_unavailable(error: &anyhow::Error) -> bool {
+    // A gateway can support ordinary Responses while rejecting compaction
+    // triggers. Its explicit protocol rejection should fall back to a summary.
+    if error.downcast_ref::<ProviderRequestError>().is_some_and(|error| {
+        error.status == Some(400) && error.detail.contains("MissingParameter")
+            && error.detail.contains("partial")
+    }) { return true; }
     let text = format!("{error:#}").to_ascii_lowercase();
     text.contains("404") || text.contains("405") || text.contains("501")
         || text.contains("not supported") || text.contains("unsupported")
         || is_context_window_error(error)
+}
+
+#[cfg(test)]
+mod remote_compaction_compatibility_tests {
+    use super::*;
+    #[test]
+    fn partial_rejection_falls_back_but_authentication_does_not() {
+        let error = |status| ProviderRequestError {
+            phase: "response_body", kind: crate::ProviderErrorKind::Http,
+            status: Some(status), retry_after_ms: None, request_id: None, retryable: false,
+            detail: "provider rejected the request (code=MissingParameter): missing `partial` parameter".into(),
+        };
+        assert!(remote_compaction_unavailable(&error(400).into()));
+        assert!(!remote_compaction_unavailable(&error(401).into()));
+    }
 }
 
 fn parse_executable_xml_calls(content: &str) -> Option<Vec<ToolCall>> {

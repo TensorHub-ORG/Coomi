@@ -39,6 +39,7 @@ mod life;
 mod billing;
 mod terminal_ui;
 mod web;
+mod session_view;
 mod workflow;
 mod snapshot_schedule;
 mod ux_profile;
@@ -602,6 +603,8 @@ impl AgentObserver for TerminalObserver {
             AgentEvent::TextDelta(text) => print!("{text}"),
             AgentEvent::ReasoningDelta(text) => eprint!("{text}"),
             AgentEvent::ConnectionRetry { message, .. } => eprintln!("\n{message}"),
+            AgentEvent::ReasoningCompleted => {},
+            AgentEvent::PersistenceFailed(message) => eprintln!("[checkpoint failed] {message}"),
             AgentEvent::StreamReset => eprintln!("\n[discarding interrupted partial response]"),
             AgentEvent::ContextUpdated(status) => eprintln!(
                 "[context {}% {}/{}]",

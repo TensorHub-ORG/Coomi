@@ -308,18 +308,8 @@ impl HttpModelProvider {
             "input": responses_input(&request.messages, self.config.capabilities.supports_vision)?,
             "instructions": request.system_prompt
         });
-        let value = checked_json(
-            send_request(
-                self.with_provider_headers(
-                    self.authenticated(self.client.post(endpoint)),
-                    request.session_id.as_deref(),
-                ).json(&body),
-                "request_send",
-            )
-            .await?,
-            "response_body",
-        )
-        .await?;
+        let response = self.send_with_reasoning_fallback(&endpoint, &body, request.session_id.as_deref()).await?;
+        let value = checked_json(response, "response_body").await?;
         let mut messages = Vec::new();
         for item in value
             .get("output")
@@ -388,15 +378,7 @@ impl HttpModelProvider {
             self.config.capabilities.supports_parallel_tool_calls,
             self.config.capabilities.supports_vision,
         )?;
-        let response = self
-            .with_provider_headers(
-                self.authenticated(self.client.post(endpoint)),
-                request.session_id.as_deref(),
-            )
-            .json(&body)
-            .send()
-            .await
-            .map_err(|error| transport_error("request_send", error))?;
+        let response = self.send_with_reasoning_fallback(&endpoint, &body, request.session_id.as_deref()).await?;
         let status = response.status();
         if !status.is_success() {
             return checked_json(response, "response_body")
@@ -859,6 +841,25 @@ impl HttpModelProvider {
             .await
             .map_err(|error| transport_error("response_body", error))?;
 
+        // Some compatible gateways require an explicit non-prefill flag even
+        // for a normal summary request. Only adapt after that exact rejection.
+        let mut compatible_body = body.clone();
+        if requires_partial_parameter(&first_body) {
+            compatible_body["partial"] = json!(false);
+            if let Some(messages) = compatible_body.get_mut("messages").and_then(Value::as_array_mut) {
+                for message in messages {
+                    if message.get("role").and_then(Value::as_str) == Some("assistant") {
+                        message["partial"] = json!(false);
+                    }
+                }
+            }
+            let retry = self.with_provider_headers(self.authenticated(self.client.post(endpoint)), session_id)
+                .json(&compatible_body).send().await.map_err(|error| transport_error("request_send", error))?;
+            if retry.status().as_u16() != 400 { return Ok(retry); }
+            let _ = retry.text().await;
+        }
+        let body = &compatible_body;
+
         // 阶梯：记录每次递减的 body，去重后依次尝试。
         let mut steps: Vec<Value> = Vec::new();
         let mut push_step = |value: Value, steps: &mut Vec<Value>| {
@@ -945,6 +946,12 @@ impl HttpModelProvider {
 
 /// Some OpenAI-compatible gateways understand reasoning but only accept `high`.
 /// Preserve the strongest supported level before falling back to removing reasoning entirely.
+fn requires_partial_parameter(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(body) else { return false; };
+    value.pointer("/error/code").and_then(Value::as_str) == Some("MissingParameter")
+        && value.pointer("/error/param").and_then(Value::as_str) == Some("partial")
+}
+
 fn downgrade_xhigh_reasoning(body: &mut Value) {
     if body.get("reasoning_effort").and_then(Value::as_str) == Some("xhigh") {
         body["reasoning_effort"] = Value::String("high".into());
@@ -2466,6 +2473,13 @@ fn nested_u64(value: Option<&Value>, key: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_compatibility_requires_the_exact_missing_parameter() {
+        assert!(requires_partial_parameter(r#"{"error":{"code":"MissingParameter","param":"partial"}}"#));
+        assert!(!requires_partial_parameter(r#"{"error":{"code":"MissingParameter","param":"api_key"}}"#));
+        assert!(!requires_partial_parameter("partial is mentioned in an unrelated error"));
+    }
 
     struct IgnoreStream;
 

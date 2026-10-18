@@ -859,6 +859,15 @@ public final class CoomiChatSession extends ContextWrapper {
 
         /** 当前安装的 versionCode（检查更新页显示/对比用）。 */
         @JavascriptInterface
+        public boolean getTestUpdateDotEnabled() { return app.coomi.UpdateChecker.isTestUpdateDotEnabled(CoomiChatSession.this); }
+        @JavascriptInterface
+        public void setTestUpdateDotEnabled(boolean enabled) { app.coomi.UpdateChecker.setTestUpdateDotEnabled(CoomiChatSession.this, enabled); }
+        @JavascriptInterface
+        public boolean getUpdateRemindersEnabled() { return app.coomi.UpdateChecker.remindersEnabled(CoomiChatSession.this); }
+        @JavascriptInterface
+        public void setUpdateRemindersEnabled(boolean enabled) { app.coomi.UpdateChecker.setRemindersEnabled(CoomiChatSession.this, enabled); }
+
+        @JavascriptInterface
         public int getAppVersionCode() {
             return app.coomi.UpdateChecker.currentVersionCode(CoomiChatSession.this);
         }
@@ -870,7 +879,15 @@ public final class CoomiChatSession extends ContextWrapper {
         /** 从 web 检查更新页发起下载并安装（复用更新源的签名校验流程）。 */
         @JavascriptInterface
         public void installApk(String url, String version) {
-            app.coomi.UpdateChecker.downloadAndInstall(CoomiChatSession.this, url, version);
+            runOnUiThread(() -> {
+                CoomiActivity host = activity();
+                if (version != null && version.contains("-test") && host != null) {
+                    new android.app.AlertDialog.Builder(host).setTitle("安装测试版 " + version)
+                        .setMessage("测试版包含实验性改动，可能存在不稳定情况。确定下载安装？")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("安装测试版", (dialog, which) -> app.coomi.UpdateChecker.downloadAndInstall(CoomiChatSession.this, url, version)).show();
+                } else app.coomi.UpdateChecker.downloadAndInstall(CoomiChatSession.this, url, version);
+            });
         }
 
         /**

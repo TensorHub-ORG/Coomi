@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHead from '@/components/PageHead.vue'
+import { splitUpdateNotes } from '@/utils/updateNotes'
 import { goBack } from '@/bridge/navigation'
 
 /** 更新通道：正式 / 测试，取自 updates.septemc.com 各自目录下的 latest.json。 */
@@ -26,19 +27,13 @@ const loading = ref(true)
 const installing = ref(false)
 const error = ref('')
 const info = ref<UpdateInfo | null>(null)
+let refreshGeneration = 0
 
 const canInstall = computed(() => Boolean(window.CoomiAndroid?.installApk))
 
 // 更新说明支持多版本分段：以「vX.Y.Z 更新说明【…】」标题行为分段边界。
 // 首段为当前版本说明常驻显示，历史段落默认收起，点「展开全部更新记录」逐段展开。
-const NOTE_SECTION_RE = /^v\d+\.\d+\.\d+[^\n]*更新说明[^\n]*$/gm
-const noteSections = computed<string[]>(() => {
-  const notes = info.value?.notes ?? ''
-  if (!notes.trim()) return []
-  const heads = [...notes.matchAll(NOTE_SECTION_RE)].map((m) => m.index ?? 0)
-  if (heads.length === 0 || heads[0] !== 0) return [notes.trim()]
-  return heads.map((start, i) => notes.slice(start, heads[i + 1] ?? notes.length).trim()).filter(Boolean)
-})
+const noteSections = computed(() => splitUpdateNotes(info.value?.notes ?? ''))
 const latestNotes = computed(() => noteSections.value[0] ?? (info.value?.notes ?? '').trim())
 const historyNotes = computed(() => noteSections.value.slice(1))
 const historyExpanded = ref(false)
@@ -54,6 +49,8 @@ const versionStatusText = computed(() => {
 })
 
 async function refresh() {
+  const generation = ++refreshGeneration
+  const selectedChannel = channel.value
   loading.value = true
   error.value = ''
   info.value = null
@@ -64,17 +61,20 @@ async function refresh() {
     if (!response.ok) throw new Error(`更新源返回 HTTP ${response.status}`)
     const data = await response.json()
     const file: string | undefined = data.file
+    if (generation !== refreshGeneration) return
     info.value = {
       versionCode: Number(data.versionCode) || 0,
       version: String(data.version ?? ''),
       notes: String(data.notes ?? ''),
       date: String(data.date ?? ''),
-      channel: channel.value,
+      channel: selectedChannel,
       apkUrl: file ? `${dir}/${file}` : undefined,
     }
   } catch (e) {
+    if (generation !== refreshGeneration) return
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
+    if (generation !== refreshGeneration) return
     loading.value = false
     void refreshDots()
   }
@@ -98,6 +98,13 @@ const currentVersionName = ref('')
 // 批次七红点策略：两通道各自有可更新版本时，在标签文字右侧亮小红点；
 // 测试通道的红点提醒可由用户开关（默认关）。
 const channelHasUpdate = ref<Record<Channel, boolean>>({ stable: false, test: false })
+const remindersEnabled = ref(window.CoomiAndroid?.getUpdateRemindersEnabled?.() ?? localStorage.getItem('coomi.updateReminders') !== '0')
+function setReminders(event: Event) {
+  const enabled = (event.target as HTMLInputElement).checked
+  remindersEnabled.value = enabled
+  localStorage.setItem('coomi.updateReminders', enabled ? '1' : '0')
+  window.CoomiAndroid?.setUpdateRemindersEnabled?.(enabled)
+}
 const testDotEnabled = ref(false)
 const canToggleTestDot = computed(() => Boolean(window.CoomiAndroid?.setTestUpdateDotEnabled))
 
@@ -127,6 +134,7 @@ function setTestDot(event: Event) {
 onMounted(() => {
   currentCode.value = window.CoomiAndroid?.getAppVersionCode?.() ?? 0
   currentVersionName.value = window.CoomiAndroid?.getAppVersionName?.() ?? ''
+  if (currentVersionName.value.includes('-test')) channel.value = 'test'
   loadTestDot()
   void refreshDots()
   void refresh()
@@ -149,11 +157,13 @@ onMounted(() => {
         </button>
       </div>
 
+      <label class="test-dot-toggle"><span>更新提醒</span><input type="checkbox" :checked="remindersEnabled" @change="setReminders" /></label>
       <label v-if="canToggleTestDot" class="test-dot-toggle">
         <span>测试通道有更新时也亮红点提醒</span>
         <input type="checkbox" :checked="testDotEnabled" @change="setTestDot" />
       </label>
 
+      <p v-if="channel === 'test'" class="notice">测试版包含实验性改动，可能存在不稳定情况。请按需安装。</p>
       <p v-if="error" class="notice error">{{ error }}</p>
       <p v-if="loading" class="notice">正在获取更新信息…</p>
 
@@ -177,7 +187,7 @@ onMounted(() => {
         </section>
 
         <button v-if="hasUpdate" class="primary" :disabled="installing || !canInstall" @click="install">
-          {{ installing ? '正在下载安装…' : '下载并安装' }}
+          {{ installing ? '正在下载安装…' : info.channel === 'test' ? '下载并安装测试版' : '下载并安装' }}
         </button>
         <p v-else class="notice">当前已是该通道的最新版本，无需更新。</p>
       </template>

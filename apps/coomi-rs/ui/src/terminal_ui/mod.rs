@@ -1451,6 +1451,8 @@ fn handle_runtime_event(app: &mut TuiState, runtime_event: RuntimeEvent) {
                         app.follow_tail = true;
                     }
                 }
+                AgentEvent::ReasoningCompleted => {},
+                AgentEvent::PersistenceFailed(message) => app.push_notice(NoticeKind::Error, message),
                 AgentEvent::ReasoningDelta(text) => {
                     if !text.is_empty() {
                         match app.timeline.last_mut() {

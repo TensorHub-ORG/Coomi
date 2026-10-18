@@ -100,4 +100,14 @@
     <color name="coomi_ember_bg">#1A1614</color><color name="coomi_ember_page">#110F0E</color><color name="coomi_ember_card">#201A18</color><color name="coomi_ember_fill">#241E1B</color><color name="coomi_ember_border">#352C28</color><color name="coomi_ember_text">#EEE9E5</color><color name="coomi_ember_text_2">#B5A8A0</color><color name="coomi_ember_text_3">#7E6F67</color><color name="coomi_ember_accent">#D18A62</color><color name="coomi_ember_accent_soft">#40291F</color>
     <color name="coomi_celadon_bg">#F8FBF9</color><color name="coomi_celadon_page">#EDF3EF</color><color name="coomi_celadon_card">#FFFFFF</color><color name="coomi_celadon_fill">#F0F5F2</color><color name="coomi_celadon_border">#DCE6DF</color><color name="coomi_celadon_text">#202A25</color><color name="coomi_celadon_text_2">#596A60</color><color name="coomi_celadon_text_3">#89988F</color><color name="coomi_celadon_accent">#39745D</color><color name="coomi_celadon_accent_soft">#DEEEE6</color>
     <color name="coomi_linen_bg">#FBFAF7</color><color name="coomi_linen_page">#F1F0EC</color><color name="coomi_linen_card">#FFFEFA</color><color name="coomi_linen_fill">#F4F2ED</color><color name="coomi_linen_border">#E4E1DA</color><color name="coomi_linen_text">#262728</color><color name="coomi_linen_text_2">#626365</color><color name="coomi_linen_text_3">#91908D</color><color name="coomi_linen_accent">#4F607F</color><color name="coomi_linen_accent_soft">#E6EAF1</color>
+    <color name="coomi_terminal_bg">#000000</color>
+    <color name="coomi_terminal_page">#000000</color>
+    <color name="coomi_terminal_card">#0A0A0A</color>
+    <color name="coomi_terminal_fill">#181818</color>
+    <color name="coomi_terminal_border">#363636</color>
+    <color name="coomi_terminal_text">#F5F5F5</color>
+    <color name="coomi_terminal_text_2">#CACACA</color>
+    <color name="coomi_terminal_text_3">#999999</color>
+    <color name="coomi_terminal_accent">#FFFFFF</color>
+    <color name="coomi_terminal_accent_soft">#262626</color>
 </resources>

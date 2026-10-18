@@ -343,6 +343,7 @@ struct SessionTask {
     file_requests: StdMutex<HashMap<String, oneshot::Sender<Vec<String>>>>,
     next_event_seq: AtomicU64,
     unacked_events: StdMutex<VecDeque<Value>>,
+    view: StdMutex<crate::session_view::SessionView>,
 }
 
 #[derive(Clone)]
@@ -372,6 +373,7 @@ impl SessionTask {
             file_requests: StdMutex::new(HashMap::new()),
             next_event_seq: AtomicU64::new(1),
             unacked_events: StdMutex::new(VecDeque::new()),
+            view: StdMutex::new(crate::session_view::SessionView::default()),
         }
     }
 
@@ -399,9 +401,24 @@ impl SessionTask {
     }
 
     /// 事件出口：分配稳定序号并保留到客户端确认，同时推送给当前活跃连接。
+    fn reset_view(&self, session: &Session) {
+        let mut view = self.view.lock().unwrap_or_else(|p| p.into_inner());
+        view.reset(serde_json::to_value(session).unwrap_or(Value::Null),
+            self.next_event_seq.load(Ordering::SeqCst).saturating_sub(1));
+    }
+
+    fn checkpoint_saved(&self, session: &Session) {
+        let users = self.view.lock().unwrap_or_else(|p| p.into_inner())
+            .saved_messages(serde_json::to_value(session).unwrap_or(Value::Null));
+        for event in users { self.push_event(event); }
+    }
+
     fn push_event(&self, mut payload: Value) {
+        // Serialize sequence assignment, journaling and delivery with snapshots.
+        let mut view = self.view.lock().unwrap_or_else(|p| p.into_inner());
         let seq = self.next_event_seq.fetch_add(1, Ordering::SeqCst);
         payload["event_seq"] = json!(seq);
+        view.push(payload.clone());
         let mut queue = self
             .unacked_events
             .lock()
@@ -487,29 +504,67 @@ impl SessionTask {
     }
 }
 
+fn session_workspace(state: &AppState, session_id: &str) -> PathBuf {
+    let path = Uuid::parse_str(session_id).ok()
+        .and_then(|id| SessionStore::new(&state.home).load(id).ok())
+        .map(|session| session.cwd).filter(|cwd| cwd.is_dir())
+        .unwrap_or_else(|| state.cwd.clone());
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
+
+#[cfg(test)]
+mod view_transport_tests {
+    use super::*;
+
+    #[test]
+    fn acknowledged_events_remain_available_to_view_recovery() {
+        let task = SessionTask::new();
+        let mut session = Session::new("p", "m", PathBuf::from("."));
+        task.reset_view(&session);
+        session.messages.push(ChatMessage::user("task"));
+        task.checkpoint_saved(&session);
+        task.push_event(json!({"event_type":"reasoning_chunk","content":"thinking"}));
+        task.push_event(json!({"event_type":"text_chunk","content":"answer"}));
+        task.acknowledge_through(100);
+        assert!(task.unacked_events.lock().unwrap().is_empty());
+        let view = task.view.lock().unwrap();
+        assert_eq!(view.event_seq, 3);
+        assert_eq!(view.events.len(), 3);
+        assert_eq!(view.events[0]["event_type"], "user_message");
+        assert_eq!(view.events[1]["content"], "thinking");
+    }
+}
+
 fn begin_managed_task(
     state: &AppState,
     session_id: &str,
     task: &SessionTask,
     kind: &str,
 ) -> Result<()> {
+    let cwd = session_workspace(state, session_id);
+    // Shared leases allow independent model requests. Actual tool reads/writes
+    // are coordinated in CoreTools, including managed shell lifetimes.
     let mut resources = vec![ResourceRequest {
-        key: ResourceKey::new(ResourceKind::Workspace, state.cwd.to_string_lossy()),
-        access: ResourceAccess::Write,
+        key: ResourceKey::new(ResourceKind::Workspace, cwd.to_string_lossy()),
+        access: ResourceAccess::Read,
     }];
-    if state.cwd.join(".git").exists() {
-        resources.push(ResourceRequest {
-            key: ResourceKey::git(&state.cwd),
-            access: ResourceAccess::Write,
-        });
+    if cwd.join(".git").exists() {
+        resources.push(ResourceRequest { key: ResourceKey::git(&cwd), access: ResourceAccess::Read });
     }
     let record = state
         .task_manager
         .create(session_id, kind, TaskPriority::Normal, resources)?;
-    if let Ok(baseline) = coomi_services::ConflictBaseline::capture(&state.cwd, &[]) {
+    if let Ok(baseline) = coomi_services::ConflictBaseline::capture(&cwd, &[]) {
         let _ = state.task_manager.set_baseline(&record.id, baseline);
     }
     task.begin_turn(record.id);
+    let id = Uuid::parse_str(session_id).context("invalid session id")?;
+    let session = SessionStore::new(&state.home).load(id).unwrap_or_else(|_| {
+        let mut session = Session::new("", "", cwd.clone());
+        session.id = id;
+        session
+    });
+    task.reset_view(&session);
     Ok(())
 }
 
@@ -878,6 +933,7 @@ pub async fn serve(
         )
         .route("/api/sessions/import", post(import_sessions))
         .route("/api/sessions/{id}/cwd", post(set_session_cwd))
+        .route("/api/sessions/{id}/snapshot", get(session_snapshot))
         .route("/api/sessions/export", post(export_sessions))
         .route("/api/sessions/{id}/messages/{msg_id}/edit", post(edit_session_message))
         .route("/api/sessions/{id}/messages/{msg_id}", delete(delete_session_message))
@@ -2939,13 +2995,10 @@ async fn stop_session_task(state: &AppState, session_id: &str, task: &Arc<Sessio
     if !task.running.swap(false, Ordering::SeqCst) {
         return false;
     }
-    if let Some(handle) = task
-        .abort
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take()
-    {
+    let abort_handle = task.abort.lock().unwrap_or_else(|p| p.into_inner()).take();
+    if let Some(handle) = abort_handle {
         handle.abort();
+        while !handle.is_finished() { tokio::task::yield_now().await; }
     }
     let processes = task
         .processes
@@ -3288,6 +3341,13 @@ async fn delete_session(
     let deleted = store
         .delete(session_id)
         .map_err(|error| ApiError::internal(format!("failed to delete session {id}: {error:#}")))?;
+    if deleted {
+        let task = state.task(&id);
+        let mut view = task.view.lock().unwrap_or_else(|p| p.into_inner());
+        let seq = view.event_seq;
+        *view = crate::session_view::SessionView::default();
+        view.event_seq = seq;
+    }
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -3319,6 +3379,7 @@ async fn edit_session_message(
     store
         .save(&session)
         .map_err(|error| ApiError::internal(format!("failed to save session {id}: {error:#}")))?;
+    state.task(&id).reset_view(&session);
     Ok(Json(json!({ "edited": true, "id": msg_id, "content": content })))
 }
 
@@ -3339,6 +3400,7 @@ async fn delete_session_message(
     store
         .save(&session)
         .map_err(|error| ApiError::internal(format!("failed to save session {id}: {error:#}")))?;
+    state.task(&id).reset_view(&session);
     Ok(Json(json!({ "deleted": true, "id": msg_id, "removed": removed })))
 }
 
@@ -3361,6 +3423,7 @@ async fn truncate_session_message(
     store
         .save(&session)
         .map_err(|error| ApiError::internal(format!("failed to save session {id}: {error:#}")))?;
+    state.task(&id).reset_view(&session);
     Ok(Json(json!({ "truncated": true, "id": msg_id, "removed": removed })))
 }
 
@@ -4452,6 +4515,30 @@ async fn set_skill_enabled_catalog(
 // ─────────────────────────── 会话 cwd ───────────────────────────
 
 /// 更新会话的工作目录（会话标记路径，绑定为会话执行目录）。
+async fn session_snapshot(
+    State(state): State<AppState>, AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let parsed = Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?;
+    let task = state.task(&id);
+    let view = task.view.lock().unwrap_or_else(|p| p.into_inner());
+    let session = view.base.clone().or_else(|| SessionStore::new(&state.home).load(parsed).ok()
+        .and_then(|session| serde_json::to_value(session).ok()))
+        .unwrap_or_else(|| json!({"id": id, "messages": [], "archive": [], "cwd": state.cwd, "usage": {}}));
+    let events: Vec<_> = if view.base.is_some() { view.events.iter().filter(|event| {
+        let call_id = event["call_id"].as_str().unwrap_or_default();
+        match event["event_type"].as_str().unwrap_or_default() {
+            "tool_approval_request" => task.approvals.lock().unwrap_or_else(|p| p.into_inner()).contains_key(call_id),
+            "user_question_request" => task.questions.lock().unwrap_or_else(|p| p.into_inner()).contains_key(call_id),
+            "file_transfer_request" => task.file_requests.lock().unwrap_or_else(|p| p.into_inner())
+                .contains_key(event["request_id"].as_str().unwrap_or_default()),
+            _ => true,
+        }
+    }).cloned().collect() } else { Vec::new() };
+    Ok(Json(json!({"session":session, "events":events, "event_seq":view.event_seq,
+        "running":task.running.load(Ordering::SeqCst),
+        "phase":task.phase.lock().unwrap_or_else(|p| p.into_inner()).clone(), "truncated":view.truncated})))
+}
+
 async fn set_session_cwd(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
@@ -4482,6 +4569,11 @@ async fn set_session_cwd(
     store
         .save(&session)
         .map_err(|e| ApiError::internal(format!("failed to save session {id}: {e:#}")))?;
+    {
+        let task = state.task(&id);
+        let mut view = task.view.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(base) = view.base.as_mut() { base["cwd"] = json!(cwd); }
+    }
     Ok(Json(json!({ "ok": true, "cwd": cwd })))
 }
 
@@ -6560,8 +6652,8 @@ async fn handle_command(
                         }));
                     }
                 }
-                turn_task.push_event(json!({"event_type": "turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
+                turn_task.push_event(json!({"event_type": "turn_end"}));
                 persist_task_checkpoints(&turn_state);
                 turn_task
                     .abort
@@ -6741,6 +6833,7 @@ async fn handle_command(
                 }
             };
             session.mode = SessionMode::Life;
+            let view_base = session.clone();
             let mut message =
                 coomi_engine::ChatMessage::assistant(entry.text.clone(), Vec::new());
             message.life_proactive = true;
@@ -6754,6 +6847,8 @@ async fn handle_command(
                 );
                 return;
             }
+            let global_task = state.task(crate::life::GLOBAL_SESSION_ID);
+            global_task.reset_view(if session_id == crate::life::GLOBAL_SESSION_ID { &view_base } else { &session });
             if session_id == crate::life::GLOBAL_SESSION_ID {
                 // 与 dispatch_guide 相同的节奏：16 字符/块 + 220ms。
                 let mut chunk = String::new();
@@ -6781,6 +6876,7 @@ async fn handle_command(
                     "trigger": entry.trigger,
                     "text": entry.text,
                 }));
+                context.task.checkpoint_saved(&session);
                 context.task.push_event(json!({"event_type": "turn_end"}));
             }
         }
@@ -7006,8 +7102,8 @@ async fn handle_command(
                     let captcha = msg.contains("3007") || msg.to_ascii_lowercase().contains("captcha");
                     turn_task.push_event(json!({"event_type":"agent_error","message":msg,"is_fatal":false,"captcha_required":captcha}));
                 }
-                turn_task.push_event(json!({"event_type":"turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
+                turn_task.push_event(json!({"event_type":"turn_end"}));
                 persist_task_checkpoints(&turn_state);
                 turn_task
                     .abort
@@ -7067,8 +7163,8 @@ async fn handle_command(
                         turn_task.push_event(json!({"event_type":"agent_error","message":emsg,"is_fatal":false,"captcha_required":ecaptcha}));
                     }
                 }
-                turn_task.push_event(json!({"event_type":"turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
+                turn_task.push_event(json!({"event_type":"turn_end"}));
                 persist_task_checkpoints(&turn_state);
                 turn_task
                     .abort
@@ -7129,8 +7225,8 @@ async fn handle_command(
                         turn_task.push_event(json!({"event_type":"agent_error","message":emsg,"is_fatal":false,"captcha_required":ecaptcha}));
                     }
                 }
-                turn_task.push_event(json!({"event_type":"turn_end"}));
                 turn_task.finish(if failed { "failed" } else { "completed" });
+                turn_task.push_event(json!({"event_type":"turn_end"}));
                 persist_task_checkpoints(&turn_state);
                 turn_task
                     .abort
@@ -7290,6 +7386,7 @@ async fn undo_turn(
         .truncate_from(&target_id)
         .context("failed to truncate undone turn")?;
     store.save(&session).context("failed to save undone session")?;
+    task.reset_view(&session);
     task.push_event(json!({"event_type":"turn_truncated"}));
     Ok(())
 }
@@ -7353,6 +7450,7 @@ async fn compact_web_session(
         .compact_session(&mut session, &provider, &tools, &observer)
         .await?;
     store.save(&session)?;
+    context.task.reset_view(&session);
     Ok(())
 }
 
@@ -7401,18 +7499,32 @@ async fn dispatch_guide(
     };
     context.send_ack(envelope_id);
     // 写入会话历史：用户标题消息 + 完整正文（assistant），保证刷新后引导内容仍在。
+    let mut saved_session = None;
     if let Ok(id) = Uuid::parse_str(session_id) {
         let store = SessionStore::new(&state.home);
-        if let Ok(mut session) = store.load(id) {
-            session
-                .messages
-                .push(coomi_engine::ChatMessage::user((*title).to_owned()));
-            session.messages.push(coomi_engine::ChatMessage::assistant(
-                (*body).to_owned(),
-                Vec::new(),
-            ));
-            let _ = store.save(&session);
+        let mut session = match store.load(id) {
+            Ok(session) => session,
+            Err(_) if !store.contains(id) => {
+                let mut session = Session::new("", "", state.cwd.clone());
+                session.id = id;
+                session
+            }
+            Err(error) => { context.send_error(envelope_id, format!("failed to load guide session: {error:#}")); return; }
+        };
+        let view_base = session.clone();
+        session.messages.push(coomi_engine::ChatMessage::user((*title).to_owned()));
+        let user_only = session.clone();
+        session.messages.push(coomi_engine::ChatMessage::assistant(
+            (*body).to_owned(),
+            Vec::new(),
+        ));
+        if let Err(error) = store.save(&session) {
+            context.send_error(envelope_id, format!("failed to save guide session: {error:#}"));
+            return;
         }
+        context.task.reset_view(&view_base);
+        context.task.checkpoint_saved(&user_only);
+        saved_session = Some(session);
     }
     // 逐块流式推送正文：16 字符/块 + 220ms，模拟自然打字节奏（约 70 字/秒）。
     let mut chunk = String::new();
@@ -7434,6 +7546,7 @@ async fn dispatch_guide(
             .task
             .push_event(json!({"event_type": "text_chunk", "content": chunk}));
     }
+    if let Some(session) = saved_session { context.task.checkpoint_saved(&session); }
     context.task.push_event(json!({"event_type": "turn_end"}));
 }
 
@@ -7470,7 +7583,7 @@ async fn run_turn(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    let conflicts = state.task_manager.verify_baseline(&task_id, &state.cwd)?;
+    let conflicts = state.task_manager.verify_baseline(&task_id, &session_workspace(state, session_id))?;
     if !conflicts.is_empty() {
         task.set_phase("conflict");
         let summary = format!("external state changed: {}", conflicts.join(", "));
@@ -7501,6 +7614,7 @@ async fn run_turn(
         &state.cwd,
     )?;
     session.mode = *context.session_mode.read().await;
+    task.reset_view(&session);
 
     // Use the session's own working directory so history and context always belong
     // to the same project; fall back to the engine cwd only when the session's
@@ -7710,8 +7824,11 @@ async fn run_turn(
         // 意外中断、进程被杀、断线重连后都能从磁盘恢复完整上下文。
         .with_durable_checkpoint({
             let checkpoint_store = SessionStore::new(&state.home);
+            let checkpoint_task = Arc::clone(&task);
             Arc::new(move |session: &Session| {
-                checkpoint_store.save(session).map_err(|error| error.to_string())
+                checkpoint_store.save(session).map_err(|error| error.to_string())?;
+                checkpoint_task.checkpoint_saved(session);
+                Ok(())
             })
         });
     // 无论成败都先保存会话：报错/中断时本轮已产生的消息（用户提问、工具结果、
@@ -7909,6 +8026,7 @@ struct BrowserUsageState {
     turn_active: bool,
     /** 本轮开始时间。真正的一轮耗时：ModelUsage 首次出现 → TurnCompleted。 */
     turn_started_at: Option<Instant>,
+    turn_elapsed_ms: u64,
     context_used_tokens: u64,
     context_window_tokens: u64,
 }
@@ -7976,7 +8094,10 @@ impl BrowserObserver {
             elapsed,
             &self.reasoning_effort,
         );
-        event["context_categories"] = json!(self.context_categories);
+        let mut categories = self.context_categories.clone();
+        let fixed = categories.iter().filter(|(key, _)| key.as_str() != "messages").map(|(_, value)| *value).sum::<u64>();
+        categories.insert("messages".into(), state.context_used_tokens.saturating_sub(fixed));
+        event["context_categories"] = json!(categories);
         self.task.push_event(event);
     }
 }
@@ -7989,7 +8110,7 @@ fn browser_usage_event(state: BrowserUsageState) -> Value {
         .turn_started_at
         .map(|started| started.elapsed().as_secs_f64())
         .filter(|value| *value > 0.0)
-        .unwrap_or(0.0);
+        .unwrap_or(state.turn_elapsed_ms as f64 / 1000.0);
     let turn_rate = if elapsed_secs > 0.0 && state.turn_output_tokens > 0 {
         state.turn_output_tokens as f64 / elapsed_secs
     } else {
@@ -8028,7 +8149,7 @@ fn browser_usage_event(state: BrowserUsageState) -> Value {
             "turn_elapsed_ms": state
                 .turn_started_at
                 .map(|started| started.elapsed().as_millis() as u64)
-                .unwrap_or(0),
+                .unwrap_or(state.turn_elapsed_ms),
             "turn_rate_tps": turn_rate,
         },
     })
@@ -8361,7 +8482,7 @@ fn estimate_context_categories(
             ))
         })
         .sum();
-    let skills = list_installed_skills(home)
+    let skills: u64 = list_installed_skills(home)
         .unwrap_or_default()
         .into_iter()
         .filter(|skill| skill.enabled)
@@ -8372,7 +8493,7 @@ fn estimate_context_categories(
         ("messages".to_owned(), messages),
         ("skills".to_owned(), skills),
         ("mcp_tools".to_owned(), mcp_tools),
-        ("system_prompt".to_owned(), estimated_tokens(system_prompt)),
+        ("system_prompt".to_owned(), estimated_tokens(system_prompt).saturating_sub(skills)),
         ("other".to_owned(), 0),
     ])
 }
@@ -8383,6 +8504,10 @@ impl AgentObserver for BrowserObserver {
             AgentEvent::Text(content) | AgentEvent::TextDelta(content) => {
                 self.task
                     .push_event(json!({"event_type": "text_chunk", "content": content}));
+            }
+            AgentEvent::ReasoningCompleted => { self.task.push_event(json!({"event_type": "reasoning_end"})); }
+            AgentEvent::PersistenceFailed(message) => {
+                self.task.push_event(json!({"event_type": "agent_error", "message": message, "is_fatal": true}));
             }
             AgentEvent::ReasoningDelta(content) => {
                 self.task
@@ -8512,6 +8637,7 @@ impl AgentObserver for BrowserObserver {
                         .take()
                         .map(|started| started.elapsed())
                         .unwrap_or_default();
+                    state.turn_elapsed_ms = elapsed.as_millis() as u64;
                     (elapsed, turn.total_tokens())
                 } else {
                     (Duration::from_secs(0), turn.total_tokens())
@@ -8541,14 +8667,13 @@ impl AgentObserver for BrowserObserver {
                 self.task.push_event(json!({"event_type": "stream_reset"}));
             }
             AgentEvent::CompactionCompleted {
-                before_tokens,
-                after_tokens,
-                ..
+                before_tokens, after_tokens, summary_id, summary, ..
             } => {
                 self.task.push_event(json!({
                     "event_type": "compression",
                     "before": before_tokens,
                     "after": after_tokens,
+                    "summary_id": summary_id, "summary": summary,
                 }));
             }
             AgentEvent::PlanUpdated(plan) => {
@@ -8591,6 +8716,8 @@ impl AgentObserver for BrowserObserver {
                     state.turn_output_tokens = 0;
                     state.turn_cache_data_available = false;
                     state.turn_active = true;
+                    state.turn_started_at = Some(Instant::now());
+                    state.turn_elapsed_ms = 0;
                 }
                 self.send_usage();
             }

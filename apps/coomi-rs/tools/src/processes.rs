@@ -65,6 +65,7 @@ impl Default for ProcessManager {
 
 struct ManagedProcess {
     child: Child,
+    execution_lease: Option<crate::execution_gate::Lease>,
     /// Process-group id (Unix only): the shell is spawned with `process_group(0)` so that
     /// descendants (`cmd &` inside the shell) share the group and can be killed together.
     pgid: Option<u32>,
@@ -86,6 +87,7 @@ async fn kill_managed(process: &Arc<AsyncMutex<ManagedProcess>>) {
     let pgid = {
         let mut guard = process.lock().await;
         if let Ok(Some(_)) = guard.child.try_wait() {
+            guard.execution_lease.take();
             return;
         }
         guard.pgid
@@ -101,7 +103,9 @@ async fn kill_managed(process: &Arc<AsyncMutex<ManagedProcess>>) {
         let pid = process.lock().await.child.id();
         if let Some(pid) = pid { let _ = std::process::Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output(); }
     }
-    let _ = process.lock().await.child.kill().await;
+    let mut process = process.lock().await;
+    let _ = process.child.kill().await;
+    process.execution_lease.take();
 }
 
 /// Cancelling a shell future must also stop its descendants.
@@ -159,6 +163,7 @@ impl ProcessManager {
     }
 
     async fn start(&self, cwd: &std::path::Path, arguments: &Value) -> ToolResult {
+        let execution_lease = crate::execution_gate::enter(false).await;
         let Some(command) = arguments.get("command").and_then(Value::as_str) else {
             return ToolResult::error("missing string argument: command");
         };
@@ -245,6 +250,7 @@ impl ProcessManager {
         let session_id = Uuid::new_v4().to_string();
         let managed = Arc::new(AsyncMutex::new(ManagedProcess {
             child,
+            execution_lease: Some(execution_lease),
             pgid,
             stdin,
             stdout: stdout_buffer,
@@ -256,6 +262,21 @@ impl ProcessManager {
             memory_limit: self.memory_limit,
             limit_error,
         }));
+        let watched = Arc::downgrade(&managed);
+        tokio::spawn(async move {
+            loop {
+                let Some(process) = watched.upgrade() else { return };
+                {
+                    let mut process = process.lock().await;
+                    if !matches!(process.child.try_wait(), Ok(None)) {
+                        process.execution_lease.take();
+                        return;
+                    }
+                }
+                drop(process);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
         {
             let mut owned = self.owned.lock().expect("owned process lock");
             owned.retain(|_, process| process.try_lock().map(|mut p| p.child.try_wait().ok().flatten().is_none()).unwrap_or(true));

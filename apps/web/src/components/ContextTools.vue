@@ -6,6 +6,7 @@ import { registerOverlay, unregisterOverlay } from '@/bridge/overlayStack'
 import CoomiIcon from './CoomiIcon.vue'
 import PromptLibrary from './PromptLibrary.vue'
 import NoteLibrary from './NoteLibrary.vue'
+import ContextRing from './ContextRing.vue'
 
 const props = defineProps<{ floating?: boolean; usagePercent: number }>()
 const emit = defineEmits<{ open: [] }>()
@@ -219,14 +220,14 @@ const fanEdgePath = computed(() => `M 0 0 A ${radius.value} ${radius.value} 0 0 
 <template>
   <div class="context-tools" data-context-tools>
     <button v-if="!floating" ref="anchor" class="context-anchor" :class="{ expanded: opened }" :aria-hidden="opened || undefined" :tabindex="opened ? -1 : 0" aria-label="展开快捷工具" :aria-expanded="opened" title="快捷工具" @click="toggle">
-      <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15" pathLength="100" /><circle class="value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${usagePercent} ${100 - usagePercent}`" /></svg>
+      <ContextRing :used="session.usage?.contextUsed ?? 0" :window="session.usage?.contextWindow ?? 0" :categories="session.usage?.contextCategories" />
     </button>
     <Teleport to="body">
       <Transition name="orbit-veil"><div v-if="opened && active" class="orbit-backdrop" aria-hidden="true" @pointerdown="active = null" /></Transition>
       <Transition name="orbit-reveal" :duration="280">
       <div v-if="opened" class="orbit-layer" :style="overlayStyle" data-context-tools>
         <button ref="closeAnchor" class="context-anchor orbit-anchor" aria-label="关闭快捷工具带" aria-expanded="true" @click="toggle">
-          <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15" pathLength="100" /><circle class="value" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${usagePercent} ${100 - usagePercent}`" /></svg>
+          <ContextRing :used="session.usage?.contextUsed ?? 0" :window="session.usage?.contextWindow ?? 0" :categories="session.usage?.contextCategories" />
           <CoomiIcon class="close-mark" name="close" :size="15" />
         </button>
         <Transition name="card-reveal" mode="out-in">

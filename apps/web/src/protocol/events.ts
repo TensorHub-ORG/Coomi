@@ -24,6 +24,7 @@ export interface ReasoningEffortStats {
 }
 
 export interface TextChunkEvent { event_type: 'text_chunk'; content: string }
+export interface ReasoningEndEvent { event_type: 'reasoning_end' }
 export interface ReasoningChunkEvent { event_type: 'reasoning_chunk'; content: string }
 export interface ToolStartEvent { event_type: 'tool_start'; call_id: string; tool_name: string; arguments: Record<string, unknown> }
 export interface ToolRunningEvent { event_type: 'tool_running'; call_id: string; tool_name: string }
@@ -37,7 +38,7 @@ export interface UsageUpdateEvent {
 }
 export interface ConnectionRetryEvent { event_type: 'connection_retry'; attempt: number; max_attempts: number; delay?: number; delay_ms?: number; message: string }
 export interface StreamResetEvent { event_type: 'stream_reset' }
-export interface CompressionEvent { event_type: 'compression'; before: number; after: number }
+export interface CompressionEvent { event_type: 'compression'; before: number; after: number; summary_id?: string; summary?: string }
 export interface CompressionStartedEvent { event_type: 'compression_started'; automatic: boolean }
 export interface AgentErrorEvent { event_type: 'agent_error'; message: string; is_fatal: boolean; captcha_required?: boolean }
 export interface ConfigurationRequiredEvent { event_type: 'configuration_required'; message: string; route: '/providers' }
@@ -71,8 +72,11 @@ export interface LifeDeliveredEvent {
   text: string
 }
 
+export interface UserMessageEvent { event_type: 'user_message' | 'assistant_message'; message_id: string; content: string; reasoning?: string; reasoning_state?: string }
+
 export type AgentEvent = (
-  | TextChunkEvent | ReasoningChunkEvent | ToolStartEvent | ToolRunningEvent
+  | UserMessageEvent
+  | TextChunkEvent | ReasoningChunkEvent | ReasoningEndEvent | ToolStartEvent | ToolRunningEvent
   | ToolDoneEvent | ToolCacheHitEvent | UsageUpdateEvent | ConnectionRetryEvent | StreamResetEvent
   | CompressionEvent | CompressionStartedEvent | AgentErrorEvent | ConfigurationRequiredEvent | AgentCancelledEvent | BgTaskDetachedEvent
   | BgTaskCompletedEvent | LoopStepStartEvent | LoopStepDoneEvent | LoopProgressEvent

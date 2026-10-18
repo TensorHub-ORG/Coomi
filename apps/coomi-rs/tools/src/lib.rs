@@ -1,4 +1,5 @@
 mod agents;
+mod execution_gate;
 mod patch;
 mod processes;
 mod shizuku;
@@ -2762,6 +2763,17 @@ impl ToolRuntime for CoreTools {
         if self.shell_only && !matches!(Self::canonical_tool_name(call.name.as_str()), "shell" | "read_note") {
             return ToolResult::error("极简模式只允许使用 shell 工具");
         }
+        let name = Self::canonical_tool_name(call.name.as_str());
+        // Delegation must not hold a lease while waiting for a child's tools.
+        // Persistent shells carry their own lease until exit; poll/write/kill
+        // must remain callable while that shell owns the mutation lease.
+        let _tool_lease = if matches!(name, "spawn_agent" | "wait_agent" | "close_agent" | "local_shell") {
+            None
+        } else {
+            let read_only = self.hooks.is_none() && self.specs().iter().find(|spec| spec.name == name)
+                .is_some_and(|spec| spec.concurrency() == coomi_engine::ToolConcurrency::ReadOnly);
+            Some(execution_gate::enter(read_only).await)
+        };
         let mut effective_call = call.clone();
         let mut additional_context = String::new();
         if let Some(hooks) = &self.hooks {

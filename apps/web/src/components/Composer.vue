@@ -119,9 +119,25 @@ const providerReady = computed(() => config.providers.some(provider => (
 function autoGrow() {
   const el = textarea.value
   if (!el) return
+  const container = el.closest<HTMLElement>('.composer-content')
+  const previousTop = container?.scrollTop ?? 0
+  const atBottom = !!container && container.scrollHeight - container.clientHeight - previousTop < 4
   el.style.height = 'auto'
   const scrollHeight = el.scrollHeight
   el.style.height = scrollHeight + 'px'
+  if (container) container.scrollTop = atBottom ? container.scrollHeight : previousTop
+}
+
+function onTextInput() {
+  autoGrow()
+  // Restore after Vue and WebView finish the input layout; keep the edited line
+  // visible without moving a user who is editing earlier text to the end.
+  void nextTick(() => {
+    autoGrow()
+    const el = textarea.value
+    const container = el?.closest<HTMLElement>('.composer-content')
+    if (el && container && el.selectionEnd === el.value.length) container.scrollTop = container.scrollHeight
+  })
 }
 
 async function submit() {
@@ -489,7 +505,7 @@ watch(attachments, () => {
           class="input"
           rows="1"
           :placeholder="session.isBusy ? '插队补充指令…' : '给 Coomi 下达任务…'"
-          @input="autoGrow"
+          @input="onTextInput"
           @keydown="onKeydown"
         />
       </div>

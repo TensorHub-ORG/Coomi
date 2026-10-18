@@ -1,5 +1,7 @@
 package app.coomi;
 
+import com.termux.BuildConfig;
+
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
@@ -41,6 +43,7 @@ public final class UpdateChecker {
         "https://updates.septemc.com/coomi/android_test/latest.json";
     private static final String PREFS_NAME = "coomi_settings";
     private static final String KEY_TEST_UPDATE_DOT = "test_update_dot_enabled";
+    private static final String KEY_UPDATE_REMINDERS = "update_reminders_enabled";
     private static final String TAG = "UpdateChecker";
 
     public interface Callback {
@@ -59,10 +62,17 @@ public final class UpdateChecker {
     }
 
 
+    public static boolean remindersEnabled(Context context) {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_UPDATE_REMINDERS, true);
+    }
+    public static void setRemindersEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(KEY_UPDATE_REMINDERS, enabled).apply();
+    }
+
     /** 测试通道更新是否也亮红点（用户可选，默认关）。 */
     public static boolean isTestUpdateDotEnabled(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_TEST_UPDATE_DOT, false);
+            .getBoolean(KEY_TEST_UPDATE_DOT, BuildConfig.VERSION_NAME.contains("-test"));
     }
 
     public static void setTestUpdateDotEnabled(Context context, boolean enabled) {
@@ -105,9 +115,9 @@ public final class UpdateChecker {
             JSONObject test = fetchLatest(TEST_UPDATE_URL, current);
             boolean stableUpdate = stable != null && stable.optInt("versionCode", 0) > current;
             boolean testUpdate = test != null && test.optInt("versionCode", 0) > current;
-            boolean dot = stableUpdate || (testUpdate && isTestUpdateDotEnabled(context));
+            boolean dot = remindersEnabled(context) && (stableUpdate || (testUpdate && isTestUpdateDotEnabled(context)));
             JSONObject chosen = stableUpdate ? stable : (testUpdate ? test : null);
-            String version = chosen == null ? null : chosen.optString("version", "");
+            String version = chosen == null ? null : chosen.optString("version", "") + (chosen == test ? "【测试版】" : "");
             String notes = chosen == null ? null : chosen.optString("notes", "");
             // 回调必须切回主线程：控制台在回调里直接操作 View（红点/文案），
             // 后台线程触碰 UI 会 CalledFromWrongThreadException 闪退。

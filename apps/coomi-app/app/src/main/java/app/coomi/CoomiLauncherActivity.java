@@ -449,7 +449,7 @@ public class CoomiLauncherActivity extends Activity {
             return;
         }
 
-        if (!CoomiService.isDeployComplete()) {
+        if (!CoomiService.isDeployComplete() && !CoomiService.canRepairDeployment(this)) {
             Logger.logInfo(LOG_TAG, "coomi-rs not deployed, routing to setup");
             mStatusText.setText(R.string.coomi_setup_required);
             Intent intent = new Intent(this, CoomiSetupActivity.class);

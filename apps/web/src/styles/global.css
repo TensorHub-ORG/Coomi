@@ -427,3 +427,22 @@ h1, h2, h3 { margin: 0; font-weight: 650; }
 .minimal-ui .tool .target { font-size: 10.5px; }
 .minimal-ui .tool-body { font-size: 10px; }
 .minimal-ui .card-out { font-size: 12.4px; }
+
+/* Black-and-white terminal preset. Custom appearance tokens retain priority. */
+:root[data-theme="terminal"]:not([data-custom-appearance="true"]) {
+  --bg:#000; --page:#000; --fill:#181818; --fill-strong:#242424; --fill-press:#333;
+  --border:#363636; --border-strong:#555; --text:#f5f5f5; --text-2:#cacaca; --text-3:#999;
+  --blue:#fff; --blue-press:#ddd; --blue-soft:#262626; --blue-soft-2:#333; --blue-border:#777;
+  --code-bg:#121212; --code-text:#eee; --code-bg-dark:#080808; --bg-card:#0a0a0a;
+  --bg-elevated:#111; --user-bubble:#eee; --user-text:#000; --font-ui:var(--font-mono);
+}
+:root[data-theme="terminal"]:not([data-custom-appearance="true"]) :is(.primary, .send, .channel-tabs button.selected) { color:#000; }
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+}
+
+.mode-pop .pill { animation:coomi-mode-enter .2s ease both; }
+.mode-pop .pill:nth-child(2) { animation-delay:.025s; }
+.mode-pop .pill:nth-child(3) { animation-delay:.05s; }
+.mode-pop .pill:nth-child(4) { animation-delay:.075s; }
+@keyframes coomi-mode-enter { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }

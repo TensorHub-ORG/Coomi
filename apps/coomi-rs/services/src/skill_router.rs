@@ -221,7 +221,16 @@ impl SkillRouter {
                 });
                 continue;
             }
-            let body = read_skill_tree(&entry.path, &self.root, 0, &mut BTreeSet::new())?;
+            let body = match read_skill_tree(&entry.path, &self.root, 0, &mut BTreeSet::new()) {
+                Ok(body) => body,
+                Err(error) => {
+                    decisions.push(SkillRouteDecision {
+                        name: entry.name.clone(), status: SkillRouteStatus::Skipped,
+                        score, reasons, conflict: Some(format!("Skill could not be loaded: {error:#}")),
+                    });
+                    continue;
+                }
+            };
             let section = format!(
                 "\n\n## Routed Skill: {}\nMatch: {}\n{}",
                 entry.name,
@@ -575,6 +584,16 @@ mod tests {
     }
 
     #[test]
+    fn oversized_skill_does_not_abort_or_hide_a_valid_match() {
+        let home = tempfile::tempdir().unwrap();
+        install_skill(home.path(), "a-large", &format!("---\nkeywords: [review]\n---\n{}", "x".repeat(MAX_SKILL_CONTEXT_BYTES + 1)), true);
+        install_skill(home.path(), "b-valid", "---\nkeywords: [review]\n---\nKeep the useful instruction.", true);
+        let result = SkillRouter::load(home.path()).unwrap().route("review", &SkillRouteContext::default()).unwrap();
+        assert!(result.instructions.contains("Keep the useful instruction."));
+        assert!(result.decisions.iter().any(|d| d.status == SkillRouteStatus::Skipped && d.conflict.as_deref().is_some_and(|c| c.contains("expanded Skill exceeds"))));
+    }
+
+    #[test]
     fn ranks_keyword_file_tool_and_project_matches() {
         let home = tempfile::tempdir().expect("temporary home");
         install_skill(
@@ -658,9 +677,10 @@ mod tests {
         );
         fs::write(home.path().join("outside.md"), "outside").expect("write outside file");
         let router = SkillRouter::load(home.path()).expect("load router");
-        let error = router
+        let result = router
             .route("escape", &SkillRouteContext::default())
-            .expect_err("path traversal must fail");
-        assert!(format!("{error:#}").contains("escapes allowed path"));
+            .expect("an invalid skill must not abort the task");
+        assert!(result.instructions.is_empty());
+        assert!(result.decisions.iter().any(|d| d.status == SkillRouteStatus::Skipped && d.conflict.as_deref().is_some_and(|c| c.contains("escapes allowed path"))));
     }
 }

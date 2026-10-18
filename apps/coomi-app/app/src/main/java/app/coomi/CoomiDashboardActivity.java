@@ -285,6 +285,7 @@ public class CoomiDashboardActivity extends Activity {
     protected void onResume() {
         super.onResume();
         mRegistryRefreshRequested = false;
+        checkUpdateSilently();
         String currentMode = CoomiTheme.getMode(this);
         String currentAppearance = CoomiTheme.appearanceSignature(this);
         if ((mAppliedThemeMode != null && !mAppliedThemeMode.equals(currentMode))
@@ -473,6 +474,9 @@ public class CoomiDashboardActivity extends Activity {
             if (hasUpdate) {
                 mUpdateDot.setVisibility(View.VISIBLE);
                 mCheckUpdateDesc.setText("发现新版本 " + version + "，点击更新");
+            } else {
+                mUpdateDot.setVisibility(View.GONE);
+                mCheckUpdateDesc.setText(getString(R.string.coomi_dash_check_update_desc, BuildConfig.VERSION_NAME));
             }
         });
     }

@@ -160,6 +160,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.website.split(stable)[1].split(test)[0], result.split(stable)[1].split(test)[0])
         self.assertIn('android_test/Coomi-Android-arm64-v2.0.0-test.1.apk', result)
 
+    def test_android_test_publish_preserves_multiple_desktop_downloads(self):
+        desktop = ('<a href="https://updates.septemc.com/coomi/desktop/current.exe" data-stat-action="download-test" data-download-button="desktop">Desktop</a>'
+                   '<a href="https://updates.septemc.com/coomi/desktop/old.exe" data-stat-action="download-test" data-test-download="desktop">Desktop old</a>')
+        website = self.website.replace('<div class="actions">', '<div class="actions">' + desktop)
+        result = deploy.update_website(website, manifest("test"))
+        self.assertIn(desktop, result)
+        self.assertIn('移动端测试版 v2.0.0-test.1', result)
+        self.assertEqual(len(re.findall(r'<details class="changelog-history" open', result)), 0)
+
     def test_unknown_site_markup_stops_deployment(self):
         with self.assertRaises(ValueError):
             deploy.update_website(self.website.replace('id="downloadButtonAndroid"', 'id="different"'), manifest())

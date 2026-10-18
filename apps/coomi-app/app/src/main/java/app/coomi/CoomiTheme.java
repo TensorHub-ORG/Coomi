@@ -69,6 +69,7 @@ public final class CoomiTheme {
     public static final String MODE_EMBER = "ember";
     public static final String MODE_CELADON = "celadon";
     public static final String MODE_LINEN = "linen";
+    public static final String MODE_TERMINAL = "terminal";
 
     public static final String PREF_THEME_MODE = "coomi.themeMode";
     public static final String PREF_DIGITAL_LIFE_ENABLED = "coomi.digitalLifeEnabled";
@@ -132,7 +133,7 @@ public final class CoomiTheme {
             return luminance < 0.45;
         }
         String mode = getMode(context);
-        if (MODE_DARK.equals(mode) || MODE_INK.equals(mode) || MODE_ABYSS.equals(mode) || MODE_EMBER.equals(mode)) return true;
+        if (MODE_TERMINAL.equals(mode) || MODE_DARK.equals(mode) || MODE_INK.equals(mode) || MODE_ABYSS.equals(mode) || MODE_EMBER.equals(mode)) return true;
         if (!MODE_SYSTEM.equals(mode)) return false;
         int night = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         return night == Configuration.UI_MODE_NIGHT_YES;
@@ -142,7 +143,7 @@ public final class CoomiTheme {
         return MODE_SYSTEM.equals(mode) || MODE_LIGHT.equals(mode) || MODE_DARK.equals(mode)
             || MODE_BOOK.equals(mode) || MODE_ORANGE.equals(mode) || MODE_INK.equals(mode)
             || MODE_ABYSS.equals(mode) || MODE_EMBER.equals(mode) || MODE_CELADON.equals(mode)
-            || MODE_LINEN.equals(mode);
+            || MODE_LINEN.equals(mode) || MODE_TERMINAL.equals(mode);
     }
 
     /**
@@ -167,6 +168,7 @@ public final class CoomiTheme {
     }
 
     private static int themeResource(String mode, boolean dark, boolean page, boolean web) {
+        if (MODE_TERMINAL.equals(mode)) return page ? R.style.Theme_Coomi_Terminal_Page : web ? R.style.Theme_Coomi_Terminal_Web : R.style.Theme_Coomi_Terminal;
         if (MODE_INK.equals(mode)) return page ? R.style.Theme_Coomi_Ink_Page : web ? R.style.Theme_Coomi_Ink_Web : R.style.Theme_Coomi_Ink;
         if (MODE_ABYSS.equals(mode)) return page ? R.style.Theme_Coomi_Abyss_Page : web ? R.style.Theme_Coomi_Abyss_Web : R.style.Theme_Coomi_Abyss;
         if (MODE_EMBER.equals(mode)) return page ? R.style.Theme_Coomi_Ember_Page : web ? R.style.Theme_Coomi_Ember_Web : R.style.Theme_Coomi_Ember;
@@ -757,6 +759,7 @@ public final class CoomiTheme {
 
     private static int resolvePageColor(Context context) {
         String mode = getMode(context);
+        if (MODE_TERMINAL.equals(mode)) return android.graphics.Color.BLACK;
         if (MODE_INK.equals(mode)) return context.getColor(R.color.coomi_ink_page);
         if (MODE_ABYSS.equals(mode)) return context.getColor(R.color.coomi_abyss_page);
         if (MODE_EMBER.equals(mode)) return context.getColor(R.color.coomi_ember_page);
@@ -769,6 +772,7 @@ public final class CoomiTheme {
     }
 
     private static int resolveBackgroundColor(Context context, String mode, boolean dark, boolean page) {
+        if (MODE_TERMINAL.equals(mode)) return android.graphics.Color.BLACK;
         if (MODE_INK.equals(mode)) return context.getColor(page ? R.color.coomi_ink_page : R.color.coomi_ink_bg);
         if (MODE_ABYSS.equals(mode)) return context.getColor(page ? R.color.coomi_abyss_page : R.color.coomi_abyss_bg);
         if (MODE_EMBER.equals(mode)) return context.getColor(page ? R.color.coomi_ember_page : R.color.coomi_ember_bg);

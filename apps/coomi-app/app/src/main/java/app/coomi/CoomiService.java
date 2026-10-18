@@ -34,6 +34,10 @@ public class CoomiService extends Service {
     private static final String LOG_TAG = "CoomiService";
     private static final int HEALTH_CHECK_TIMEOUT_MS = 2000;
     private static final int CMD_TIMEOUT_SEC = 30;
+    private static final int ENGINE_START_WAIT_MS = 12_000;
+    private static final int ENGINE_HEALTH_POLL_MS = 300;
+    private static final long ENGINE_LOG_MAX_BYTES = 8L * 1024 * 1024;
+    private static final int ENGINE_LOG_KEEP_BYTES = 1024 * 1024;
     /** ~/.profile 与 ~/.bashrc 里由 Coomi 管理的块标记：块内整体替换，块外保留用户内容。 */
     private static final String SHELL_BLOCK_START = "# >>> Coomi Android managed block >>>";
     private static final String SHELL_BLOCK_END = "# <<< Coomi Android managed block <<<";
@@ -169,6 +173,14 @@ public class CoomiService extends Service {
         return new File(CoomiConstants.INSTALL_MARKER_PATH).isFile();
     }
 
+    /** Route an existing installation through repair instead of first-run setup. */
+    public static boolean canRepairDeployment(Context context) {
+        return isBootstrapInstalled()
+            && new File(CoomiConstants.COOMI_CONFIG_DIR).isDirectory()
+            && new File(context.getApplicationInfo().nativeLibraryDir,
+                CoomiConstants.NATIVE_BINARY_NAME).isFile();
+    }
+
     private File nativeBinary() {
         return new File(getApplicationInfo().nativeLibraryDir, CoomiConstants.NATIVE_BINARY_NAME);
     }
@@ -181,7 +193,7 @@ public class CoomiService extends Service {
         File marker = new File(CoomiConstants.INSTALL_MARKER_PATH);
         File binary = nativeBinary();
         File link = new File(prefix() + "/bin/coomi");
-        if (!marker.isFile() || !binary.isFile()) return false;
+        if (!binary.isFile()) return false;
 
         String expected = binary.getAbsolutePath();
         String actual = "";
@@ -208,7 +220,7 @@ public class CoomiService extends Service {
                 return false;
             }
             Logger.logInfo(LOG_TAG, "Refreshed native engine link after APK update: " + expected);
-            updateInstallMarkerNativePath(marker, expected);
+            if (marker.isFile()) updateInstallMarkerNativePath(marker, expected);
             return true;
         } catch (Exception e) {
             Logger.logError(LOG_TAG, "Failed to refresh native engine link: " + e.getMessage());
@@ -488,89 +500,115 @@ public class CoomiService extends Service {
         }
     }
 
+    private void repairDeploymentIfNeeded() throws Exception {
+        if (!isBootstrapInstalled()) throw new java.io.IOException("基础环境未安装完整，请在安装页修复");
+        for (String path : new String[] {prefix() + "/bin", CoomiConstants.COOMI_CONFIG_DIR,
+                CoomiConstants.COOMI_CONFIG_DIR + "/config", CoomiConstants.COOMI_CONFIG_DIR + "/sessions",
+                workspaceDir(this)}) {
+            File directory = new File(path);
+            if (!directory.isDirectory() && !directory.mkdirs()) throw new java.io.IOException("无法创建运行目录：" + path);
+        }
+        boolean repair = !isDeployComplete();
+        File link = new File(prefix() + "/bin/coomi");
+        try { repair |= !nativeBinary().getAbsolutePath().equals(Os.readlink(link.getAbsolutePath())); }
+        catch (ErrnoException missing) { repair = true; }
+        if (!ensureNativeBinaryLinkCurrent()) throw new java.io.IOException("无法刷新原生引擎软链");
+        if (repair) {
+            CommandResult version = execTermux("coomi --version");
+            if (!version.success || !version.stdout.contains("coomi")) {
+                throw new java.io.IOException("原生引擎校验失败：" + version.stdout + " " + version.stderr);
+            }
+            writeShellEnvironment();
+            writeFileAtomically(new File(CoomiConstants.INSTALL_MARKER_PATH),
+                (version.stdout.trim() + "\n" + nativeBinary().getAbsolutePath() + "\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Logger.logInfo(LOG_TAG, "Repaired native engine deployment");
+        }
+    }
+
+    private boolean waitForHealthy(Process process, int port) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + ENGINE_START_WAIT_MS;
+        while (!mDestroyed && !Thread.currentThread().isInterrupted()
+                && android.os.SystemClock.elapsedRealtime() < deadline) {
+            if (mEngineProcess != process || !process.isAlive()) return false;
+            if (checkHealth(port)) return true;
+            try { Thread.sleep(ENGINE_HEALTH_POLL_MS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
+        }
+        return false;
+    }
+
+    private void rotateEngineLog() throws Exception {
+        File log = new File(CoomiConstants.ENGINE_LOG_PATH);
+        if (!log.isFile() || log.length() <= ENGINE_LOG_MAX_BYTES) return;
+        try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(log, "r")) {
+            input.seek(Math.max(0, input.length() - ENGINE_LOG_KEEP_BYTES));
+            byte[] tail = new byte[(int) (input.length() - input.getFilePointer())];
+            input.readFully(tail);
+            writeFileAtomically(log, tail);
+        }
+    }
+
     private CommandResult startEngineSync() {
         mIsEngineStarting = true;
         try {
-            if (!engineMatchesApk()) {
-                Logger.logInfo(LOG_TAG, "Engine binary changed (APK updated), stopping stale engine");
-                stopEngineSync();
-            }
+            if (mDestroyed || Thread.currentThread().isInterrupted()) return new CommandResult(false, "", "引擎启动已取消", -1);
+            if (!engineMatchesApk()) stopEngineSync();
             if (mEngineProcess != null && mEngineProcess.isAlive()) {
                 if (checkHealth(mEnginePort)) {
-                    // 引擎进程活着且健康，但 APK 更新后引擎二进制可能已换新：
-                    // 旧进程加载的还是旧代码（新旧 API 不匹配，前端会 404）。
-                    // 对比引擎自身写入的二进制指纹，不一致则重启。
-                    mIsEngineStarting = false;
+                    mIsEngineRunning = true;
                     return new CommandResult(true, "already running", "", 0);
-                } else {
-                    // 进程活着但健康检查失败（假死/端口错乱）：先清理旧进程再重启，
-                    // 避免双引擎并发写同一会话目录。
-                    Logger.logInfo(LOG_TAG, "Engine process alive but unhealthy, killing before restart");
-                    stopEngineSync();
                 }
+                stopEngineSync();
             }
-            if (!ensureNativeBinaryLinkCurrent() || !isDeployComplete()) {
-                mIsEngineStarting = false;
-                return new CommandResult(false, "", "coomi-rs is not deployed", -1);
-            }
+            purgeOwnedEngines();
+            mIsEngineStarting = true;
+            repairDeploymentIfNeeded();
             File binary = nativeBinary();
             File web = ensureCurrentWebAssets();
-            if (!binary.isFile() || !new File(web, "index.html").isFile()) {
-                mIsEngineStarting = false;
-                return new CommandResult(false, "", "native binary or frontend is missing", -1);
-            }
-            // Runtime V2 资产暂存（Ubuntu rootfs 311MB）失败（典型：存储不足）
-            // 不应阻止引擎启动——引擎可继续用当前已装 Runtime 运行，
-            // 自动升级会在空间释放后的下次启动重试暂存。
+            if (!new File(web, "index.html").isFile()) return new CommandResult(false, "", "APK 中缺少前端资源", -1);
             stageBundledRuntimeForStartup();
-
-            int port = findFreePort();
-            String token = generateToken();
-            mEngineToken = token;
-            String command = termuxEnvironment()
-                // 告诉引擎它的配置目录（也就是 .coomi），PoW 求解队列要用它定位。
-                + "export COOMI_HOME=" + shellQuote(CoomiConstants.COOMI_CONFIG_DIR) + "; "
-                + "export RUST_BACKTRACE=1; cd " + shellQuote(workspaceDir(this)) + "; "
-                + "exec >>" + shellQuote(CoomiConstants.ENGINE_LOG_PATH) + " 2>&1; "
-                + "exec " + shellQuote(binary.getAbsolutePath())
-                + " --home " + shellQuote(CoomiConstants.COOMI_CONFIG_DIR)
-                + " --cwd " + shellQuote(workspaceDir(this))
-                + " serve --port " + port
-                + " --token " + shellQuote(token)
-                + " --static-dir " + shellQuote(web.getAbsolutePath());
-            ProcessBuilder builder = new ProcessBuilder("/system/bin/sh", "-c", command);
-            builder.redirectErrorStream(true);
-            mEngineProcess = builder.start();
-            mEnginePort = port;
-            mIsEngineRunning = true;
-            startBundledRuntimeInstallWhenReady(mEngineProcess, port, token);
-            reportDailyActive();
-            // 引擎就绪后补传离线期间的反馈（Outbox 里的记录都已获用户授权或为崩溃自动上报）。
-            new Thread(() -> FeedbackManager.flushOutbox(CoomiService.this), "coomi-feedback-flush").start();
-
-            Process process = mEngineProcess;
-            new Thread(() -> {
-                try {
-                    int code = process.waitFor();
-                    Logger.logInfo(LOG_TAG, "coomi-rs exited with code " + code);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    if (mEngineProcess == process) {
-                        mEngineProcess = null;
-                        mIsEngineRunning = false;
-                    }
+            try { rotateEngineLog(); }
+            catch (Exception rotation) { Logger.logError(LOG_TAG, "Log rotation failed: " + rotation.getMessage()); }
+            String lastFailure = "";
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                if (mDestroyed || Thread.currentThread().isInterrupted()) break;
+                int port = findFreePort();
+                String token = generateToken();
+                mEngineToken = token;
+                String command = termuxEnvironment()
+                    + "export RUST_BACKTRACE=1; cd " + shellQuote(workspaceDir(this)) + "; "
+                    + "exec >>" + shellQuote(CoomiConstants.ENGINE_LOG_PATH) + " 2>&1; "
+                    + "exec " + shellQuote(binary.getAbsolutePath())
+                    + " --home " + shellQuote(CoomiConstants.COOMI_CONFIG_DIR)
+                    + " --cwd " + shellQuote(workspaceDir(this))
+                    + " serve --port " + port + " --token " + shellQuote(token)
+                    + " --static-dir " + shellQuote(web.getAbsolutePath());
+                Process process = new ProcessBuilder("/system/bin/sh", "-c", command).redirectErrorStream(true).start();
+                mEngineProcess = process;
+                mEnginePort = port;
+                if (waitForHealthy(process, port)) {
+                    mIsEngineRunning = true;
+                    startBundledRuntimeInstallWhenReady(process, port, token);
+                    reportDailyActive();
+                    new Thread(() -> FeedbackManager.flushOutbox(CoomiService.this), "coomi-feedback-flush").start();
+                    new Thread(() -> {
+                        try { Logger.logInfo(LOG_TAG, "coomi-rs exited with code " + process.waitFor()); }
+                        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                        finally { if (mEngineProcess == process) { mEngineProcess = null; mIsEngineRunning = false; } }
+                    }, "coomi-rs-waiter").start();
+                    return new CommandResult(true, "Engine healthy on port " + port, "", 0);
                 }
-            }, "coomi-rs-waiter").start();
-
-            return new CommandResult(true, "Engine started on port " + port, "", 0);
-        } catch (Exception e) {
-            mEngineProcess = null;
-            mIsEngineRunning = false;
-            return new CommandResult(false, "", e.getMessage(), -1);
-        } finally {
-            mIsEngineStarting = false;
-        }
+                lastFailure = "引擎启动失败（" + attempt + "/2）："
+                    + (process.isAlive() ? "健康检查超时" : "进程已退出") + "\n" + readEngineLogTail(60);
+                stopEngineSync();
+                mIsEngineStarting = true;
+            }
+            return new CommandResult(false, "", lastFailure.isEmpty() ? "引擎启动已取消" : lastFailure, -1);
+        } catch (Exception error) {
+            stopEngineSync();
+            return new CommandResult(false, "", "引擎启动失败：" + error.getMessage() + "\n" + readEngineLogTail(60), -1);
+        } finally { mIsEngineStarting = false; }
     }
 
     private void reportDailyActive() {
@@ -746,14 +784,49 @@ public class CoomiService extends Service {
             }
             if (process.isAlive()) process.destroyForcibly();
         }
-        // 兜底：清掉可能残留的 coomi 进程（Rust 侧收到 SIGTERM 会先清理全部工具子进程）。
-        // ^/[^ ]*libcoomi\.so 锚定引擎二进制路径开头，避免误匹配执行本命令的 shell 自身。
-        try {
-            execTermux("pkill -f '^/[^ ]*" + CoomiConstants.NATIVE_BINARY_NAME + "' 2>/dev/null; true");
-        } catch (Exception ignored) { /* best-effort */ }
+        purgeOwnedEngines();
         mEngineProcess = null;
         mIsEngineRunning = false;
         mIsEngineStarting = false;
+    }
+
+    private String ownedEngineStartTime(File proc) {
+        try {
+            if (Os.stat(proc.getAbsolutePath()).st_uid != android.os.Process.myUid()) return "";
+            String[] args = new String(readFileBytes(new File(proc, "cmdline")),
+                java.nio.charset.StandardCharsets.UTF_8).split("\\x00");
+            if (!CoomiEngineProcessIdentity.matches(args, CoomiConstants.COOMI_CONFIG_DIR)) return "";
+            return CoomiEngineProcessIdentity.startTime(readText(new File(proc, "stat")));
+        } catch (Exception unavailable) { return ""; }
+    }
+
+    private void purgeOwnedEngines() {
+        File[] entries = new File("/proc").listFiles();
+        if (entries == null) return;
+        java.util.Map<Integer, String> owned = new java.util.HashMap<>();
+        for (File entry : entries) {
+            int pid;
+            try { pid = Integer.parseInt(entry.getName()); }
+            catch (NumberFormatException invalid) { continue; }
+            if (pid <= 1 || pid == android.os.Process.myPid()) continue;
+            String start = ownedEngineStartTime(entry);
+            if (start.isEmpty()) continue;
+            owned.put(pid, start);
+            try { Os.kill(pid, OsConstants.SIGTERM); } catch (Exception ignored) {}
+        }
+        if (owned.isEmpty()) return;
+        long deadline = android.os.SystemClock.elapsedRealtime() + 1500;
+        while (android.os.SystemClock.elapsedRealtime() < deadline && !Thread.currentThread().isInterrupted()) {
+            owned.entrySet().removeIf(entry -> !entry.getValue().equals(ownedEngineStartTime(new File("/proc/" + entry.getKey()))));
+            if (owned.isEmpty()) return;
+            try { Thread.sleep(100); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+        }
+        for (java.util.Map.Entry<Integer, String> entry : owned.entrySet()) {
+            if (entry.getValue().equals(ownedEngineStartTime(new File("/proc/" + entry.getKey())))) {
+                try { Os.kill(entry.getKey(), OsConstants.SIGKILL); } catch (Exception ignored) {}
+            }
+        }
     }
 
     public void restartEngine(Consumer<CommandResult> callback) {
@@ -804,18 +877,18 @@ public class CoomiService extends Service {
     }
 
     public static String readEngineLogTail(int count) {
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new FileReader(CoomiConstants.ENGINE_LOG_PATH))) {
-            String line;
-            while ((line = reader.readLine()) != null) lines.add(line);
-        } catch (Exception ignored) {
-            return "";
-        }
-        StringBuilder output = new StringBuilder();
-        for (int i = Math.max(0, lines.size() - count); i < lines.size(); i++) {
-            output.append(lines.get(i)).append('\n');
-        }
-        return output.toString().trim();
+        File log = new File(CoomiConstants.ENGINE_LOG_PATH);
+        if (!log.isFile() || count <= 0) return "";
+        try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(log, "r")) {
+            long offset = Math.max(0, input.length() - 12_000);
+            input.seek(offset);
+            byte[] bytes = new byte[(int) (input.length() - offset)];
+            input.readFully(bytes);
+            String[] lines = new String(bytes, java.nio.charset.StandardCharsets.UTF_8).split("\n");
+            StringBuilder tail = new StringBuilder();
+            for (int i = Math.max(offset > 0 ? 1 : 0, lines.length - count); i < lines.length; i++) tail.append(lines[i]).append('\n');
+            return tail.toString().trim();
+        } catch (Exception unavailable) { return ""; }
     }
 
     private static int findFreePort() {
