@@ -1,8 +1,8 @@
 # Coomi
 
-> **最新稳定版：v1.4.7**（Android ARM64）· [下载 APK](https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.7.apk) · [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) · [官网](https://coomi.septemc.com/)
+> **当前源码版本：v1.5.0-test.4（测试版）· 最新稳定版：v1.4.7**（Android ARM64）· [下载稳定版 APK](https://updates.septemc.com/coomi/android/Coomi-Android-arm64-v1.4.7.apk) · [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) · [官网](https://coomi.septemc.com/)
 >
-> v1.4.7 亮点：AI 工作室成员消息实时流式显示、重复气泡修复、群聊协作体验升级、悬浮聊天窗口与反馈体验优化。
+> v1.5.0-test.4 测试内容：会话运行过程恢复、上下文用量统计和终端主题等。测试版可能不稳定，不替代稳定版下载。
 
 <table align="center">
   <tr>
@@ -35,7 +35,7 @@
 </table>
 
 <p align="center">
-<img alt="release" src="https://img.shields.io/badge/release-v1.4.0-2563eb?style=flat-square" />
+<img alt="source version" src="https://img.shields.io/badge/build-v1.5.0--test.4-2563eb?style=flat-square" />
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-0f766e?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Android%207.0%2B-16a34a?style=flat-square&logo=android&logoColor=white" />
   <img alt="agent" src="https://img.shields.io/badge/agent-Coomi-7c3aed?style=flat-square" />
@@ -44,7 +44,9 @@
   <img alt="local first" src="https://img.shields.io/badge/local--first-full%20control-334155?style=flat-square" />
 </p>
 
-Coomi 是一个在 Android 设备上运行的本地优先智能体工作环境。内置Rust 智能体引擎、终端式虚拟环境、可扩展的 SKILL / MCP 工具链和 Vue 对话界面：模型服务可自定义配置，会话与文件只留在设备本地，Agent 可以真实执行命令、读写文件、识别图片并展示结果。
+## 项目介绍
+
+Coomi 是一款面向 Android 的 AI Agent 工作环境。可以用于手机上直接开发APK应用，快速处理文件，便携灵感落地等场景。它已将可配置的模型服务、可执行的终端环境与文件工具进行整合，让 Agent 能够在手机上运行命令、读写文件、处理图片，并通过 SKILL / MCP 扩展能力。所有的对话、会话记录和运行环境由设备本地管理；可自由配置模型提供商。
 
 <p align="center">
   <a href="docs/assets/show_001.jpg"><img src="docs/assets/show_001.jpg" alt="对话界面" width="23%" /></a>
@@ -53,27 +55,21 @@ Coomi 是一个在 Android 设备上运行的本地优先智能体工作环境�
   <a href="docs/assets/show_004.jpg"><img src="docs/assets/show_004.jpg" alt="API 配置" width="23%" /></a>
 </p>
 
+## 主要功能
 
-## 业务能力
-
-- **本地智能体引擎**：内置 Rust 引擎（`coomi`），对话、工具执行、会话存储全部在设备本地完成，仅模型请求发往你配置的 Provider。
-- **真实终端环境**：内置 Termux 兼容虚拟环境与包管理器，Agent 可执行 shell 命令、读写文件、管理目录，而不是纸上谈兵。
-- **多 Provider 模型配置**：支持 OpenAI 兼容、Anthropic、Gemini 等协议，可自定义 base URL 与模型列表，按需开启联网搜索、图像理解等能力。
-- **图像理解与展示**：支持视觉模型的 `view_image` 真实读图（OpenAI 兼容 `image_url` 协议），以及面向任意模型的 `show_image` 大图展示，点击全屏预览、保存到相册或下载目录。
-- **SKILL / MCP 生态**：Agent 可自行安装 SKILL 与 MCP 服务，管理面板支持停用（文件保留可恢复）或彻底删除，已配置的 MCP 会注入系统提示供 Agent 直接调用。
-- **可靠的会话管理**：切换会话不中断任务、运行状态实时显示、草稿按会话独立保存、断线审批缓存补发、按最后一轮执行时间排序。
-- **上下文压缩与长会话**：智能 token 估算避免误压缩，压缩后本地缓存完整历史可回溯；长会话窗口化渲染、上滑动态加载，流畅不卡顿。
-- **大文件分段读取**：`read_file` 默认只读前 64 KiB，支持按行偏移分批继续读取，超长单行自动截断。
-- **三档主题**：跟随系统 / 明亮 / 夜间，对话界面、控制台、引导页全链路统一，原生状态栏联动。
-- **隐私与授权可控**：手机存储访问默认关闭，开启时联动系统授权；引擎单实例锁防止多实例串扰；更新检查为手动触发，升级保留全部会话、环境与配置。
-- **DeepSeek 账号登录**：支持 DeepSeek App 账号（密码 / 短信验证码）直接登录，复用 App 订阅额度（deepseek-chat / deepseek-reasoner），无需单独购买 API 额度。
-- **AI 工作室（实验）**：多智能体协作工作台——创建工作室、配置成员职责与模型、群聊 @调度、工单看板与审批闭环。
-- **完整 Ubuntu 系统环境**：内置 Ubuntu 24.04 LTS（对齐 Operit 完整发行版），gcc/cmake 等构建链开箱即用，随包离线安装、引擎启动自动升级。
-- **执行过程实时可观察**：Agent 命令与输出在对话页实时滚动展示，支持错误归因（网络 / 上游 / 参数）与可行动自纠提示。
+- **模型服务**：支持 OpenAI 兼容接口、Anthropic 和 Gemini，可自行设置服务地址、密钥和模型名称。
+- **终端与文件**：提供 Android 本地终端和 Ubuntu 24.04 环境，可运行命令、管理文件，并使用 gcc、cmake 等构建工具。访问手机共享存储前需授予系统权限。
+- **图片查看**：可将图片发送给支持视觉输入的模型，或自行配置图像理解MCP功能；图片可在应用内自由查看并保存。
+- **SKILL 与 MCP**：添加 SKILL 或连接 MCP 服务；可以自由配置、AI自定义制作MCP与SKILL。
+- **会话与执行记录**：记录功能状态稳定，各会话分别保存历史和草稿；运行状态、命令及输出会显示在对话中，切换会话或重新连接后可恢复查看运行过程。
+- **长对话**：超长对话记忆稳定，支持整理上下文和分段加载历史；整理后持久保留完整会话记录。
+- **协作工作室（实验）**：支持多种工坊用法，创建工作室、配置成员和模型，通过群聊分配任务，并在工单看板中跟进和审批。
+- **DeepSeek 登录**：可使用 DeepSeek App 账号登录，并调用账号当前可用的订阅额度。
+- **外观与本地数据**：支持跟随系统、明亮和夜间主题；升级会保留会话、运行环境与配置，卸载应用会清除设备上的本地数据。
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) 或[官网](https://coomi.septemc.com/)下载最新 APK（`Coomi-Android-arm64-v1.4.7.apk`），安装到 Android 7.0+ 的 ARM64 设备。
+1. 从 [GitHub Releases](https://github.com/TensorHub-ORG/Coomi/releases) 或[官网](https://coomi.septemc.com/)下载最新稳定版 APK（`Coomi-Android-arm64-v1.4.7.apk`），安装到 Android 7.0+ 的 ARM64 设备。
 2. 打开 App，完成引导：配置模型服务商（Provider）与 API Key，或先跳过、稍后在「对话设置 → Provider 配置」中填写。
 3. 进入对话界面，向 Agent 下达任务——它可以执行命令、读写文件、识别图片、管理 SKILL/MCP。
 
