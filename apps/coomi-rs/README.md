@@ -114,6 +114,7 @@ configuration, startup update checks, installable catalogs, and keyboard-only
 Settings are available in the first interactive session.
 
 The default `workspace-write` policy allows file edits inside the selected
-working directory and asks before arbitrary shell commands. `read-only` blocks
+working directory and asks before arbitrary shell commands or patches that
+delete or move files. `read-only` blocks
 writes; `full-access` expands the path boundary but still asks before commands
 recognized as destructive unless `--yes` is explicitly supplied.

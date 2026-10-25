@@ -584,9 +584,14 @@ impl CoreTools {
         let Some(patch_text) = string_arg(&call.arguments, "patch") else {
             return ToolResult::error("missing string argument: patch");
         };
-        if self.policy.mode() != coomi_security::AccessMode::FullAccess
+        let removes_files = match patch::removes_files(patch_text) {
+            Ok(removes_files) => removes_files,
+            Err(error) => return ToolResult::error(error),
+        };
+        if removes_files
+            && self.policy.mode() != coomi_security::AccessMode::ReadOnly
             && !approval
-                .approve(call, "apply_patch will modify files")
+                .approve(call, "apply_patch may delete or move files")
                 .await
         {
             return ToolResult::error("patch was not approved");
@@ -3437,6 +3442,70 @@ mod tests {
                 assert_eq!(result.success, expected_success, "{name}: {}", result.output);
                 assert!(result.output.contains("中文成功"), "{name}: {}", result.output);
                 if !expected_success { assert!(result.output.contains("exit code: 7"), "{}", result.output); }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_patch_edits_follow_file_policy() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::tempdir().expect("outside");
+        std::fs::write(workspace.path().join("edit.txt"), "before\n").unwrap();
+        let policy = SecurityPolicy::new(workspace.path(), AccessMode::WorkspaceWrite).unwrap();
+        let tools = CoreTools::new(workspace.path().to_path_buf(), policy);
+        let call = |patch: String| ToolCall {
+            id: "patch-policy".into(), name: "apply_patch".into(),
+            arguments: json!({"patch": patch}),
+        };
+        let edit = call("*** Begin Patch\n*** Add File: new.txt\n+created\n*** Update File: edit.txt\n@@\n-before\n+after\n*** End Patch".into());
+        let result = tools.call(&edit, &Deny).await;
+        assert!(result.success, "{}", result.output);
+        assert_eq!(std::fs::read_to_string(workspace.path().join("edit.txt")).unwrap(), "after\n");
+        assert_eq!(std::fs::read_to_string(workspace.path().join("new.txt")).unwrap(), "created\n");
+
+        let escape = call(format!("*** Begin Patch\n*** Add File: {}\n+outside\n*** End Patch", outside.path().join("escape.txt").display()));
+        assert!(!tools.call(&escape, &Approve).await.success);
+        assert!(!outside.path().join("escape.txt").exists());
+        let readonly = SecurityPolicy::new(workspace.path(), AccessMode::ReadOnly).unwrap();
+        let readonly_tools = CoreTools::new(workspace.path().to_path_buf(), readonly);
+        let add = call("*** Begin Patch\n*** Add File: readonly.txt\n+blocked\n*** End Patch".into());
+        assert!(!readonly_tools.call(&add, &Approve).await.success);
+        assert!(!workspace.path().join("readonly.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn patch_delete_and_move_require_approval_before_any_change() {
+        for mode in [AccessMode::WorkspaceWrite, AccessMode::FullAccess, AccessMode::ReadOnly] {
+            for operation in [
+                "*** Delete File: original.txt",
+                "*** Update File: original.txt\n*** Move to: moved.txt\n@@\n-before\n+after",
+            ] {
+                let workspace = tempfile::tempdir().expect("workspace");
+                let original = workspace.path().join("original.txt");
+                std::fs::write(&original, "before\n").unwrap();
+                let policy = SecurityPolicy::new(workspace.path(), mode).unwrap();
+                let tools = CoreTools::new(workspace.path().to_path_buf(), policy);
+                let call = ToolCall {
+                    id: "patch-removal".into(), name: "apply_patch".into(),
+                    arguments: json!({"patch": format!("*** Begin Patch\n*** Add File: new.txt\n+new\n{operation}\n*** End Patch")}),
+                };
+                assert!(!tools.call(&call, &Deny).await.success);
+                assert_eq!(std::fs::read_to_string(&original).unwrap(), "before\n");
+                assert!(!workspace.path().join("new.txt").exists());
+                assert!(!workspace.path().join("moved.txt").exists());
+                let approved = tools.call(&call, &Approve).await;
+                if mode == AccessMode::ReadOnly {
+                    assert!(!approved.success);
+                    assert!(original.exists());
+                    assert!(!workspace.path().join("new.txt").exists());
+                } else {
+                    assert!(approved.success, "{}", approved.output);
+                    assert!(!original.exists());
+                    assert!(workspace.path().join("new.txt").exists());
+                    if operation.contains("Move to:") {
+                        assert_eq!(std::fs::read_to_string(workspace.path().join("moved.txt")).unwrap(), "after\n");
+                    }
+                }
             }
         }
     }

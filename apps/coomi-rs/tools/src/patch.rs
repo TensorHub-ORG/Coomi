@@ -37,6 +37,16 @@ struct PreparedChange {
     new_content: Option<Vec<u8>>,
 }
 
+/// Adding or editing files follows the workspace write policy. Removing a file,
+/// including moving it to another path, needs a separate approval decision.
+pub fn removes_files(patch: &str) -> Result<bool, String> {
+    Ok(parse_patch(patch)?.iter().any(|operation| match operation {
+        PatchOperation::Delete { .. } => true,
+        PatchOperation::Update { path, move_to: Some(destination), .. } => path != destination,
+        _ => false,
+    }))
+}
+
 #[allow(dead_code)]
 pub fn apply_patch(policy: &SecurityPolicy, patch: &str) -> Result<String, String> {
     apply_patch_with_paths(policy, None, patch)

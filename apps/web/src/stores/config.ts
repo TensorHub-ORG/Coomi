@@ -122,7 +122,7 @@ export function mergeProviderList(configured: ProviderConfig[], activeId: string
 }
 
 export const PERMISSION_MODES: { mode: PermissionMode; label: string; desc: string }[] = [
-  { mode: 'ask', label: '询问', desc: '每个写入/破坏性操作前都确认' },
+  { mode: 'ask', label: '询问', desc: '工作区内编辑自动执行，命令及删除、移动操作需确认' },
   { mode: 'auto', label: '自动', desc: '读写自动放行，仅破坏性需确认' },
   { mode: 'full', label: '放行', desc: '全部自动执行（仅信任场景）' },
   { mode: 'minimal', label: '极简', desc: '只提供 shell 工具，适合纯命令行任务' },
