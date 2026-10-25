@@ -129,6 +129,17 @@ impl CoreTools {
         self
     }
 
+    /// Explicit desktop execution when no Android runtime is installed.
+    pub fn with_platform_shell(mut self) -> Self {
+        self.processes = Arc::new(ProcessManager::default());
+        self
+    }
+
+    pub fn with_process_runtime_limit(mut self, limit: Duration) -> Self {
+        self.processes = Arc::new(self.processes.as_ref().clone().with_runtime_limit(limit));
+        self
+    }
+
     pub fn with_skills_directory(mut self, directory: PathBuf) -> Self {
         self.skills_directory = Some(directory);
         self
@@ -159,11 +170,13 @@ impl CoreTools {
             .with_termux(legacy.home.clone(), legacy.prefix.clone());
         let prefix = legacy.prefix.clone();
         let legacy_home = legacy.home.clone();
-        let mut processes =
-            ProcessManager::default().with_runtime_backend(Arc::new(LegacyTermuxBackend {
+        let mut processes = ProcessManager::default();
+        if cfg!(target_os = "android") || prefix.join("bin/sh").is_file() {
+            processes = processes.with_runtime_backend(Arc::new(LegacyTermuxBackend {
                 prefix: prefix.clone(),
                 home: legacy_home.clone(),
             }));
+        }
         if let Ok(manager) = RuntimeManager::open(&home)
             && let Ok(backend) = manager.backend(prefix, legacy_home)
             && backend.kind() == RuntimeBackendKind::ProotLinux
@@ -3312,7 +3325,16 @@ fn web_search_unavailable(reason: impl AsRef<str>) -> ToolResult {
 #[cfg(windows)]
 fn platform_shell(command: &str) -> Command {
     let mut process = Command::new("powershell.exe");
-    process.args(["-NoLogo", "-NoProfile", "-Command", command]);
+    // Both shell tools must report PowerShell errors even when later commands
+    // would succeed, and their output is decoded as UTF-8 by the tool runtime.
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n\
+         $OutputEncoding = [Console]::OutputEncoding\n\
+         {command}\n\
+         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}"
+    );
+    process.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &script]);
     process
 }
 
@@ -3352,6 +3374,70 @@ mod tests {
     impl ApprovalHandler for Approve {
         async fn approve(&self, _call: &ToolCall, _reason: &str) -> bool {
             true
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn desktop_configured_tools_execute_in_the_host_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().join("workspace");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let policy = SecurityPolicy::new(&cwd, AccessMode::FullAccess).unwrap();
+        let tools = CoreTools::new(cwd.clone(), policy).with_config_home(root.path().join("data"));
+        #[cfg(windows)] let command = "Set-Content -LiteralPath host-check.txt -Value desktop; Get-Content -LiteralPath host-check.txt";
+        #[cfg(not(windows))] let command = "printf desktop > host-check.txt; cat host-check.txt";
+        for name in ["shell", "local_shell"] {
+            let result = tools.call(&ToolCall { id: name.into(), name: name.into(),
+                arguments: json!({"command":command,"yield_time_ms":5000}) }, &Approve).await;
+            assert!(result.success, "{name}: {}", result.output);
+            assert!(result.output.contains("desktop"));
+            assert!(cwd.join("host-check.txt").is_file());
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn windows_shell_errors_stop_later_side_effects_and_preserve_utf8() {
+        let root = tempfile::tempdir().unwrap();
+        let policy = SecurityPolicy::new(root.path(), AccessMode::FullAccess).unwrap();
+        let tools = CoreTools::new(root.path().to_path_buf(), policy);
+        std::fs::write(root.path().join("input.txt"), "fixture").unwrap();
+        for name in ["shell", "local_shell"] {
+            for command in [
+                "Write-Error '中文失败'; Set-Content -LiteralPath should-not-exist.txt -Value WRONG",
+                "Get-Content -LiteralPath input.txt -AsByteStream; Set-Content -LiteralPath should-not-exist.txt -Value WRONG",
+            ] {
+                let result = tools.call(&ToolCall { id: name.into(), name: name.into(),
+                    arguments: json!({"command":command,"yield_time_ms":10000}) }, &Approve).await;
+                assert!(!result.success, "{name} accepted a failed command: {}", result.output);
+                assert!(!root.path().join("should-not-exist.txt").exists(), "{name} continued after failure");
+                assert!(!result.output.contains('\u{fffd}'), "{name} corrupted stderr: {}", result.output);
+                if command.starts_with("Write-Error") {
+                    assert!(result.output.contains("中文失败"), "{name}: {}", result.output);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn windows_shell_preserves_native_exit_codes_and_successful_unicode_output() {
+        let root = tempfile::tempdir().unwrap();
+        let policy = SecurityPolicy::new(root.path(), AccessMode::FullAccess).unwrap();
+        let tools = CoreTools::new(root.path().to_path_buf(), policy);
+        for name in ["shell", "local_shell"] {
+            for (command, expected_success) in [
+                ("Write-Output '中文成功'", true),
+                ("try { Write-Error 'expected' } catch { Write-Output '中文成功' }", true),
+                ("cmd.exe /c exit 7; Write-Output '中文成功'", false),
+            ] {
+                let result = tools.call(&ToolCall { id: name.into(), name: name.into(),
+                    arguments: json!({"command":command,"yield_time_ms":10000}) }, &Approve).await;
+                assert_eq!(result.success, expected_success, "{name}: {}", result.output);
+                assert!(result.output.contains("中文成功"), "{name}: {}", result.output);
+                if !expected_success { assert!(result.output.contains("exit code: 7"), "{}", result.output); }
+            }
         }
     }
 

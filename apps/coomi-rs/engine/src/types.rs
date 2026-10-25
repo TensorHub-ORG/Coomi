@@ -678,6 +678,8 @@ pub enum StepAction {
         #[serde(default)]
         workflow: String,
     },
+    /// Pause execution until the user approves this checkpoint.
+    Approval { prompt: String },
 }
 
 /// 步骤的完成状态。
@@ -719,6 +721,8 @@ pub struct WorkflowStep {
     pub result: Option<serde_json::Value>,
     #[serde(default)]
     pub attempts: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 impl WorkflowStep {
@@ -734,6 +738,7 @@ impl WorkflowStep {
             state: WorkflowStepState::Pending,
             result: None,
             attempts: 0,
+            duration_ms: None,
         }
     }
 
@@ -820,11 +825,23 @@ impl WorkflowSchedule {
     }
 }
 
+fn default_workflow_permission() -> String { "ask".into() }
+
+pub(crate) fn valid_workflow_id(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 128
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
 /// 一个可编排工作流的完整定义（定义文件落点为 .coomi/workflows/<id>/workflow.json）。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WorkflowState {
     pub id: String,
     pub name: String,
+    /// Host or mapped guest working directory; absent uses the engine workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<std::path::PathBuf>,
+    #[serde(default = "default_workflow_permission")]
+    pub permission: String,
     #[serde(default)]
     pub description: String,
     pub steps: Vec<WorkflowStep>,
@@ -852,6 +869,8 @@ impl WorkflowState {
         Self {
             id: id.into(),
             name: name.into(),
+            cwd: None,
+            permission: default_workflow_permission(),
             description: String::new(),
             steps,
             status: WorkflowStatus::Pending,
@@ -867,16 +886,22 @@ impl WorkflowState {
     /// 校验依赖图：无自环、无未知依赖、无重复 id、每个依赖最终可执行。
     /// 返回给定步骤的拓扑可执行顺序（DAG，允许多个无依赖的根并行）。
     pub fn validate(&self) -> Result<(), String> {
-        if self.id.trim().is_empty() {
-            return Err("workflow id must not be empty".into());
+        if !valid_workflow_id(&self.id) {
+            return Err("workflow id must contain only ASCII letters, digits, - or _".into());
+        }
+        if !matches!(self.permission.as_str(), "ask" | "auto" | "full") {
+            return Err("workflow permission must be ask, auto or full".into());
         }
         if self.steps.is_empty() {
             return Err("workflow must contain at least one step".into());
         }
         let mut seen = std::collections::HashSet::new();
         for step in &self.steps {
-            if step.id.trim().is_empty() {
-                return Err("step id must not be empty".into());
+            if !valid_workflow_id(&step.id) {
+                return Err("step id must contain only ASCII letters, digits, - or _".into());
+            }
+            if step.retry > 10 || step.timeout_s.is_some_and(|seconds| seconds == 0 || seconds > 3600) {
+                return Err(format!("step `{}` requires retry <= 10 and timeout_s between 1 and 3600", step.id));
             }
             if !seen.insert(step.id.as_str()) {
                 return Err(format!("duplicate step id `{}`", step.id));
@@ -975,6 +1000,18 @@ impl WorkflowState {
             }
         }
         ready
+    }
+
+    /// A new run never inherits execution state from a previous run or old definition.
+    pub fn reset_for_run(&mut self) {
+        self.status = WorkflowStatus::Pending;
+        for step in &mut self.steps {
+            self.variables.remove(&step.id);
+            step.state = WorkflowStepState::Pending;
+            step.result = None;
+            step.attempts = 0;
+            step.duration_ms = None;
+        }
     }
 
     /// 所有步骤是否都到达终态。

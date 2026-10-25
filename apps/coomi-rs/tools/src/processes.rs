@@ -122,6 +122,16 @@ impl Drop for ShellProcessGroup {
 }
 
 impl ProcessManager {
+    pub fn with_runtime_limit(mut self, limit: Duration) -> Self {
+        self.runtime_limit = limit;
+        self
+    }
+
+    /// Workflow tools may only address processes created by their current step.
+    pub fn owns(&self, id: &str) -> bool {
+        self.owned.lock().expect("owned process lock").contains_key(id)
+    }
+
     pub fn with_runtime_backend(mut self, backend: Arc<dyn RuntimeBackend>) -> Self {
         match backend.kind() {
             RuntimeBackendKind::LegacyTermux => self.termux_backend = Some(backend),
@@ -544,9 +554,7 @@ fn process_memory_bytes(_pid: u32) -> Option<u64> {
 
 #[cfg(windows)]
 fn platform_shell(command: &str) -> Command {
-    let mut process = Command::new("powershell.exe");
-    process.args(["-NoLogo", "-NoProfile", "-Command", command]);
-    process
+    crate::platform_shell(command)
 }
 
 #[cfg(test)]

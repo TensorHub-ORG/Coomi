@@ -1,28 +1,28 @@
-//! P1 工作流服务：运行历史存储、宿主步骤执行器（tool/script/subworkflow）、
-//! cron 定时调度器与内置模板。API 路由层在 `web.rs`；执行层复用
-//! `coomi_engine::WorkflowRunner`（DAG 调度/重试/变量注入）。
+//! Durable workflow runs. Definitions stay immutable while an execution is running.
+mod control;
+mod executor;
+#[cfg(test)]
+mod tests;
 
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use chrono::Timelike;
+use anyhow::{Context, Result, bail};
+use chrono::{TimeZone, Timelike};
+use control::{Interaction, RunState};
 use coomi_engine::{
-    StepAction, StepContext, StepExecResult, StepExecutor, WorkflowRunOutcome, WorkflowRunner,
-    WorkflowState, WorkflowStep, WorkflowStepState, WorkflowStore,
+    Session, TokenUsage, WorkflowRunOutcome, WorkflowRunner, WorkflowState, WorkflowStepState,
+    WorkflowStore,
 };
+use executor::WorkflowExecutor;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::collections::HashSet;
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, watch};
 use uuid::Uuid;
 
 const RUNS_LIMIT: usize = 50;
-const MAX_FETCH_BYTES: usize = 8 * 1024;
-const MAX_RUNNING_WORKFLOWS: usize = 2;
-
+static RUNS_LOCK: Mutex<()> = Mutex::new(());
 fn now_ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -30,523 +30,657 @@ fn now_ts() -> u64 {
         .as_secs()
 }
 
-// ---------------------------------------------------------------------------
-// 运行历史
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StepOutcome {
     pub id: String,
     pub name: String,
     pub state: String,
     pub duration_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default)]
+    pub attempts: u32,
+    #[serde(default)]
+    pub result: Option<Value>,
 }
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunRecord {
     pub id: String,
     pub started_at: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<u64>,
     pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     pub trigger: String,
     pub steps: Vec<StepOutcome>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub pending: Option<Interaction>,
+    #[serde(default)]
+    pub usage: TokenUsage,
+    #[serde(default)]
+    pub snapshot: Option<WorkflowState>,
+    #[serde(default)]
+    pub children: BTreeMap<String, WorkflowState>,
+    #[serde(default)]
+    pub sessions: BTreeMap<String, Session>,
+    #[serde(default)]
+    pub resumed_from: Option<String>,
 }
-
+impl RunRecord {
+    pub fn public(&self) -> Value {
+        json!({"id":self.id,"started_at":self.started_at,"finished_at":self.finished_at,
+            "status":self.status,"duration_ms":self.duration_ms,"trigger":self.trigger,
+            "steps":self.steps,"error":self.error,"pending":self.pending,"usage":self.usage,
+            "resumable":self.snapshot.is_some() && matches!(self.status.as_str(),"failed"|"interrupted"),
+            "resumed_from":self.resumed_from})
+    }
+}
+pub fn step_outcomes(workflow: &WorkflowState) -> Vec<StepOutcome> {
+    workflow
+        .steps
+        .iter()
+        .map(|step| StepOutcome {
+            id: step.id.clone(),
+            name: step.name.clone(),
+            state: format!("{:?}", step.state).to_lowercase(),
+            duration_ms: step.duration_ms,
+            attempts: step.attempts,
+            result: step.result.clone(),
+            error: if step.state == WorkflowStepState::Failed {
+                Some(
+                    step.result
+                        .as_ref()
+                        .and_then(|v| v.get("error"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("step failed")
+                        .into(),
+                )
+            } else {
+                None
+            },
+        })
+        .collect()
+}
+fn valid_id(id: &str) -> Result<()> {
+    anyhow::ensure!(
+        !id.is_empty()
+            && id.len() <= 128
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')),
+        "invalid workflow/run id"
+    );
+    Ok(())
+}
+fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
+    let parent = path.parent().context("missing parent")?;
+    std::fs::create_dir_all(parent)?;
+    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec_pretty(value)?)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+#[derive(Clone)]
 pub struct RunsStore {
     dir: PathBuf,
 }
-
 impl RunsStore {
     pub fn new(home: &Path) -> Self {
         Self {
             dir: home.join("workflows"),
         }
     }
-
-    fn file(&self, id: &str) -> PathBuf {
-        self.dir.join(id).join("runs.json")
+    fn file(&self, id: &str) -> Result<PathBuf> {
+        valid_id(id)?;
+        Ok(self.dir.join(id).join("runs.json"))
     }
-
-    pub fn list(&self, id: &str) -> Vec<RunRecord> {
-        let Ok(bytes) = std::fs::read(self.file(id)) else {
-            return Vec::new();
-        };
-        serde_json::from_slice::<Vec<RunRecord>>(&bytes).unwrap_or_default()
-    }
-
-    fn write(&self, id: &str, records: &[RunRecord]) {
-        let path = self.file(id);
-        let Some(parent) = path.parent() else { return };
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
-        }
-        let Ok(bytes) = serde_json::to_vec_pretty(records) else {
-            return;
-        };
-        let tmp = parent.join("runs.json.tmp");
-        if std::fs::write(&tmp, bytes).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+    pub fn list(&self, id: &str) -> Result<Vec<RunRecord>> {
+        let path = self.file(id)?;
+        match std::fs::read(path) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)
+                .context("invalid workflow run history; original file retained")?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(error.into()),
         }
     }
-
-    /// 追加一条运行记录（保留最近 RUNS_LIMIT 条）。
-    pub fn push(&self, id: &str, record: &RunRecord) {
-        let mut records = self.list(id);
-        records.insert(0, record.clone());
-        records.truncate(RUNS_LIMIT);
-        self.write(id, &records);
-    }
-
-    /// 以同 id 覆盖（用于运行结束后把 running 记录补全为终态）。
-    pub fn upsert(&self, id: &str, record: &RunRecord) {
-        let mut records = self.list(id);
+    pub fn upsert(&self, id: &str, record: &RunRecord) -> Result<()> {
+        let _lock = RUNS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut records = self.list(id)?;
         if let Some(existing) = records.iter_mut().find(|r| r.id == record.id) {
             *existing = record.clone();
         } else {
             records.insert(0, record.clone());
         }
         records.truncate(RUNS_LIMIT);
-        self.write(id, &records);
+        atomic_json(&self.file(id)?, &records)
+    }
+    fn recover_stale(&self) -> Result<()> {
+        if !self.dir.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if valid_id(&id).is_err() {
+                continue;
+            }
+            for mut record in self.list(&id)? {
+                if is_active(&record.status) {
+                    record.status = "interrupted".into();
+                    record.pending = None;
+                    record.finished_at = Some(now_ts());
+                    record.error=Some("引擎已重启；请核对最后一个步骤的产物后选择恢复，未完成步骤可能需要重新执行。".into());
+                    self.upsert(&id, &record)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// 宿主步骤执行器（P1：Script/Tool/SubWorkflow；Model 留待 P2）
-// ---------------------------------------------------------------------------
-
-pub struct HostStepExecutor {
-    home: PathBuf,
-    /// 子工作流递归防环：正在执行的 workflow id 集合。
-    in_flight: Arc<Mutex<HashSet<String>>>,
+fn is_active(status: &str) -> bool {
+    matches!(
+        status,
+        "queued" | "running" | "pause_pending" | "paused" | "awaiting_approval" | "awaiting_input"
+    )
 }
-
-impl HostStepExecutor {
-    pub fn new(home: &Path) -> Self {
-        Self {
-            home: home.to_path_buf(),
-            in_flight: Arc::new(Mutex::new(HashSet::new())),
-        }
-    }
-
-    /// 把 `{{step_id}}` 引用的前置变量替换成 JSON 文本。
-    fn render(&self, text: &str, vars: &std::collections::BTreeMap<String, Value>) -> String {
-        let mut out = text.to_owned();
-        for (key, value) in vars {
-            let token = format!("{{{{{key}}}}}");
-            let rendered = if value.is_string() {
-                value.as_str().unwrap_or_default().to_owned()
-            } else {
-                value.to_string()
-            };
-            out = out.replace(&token, &rendered);
-        }
-        out
-    }
-
-    fn resolve_path(&self, raw: &str) -> PathBuf {
-        let p = PathBuf::from(raw);
-        if p.is_absolute() {
-            p
-        } else {
-            self.home.join(p)
-        }
-    }
-
-    async fn run_script(
-        &self,
-        command: &str,
-        timeout_s: Option<u64>,
-        vars: &std::collections::BTreeMap<String, Value>,
-    ) -> StepExecResult {
-        let command = self.render(command, vars);
-        let mut cmd = tokio::process::Command::new("bash");
-        cmd.arg("-c").arg(&command).current_dir(&self.home);
-        let future = cmd.output();
-        let output = match timeout_s {
-            Some(seconds) if seconds > 0 => {
-                match tokio::time::timeout(std::time::Duration::from_secs(seconds), future).await {
-                    Ok(result) => result,
-                    Err(_) => {
-                        return StepExecResult {
-                            value: json!({ "error": format!("step timed out after {seconds}s") }),
-                            retryable: false,
-                        };
-                    }
-                }
-            }
-            _ => future.await,
-        };
-        match output {
-            Ok(output) if output.status.success() => StepExecResult::success(json!({
-                "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-                "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
-            })),
-            Ok(output) => StepExecResult {
-                value: json!({
-                    "error": format!("exit {}", output.status.code().unwrap_or(-1)),
-                    "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-                    "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
-                }),
-                retryable: false,
-            },
-            Err(error) => StepExecResult {
-                value: json!({ "error": error.to_string() }),
-                retryable: false,
-            },
-        }
-    }
-
-    async fn run_tool(
-        &self,
-        tool: &str,
-        arguments: &Value,
-        vars: &std::collections::BTreeMap<String, Value>,
-    ) -> StepExecResult {
-        let pull_string = |key: &str| -> Option<String> {
-            arguments.get(key).and_then(Value::as_str).map(|s| self.render(s, vars))
-        };
-        match tool {
-            "shell" => {
-                let command = pull_string("command").unwrap_or_default();
-                if command.trim().is_empty() {
-                    return StepExecResult { value: json!({"error": "shell tool requires a command"}), retryable: false };
-                }
-                self.run_script(&command, arguments.get("timeout_s").and_then(Value::as_u64), vars)
-                    .await
-            }
-            "read_file" => {
-                let path = self.resolve_path(&pull_string("path").unwrap_or_default());
-                match std::fs::read(&path) {
-                    Ok(bytes) => StepExecResult::success(json!({
-                        "path": path.to_string_lossy(),
-                        "content": String::from_utf8_lossy(&bytes).to_string(),
-                    })),
-                    Err(error) => StepExecResult { value: json!({"error": error.to_string()}), retryable: false },
-                }
-            }
-            "write_file" => {
-                let path = self.resolve_path(&pull_string("path").unwrap_or_default());
-                let content = pull_string("content").unwrap_or_default();
-                if let Some(parent) = path.parent() {
-                    if std::fs::create_dir_all(parent).is_err() {
-                        return StepExecResult { value: json!({"error": "cannot create parent dir"}), retryable: false };
-                    }
-                }
-                match std::fs::write(&path, content.as_bytes()) {
-                    Ok(_) => StepExecResult::success(json!({"path": path.to_string_lossy(), "bytes": content.len()})),
-                    Err(error) => StepExecResult { value: json!({"error": error.to_string()}), retryable: false },
-                }
-            }
-            "fetch" => {
-                let url = pull_string("url").unwrap_or_default();
-                if !url.starts_with("http://") && !url.starts_with("https://") {
-                    return StepExecResult { value: json!({"error": "fetch tool requires an http(s) url"}), retryable: false };
-                }
-                match reqwest::get(&url).await {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let mut body = resp.text().await.unwrap_or_default();
-                        let truncated = body.len() > MAX_FETCH_BYTES;
-                        body.truncate(MAX_FETCH_BYTES);
-                        StepExecResult::success(json!({"status": status, "body": body, "truncated": truncated}))
-                    }
-                    Err(error) => StepExecResult { value: json!({"error": error.to_string()}), retryable: false },
-                }
-            }
-            other => StepExecResult {
-                value: json!({
-                    "error": format!("tool `{other}` not bound in P1; supported: shell, read_file, write_file, fetch"),
-                }),
-                retryable: false,
-            },
-        }
-    }
-
-    async fn run_subworkflow(&self, workflow_id: &str) -> StepExecResult {
-        let store = WorkflowStore::new(&self.home);
-        let Ok(mut sub) = store.read(workflow_id) else {
-            return StepExecResult { value: json!({"error": format!("subworkflow `{workflow_id}` not found")}), retryable: false };
-        };
-        {
-            let mut guard = self.in_flight.lock().unwrap_or_else(|p| p.into_inner());
-            if guard.contains(&sub.id) || guard.contains(workflow_id) {
-                return StepExecResult { value: json!({"error": "subworkflow cycle detected"}), retryable: false };
-            }
-            guard.insert(sub.id.clone());
-        }
-        let result = WorkflowRunner::run(&mut sub, self).await;
-        self.in_flight.lock().unwrap_or_else(|p| p.into_inner()).remove(&sub.id);
-        match result {
-            Ok(WorkflowRunOutcome::Completed) => StepExecResult::success(json!({
-                "subworkflow": sub.id,
-                "status": "completed",
-                "steps": sub.steps.iter().map(|s| json!({"id": s.id, "name": s.name, "state": format!("{:?}", s.state)})).collect::<Vec<_>>(),
-            })),
-            Ok(_) => StepExecResult { value: json!({"subworkflow": sub.id, "status": "interrupted"}), retryable: false },
-            Err(error) => StepExecResult { value: json!({"error": error.to_string()}), retryable: false },
-        }
-    }
+struct ActiveRun {
+    state: Arc<RunState>,
+    done: watch::Receiver<bool>,
 }
-
-#[async_trait]
-impl StepExecutor for HostStepExecutor {
-    async fn execute(&self, ctx: &StepContext<'_>) -> StepExecResult {
-        let marker = uuid::Uuid::new_v4().to_string();
-        let _keep_alive = marker; // 步骤唯一标识预留（后续进度上报用）
-        match &ctx.step.action {
-            StepAction::Script { command, timeout_s } => {
-                self.run_script(command, *timeout_s, ctx.variables).await
-            }
-            StepAction::Tool { tool, arguments } => {
-                self.run_tool(tool, arguments, ctx.variables).await
-            }
-            StepAction::SubWorkflow { workflow } => self.run_subworkflow(workflow).await,
-            StepAction::Model { .. } => StepExecResult { value: json!({
-                "error": "model steps land in P2; this workflow uses P1 unsupported step",
-            }), retryable: false },
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// cron 定时调度器
-// ---------------------------------------------------------------------------
-
 pub struct WorkflowScheduler {
     home: PathBuf,
+    cwd: PathBuf,
     store: WorkflowStore,
     runs: RunsStore,
-    executor: Arc<HostStepExecutor>,
-    running: Arc<Mutex<HashSet<String>>>,
+    active: Arc<Mutex<HashMap<String, ActiveRun>>>,
     slots: Arc<Semaphore>,
-    last_minute: Arc<Mutex<u64>>,
+    last_minute: Mutex<Option<u64>>,
 }
-
+struct RunGuard {
+    active: Arc<Mutex<HashMap<String, ActiveRun>>>,
+    workflow_id: String,
+    state: Arc<RunState>,
+    done: watch::Sender<bool>,
+}
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        if let Err(error) = self.state.change(|r| {
+            if is_active(&r.status) {
+                r.status = "interrupted".into();
+                r.pending = None;
+                r.finished_at = Some(now_ts());
+                r.error = Some("工作流执行意外中断".into());
+            }
+        }) {
+            eprintln!("workflow final checkpoint failed: {error:#}");
+        }
+        self.active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.workflow_id);
+        let _ = self.done.send(true);
+    }
+}
 impl WorkflowScheduler {
     pub fn new(home: &Path) -> Arc<Self> {
+        Self::with_workspace(home, home)
+    }
+    pub fn with_workspace(home: &Path, cwd: &Path) -> Arc<Self> {
         Arc::new(Self {
-            home: home.to_path_buf(),
+            home: home.into(),
+            cwd: cwd.into(),
             store: WorkflowStore::new(home),
             runs: RunsStore::new(home),
-            executor: Arc::new(HostStepExecutor::new(home)),
-            running: Arc::new(Mutex::new(HashSet::new())),
-            slots: Arc::new(Semaphore::new(MAX_RUNNING_WORKFLOWS)),
-            last_minute: Arc::new(Mutex::new(0)),
+            active: Arc::new(Mutex::new(HashMap::new())),
+            slots: Arc::new(Semaphore::new(2)),
+            last_minute: Mutex::new(None),
         })
     }
-
-    /// 在后台启动 tick 循环（每 15 秒检查一次分钟变化；跨分钟补触发）。
-    pub fn start(self: &Arc<Self>) {
-        let this = Arc::clone(self);
+    pub fn start(self: &Arc<Self>) -> Result<()> {
+        self.runs.recover_stale()?;
+        let scheduler = Arc::clone(self);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 interval.tick().await;
-                this.tick().await;
+                scheduler.tick().await;
             }
         });
+        Ok(())
     }
-
-    fn now_minute() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            / 60
-    }
-
-    /// 检查这一分钟内是否有启用+配置 cron 的工作流需要触发。
-    pub async fn tick(&self) {
-        let minute = Self::now_minute();
+    pub async fn tick(self: &Arc<Self>) {
+        let minute = now_ts() / 60;
         {
-            let mut guard = self.last_minute.lock().unwrap_or_else(|p| p.into_inner());
-            if *guard == minute {
+            let mut last = self.last_minute.lock().unwrap_or_else(|e| e.into_inner());
+            if *last == Some(minute) {
                 return;
             }
-            *guard = minute;
+            *last = Some(minute);
         }
         let Ok(ids) = self.store.list_ids() else {
             return;
         };
         for id in ids {
-            if self.running.lock().unwrap_or_else(|p| p.into_inner()).contains(&id) {
-                continue;
-            }
             let Ok(workflow) = self.store.read(&id) else {
                 continue;
             };
-            if !workflow.schedule.is_active() {
+            if !workflow.schedule.is_active()
+                || !workflow
+                    .schedule
+                    .cron
+                    .as_ref()
+                    .is_some_and(|c| cron_matches_minute(c, minute))
+            {
                 continue;
             }
-            let Some(expr) = workflow.schedule.cron.clone() else {
+            // Persisted trigger minute prevents duplicate automatic execution after a same-minute restart.
+            if self
+                .runs
+                .list(&id)
+                .map(|r| {
+                    r.iter()
+                        .any(|r| r.trigger == "schedule" && r.started_at / 60 == minute)
+                })
+                .unwrap_or(true)
+            {
                 continue;
-            };
-            if cron_matches_minute(&expr, minute) {
-                let _ = self.run_internal(&id, "schedule").await;
+            }
+            if let Err(error) = self.launch(&id, "schedule", None).await {
+                eprintln!("workflow {id}: {error:#}");
             }
         }
     }
-
-    /// 手动触发（Web API）。返回运行记录 id。
     pub async fn run_manual(self: &Arc<Self>, id: &str) -> Result<String> {
-        self.run_internal(id, "manual").await
+        self.launch(id, "manual", None).await
     }
-
-    async fn run_internal(&self, id: &str, trigger: &str) -> Result<String> {
-        {
-            let mut guard = self.running.lock().unwrap_or_else(|p| p.into_inner());
-            if guard.contains(id) {
-                anyhow::bail!("workflow `{id}` is already running");
-            }
-            guard.insert(id.to_owned());
-        }
-        let permit = match self.slots.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => {
-                self.running.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
-                anyhow::bail!("workflow slots exhausted; retry shortly");
-            }
+    pub async fn recover(self: &Arc<Self>, id: &str, run_id: &str) -> Result<String> {
+        let record = self
+            .runs
+            .list(id)?
+            .into_iter()
+            .find(|r| r.id == run_id)
+            .context("run not found")?;
+        anyhow::ensure!(
+            matches!(record.status.as_str(), "failed" | "interrupted"),
+            "only failed/interrupted runs can be recovered"
+        );
+        anyhow::ensure!(
+            record.snapshot.is_some(),
+            "legacy run has no checkpoint; start a new run"
+        );
+        self.launch(id, "recovery", Some(record)).await
+    }
+    async fn launch(
+        self: &Arc<Self>,
+        id: &str,
+        trigger: &str,
+        previous: Option<RunRecord>,
+    ) -> Result<String> {
+        valid_id(id)?;
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        anyhow::ensure!(!active.contains_key(id), "workflow is already active");
+        let recovery = previous.is_some();
+        let mut workflow = if let Some(old) = &previous {
+            old.snapshot.clone().context("missing checkpoint")?
+        } else {
+            self.store.read(id)?
         };
-
+        validate_definition(&workflow)?;
+        let mut children = previous
+            .as_ref()
+            .map(|r| r.children.clone())
+            .unwrap_or_default();
+        if !recovery {
+            workflow.reset_for_run();
+            freeze_children(
+                &self.store,
+                &workflow,
+                "",
+                &mut vec![workflow.id.clone()],
+                &mut children,
+            )?;
+        }
+        for definition in std::iter::once(&workflow).chain(children.values()) {
+            for step in &definition.steps {
+                if let coomi_engine::StepAction::Model { model, .. } = &step.action {
+                    let registry = coomi_services::ProviderRegistry::load(
+                        &self.home.join("config/providers.json"),
+                    )?;
+                    let config = registry
+                        .resolve(model.as_deref())
+                        .with_context(|| format!("model for step '{}' is unavailable", step.id))?;
+                    coomi_services::HttpModelProvider::new(config)?;
+                }
+            }
+        }
+        let cwd = coomi_services::RuntimePathMap::new(self.cwd.clone())
+            .with_runtime_root(self.home.join("runtime-v2"))
+            .resolve(workflow.cwd.as_deref().unwrap_or(&self.cwd), None)?
+            .host_path
+            .canonicalize()
+            .context("workflow working directory is unavailable")?;
+        workflow.cwd = Some(cwd);
+        // A nested definition is a reusable step group, executing within this run's context.
+        for child in children.values_mut() {
+            child.cwd = workflow.cwd.clone();
+            child.permission = workflow.permission.clone();
+        }
         let run_id = Uuid::new_v4().to_string();
-        let mut workflow = self
-            .store
-            .read(id)
-            .context("workflow disappeared while starting")?;
-        let trigger_owned = trigger.to_owned();
-        self.runs.push(id, &RunRecord {
+        let record = RunRecord {
             id: run_id.clone(),
             started_at: now_ts(),
             finished_at: None,
-            status: "running".into(),
+            status: "queued".into(),
             duration_ms: None,
-            trigger: trigger_owned.clone(),
-            steps: Vec::new(),
-        });
-
-        let runs = RunsStore::new(&self.home);
-        let executor = Arc::clone(&self.executor);
-        let store = WorkflowStore::new(&self.home);
-        let running_guard = Arc::clone(&self.running);
-        let workflow_id = id.to_owned();
-        let record_id = run_id.clone();
+            trigger: trigger.into(),
+            steps: step_outcomes(&workflow),
+            error: None,
+            pending: None,
+            usage: TokenUsage::default(),
+            snapshot: Some(workflow.clone()),
+            children,
+            sessions: previous
+                .as_ref()
+                .map(|r| r.sessions.clone())
+                .unwrap_or_default(),
+            resumed_from: previous.map(|r| r.id),
+        };
+        let state = RunState::new(self.runs.clone(), id.into(), record);
+        let (done_tx, done_rx) = watch::channel(false);
+        {
+            self.runs
+                .upsert(id, &state.record.lock().unwrap_or_else(|e| e.into_inner()))?;
+            active.insert(
+                id.into(),
+                ActiveRun {
+                    state: state.clone(),
+                    done: done_rx,
+                },
+            );
+        }
+        drop(active);
+        let guard = RunGuard {
+            active: self.active.clone(),
+            workflow_id: id.into(),
+            state: state.clone(),
+            done: done_tx,
+        };
+        let slots = self.slots.clone();
+        let home = self.home.clone();
         tokio::spawn(async move {
-            let started = now_ts();
-            let outcome = WorkflowRunner::run(&mut workflow, executor.as_ref()).await;
-            let finished = now_ts();
+            let _guard = guard;
+            let executor = WorkflowExecutor::new(home, state.clone());
+            let work = async {
+                let _permit = slots.acquire_owned().await?;
+                state
+                    .started
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                coomi_engine::TurnControl::safe_point(state.as_ref()).await?;
+                state.change(|r| r.status = "running".into())?;
+                if recovery {
+                    WorkflowRunner::resume(&mut workflow, &executor).await
+                } else {
+                    WorkflowRunner::run(&mut workflow, &executor).await
+                }
+            };
+            let outcome = tokio::select! {
+                biased;
+                _=state.cancel_wake.notified()=>Ok(WorkflowRunOutcome::Cancelled),
+                result=work=>result,
+            };
+            executor.cleanup().await;
             let status = match &outcome {
                 Ok(WorkflowRunOutcome::Completed) => "completed",
-                Ok(_) => "cancelled",
+                Ok(WorkflowRunOutcome::Failed) => "failed",
+                Ok(WorkflowRunOutcome::Cancelled) => "cancelled",
                 Err(_) => "failed",
             };
-            let steps: Vec<StepOutcome> = workflow
-                .steps
-                .iter()
-                .map(|s| StepOutcome {
-                    id: s.id.clone(),
-                    name: s.name.clone(),
-                    state: format!("{:?}", s.state).to_lowercase(),
-                    duration_ms: None,
-                    error: match &s.result {
-                        Some(value) => value.get("error").and_then(Value::as_str).map(|e| e.to_owned()),
-                        None => None,
-                    },
-                })
-                .collect();
-            if let Err(error) = &outcome {
-                eprintln!("workflow {workflow_id} failed: {error:#}");
+            if let Err(error) = state.change(|r| {
+                r.status = status.into();
+                r.pending = None;
+                r.finished_at = Some(now_ts());
+                r.duration_ms = Some(now_ts().saturating_sub(r.started_at) * 1000);
+                if let Err(error) = &outcome {
+                    r.error = Some(format!("{error:#}"));
+                }
+                if status == "cancelled" {
+                    if let Some(snapshot) = &mut r.snapshot {
+                        snapshot.status = coomi_engine::WorkflowStatus::Cancelled;
+                        for step in &mut snapshot.steps {
+                            if step.state != WorkflowStepState::Succeeded {
+                                step.state = WorkflowStepState::Cancelled;
+                            }
+                        }
+                        r.steps = step_outcomes(snapshot);
+                    }
+                }
+            }) {
+                eprintln!("workflow completion could not be saved: {error:#}");
             }
-            let _ = store.save(&workflow);
-            runs.upsert(&workflow_id, &RunRecord {
-                id: record_id,
-                started_at: started,
-                finished_at: Some(finished),
-                status: status.into(),
-                duration_ms: Some(finished.saturating_sub(started) * 1000),
-                trigger: trigger_owned,
-                steps,
-            });
-            running_guard.lock().unwrap_or_else(|p| p.into_inner()).remove(&workflow_id);
-            drop(permit);
         });
         Ok(run_id)
     }
-
+    pub async fn action(&self, id: &str, run_id: &str, action: &str) -> Result<()> {
+        let (state, mut done) = {
+            let active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+            let run = active.get(id).context("workflow is not active")?;
+            anyhow::ensure!(
+                run.state
+                    .record
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .id
+                    == run_id,
+                "run is not active"
+            );
+            (run.state.clone(), run.done.clone())
+        };
+        match action {
+            "pause" => state.pause()?,
+            "resume" => state.resume()?,
+            "cancel" => {
+                state.cancel();
+                while !*done.borrow() {
+                    done.changed()
+                        .await
+                        .context("cancel completion channel closed")?;
+                }
+            }
+            _ => bail!("unknown workflow action"),
+        }
+        Ok(())
+    }
+    pub fn answer(&self, id: &str, run_id: &str, request: &str, value: Value) -> Result<()> {
+        let active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        let run = active.get(id).context("workflow is not active")?;
+        anyhow::ensure!(
+            run.state
+                .record
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .id
+                == run_id,
+            "run is not active"
+        );
+        run.state.answer(request, value)
+    }
+    pub fn ensure_inactive(&self, id: &str) -> Result<()> {
+        anyhow::ensure!(
+            !self
+                .active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(id),
+            "stop the workflow before deleting it"
+        );
+        Ok(())
+    }
+    pub fn remove(&self, id: &str) -> Result<()> {
+        let active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        anyhow::ensure!(
+            !active.contains_key(id),
+            "stop the workflow before deleting it"
+        );
+        self.store.remove(id)
+    }
 }
-
-// ---------------------------------------------------------------------------
-// cron 匹配
-// ---------------------------------------------------------------------------
-
-/// 判断给定 cron 表达式是否命中「当前这一分钟」（按本地时区）。
-pub fn cron_matches_minute(expr: &str, _minute: u64) -> bool {
-    let now = chrono::Local::now();
-    // 无秒 cron（5 段）只在分钟起点匹配，秒/纳秒必须归零再比对。
-    let floor = now
-        .with_second(0)
-        .and_then(|t| t.with_nanosecond(0))
-        .unwrap_or(now);
-    let Ok(parsed) = croner::Cron::new(expr)
-        .with_seconds_optional()
-        .parse()
+pub fn validate_definition(workflow: &WorkflowState) -> Result<()> {
+    workflow.validate().map_err(anyhow::Error::msg)?;
+    anyhow::ensure!(
+        !workflow.schedule.enabled
+            || workflow
+                .schedule
+                .cron
+                .as_deref()
+                .is_some_and(|c| !c.trim().is_empty()),
+        "enabled schedule requires a cron expression"
+    );
+    if let Some(cron) = workflow
+        .schedule
+        .cron
+        .as_deref()
+        .filter(|c| !c.trim().is_empty())
+    {
+        anyhow::ensure!(
+            cron.split_whitespace().count() == 5,
+            "cron requires five fields (minute granularity)"
+        );
+        croner::Cron::new(cron)
+            .parse()
+            .context("invalid cron expression")?;
+    }
+    for step in &workflow.steps {
+        use coomi_engine::StepAction;
+        match &step.action {
+            StepAction::Script { command, timeout_s } => {
+                anyhow::ensure!(!command.trim().is_empty(), "script command is empty");
+                anyhow::ensure!(
+                    timeout_s.is_none_or(|s| (1..=3600).contains(&s)),
+                    "script timeout must be 1..3600 seconds"
+                );
+            }
+            StepAction::Model { prompt, .. } | StepAction::Approval { prompt } => {
+                anyhow::ensure!(!prompt.trim().is_empty(), "step prompt is empty")
+            }
+            StepAction::Tool { tool, arguments } => {
+                anyhow::ensure!(
+                    !tool.is_empty() && arguments.is_object(),
+                    "tool requires a name and object arguments"
+                );
+                if matches!(tool.as_str(), "shell" | "local_shell") {
+                    anyhow::ensure!(
+                        arguments
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .is_some_and(|s| !s.trim().is_empty()),
+                        "command step requires a command"
+                    );
+                    anyhow::ensure!(
+                        arguments.get("action").is_none_or(|v| v == "exec"),
+                        "command step requires action exec"
+                    );
+                    anyhow::ensure!(
+                        arguments
+                            .get("environment")
+                            .is_none_or(|v| v == "auto" || v == "proot"),
+                        "workflow commands use environment auto or proot"
+                    );
+                    for (key, limit) in [("timeout_s", 3600), ("timeout_ms", 3_600_000)] {
+                        anyhow::ensure!(
+                            arguments
+                                .get(key)
+                                .is_none_or(|v| v.as_u64().is_some_and(|n| n > 0 && n <= limit)),
+                            "invalid command timeout"
+                        );
+                    }
+                }
+            }
+            StepAction::SubWorkflow { workflow } => valid_id(workflow)?,
+        }
+    }
+    Ok(())
+}
+fn freeze_children(
+    store: &WorkflowStore,
+    workflow: &WorkflowState,
+    path: &str,
+    stack: &mut Vec<String>,
+    children: &mut BTreeMap<String, WorkflowState>,
+) -> Result<()> {
+    anyhow::ensure!(
+        stack.len() <= 16 && children.len() < 128,
+        "subworkflow nesting limit exceeded"
+    );
+    for step in &workflow.steps {
+        if let coomi_engine::StepAction::SubWorkflow { workflow: id } = &step.action {
+            anyhow::ensure!(!stack.contains(id), "subworkflow cycle detected: {id}");
+            let mut child = store.read(id)?;
+            validate_definition(&child)?;
+            child.reset_for_run();
+            let child_path = format!("{path}/{}", step.id);
+            stack.push(id.clone());
+            freeze_children(store, &child, &child_path, stack, children)?;
+            stack.pop();
+            children.insert(child_path, child);
+        }
+    }
+    Ok(())
+}
+pub fn cron_matches_minute(expr: &str, minute: u64) -> bool {
+    let Some(now) = chrono::Local
+        .timestamp_opt((minute * 60) as i64, 0)
+        .single()
     else {
         return false;
     };
-    parsed.is_time_matching(&floor).unwrap_or(false)
+    let Some(floor) = now.with_second(0).and_then(|t| t.with_nanosecond(0)) else {
+        return false;
+    };
+    if expr.split_whitespace().count() != 5 {
+        return false;
+    }
+    croner::Cron::new(expr)
+        .parse()
+        .ok()
+        .and_then(|c| c.is_time_matching(&floor).ok())
+        .unwrap_or(false)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::cron_matches_minute;
-
-    #[test]
-    fn every_minute_matches() {
-        assert!(cron_matches_minute("* * * * *", 1));
-    }
-
-    #[test]
-    fn fixed_hour_does_not_match_now() {
-        // True only when the wall clock is exactly 04:15; the point here is that
-        // a fixed minute does NOT match every minute.
-        let now_min = chrono::Local::now().format("%M").to_string();
-        let expected = now_min == "15";
-        assert_eq!(cron_matches_minute("15 * * * *", 1), expected);
-    }
-
-    #[test]
-    fn invalid_cron_never_matches() {
-        assert!(!cron_matches_minute("not a cron", 1));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 内置模板
-// ---------------------------------------------------------------------------
 
 pub fn builtin_templates() -> Vec<Value> {
-    let entry = |key: &str, name: &str, description: &str, default_cron: &str, steps: Vec<Value>| {
-        json!({
-            "key": key,
-            "name": name,
-            "description": description,
-            "default_cron": default_cron,
-            "steps": steps,
-        })
-    };
+    let entry =
+        |key: &str, name: &str, description: &str, default_cron: &str, steps: Vec<Value>| {
+            json!({
+                "key": key,
+                "name": name,
+                "description": description,
+                "default_cron": default_cron,
+                "steps": steps,
+            })
+        };
     vec![
         entry(
             "env-inspect",
             "环境巡检",
-            "检查手机 Linux 环境：系统信息、磁盘占用与宿主目录汇总，适合定时采集。",
+            "检查手机 Linux 环境：系统信息、磁盘占用与工作目录汇总，适合定时采集。",
             "0 8 * * *",
             vec![
                 json!({"id": "sys", "name": "系统信息", "action": {"kind": "tool", "tool": "shell", "arguments": {"command": "uname -a && echo --- && date && echo --- && df -h | head -6"}}}),
-                json!({"id": "home", "name": "宿主目录", "depends_on": ["sys"], "action": {"kind": "tool", "tool": "shell", "arguments": {"command": "ls -la ~ | head -20"}}}),
+                json!({"id": "home", "name": "工作目录", "depends_on": ["sys"], "action": {"kind": "tool", "tool": "shell", "arguments": {"command": "ls -la . | head -20"}}}),
                 json!({"id": "summary", "name": "写入巡检报告", "depends_on": ["sys", "home"], "action": {"kind": "tool", "tool": "write_file", "arguments": {"path": "coomi-reports/latest.txt", "content": "{{sys}}
 {{home}}"}}}),
             ],
@@ -557,7 +691,7 @@ pub fn builtin_templates() -> Vec<Value> {
             "每天定时把关键目录清单留存为快照文件，便于比对变化。",
             "0 9 * * *",
             vec![
-                json!({"id": "snap", "name": "生成快照", "action": {"kind": "tool", "tool": "shell", "arguments": {"command": "mkdir -p ~/coomi-snapshots && date >> ~/coomi-snapshots/daily.log && echo ok"}}}),
+                json!({"id": "snap", "name": "生成快照", "action": {"kind": "tool", "tool": "shell", "arguments": {"command": "mkdir -p coomi-snapshots && date >> coomi-snapshots/daily.log && echo ok"}}}),
                 json!({"id": "verify", "name": "校验快照", "depends_on": ["snap"], "action": {"kind": "tool", "tool": "read_file", "arguments": {"path": "coomi-snapshots/daily.log"}}}),
             ],
         ),

@@ -15,6 +15,12 @@
 
 ## 二、路径视图（PathMapper 双向映射）
 
+本机开发补充：非 Android 构建在未安装 Termux bootstrap 时统一使用平台 shell（Windows PowerShell、Linux/macOS 系统 shell），覆盖聊天、协作、工作流和 CLI。此时 `auto` 指本机 shell，shell 参数必须使用本机路径；`/workspace` 等别名仅由文件工具映射，不假设主机存在 guest 挂载。系统提示应说明实际平台；本机开发不自动安装 Android rootfs。开发数据、下载与临时缓存固定到项目所在盘的 `.local-plans/dev/`，Windows 启动脚本拒绝将开发目录放到 C 盘。
+
+Windows 的 `shell` 与 `local_shell` 共用 Windows PowerShell 5.1 启动配置：不加载用户 profile，输出使用 UTF-8，默认 `$ErrorActionPreference = 'Stop'`。PowerShell 错误终止后续命令并返回失败，保留最后一个原生命令的非零退出码；脚本有意捕获并处理错误时可继续执行。提示词明确 5.1 版本，不假设支持 PowerShell 7 的参数。
+
+工作流沿用内置工具的 RuntimePathMap 与 shell 运行时选择，不再直接在引擎配置目录执行 bash。工作流 `cwd` 缺省为引擎工作区，运行时冻结解析后的宿主目录；Android 默认使用已就绪的 Runtime V2，未安装时按现有 Termux 回退规则执行。桌面环境使用平台 shell。脚本取消/超时清理该次运行拥有的进程，不终止其他会话。工作流权限和人工审批在工具实际执行前处理，定时触发同样适用。
+
 | guest 路径 | 宿主真实路径 | 说明 |
 |------------|--------------|------|
 | `/workspace` | Android 工作目录（会话 cwd） | 当前工作区，双向读写 |

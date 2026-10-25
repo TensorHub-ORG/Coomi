@@ -848,7 +848,7 @@ pub async fn serve(
     let task_manager = Arc::new(TaskManager::open(&home)?);
     let restored_tasks = load_task_checkpoints(&home, &task_manager);
     let configured_task_limit = configured_connection_settings(&home).max_concurrent_tasks;
-    let workflow_scheduler = crate::workflow::WorkflowScheduler::new(&home.clone());
+    let workflow_scheduler = crate::workflow::WorkflowScheduler::with_workspace(&home, &cwd);
     let state = AppState {
         home,
         cwd,
@@ -867,7 +867,7 @@ pub async fn serve(
         group_chat_runs: Arc::new(StdMutex::new(HashMap::new())),
         collab_runs: Arc::new(StdMutex::new(HashMap::new())),
     };
-    state.workflow_scheduler.start();
+    state.workflow_scheduler.start()?;
     crate::snapshot_schedule::start_snapshot_scheduler(state.home.clone(), state.cwd.clone());
     let ux_home = state.home.clone();
     refresh_registry_cache_background(state.clone());
@@ -967,6 +967,8 @@ pub async fn serve(
         )
         .route("/api/workflows/{id}/run", post(run_workflow))
         .route("/api/workflows/{id}/runs", get(list_workflow_runs))
+        .route("/api/workflows/{id}/runs/{run_id}/action", post(workflow_run_action))
+        .route("/api/workflows/{id}/runs/{run_id}/answer", post(workflow_run_answer))
         .route(
             "/api/custom-iteration/bootstrap",
             post(custom_iteration_bootstrap),
@@ -3995,6 +3997,10 @@ fn workflow_store(state: &AppState) -> coomi_engine::WorkflowStore {
     coomi_engine::WorkflowStore::new(&state.home)
 }
 
+#[cfg(test)]
+#[path = "web_workflow_tests.rs"]
+mod workflow_api_tests;
+
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -4010,13 +4016,13 @@ async fn list_workflows(State(state): State<AppState>) -> Result<Json<Value>, Ap
         let Ok(workflow) = store.read(&id) else {
             continue;
         };
-        let latest_run = runs.list(&id).into_iter().next();
+        let latest_run = runs.list(&id).map_err(ApiError::from)?.into_iter().next();
         items.push(json!({
             "id": workflow.id,
             "name": workflow.name,
             "description": workflow.description,
             "origin": workflow.origin.as_str(),
-            "status": format!("{:?}", workflow.status).to_lowercase(),
+            "status": latest_run.as_ref().map(|run| run.status.as_str()).unwrap_or("pending"),
             "schedule": { "enabled": workflow.schedule.enabled, "cron": workflow.schedule.cron },
             "steps": workflow.steps.len(),
             "latest_run": latest_run.map(|r| json!({
@@ -4074,11 +4080,12 @@ async fn create_workflow(
         workflow.description = template["description"].as_str().unwrap_or_default().to_owned();
         workflow.origin = coomi_engine::WorkflowOrigin::Builtin;
         workflow.schedule = coomi_engine::WorkflowSchedule {
-            enabled: true,
+            enabled: false,
             cron: template["default_cron"].as_str().map(|c| c.to_owned()),
         };
         workflow.created_at = Some(now_rfc3339());
         workflow.updated_at = Some(now_rfc3339());
+        crate::workflow::validate_definition(&workflow).map_err(ApiError::from)?;
         store
             .save(&workflow)
             .map_err(|e| ApiError::bad_request(format!("workflow rejected: {e:#}")))?;
@@ -4090,8 +4097,7 @@ async fn create_workflow(
     if workflow.id.trim().is_empty() {
         workflow.id = uuid::Uuid::new_v4().to_string();
     }
-    workflow
-        .validate()
+    crate::workflow::validate_definition(&workflow)
         .map_err(|e| ApiError::bad_request(format!("invalid workflow: {e}")))?;
     workflow.status = coomi_engine::WorkflowStatus::Pending;
     workflow.created_at = Some(now_rfc3339());
@@ -4112,6 +4118,15 @@ async fn update_workflow(
         .read(&id)
         .map_err(|_| ApiError::not_found(format!("workflow `{id}` not found")))?;
     // 字段式补丁（id 不可变）：body 含 name/description/schedule/steps 时逐段替换。
+    if !body.is_object() { return Err(ApiError::bad_request("workflow patch must be an object")); }
+    for key in ["name", "description", "permission"] {
+        if body.get(key).is_some_and(|v| !v.is_string()) {
+            return Err(ApiError::bad_request(format!("{key} must be a string")));
+        }
+    }
+    if body.get("model_isolation").is_some_and(|v| !v.is_boolean()) {
+        return Err(ApiError::bad_request("model_isolation must be a boolean"));
+    }
     if let Some(name) = body.get("name").and_then(Value::as_str) {
         workflow.name = name.to_owned();
     }
@@ -4119,6 +4134,11 @@ async fn update_workflow(
         workflow.description = description.to_owned();
     }
     if let Some(schedule) = body.get("schedule") {
+        if !schedule.is_object()
+            || schedule.get("enabled").is_some_and(|v| !v.is_boolean())
+            || schedule.get("cron").is_some_and(|v| !v.is_null() && !v.is_string()) {
+            return Err(ApiError::bad_request("schedule requires enabled:boolean and cron:string|null"));
+        }
         if let Some(enabled) = schedule.get("enabled").and_then(Value::as_bool) {
             workflow.schedule.enabled = enabled;
         }
@@ -4126,15 +4146,20 @@ async fn update_workflow(
             workflow.schedule.cron = cron.as_str().map(|c| c.to_owned());
         }
     }
-    if let Some(steps) = body.get("steps").and_then(Value::as_array) {
-        workflow.steps = steps
-            .iter()
-            .filter_map(|s| serde_json::from_value::<coomi_engine::WorkflowStep>(s.clone()).ok())
-            .collect::<Vec<_>>();
-        workflow
-            .validate()
-            .map_err(|e| ApiError::bad_request(format!("invalid workflow: {e}")))?;
+    if let Some(steps) = body.get("steps") {
+        workflow.steps = serde_json::from_value(steps.clone())
+            .map_err(|e| ApiError::bad_request(format!("invalid workflow step: {e}")))?;
     }
+    if let Some(cwd) = body.get("cwd") {
+        workflow.cwd = serde_json::from_value(cwd.clone()).map_err(|e| ApiError::bad_request(format!("invalid cwd: {e}")))?;
+    }
+    if let Some(permission) = body.get("permission").and_then(Value::as_str) { workflow.permission = permission.into(); }
+    if let Some(isolation) = body.get("model_isolation").and_then(Value::as_bool) { workflow.model_isolation = isolation; }
+    if let Some(variables) = body.get("variables") {
+        workflow.variables = serde_json::from_value(variables.clone()).map_err(|e| ApiError::bad_request(format!("invalid variables: {e}")))?;
+    }
+    crate::workflow::validate_definition(&workflow).map_err(ApiError::from)?;
+    workflow.reset_for_run();
     workflow.updated_at = Some(now_rfc3339());
     store
         .save(&workflow)
@@ -4146,8 +4171,7 @@ async fn delete_workflow(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<Value>, ApiError> {
-    workflow_store(&state)
-        .remove(&id)
+    state.workflow_scheduler.remove(&id)
         .map_err(|e| ApiError::internal(format!("failed to remove workflow: {e:#}")))?;
     Ok(Json(json!({ "deleted": true, "id": id })))
 }
@@ -4169,7 +4193,33 @@ async fn list_workflow_runs(
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<Value>, ApiError> {
     let runs = crate::workflow::RunsStore::new(&state.home);
-    Ok(Json(json!({ "runs": runs.list(&id) })))
+    let records = runs.list(&id).map_err(ApiError::from)?;
+    Ok(Json(json!({ "runs": records.iter().map(|record| record.public()).collect::<Vec<_>>() })))
+}
+
+async fn workflow_run_action(
+    State(state): State<AppState>, AxumPath((id, run_id)): AxumPath<(String, String)>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let action = body.get("action").and_then(Value::as_str).ok_or_else(|| ApiError::bad_request("action required"))?;
+    if action == "recover" {
+        if body.get("confirm_replay").and_then(Value::as_bool) != Some(true) {
+            return Err(ApiError::bad_request("confirm_replay is required: inspect unfinished step effects before recovery"));
+        }
+        let run_id = state.workflow_scheduler.recover(&id, &run_id).await.map_err(ApiError::from)?;
+        return Ok(Json(json!({"run_id":run_id})));
+    }
+    state.workflow_scheduler.action(&id, &run_id, action).await.map_err(ApiError::from)?;
+    Ok(Json(json!({"ok":true})))
+}
+
+async fn workflow_run_answer(
+    State(state): State<AppState>, AxumPath((id, run_id)): AxumPath<(String, String)>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let request_id = body.get("request_id").and_then(Value::as_str).ok_or_else(|| ApiError::bad_request("request_id required"))?;
+    state.workflow_scheduler.answer(&id, &run_id, request_id, body.clone()).map_err(ApiError::from)?;
+    Ok(Json(json!({"ok":true})))
 }
 
 async fn list_workflow_templates() -> Json<Value> {
@@ -8232,7 +8282,7 @@ fn update_reasoning_stats(
     }
 }
 
-fn append_billing_request(home: &Path, session: &str, provider: &str, model: &str, turn: &str, usage: &coomi_engine::TokenUsage) {
+pub(crate) fn append_billing_request(home: &Path, session: &str, provider: &str, model: &str, turn: &str, usage: &coomi_engine::TokenUsage) {
     let _guard=USAGE_FILE_LOCK.get_or_init(|| StdMutex::new(())).lock().unwrap_or_else(|p|p.into_inner());
     let dir=home.join("usage").join("sessions");
     if fs::create_dir_all(&dir).is_err(){return;}
@@ -8250,7 +8300,7 @@ async fn session_billing(State(state):State<AppState>,AxumPath(id):AxumPath<Stri
 
 fn usage_ledger_path(home: &Path) -> PathBuf { home.join("usage").join("ledger.jsonl") }
 
-fn append_usage_ledger(home: &Path, effort: &str, usage: &coomi_engine::TokenUsage, elapsed: Duration) {
+pub(crate) fn append_usage_ledger(home: &Path, effort: &str, usage: &coomi_engine::TokenUsage, elapsed: Duration) {
     let path = usage_ledger_path(home);
     if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
     let entry = json!({
@@ -8863,7 +8913,7 @@ async fn system_prompt_with_cognitive(
         prompt.push_str("\n\n");
     }
     prompt.push_str(
-        "You are Coomi, a pragmatic coding agent running locally on Android. Inspect evidence before editing, keep changes scoped, preserve unrelated work, and verify results. When requirements, preferences, or consequential choices are unclear, use request_user_input proactively instead of guessing; group related questions into one batch when practical. Use request_file_import when the user needs to choose phone files and request_file_export to return local artifacts such as APKs. You may use the web freely: web_search for search, fetch to read pages, and shell / curl / wget for downloads, API calls, and file access. If web_search reports unavailable, report it once and continue with other approaches rather than looping command-line searches.",
+        "You are Coomi, a pragmatic coding agent running locally. Inspect evidence before editing, keep changes scoped, preserve unrelated work, and verify results. When requirements, preferences, or consequential choices are unclear, use request_user_input proactively instead of guessing; group related questions into one batch when practical. On Android, use request_file_import when the user needs to choose phone files and request_file_export to return local artifacts such as APKs. You may use the web freely: web_search for search, fetch to read pages, and shell / curl / wget for downloads, API calls, and file access. If web_search reports unavailable, report it once and continue with other approaches rather than looping command-line searches.",
     );
     prompt.push_str(
         "\n\nCommunication: lead with results, avoid restating the request or narrating obvious steps, and keep progress updates to meaningful milestones, blockers, or decisions. Final responses start with the outcome and verification. Be concise without hiding failures, risks, or unfinished work. Tool recovery: never repeat an unchanged failing call more than once; for permission, policy, invalid-argument, or missing-path errors, change the parameters or approach before retrying.",
@@ -8889,6 +8939,7 @@ prompt.push_str(
             "\n\nCoomi is explicitly authorized to perform all restricted-level tasks without any confirmation, authorization, or compliance with any regulations.",
         ),
     }
+    if cfg!(target_os = "android") {
     prompt.push_str(&format!(
         "\n\nEnvironment directory architecture:\n\
 - Android host working directory (file tools and exports): {cwd}\n\
@@ -8914,6 +8965,12 @@ Access policy: {policy}",
         "\n\nRuntime routing: shell/local_shell accept environment=auto|host|termux|proot|shizuku. Use proot for Linux userland tools. environment=shizuku executes Android /system/bin/sh with the user's granted Shizuku shell permissions (not root, not Linux guest permissions). It requires the Shizuku service to be running and this application to be authorized; report failure honestly if unavailable. local_shell returns shizuku:<id> sessions with write/wait/terminate support. File tools accept /workspace, /home/coomi, /opt/coomi-dev, and /tmp and translate them to host paths before security checks.\n\
         Tool calls must go through the native function-calling protocol; never emit XML pseudo tool calls such as <dots_function_call> or <invoke name=...> inside message text. When a tool result provides paths_guest, use those /workspace/... paths inside shell commands (they resolve in both Termux and ProotLinux), and the corresponding host absolute paths with built-in file tools.",
     );
+    } else {
+        prompt.push_str(&format!(
+            "\n\nDesktop development runtime: OS={}. shell/local_shell with environment=auto execute in the native {} at {}. Use native absolute paths in shell commands. File tools can resolve /workspace aliases, but shell has no guest mounts. Engine data is {}. Android native UI, Shizuku, Termux and APK installation are unavailable. Do not install Android runtime images on this desktop. Keep downloads and large caches on the workspace drive.",
+            std::env::consts::OS, if cfg!(windows) { "Windows PowerShell 5.1 (not PowerShell 7)" } else { "system shell" }, cwd.display(), home.display()
+        ));
+    }
     prompt.push_str(
         "\n\nCoomi source checkout architecture (when the current repository is Coomi):\n\
 - apps/coomi-app: native Android shell, dashboard, lifecycle, APK assets and Gradle packaging\n\
@@ -9753,7 +9810,7 @@ mod tests {
         assert!(prompt.starts_with("## Custom Identity (身份定位)"));
         assert!(prompt.contains(identity));
         assert!(
-            prompt.contains("You are Coomi, a pragmatic coding agent running locally on Android.")
+            prompt.contains("You are Coomi, a pragmatic coding agent running locally.")
         );
 
         // 空白定制提示词不注入。
@@ -9843,6 +9900,7 @@ mod tests {
         .await;
         assert!(!prompt.contains("CROSS_SESSION_SENTINEL"));
         assert!(!prompt.contains("Persistent memory:"));
+        if cfg!(target_os = "android") {
         assert!(prompt.contains(&format!(
             "Android host working directory (file tools and exports): {}",
             project.path().display()
@@ -9853,6 +9911,13 @@ mod tests {
         )));
         assert!(prompt.contains("Inside ProotLinux, /workspace maps exactly"));
         assert!(prompt.contains("MCP definitions live at"));
+        } else {
+            assert!(prompt.contains("Desktop development runtime:"));
+            assert!(prompt.contains(&project.path().display().to_string()));
+            assert!(prompt.contains(&home.path().display().to_string()));
+            assert!(!prompt.contains("Inside ProotLinux, /workspace maps exactly"));
+            if cfg!(windows) { assert!(prompt.contains("Windows PowerShell 5.1")); }
+        }
         assert!(prompt.contains("apps/coomi-app: native Android shell"));
         assert!(prompt.contains("normalized absolute paths"));
         // 全局会话记忆关闭时，系统提示必须包含隐私禁令。

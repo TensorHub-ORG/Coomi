@@ -397,9 +397,13 @@ confirmation, authorization, or compliance with any regulations.",
         home.display(),
         policy.label()
     ));
-    prompt.push_str(
-        "\nRuntime environments: `host` handles Android file APIs and exports; `termux` handles Android-native tools; `proot` handles Linux userland tools. Shell tools accept environment=auto|host|termux|proot. Guest aliases are /workspace, /home/coomi, /opt/coomi-dev, and /tmp; file tools translate these aliases automatically.",
-    );
+    if cfg!(target_os = "android") {
+        prompt.push_str(
+            "\nRuntime environments: `host` handles Android file APIs and exports; `termux` handles Android-native tools; `proot` handles Linux userland tools. Shell tools accept environment=auto|host|termux|proot. Guest aliases are /workspace, /home/coomi, /opt/coomi-dev, and /tmp; file tools translate these aliases automatically.",
+        );
+    } else {
+        prompt.push_str(&format!("\nDesktop runtime: OS={}; environment=auto uses the native {}. Shell commands use host paths, not guest mounts. Android-specific tools are unavailable.", std::env::consts::OS, if cfg!(windows) { "Windows PowerShell 5.1 (not PowerShell 7)" } else { "system shell" }));
+    }
     prompt.push_str(
         "\nAll file references shown to the user and every path passed to file export must be normalized absolute paths. Never return a relative path for a created, edited, downloaded, referenced, or exported file. Resolve relative tool output against the working directory before presenting it.",
     );

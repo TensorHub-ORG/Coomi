@@ -24,6 +24,10 @@ const TOKEN_STORAGE_KEY = 'coomi.engine.token'
 const ENGINE_TOKEN: string = (() => {
   try {
     const token = new URLSearchParams(window.location.search).get('token') ?? ''
+    // Keep this development tab authenticated across Vite reloads; release behavior stays unchanged.
+    if (import.meta.env.DEV && token) {
+      try { window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token) } catch { /* private browsing */ }
+    }
     if (token && window.history?.replaceState) {
       const url = new URL(window.location.href)
       url.searchParams.delete('token')

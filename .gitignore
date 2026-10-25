@@ -34,6 +34,9 @@ apps/web/node_modules/
 apps/web/dist/
 
 # ---- Local configuration ----
+.local-plans/
+output/playwright/
+.playwright-cli/
 local.properties
 *.keystore
 *.jks

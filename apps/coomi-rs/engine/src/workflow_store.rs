@@ -8,6 +8,9 @@ use std::path::PathBuf;
 
 use crate::WorkflowState;
 
+// Serialize definition/registry writes across cloned stores in the engine process.
+static DEFINITIONS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `config/workflows.json` 的顶层文档（与 `mcp_servers.json`/`skills.json` 同构）。
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct WorkflowDocument {
@@ -97,6 +100,7 @@ impl WorkflowStore {
 
     /// 读取一个 workflow 定义。找不到或未启用时返回错误。
     pub fn read(&self, id: &str) -> Result<WorkflowState> {
+        anyhow::ensure!(crate::types::valid_workflow_id(id), "invalid workflow id");
         anyhow::ensure!(!id.trim().is_empty(), "workflow id must not be empty");
         let document = self.load_document()?;
         let Some(entry) = document.workflows.get(id) else {
@@ -115,11 +119,17 @@ impl WorkflowStore {
         workflow
             .validate()
             .map_err(|e| anyhow::anyhow!("invalid workflow `{id}`: {e}"))?;
+        anyhow::ensure!(
+            workflow.id == id,
+            "workflow definition id does not match registration"
+        );
         Ok(workflow)
     }
 
     /// 保存一个 workflow 定义到 `<home>/workflows/<id>/workflow.json`，并同步注册表。
     pub fn save(&self, workflow: &WorkflowState) -> Result<()> {
+        let _lock = DEFINITIONS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        self.load_document()?;
         workflow
             .validate()
             .map_err(|e| anyhow::anyhow!("invalid workflow: {e}"))?;
@@ -134,8 +144,7 @@ impl WorkflowStore {
             .to_path_buf();
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("failed to create workflow directory {}", dir.display()))?;
-        let bytes =
-            serde_json::to_vec_pretty(workflow).context("failed to serialize workflow")?;
+        let bytes = serde_json::to_vec_pretty(workflow).context("failed to serialize workflow")?;
         let path = self.workflow_path(&workflow.id);
         // 原子写：先写临时文件再 rename，避免崩溃/断电留下截断的 JSON。
         let tmp = path.with_extension("json.tmp");
@@ -162,6 +171,8 @@ impl WorkflowStore {
 
     /// 删除一个 workflow：移除定义文件与注册条目。
     pub fn remove(&self, id: &str) -> Result<()> {
+        let _lock = DEFINITIONS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        anyhow::ensure!(crate::types::valid_workflow_id(id), "invalid workflow id");
         anyhow::ensure!(!id.trim().is_empty(), "workflow id must not be empty");
         let mut document = self.load_document()?;
         let dir = self
@@ -183,8 +194,7 @@ impl WorkflowStore {
         std::fs::create_dir_all(&config_dir)
             .with_context(|| format!("failed to create {}", config_dir.display()))?;
         let path = self.config_path();
-        let bytes =
-            serde_json::to_vec_pretty(document).context("serialize workflows.json")?;
+        let bytes = serde_json::to_vec_pretty(document).context("serialize workflows.json")?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &bytes)?;
         std::fs::rename(&tmp, &path)?;
@@ -279,12 +289,18 @@ mod tests {
         let bad = WorkflowState::new(
             "wf-bad",
             "Bad",
-            vec![WorkflowStep::new("a", "A", StepAction::Model {
-                prompt: "hi".into(),
-                model: None,
-                isolate: None,
-            })
-            .depends_on(&["a"])],
+            vec![
+                WorkflowStep::new(
+                    "a",
+                    "A",
+                    StepAction::Model {
+                        prompt: "hi".into(),
+                        model: None,
+                        isolate: None,
+                    },
+                )
+                .depends_on(&["a"]),
+            ],
         );
         assert!(store.save(&bad).is_err());
         let _ = std::fs::remove_dir_all(&home);
