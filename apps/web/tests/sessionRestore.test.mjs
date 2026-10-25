@@ -8,7 +8,7 @@ test('session snapshots survive late restores, background ACKs and engine sequen
   globalThis.window = { location: { search: '' } }
   const mocks = {
     '@/bridge': `export const sockets = []; export function createTransport(id) { const t = { id, sent: [], send(v) { this.sent.push(v) }, onStateChange(cb) { this.state = cb }, onMessage(cb) { this.message = cb }, connect() { this.state({state:'open'}) }, close() {} }; sockets.push(t); return t }`,
-    '@/bridge/http': `export const requests = new Map(); export async function authedFetch(url) { if (!url.endsWith('/snapshot')) return {ok:true,json:async()=>({sessions:[]})}; return new Promise(resolve => requests.set(url.split('/')[3], data => resolve({ok:true,status:200,json:async()=>data}))) } export async function apiGet() { return {} } export async function apiSend() { return {} }`,
+    '@/bridge/http': `export const requests = new Map(); export const undoRequests = []; export async function authedFetch(url) { if (!url.endsWith('/snapshot')) return {ok:true,json:async()=>({sessions:[]})}; return new Promise(resolve => requests.set(url.split('/')[3], data => resolve({ok:true,status:200,json:async()=>data}))) } export async function apiGet(url) { if (url.endsWith('/undo')) return new Promise((resolve,reject)=>undoRequests.push({url,resolve,reject})); return {} } export async function apiSend(url,method,body) { return new Promise((resolve,reject)=>undoRequests.push({url,method,body,resolve,reject})) }`,
     '@/bridge/demoMode': `export const isDemoMode = () => false`,
     '@/bridge/life': `export const GLOBAL_SESSION_ID = 'global'; export const isGlobalSession = () => false`,
     '@/router': `export const router = {push(){}}`,
@@ -17,14 +17,14 @@ test('session snapshots survive late restores, background ACKs and engine sequen
   }
   const root = new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1')
   const result = await build({ absWorkingDir: root, stdin: { loader: 'ts', resolveDir: root,
-    contents: `import {createPinia,setActivePinia} from 'pinia'; import {useSessionStore} from './src/stores/session'; import {sockets} from '@/bridge'; import {requests} from '@/bridge/http'; setActivePinia(createPinia()); export {useSessionStore,sockets,requests};` },
+    contents: `import {createPinia,setActivePinia} from 'pinia'; import {useSessionStore} from './src/stores/session'; import {sockets} from '@/bridge'; import {requests,undoRequests} from '@/bridge/http'; setActivePinia(createPinia()); export {useSessionStore,sockets,requests,undoRequests};` },
     bundle: true, platform: 'node', format: 'esm', write: false,
     plugins: [{ name: 'snapshot-transport', setup(builder) {
       builder.onResolve({filter:/.*/}, args => args.path in mocks ? {path:args.path,namespace:'mock'} : undefined)
       builder.onLoad({filter:/.*/,namespace:'mock'}, args => ({contents:mocks[args.path],loader:'js'}))
     } }],
   })
-  const {useSessionStore, sockets, requests} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`)
+  const {useSessionStore, sockets, requests, undoRequests} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`)
   globalThis.document = { hidden: false }
   const store = useSessionStore()
   const a = '11111111-1111-4111-8111-111111111111'
@@ -97,5 +97,32 @@ test('session snapshots survive late restores, background ACKs and engine sequen
   event({event_seq:10,event_type:'compression',before:200,after:50,summary_id:'summary',summary:'handoff'})
   assert.equal(store.timeline.filter(t=>t.id==='compression:summary').length,1)
   assert.equal(store.timeline.find(t=>t.id==='compression:summary').detail,'handoff')
+  event({event_seq:11,event_type:'turn_end'})
+  const timelineBeforeUndo = JSON.stringify(store.timeline)
+  const preview = {turn_id:'u', revision:'v1',available:true,files:[{path:'a',action:'delete'}],warnings:[],conflicts:[]}
+  const latePreview = store.requestUndo('second')
+  const latestPreview = store.requestUndo('second')
+  undoRequests[1].resolve(preview)
+  await latestPreview
+  undoRequests[0].resolve({...preview, revision:'stale'})
+  await latePreview
+  assert.equal(store.undoConfirm.preview.revision, 'v1', 'older preview must not replace the current one')
+  const failedUndo = store.confirmUndo(true)
+  assert.equal(undoRequests.at(-1).body.restore_files, true)
+  undoRequests.at(-1).reject(new Error('file changed'))
+  await failedUndo
+  assert.equal(JSON.stringify(store.timeline), timelineBeforeUndo, 'failure must keep the conversation visible')
+  assert.equal(store.undoConfirm.error, 'file changed')
+  const succeededUndo = store.confirmUndo(true)
+  undoRequests.at(-1).resolve({ok:true})
+  await new Promise(resolve=>setImmediate(resolve))
+  requests.get(a)(snapshot([],12,false,[{id:'retained',role:'user',content:'previous turn'}]))
+  await succeededUndo
+  assert.deepEqual(store.timeline.map(t=>t.content), ['previous turn'])
+  assert.equal(store.undoConfirm,null)
+  event({event_seq:1,event_type:'turn_truncated'})
+  requests.get(a)(snapshot([],1,false,[]))
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(store.timeline.length,0,'another window undo must refresh even after a sequence reset')
   store.flushPersistence(); store.disconnect()
 })

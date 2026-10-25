@@ -56,6 +56,7 @@ export interface UserQuestion { id: string; header: string; question: string; op
 export interface UserQuestionRequestEvent { event_type: 'user_question_request'; call_id: string; questions: UserQuestion[] }
 export interface FileTransferRequestEvent { event_type: 'file_transfer_request'; request_id: string; operation: 'import' | 'export'; path?: string; suggested_name?: string; multiple: boolean }
 export interface TurnEndEvent { event_type: 'turn_end' }
+export interface TurnTruncatedEvent { event_type: 'turn_truncated' }
 /** 重连补发：会话是否正在后台执行（切走会话后任务继续跑）。 */
 export interface SessionStateEvent { event_type: 'session_state'; running: boolean }
 export interface SessionLoadedEvent {
@@ -83,6 +84,7 @@ export type AgentEvent = (
   | LoopIssueCreatedEvent | RetryConfirmationEvent | ToolApprovalRequestEvent | UserQuestionRequestEvent
   | FileTransferRequestEvent
   | TurnEndEvent
+  | TurnTruncatedEvent
   | SessionStateEvent
   | SessionLoadedEvent
   | LifeDeliveredEvent

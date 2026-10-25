@@ -1,5 +1,7 @@
 mod agents;
 mod execution_gate;
+/// Serialize a restoration with all managed file mutations and running shells.
+pub async fn lock_file_mutations() -> impl Send { execution_gate::enter(false).await }
 mod patch;
 mod processes;
 mod shizuku;
@@ -57,6 +59,7 @@ const DEFAULT_MAX_OUTPUT: usize = 48_000;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 pub struct CoreTools {
+    file_history: Option<(PathBuf, String)>,
     cwd: PathBuf,
     path_map: RuntimePathMap,
     policy: SecurityPolicy,
@@ -77,6 +80,7 @@ pub struct CoreTools {
 impl CoreTools {
     pub fn new(cwd: PathBuf, policy: SecurityPolicy) -> Self {
         Self {
+            file_history: None,
             path_map: RuntimePathMap::new(cwd.clone()),
             cwd,
             policy,
@@ -108,6 +112,34 @@ impl CoreTools {
     pub fn shell_only(mut self) -> Self {
         self.shell_only = true;
         self
+    }
+
+    pub fn with_file_history(mut self, home: PathBuf, session_id: String) -> Self {
+        self.file_history = Some((home, session_id));
+        self
+    }
+
+    fn file_journal(&self) -> Result<Option<coomi_services::FileJournal>, String> {
+        let Some((home, session_id)) = &self.file_history else { return Ok(None); };
+        let history = self.parent_history.read().map_err(|_| "file history lock poisoned")?;
+        let Some(turn) = history.iter().rev().find(|m| m.role == coomi_engine::Role::User && !m.internal && !m.compaction_summary) else {
+            return Err("cannot identify the user turn for file history".into());
+        };
+        coomi_services::FileJournal::new(home, &self.cwd, session_id, &turn.id)
+            .map(Some).map_err(|error| format!("{error:#}"))
+    }
+
+    fn write_with_history(&self, path: &std::path::Path, before: Option<Vec<u8>>, after: Vec<u8>) -> Result<(), String> {
+        if let Some(journal) = self.file_journal()? {
+            if journal.relative_path(path).is_ok() {
+                return journal.apply(vec![coomi_services::FileEdit { path: path.to_path_buf(), before, after: Some(after), after_mode: None }])
+                    .map_err(|error| format!("{error:#}"));
+            }
+            journal.mark_untracked("本轮包含工作区外或不支持备份的文件写入，这些修改不会自动回撤。")
+                .map_err(|error| format!("{error:#}"))?;
+        }
+        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        std::fs::write(path, after).map_err(|error| error.to_string())
     }
 
     pub fn with_session_state(
@@ -596,7 +628,8 @@ impl CoreTools {
         {
             return ToolResult::error("patch was not approved");
         }
-        match patch::apply_patch_with_paths(&self.policy, Some(&self.path_map), patch_text) {
+        let journal = match self.file_journal() { Ok(journal) => journal, Err(error) => return ToolResult::error(error) };
+        match patch::apply_patch_with_journal(&self.policy, Some(&self.path_map), patch_text, journal.as_ref()) {
             Ok(output) => ToolResult::success(output),
             Err(error) => ToolResult::error(error),
         }
@@ -1969,7 +2002,12 @@ impl CoreTools {
                 parent.display()
             ));
         }
-        match tokio::fs::write(&path, content).await {
+        let before = match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return ToolResult::error(format!("cannot back up file: {error}")),
+        };
+        match self.write_with_history(&path, before, content.as_bytes().to_vec()) {
             Ok(()) => ToolResult::success(format!(
                 "wrote {} bytes to {}",
                 content.len(),
@@ -2010,7 +2048,7 @@ impl CoreTools {
                 updated.push_str(&content[..from]);
                 updated.push_str(new_string);
                 updated.push_str(&content[to..]);
-                return match tokio::fs::write(&path, updated).await {
+                return match self.write_with_history(&path, Some(content.as_bytes().to_vec()), updated.into_bytes()) {
                     Ok(()) => ToolResult::success(format!("edited {}", path.display())),
                     Err(error) => {
                         ToolResult::error(format!("failed to edit {}: {error}", path.display()))
@@ -2037,7 +2075,7 @@ impl CoreTools {
         } else {
             content.replacen(old_string, new_string, 1)
         };
-        match tokio::fs::write(&path, updated).await {
+        match self.write_with_history(&path, Some(content.into_bytes()), updated.into_bytes()) {
             Ok(()) => ToolResult::success(format!("edited {}", path.display())),
             Err(error) => ToolResult::error(format!("failed to edit {}: {error}", path.display())),
         }
@@ -2782,6 +2820,12 @@ impl ToolRuntime for CoreTools {
             return ToolResult::error("极简模式只允许使用 shell 工具");
         }
         let name = Self::canonical_tool_name(call.name.as_str());
+        if self.file_history.is_some() && !matches!(name, "write_file" | "edit_file" | "apply_patch" | "read_file" | "list_dir" | "grep_files" | "search" | "view_image" | "read_note" | "update_plan") {
+            match self.file_journal().and_then(|journal| journal.map(|j| j.mark_untracked(&format!("工具 {name} 的外部影响不属于文件回撤范围。"))
+                .map_err(|e| e.to_string())).transpose()) {
+                Ok(_) => {}, Err(error) => return ToolResult::error(error),
+            }
+        }
         // Delegation must not hold a lease while waiting for a child's tools.
         // Persistent shells carry their own lease until exit; poll/write/kill
         // must remain callable while that shell owns the mutation lease.
@@ -3363,6 +3407,43 @@ fn platform_shell(command: &str) -> Command {
 mod tests {
     use super::*;
     use coomi_security::AccessMode;
+
+    #[tokio::test]
+    async fn file_history_covers_tools_and_uses_the_actual_user_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().join("workspace");
+        let home = root.path().join("home");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(cwd.join("edit.txt"), "user original\n").unwrap();
+        std::fs::write(cwd.join("delete.txt"), [0, 255, 1]).unwrap();
+        std::fs::write(cwd.join("move.txt"), "move original\n").unwrap();
+        let session = uuid::Uuid::new_v4().to_string();
+        let user = coomi_engine::ChatMessage::user("change files");
+        let mut internal = coomi_engine::ChatMessage::user("internal follow-up");
+        internal.internal = true;
+        let policy = SecurityPolicy::new(&cwd, AccessMode::WorkspaceWrite).unwrap();
+        let tools = CoreTools::new(cwd.clone(), policy).with_file_history(home.clone(), session.clone());
+        tools.update_history(&[user.clone(), internal]);
+        for (name, arguments) in [
+            ("write_file", json!({"path":"new.txt", "content":"created\n"})),
+            ("edit_file", json!({"path":"edit.txt", "old_string":"user original", "new_string":"edited"})),
+            ("apply_patch", json!({"patch":"*** Begin Patch\n*** Update File: edit.txt\n@@\n-edited\n+patched\n*** Delete File: delete.txt\n*** Update File: move.txt\n*** Move to: moved.txt\n@@\n-move original\n+moved\n*** End Patch"})),
+        ] {
+            let result = tools.call(&ToolCall { id:name.into(), name:name.into(), arguments }, &Approve).await;
+            assert!(result.success, "{name}: {}", result.output);
+        }
+        let journal = coomi_services::FileJournal::new(&home, &cwd, &session, &user.id).unwrap();
+        let preview = journal.preview().unwrap();
+        assert_eq!(preview.files.len(), 5);
+        assert!(preview.conflicts.is_empty(), "{:?}", preview.conflicts);
+        journal.restore_with(&preview.revision, || Ok(())).unwrap();
+        assert_eq!(std::fs::read_to_string(cwd.join("edit.txt")).unwrap(), "user original\n");
+        assert_eq!(std::fs::read(cwd.join("delete.txt")).unwrap(), [0,255,1]);
+        assert_eq!(std::fs::read_to_string(cwd.join("move.txt")).unwrap(), "move original\n");
+        assert!(!cwd.join("moved.txt").exists());
+        assert!(!cwd.join("new.txt").exists());
+    }
 
     struct Deny;
 

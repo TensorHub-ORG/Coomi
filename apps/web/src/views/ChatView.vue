@@ -214,6 +214,7 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
         </div>
         <DynamicScroller
           v-else
+          :key="`${session.sessionId}:${session.viewRevision}`"
           ref="virtualScroller"
           :items="blocks"
           key-field="key"
@@ -251,10 +252,24 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
         </div>
       </div>
       <div v-if="session.undoConfirm" class="retry-confirm">
-        <div><CoomiIcon name="arrowLeft" :size="16" /><span>确定回撤这一轮？将撤回该轮执行与产生的所有修改，并返回上一轮状态。</span></div>
+        <div><CoomiIcon name="arrowLeft" :size="16" /><span>回撤这一轮</span></div>
+        <p v-if="session.undoConfirm.busy">正在核对或恢复，请稍候…</p>
+        <p v-if="session.undoConfirm.error" role="alert">{{ session.undoConfirm.error }}</p>
+        <template v-if="session.undoConfirm.preview">
+          <p>仅撤回对话会保留已执行的修改。恢复文件只处理下列本轮记录的修改，Git 提交和暂存区保持不变。</p>
+          <ul v-if="session.undoConfirm.preview.files.length" class="undo-files">
+            <li v-for="file in session.undoConfirm.preview.files" :key="file.path">{{ file.action === 'delete' ? '移除新增文件' : '恢复原内容' }}：{{ file.path }}</li>
+          </ul>
+          <p v-else>没有可恢复的文件修改。</p>
+          <p v-for="warning in session.undoConfirm.preview.warnings" :key="warning">{{ warning }}</p>
+          <p v-for="conflict in session.undoConfirm.preview.conflicts" :key="conflict" role="alert">{{ conflict }}</p>
+          <p v-if="session.undoConfirm.preview.conflicts.length">文件恢复已阻止；后续修改会保留。仍可选择仅撤回对话。</p>
+        </template>
         <div class="retry-actions">
-          <button class="retry-secondary" @click="session.cancelUndo()">取消</button>
-          <button class="retry-primary" @click="session.confirmUndo()">确认回撤</button>
+          <button class="retry-secondary" :disabled="session.undoConfirm.busy" @click="session.cancelUndo()">取消</button>
+          <button v-if="session.undoConfirm.error || session.undoConfirm.preview?.conflicts.length" class="retry-secondary" :disabled="session.undoConfirm.busy" @click="session.requestUndo(session.undoConfirm.mid)">重新预览</button>
+          <button class="retry-secondary" :disabled="session.undoConfirm.busy || !session.undoConfirm.preview" @click="session.confirmUndo(false)">仅撤回对话</button>
+          <button v-if="session.undoConfirm.preview?.files.length" class="retry-primary" :disabled="session.undoConfirm.busy || !!session.undoConfirm.preview?.conflicts.length" @click="session.confirmUndo(true)">恢复文件并撤回</button>
         </div>
       </div>
       <Transition name="pop">
@@ -361,7 +376,8 @@ watch(() => session.pendingQuestion?.callId, (id, previous) => {
   color: var(--text-3); font-size: 12px;
 }
 
-.retry-confirm { margin: 0 12px 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: var(--shadow-1); }.retry-confirm > div:first-child { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-2); }
+.retry-confirm { margin: 0 12px 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: var(--shadow-1); max-height: 45vh; overflow-y: auto; }.retry-confirm > div:first-child { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-2); }
+.undo-files { max-height: 160px; overflow-y: auto; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
 .retry-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; }
 .retry-actions button { min-height: 34px; padding: 0 13px; border-radius: 6px; font-size: 13px; font-weight: 600; }
 .retry-secondary { background: var(--fill); color: var(--text-2); }

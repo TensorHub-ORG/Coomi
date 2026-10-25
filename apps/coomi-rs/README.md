@@ -14,6 +14,28 @@ Coomi is a compact terminal coding agent organized as six workspace layers.
 Installed Skills are exposed to the agent through `list_skills` and
 `read_skill`, so full instructions are loaded only when a task needs them.
 
+## Web chat undo
+
+The chat undo dialog previews the latest user turn and offers conversation-only
+undo or file restoration followed by conversation undo. New turns record exact
+before/after bytes for workspace `write_file`, `edit_file`, and `apply_patch`
+operations under `<home>/turn-files/`; Git is not required. Repeated edits in one
+turn restore the first version. Later changes to a recorded file block restoration.
+If file restoration or the conversation save fails, the operation preserves the
+conversation and attempts to return all files to their pre-undo state. Compacted
+archives are truncated with the conversation, and retained messages replace the
+summary so it cannot reintroduce undone content. Older turns without a journal
+support conversation-only undo.
+
+Shell, MCP, delegated agents, custom hooks and operations outside the supported
+workspace paths are not automatically reversed; the dialog reports uncovered
+operations. Symlinks, Git metadata and application data are excluded. The journal
+accepts regular files up to 32 MiB, 1000 paths, and 128 MiB of before/after versions
+per turn. Empty directories, timestamps, ACLs and external side effects are not
+restored. Interrupted transactions retain backups and block further automatic
+restoration; automatic recovery after process termination/power loss and backup
+retention management are not yet implemented.
+
 ## Provider configuration
 
 Models are loaded exclusively from `~/.coomi/config/providers.json` (or

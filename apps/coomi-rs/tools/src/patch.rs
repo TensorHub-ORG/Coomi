@@ -57,6 +57,15 @@ pub fn apply_patch_with_paths(
     path_map: Option<&RuntimePathMap>,
     patch: &str,
 ) -> Result<String, String> {
+    apply_patch_with_journal(policy, path_map, patch, None)
+}
+
+pub fn apply_patch_with_journal(
+    policy: &SecurityPolicy,
+    path_map: Option<&RuntimePathMap>,
+    patch: &str,
+    journal: Option<&coomi_services::FileJournal>,
+) -> Result<String, String> {
     let operations = parse_patch(patch)?;
     if operations.is_empty() {
         return Err("patch contains no file operations".into());
@@ -65,7 +74,26 @@ pub fn apply_patch_with_paths(
     for operation in operations {
         prepared.push(prepare_change(policy, path_map, operation)?);
     }
-    apply_prepared(&prepared)?;
+    if let Some(journal) = journal {
+        let in_workspace = prepared.iter().all(|change| journal.relative_path(&change.source).is_ok()
+            && journal.relative_path(&change.destination).is_ok());
+        if in_workspace {
+            let mut edits = Vec::new();
+            for change in &prepared {
+                if change.source != change.destination {
+                    edits.push(coomi_services::FileEdit { path: change.source.clone(), before: change.previous_source.clone(), after: None, after_mode: None });
+                    edits.push(coomi_services::FileEdit { path: change.destination.clone(), before: change.previous_destination.clone(), after: change.new_content.clone(), after_mode: None });
+                } else {
+                    edits.push(coomi_services::FileEdit { path: change.source.clone(), before: change.previous_source.clone(), after: change.new_content.clone(), after_mode: None });
+                }
+            }
+            journal.apply(edits).map_err(|error| format!("{error:#}"))?;
+        } else {
+            journal.mark_untracked("本轮包含工作区外或不支持备份的补丁路径，该补丁不会自动回撤。")
+                .map_err(|error| format!("{error:#}"))?;
+            apply_prepared(&prepared)?;
+        }
+    } else { apply_prepared(&prepared)?; }
 
     let mut output = Vec::new();
     for change in prepared {

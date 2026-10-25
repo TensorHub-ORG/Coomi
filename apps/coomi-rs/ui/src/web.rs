@@ -938,6 +938,7 @@ pub async fn serve(
         .route("/api/sessions/{id}/messages/{msg_id}/edit", post(edit_session_message))
         .route("/api/sessions/{id}/messages/{msg_id}", delete(delete_session_message))
         .route("/api/sessions/{id}/messages/{msg_id}/truncate", post(truncate_session_message))
+        .route("/api/sessions/{id}/messages/{msg_id}/undo", get(preview_file_undo).post(restore_file_undo))
         .route("/api/fs/list", get(fs_list))
         .route("/api/fs/raw", get(fs_raw))
         .route("/api/fs/mkdir", post(fs_mkdir))
@@ -7401,6 +7402,103 @@ async fn edit_turn(
     run_turn(state, session_id, "", true, context, task).await
 }
 
+fn undo_history(session: &Session) -> Vec<coomi_engine::ChatMessage> {
+    let mut seen = HashSet::new();
+    session.archive.iter().chain(session.messages.iter())
+        .filter(|m| !m.compaction_summary && seen.insert(m.id.clone())).cloned().collect()
+}
+
+fn latest_undo_target(session: &Session, msg_id: &str) -> Result<String> {
+    let messages = undo_history(session);
+    let target = if msg_id.is_empty() {
+        messages.iter().rposition(|m| m.role == coomi_engine::Role::User && !m.internal)
+    } else {
+        let index = messages.iter().position(|m| m.id == msg_id).context("目标消息已不存在，请刷新会话")?;
+        messages[..=index].iter().rposition(|m| m.role == coomi_engine::Role::User && !m.internal)
+    }.context("没有可回撤的轮次")?;
+    anyhow::ensure!(!messages[target + 1..].iter().any(|m| m.role == coomi_engine::Role::User && !m.internal),
+        "只能回撤最新一轮，请先处理后续轮次");
+    Ok(messages[target].id.clone())
+}
+
+async fn preview_file_undo(
+    State(state): State<AppState>,
+    AxumPath((id, msg_id)): AxumPath<(String, String)>,
+) -> Result<Json<coomi_services::FileUndoPreview>, ApiError> {
+    let session = SessionStore::new(&state.home).load(Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?)?;
+    let turn = latest_undo_target(&session, &msg_id)?;
+    let mut preview = coomi_services::FileJournal::new(&state.home, &session.cwd, &id, &turn)
+        .and_then(|journal| journal.preview())
+        .unwrap_or_else(|error| coomi_services::FileUndoPreview {
+            turn_id:turn, workspace:session.cwd.display().to_string(), available:false,
+            files:Vec::new(), conflicts:Vec::new(), revision:String::new(),
+            warnings:vec![format!("文件恢复暂不可用：{error:#}。仍可仅撤回对话。")],
+        });
+    if state.task(&id).running.load(Ordering::SeqCst) { preview.conflicts.push("请先停止当前任务，再回撤。".into()); }
+    Ok(Json(preview))
+}
+
+#[derive(Deserialize)]
+struct FileUndoRequest {
+    turn_id: String,
+    revision: String,
+    #[serde(default)]
+    restore_files: bool,
+}
+
+struct FileUndoGuard(Arc<SessionTask>);
+impl Drop for FileUndoGuard {
+    fn drop(&mut self) { self.0.running.store(false, Ordering::SeqCst); }
+}
+
+async fn restore_file_undo(
+    State(state): State<AppState>,
+    AxumPath((id, msg_id)): AxumPath<(String, String)>,
+    Json(body): Json<FileUndoRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let task = state.task(&id);
+    // Exclude new turns until both the file transaction and conversation save finish.
+    if task.running.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return Err(ApiError::conflict("请先停止当前任务，再回撤"));
+    }
+    let _running_guard = FileUndoGuard(Arc::clone(&task));
+    let result = async {
+        let _lease = tokio::time::timeout(Duration::from_secs(3), coomi_tools::lock_file_mutations()).await
+            .map_err(|_| ApiError::conflict("有文件操作正在执行，请稍后重试"))?;
+        let store = SessionStore::new(&state.home);
+        let mut session = store.load(Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("invalid session id"))?)?;
+        let target = latest_undo_target(&session, &msg_id)?;
+        if target != body.turn_id { return Err(ApiError::conflict("会话已变化，请重新预览")); }
+        // Remove the same suffix from archived history. Rebuild model context
+        // from retained messages so a summary cannot reintroduce an undone turn.
+        session.messages = undo_history(&session);
+        session.archive.clear();
+        session.truncate_from(&target)?;
+        let count = if body.restore_files {
+            let journal = coomi_services::FileJournal::new(&state.home, &session.cwd, &id, &target)?;
+            journal.restore_with(&body.revision, || {
+                if let Err(error) = store.save(&session) {
+                    // A directory fsync can fail after the atomic rename already
+                    // committed the session. Do not put files back in that case.
+                    let committed = store.load(session.id).ok().is_some_and(|saved|
+                        serde_json::to_value(&saved.messages).ok() == serde_json::to_value(&session.messages).ok());
+                    if !committed { return Err(error); }
+                }
+                Ok(())
+            })
+                .map_err(|error| ApiError::conflict(format!("{error:#}")))?
+        } else {
+            store.save(&session)?;
+            0
+        };
+        task.reset_view(&session);
+        Ok(Json(json!({"ok":true, "restored_files":count})))
+    }.await;
+    drop(_running_guard);
+    if result.is_ok() { task.push_event(json!({"event_type":"turn_truncated"})); }
+    result
+}
+
 /// 回撤：定位目标轮次的 user 提问（缺省 = 最后一条 user 消息；给 assistant id 时
 /// 回撤到它对应的提问），截断该提问及其后所有消息，不重新执行。
 /// 任务运行中会先取消再截断。
@@ -7778,6 +7876,7 @@ async fn run_turn(
     .with_limits(read_subagent_settings(&state.home).max_agents, configured_connection_settings(&state.home).auto_compact_percent)
     .without_persistent_memory();
     let tools = CoreTools::new(cwd.clone(), policy)
+        .with_file_history(state.home.clone(), session_id.to_owned())
         .with_skills_directory(state.home.join("skills"))
         .with_config_home(state.home.clone())
         .with_session_state(session.plan.clone(), session.loop_state.clone())
@@ -7875,7 +7974,16 @@ async fn run_turn(
         .with_durable_checkpoint({
             let checkpoint_store = SessionStore::new(&state.home);
             let checkpoint_task = Arc::clone(&task);
+            let file_home = state.home.clone();
+            let file_cwd = cwd.clone();
+            let has_hooks = !HookRunner::load(&state.home)?.is_empty();
             Arc::new(move |session: &Session| {
+                if let Some(turn) = session.messages.iter().rev().find(|m| m.role == coomi_engine::Role::User && !m.internal && !m.compaction_summary) {
+                    let journal = coomi_services::FileJournal::new(&file_home, &file_cwd, &session.id.to_string(), &turn.id)
+                        .map_err(|e| format!("{e:#}"))?;
+                    journal.ensure().map_err(|e| format!("{e:#}"))?;
+                    if has_hooks { journal.mark_untracked("本轮启用了自定义 Hook，其外部影响不会自动回撤。").map_err(|e| format!("{e:#}"))?; }
+                }
                 checkpoint_store.save(session).map_err(|error| error.to_string())?;
                 checkpoint_task.checkpoint_saved(session);
                 Ok(())
@@ -9953,6 +10061,61 @@ mod tests {
         assert!(serialized.contains("SECOND_SESSION_ONLY"));
         assert!(!serialized.contains("FIRST_SESSION_ONLY"));
         assert_eq!(loaded.id, second.id);
+    }
+
+    #[tokio::test]
+    async fn file_undo_keeps_conversation_on_conflict_and_restores_archived_turn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let cwd = tmp.path().join("project");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+        let state = AppState {
+            home:home.clone(), cwd:cwd.clone(), port:0, token:"test".into(),
+            permission:Arc::new(RwLock::new(PermissionMode::Auto)),
+            tasks:Arc::new(StdMutex::new(HashMap::new())), task_slots:Arc::new(Semaphore::new(2)),
+            task_manager:Arc::new(TaskManager::open(&home).unwrap()),
+            vision_degraded:Arc::new(StdMutex::new(HashSet::new())), registry_cache:Arc::new(StdMutex::new(None)),
+            workflow_scheduler:crate::workflow::WorkflowScheduler::new(&home),
+            studio_approvals:Arc::new(StdMutex::new(HashMap::new())), studio_runs:Arc::new(StdMutex::new(HashMap::new())),
+            studio_events:Arc::new(StdMutex::new(HashMap::new())), group_chat_runs:Arc::new(StdMutex::new(HashMap::new())),
+            collab_runs:Arc::new(StdMutex::new(HashMap::new())),
+        };
+        let store = SessionStore::new(&home);
+        let mut session = Session::new("provider", "model", cwd.clone());
+        let first = ChatMessage::user("previous");
+        let latest = ChatMessage::user("latest");
+        session.archive = vec![first.clone(), latest.clone()];
+        session.messages = vec![latest.clone()];
+        store.save(&session).unwrap();
+        let id = session.id.to_string();
+        assert!(latest_undo_target(&session, &first.id).is_err());
+        let journal = coomi_services::FileJournal::new(&home, &cwd, &id, &latest.id).unwrap();
+        journal.apply(vec![coomi_services::FileEdit {path:cwd.canonicalize().unwrap().join("file"),before:None,after:Some(b"created".to_vec()),after_mode:None}]).unwrap();
+        let preview = preview_file_undo(State(state.clone()), AxumPath((id.clone(),latest.id.clone()))).await.unwrap().0;
+        let request = || Json(FileUndoRequest {turn_id:latest.id.clone(),revision:preview.revision.clone(),restore_files:true});
+        std::fs::write(cwd.join("file"), b"human later").unwrap();
+        assert!(restore_file_undo(State(state.clone()),AxumPath((id.clone(),latest.id.clone())),request()).await.is_err());
+        assert_eq!(store.load(session.id).unwrap().archive.len(),2);
+        assert_eq!(std::fs::read(cwd.join("file")).unwrap(),b"human later");
+        assert!(!state.task(&id).running.load(Ordering::SeqCst));
+        std::fs::write(cwd.join("file"),b"created").unwrap();
+        state.task(&id).running.store(true,Ordering::SeqCst);
+        assert!(restore_file_undo(State(state.clone()),AxumPath((id.clone(),latest.id.clone())),request()).await.is_err());
+        state.task(&id).running.store(false,Ordering::SeqCst);
+        let _ = restore_file_undo(State(state.clone()),AxumPath((id.clone(),latest.id.clone())),request()).await.unwrap();
+        assert!(!cwd.join("file").exists());
+        let mut saved = store.load(session.id).unwrap();
+        assert!(saved.archive.is_empty());
+        assert_eq!(saved.messages.len(),1);
+        assert_eq!(saved.messages[0].id,first.id);
+        // An old/moved project must not prevent conversation-only undo.
+        saved.cwd = cwd.join("no-longer-exists");
+        store.save(&saved).unwrap();
+        let preview = preview_file_undo(State(state.clone()),AxumPath((id.clone(),first.id.clone()))).await.unwrap().0;
+        assert!(!preview.available);
+        let _ = restore_file_undo(State(state),AxumPath((id,first.id.clone())),Json(FileUndoRequest {turn_id:first.id,revision:preview.revision,restore_files:false})).await.unwrap();
+        assert!(store.load(session.id).unwrap().messages.is_empty());
     }
 
     #[tokio::test]

@@ -8,6 +8,8 @@ mod config;
 mod data_tools;
 mod deepseek;
 mod git_engine;
+mod file_journal;
+pub use file_journal::{FileEdit, FileJournal, FileUndoPreview};
 mod ops;
 mod group_chat;
 mod mcp;

@@ -3,7 +3,7 @@ import { RecoveryEvents } from '@/utils/sessionRecovery'
 import { buildAttachmentRequest, parseAttachmentRequest, type ChatAttachment } from '@/utils/attachments'
 import { ref, computed, shallowRef, watch, inject, hasInjectionContext, type Ref, type InjectionKey } from 'vue'
 import { createTransport, type Transport } from '@/bridge'
-import { authedFetch, apiGet } from '@/bridge/http'
+import { authedFetch, apiGet, apiSend } from '@/bridge/http'
 import { isDemoMode } from '@/bridge/demoMode'
 import type { AgentEvent } from '@/protocol/events'
 import type { ReasoningEffortStats } from '@/protocol/events'
@@ -66,7 +66,9 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   /** 编辑覆盖状态：非空表示输入框正处于「编辑上一条消息」模式。 */
   const pendingEdit = ref<{ mid: string; content: string } | null>(null)
   /** 回撤确认弹窗状态：非空表示等待用户确认回撤该轮。 */
-  const undoConfirm = ref<{ mid: string } | null>(null)
+  const undoConfirm = ref<{ mid: string; sessionId: string; busy: boolean; error: string; preview?: {
+    turn_id: string; available: boolean; files: {path: string; action: string}[]; conflicts: string[]; warnings: string[]; revision: string
+  } } | null>(null)
 
   let currentAssistant: AssistantMessage | null = null
 
@@ -248,7 +250,12 @@ function defineSessionStore(storeId: string, auxiliary = false) {
       const isForeground = sessionId.value === targetSessionId
       if (env.type === 'event') {
         const seq = env.payload.event_seq
-        if (isForeground && restoring.value) restoreEvents.push(env.payload)
+        if (isForeground && env.payload.event_type === 'turn_truncated') {
+          // A reset can lower the sequence number. Always refresh from durable
+          // history, including when another window initiated the undo.
+          if (!undoConfirm.value?.busy) void restoreFromEngine(targetSessionId)
+        }
+        else if (isForeground && restoring.value) restoreEvents.push(env.payload)
         else if (isForeground && (typeof document === 'undefined' || !document.hidden) && (!seq || seq > (appliedThrough.get(targetSessionId) ?? 0))) {
           onInbound(env)
           if (seq) appliedThrough.set(targetSessionId, seq)
@@ -973,43 +980,49 @@ function defineSessionStore(storeId: string, auxiliary = false) {
   }
 
   /** 点击「回撤」：先弹确认，避免误触后无法找回。 */
-  function requestUndo(mid: string) {
-    undoConfirm.value = { mid }
+  let undoRequest = 0
+  async function requestUndo(mid: string) {
+    if (isBusy.value || !mid) return
+    const request = ++undoRequest
+    const target = { mid, sessionId: sessionId.value, busy: true, error: '' }
+    undoConfirm.value = target
+    try {
+      const preview = await apiGet<NonNullable<NonNullable<typeof undoConfirm.value>['preview']>>(`/api/sessions/${target.sessionId}/messages/${encodeURIComponent(mid)}/undo`)
+      if (request === undoRequest && undoConfirm.value?.mid === mid && sessionId.value === target.sessionId) Object.assign(undoConfirm.value, {preview, busy: false})
+    } catch (e) {
+      if (request === undoRequest && undoConfirm.value?.mid === mid && sessionId.value === target.sessionId) Object.assign(undoConfirm.value, {busy:false,error:e instanceof Error ? e.message : String(e)})
+    }
   }
 
   /** 确认回撤：执行截断，返回选定轮之前的状态。 */
-  function confirmUndo() {
+  async function confirmUndo(restoreFiles = false) {
     const target = undoConfirm.value
-    undoConfirm.value = null
-    if (target) undoTurn(target.mid)
+    if (!target?.preview || target.busy || target.sessionId !== sessionId.value) return
+    target.busy = true
+    target.error = ''
+    try {
+      await apiSend(`/api/sessions/${target.sessionId}/messages/${encodeURIComponent(target.mid)}/undo`, 'POST', {
+        turn_id: target.preview.turn_id, revision: target.preview.revision, restore_files: restoreFiles,
+      })
+      if (target.sessionId !== sessionId.value) return
+      undoConfirm.value = null
+      pendingEdit.value = null
+      if (!await restoreFromEngine(target.sessionId)) pushNotice('error', '回撤已保存，但界面刷新失败，请重新打开会话。')
+    } catch (e) {
+      if (target.sessionId !== sessionId.value) return
+      target.busy = false
+      target.error = e instanceof Error ? e.message : String(e)
+    }
   }
 
   function cancelUndo() {
+    if (undoConfirm.value?.busy) return
     undoConfirm.value = null
   }
 
   /** 回撤一轮：截断该轮 user 提问及其后的所有消息（含工具执行过程），不重新执行。 */
   function undoTurn(mid: string) {
-    if (isBusy.value) return
-    let cutAt = -1
-    if (mid) {
-      const aiIdx = timeline.value.findIndex(t => t.kind === 'assistant' && t.mid === mid)
-      if (aiIdx >= 0) {
-        for (let i = aiIdx; i >= 0; i--) {
-          if (timeline.value[i].kind === 'user') { cutAt = i; break }
-        }
-      }
-    }
-    if (cutAt < 0) {
-      for (let i = timeline.value.length - 1; i >= 0; i--) {
-        if (timeline.value[i].kind === 'user') { cutAt = i; break }
-      }
-    }
-    if (cutAt >= 0) timeline.value.splice(cutAt)
-    runState.value = 'idle'
-    pendingEdit.value = null
-    transport.value?.send({ command: 'undo_turn', msg_id: mid })
-    persistSoon()
+    void requestUndo(mid)
   }
 
   function appendAssistant(content: string) {
