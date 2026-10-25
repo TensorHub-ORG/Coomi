@@ -21,6 +21,8 @@ Windows 的 `shell` 与 `local_shell` 共用 Windows PowerShell 5.1 启动配置
 
 工作流沿用内置工具的 RuntimePathMap 与 shell 运行时选择，不再直接在引擎配置目录执行 bash。工作流 `cwd` 缺省为引擎工作区，运行时冻结解析后的宿主目录；Android 默认使用已就绪的 Runtime V2，未安装时按现有 Termux 回退规则执行。桌面环境使用平台 shell。脚本取消/超时清理该次运行拥有的进程，不终止其他会话。工作流权限和人工审批在工具实际执行前处理，定时触发同样适用。
 
+引擎默认工作区和恢复检查点中冻结的 `cwd` 始终作为宿主路径解析。桌面工作流显式配置的 `cwd` 同样使用宿主路径，不能把 Linux `/tmp/...` 重映射到 Android runtime；只有 Android 新运行的显式 `cwd` 才自动识别 guest 别名。
+
 | guest 路径 | 宿主真实路径 | 说明 |
 |------------|--------------|------|
 | `/workspace` | Android 工作目录（会话 cwd） | 当前工作区，双向读写 |

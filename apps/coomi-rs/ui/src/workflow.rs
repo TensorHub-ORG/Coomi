@@ -368,9 +368,16 @@ impl WorkflowScheduler {
                 }
             }
         }
+        // The engine cwd and recovery snapshots are already host paths. Desktop
+        // paths such as /tmp must not be inferred as Android guest aliases.
+        let namespace = if recovery || workflow.cwd.is_none() || !cfg!(target_os = "android") {
+            Some(coomi_services::PathNamespace::Host)
+        } else {
+            None
+        };
         let cwd = coomi_services::RuntimePathMap::new(self.cwd.clone())
             .with_runtime_root(self.home.join("runtime-v2"))
-            .resolve(workflow.cwd.as_deref().unwrap_or(&self.cwd), None)?
+            .resolve(workflow.cwd.as_deref().unwrap_or(&self.cwd), namespace)?
             .host_path
             .canonicalize()
             .context("workflow working directory is unavailable")?;

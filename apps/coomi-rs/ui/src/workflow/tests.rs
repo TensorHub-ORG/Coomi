@@ -205,6 +205,36 @@ async fn cancel_pending_approval_releases_run_and_does_not_execute_next_step() {
     assert!(!cwd.join("result.txt").exists());
 }
 #[tokio::test]
+#[cfg(not(target_os = "android"))]
+async fn desktop_explicit_working_directory_and_recovery_keep_host_paths() {
+    let (_temp, cwd, scheduler) = setup(vec![step(
+        "read",
+        StepAction::Tool {
+            tool: "read_file".into(),
+            arguments: json!({"path":"input.txt"}),
+        },
+    )]);
+    let selected = cwd.join("selected");
+    std::fs::create_dir_all(&selected).unwrap();
+    let mut definition = scheduler.store.read("test").unwrap();
+    // Linux tempfile paths start with /tmp: they must remain native paths.
+    definition.cwd = Some(selected.clone());
+    scheduler.store.save(&definition).unwrap();
+    let first = scheduler.run_manual("test").await.unwrap();
+    let failed = finished(&scheduler, &first).await;
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.snapshot.unwrap().cwd, Some(selected.canonicalize().unwrap()));
+
+    std::fs::write(selected.join("input.txt"), "host directory retained").unwrap();
+    let second = scheduler.recover("test", &first).await.unwrap();
+    let recovered = finished(&scheduler, &second).await;
+    assert_eq!(recovered.status, "completed");
+    assert!(recovered.steps[0].result.as_ref().unwrap()["output"]
+        .as_str().unwrap().contains("host directory retained"));
+    assert_eq!(recovered.snapshot.unwrap().cwd, Some(selected.canonicalize().unwrap()));
+}
+
+#[tokio::test]
 async fn recovery_skips_completed_steps_and_preserves_the_frozen_definition() {
     let (_temp, cwd, scheduler) = setup(vec![
         write_step("done", "keep.txt", "original"),

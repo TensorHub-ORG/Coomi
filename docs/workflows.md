@@ -12,7 +12,7 @@
 
 ## 工作目录、权限与时限
 
-`cwd` 为空时使用引擎当前工作区，也可以设置存在的工作目录；运行开始时解析并固定。Android 沿用现有 RuntimePathMap 和 Linux 运行时，桌面开发环境使用平台 shell。内置巡检模板面向 Android/Linux，Windows 自定义脚本应使用 PowerShell 语法。
+`cwd` 为空时使用引擎当前工作区，也可以设置存在的工作目录；运行开始时解析并固定。桌面 `cwd` 使用本机路径（相对路径基于引擎工作区），Linux `/tmp/...` 保持为本机目录；Android 显式 `cwd` 可使用 RuntimePathMap 别名。恢复时沿用已冻结的宿主目录。桌面开发环境使用平台 shell。内置巡检模板面向 Android/Linux，Windows 自定义脚本应使用 PowerShell 语法。
 
 | 权限 | 行为 |
 | --- | --- |
