@@ -6,7 +6,7 @@
 //! - git 在本进程所在主机上执行（与 `task_manager::ConflictBaseline` 一致），
 //!   仓库根 = 调用方传入的 workspace 绝对路径。
 //! - 快照使用 git 对象法：临时索引 + `write-tree` + `commit-tree` + 独立 ref
-//!   （`refs/coomi/snap/<id>`），不触碰用户暂存区，可被 `git reset --hard` 精确还原。
+//!   （`refs/coomi/snap/<id>`），恢复仅写工作文件，不触碰 HEAD 或用户暂存区。
 //! - 元数据索引落在 `<home>/coomi-snapshots.json`，与 git refs 双写；
 //!   索引损坏时自动改名保留，避免写操作覆盖掉可恢复数据。
 //! - 所有命令强制 `LC_ALL=C`，保证解析输出（如 `git clean -nd`）不随语言环境漂移。
@@ -105,16 +105,19 @@ pub struct Snapshot {
     pub file_count: usize,
     pub note: Option<String>,
     pub locked: bool,
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SnapshotPreview {
     pub snapshot: Snapshot,
     pub stat: String,
-    /// 还原将被回退的已跟踪文件。
+    /// 将恢复或重新创建的快照文件。
     pub reverted_files: Vec<String>,
-    /// 还原将被删除的未跟踪文件（`git clean -nd` 模拟结果）。
+    /// 当前存在但快照中不存在、将被移除的文件（字段名保留兼容）。
     pub untracked_to_delete: Vec<String>,
+    pub revision: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -681,20 +684,33 @@ impl GitEngine {
         };
         let ref_name = format!("{SNAPSHOT_REF_PREFIX}/{id}");
 
-        let tmp_index = self.workspace.join(".git").join(format!(
+        // Git's native path avoids Windows' canonical \\?\ prefix and
+        // supports linked worktrees whose .git is a file.
+        let index_name = format!(
             "coomi-index-{}-{}",
             Uuid::new_v4().simple(),
             created_at
-        ));
+        );
+        let index_env_value = self.run(&["rev-parse", "--git-path", &index_name], &[]).await?;
+        let tmp_index = self.workspace.join(&index_env_value);
         let index_env_key = "GIT_INDEX_FILE";
-        let index_env_value = tmp_index.to_string_lossy().into_owned();
         let index_env_refs = [(index_env_key, index_env_value.as_str())];
 
-        // 1. 用临时索引收集工作区全貌（含未跟踪文件），不触碰用户暂存区。
-        self.run(&["add", "-A"], &index_env_refs).await?;
-        // 2. 生成树对象。
-        let tree = self.run(&["write-tree"], &index_env_refs).await?;
+        // Seed from the real index so tracked files matching .gitignore remain
+        // in the snapshot, including force-added files not yet committed.
+        let source_index = self.run(&["rev-parse", "--git-path", "index"], &[]).await?;
+        let source_index = self.workspace.join(source_index);
+        if source_index.exists() {
+            std::fs::copy(&source_index, &tmp_index).context("copy snapshot index")?;
+        }
+        // 1. 用临时索引收集工作区文件（含未忽略的新文件），不触碰用户暂存区。
+        let tree = async {
+            self.run(&["add", "-A"], &index_env_refs).await?;
+            // 2. 生成树对象。
+            self.run(&["write-tree"], &index_env_refs).await
+        }.await;
         let _ = std::fs::remove_file(&tmp_index);
+        let tree = tree?;
         // 3. 生成提交对象（首次快照无父提交）。
         let head = self.run_opt(&["rev-parse", "--verify", "HEAD"], &[]).await?;
         let commit_message = format!("coomi {kind} {summary}");
@@ -725,6 +741,7 @@ impl GitEngine {
             file_count,
             note: None,
             locked: false,
+            workspace: Some(self.workspace.canonicalize()?),
         };
         self.index_add(&snapshot)?;
         self.prune_snapshots().await?;
@@ -733,6 +750,8 @@ impl GitEngine {
 
     pub async fn snapshot_list(&self) -> Result<Vec<Snapshot>> {
         let mut list = self.index_load()?;
+        let cwd = self.workspace.canonicalize()?;
+        list.retain(|snap| snap.workspace.as_ref().is_none_or(|root| root == &cwd));
         list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(list)
     }
@@ -754,45 +773,34 @@ impl GitEngine {
         Ok(snap)
     }
 
-    /// 还原预览：列出将回退的已跟踪文件与将删除的未跟踪文件（模拟，不删除）。
+    /// 还原预览：列出实际将恢复及移除的文件，不修改工作区。
     pub async fn snapshot_preview(&self, id: &str) -> Result<SnapshotPreview> {
         let snap = self.index_find(id)?;
-        let sha = snap.sha.as_str();
-        let stat = self
-            .run_opt(&["diff", "--stat", sha], &[])
-            .await?
-            .unwrap_or_default();
-        let reverted_files = self
-            .run_opt(&["diff", "--name-only", sha], &[])
-            .await?
-            .unwrap_or_default()
-            .lines()
-            .map(str::to_owned)
-            .collect();
-        let untracked_to_delete = self.simulate_clean().await?;
-        Ok(SnapshotPreview {
-            snapshot: snap,
-            stat,
-            reverted_files,
-            untracked_to_delete,
-        })
+        let (edits, revision) = self.snapshot_edits(&snap).await?;
+        let cwd = self.workspace.canonicalize()?;
+        let reverted_files = edits.iter().filter(|e| e.after.is_some()).map(|e| e.path.strip_prefix(&cwd).unwrap_or(&e.path).display().to_string()).collect();
+        let untracked_to_delete = edits.iter().filter(|e| e.after.is_none()).map(|e| e.path.strip_prefix(&cwd).unwrap_or(&e.path).display().to_string()).collect();
+        Ok(SnapshotPreview { snapshot: snap, stat: format!("{} files will change", edits.len()), reverted_files, untracked_to_delete, revision })
     }
 
-    /// 执行还原：先自动打"还原前"备份，再 `reset --hard` + `clean -fd`。
+    /// Restore worktree files only; keep the branch, HEAD and index unchanged.
     pub async fn snapshot_restore(&self, id: &str) -> Result<RestoreReport> {
+        let preview = self.snapshot_preview(id).await?;
+        self.snapshot_restore_checked(id, &preview.revision).await
+    }
+
+    pub async fn snapshot_restore_checked(&self, id: &str, revision: &str) -> Result<RestoreReport> {
         let snap = self.index_find(id)?;
         let sha = snap.sha.clone();
+        let (edits, current_revision) = self.snapshot_edits(&snap).await?;
+        anyhow::ensure!(current_revision == revision, "文件在预览后已变化，请重新预览");
+        let reverted_files = edits.iter().filter(|e| e.after.is_some()).count();
+        let deleted_untracked = edits.iter().filter(|e| e.after.is_none()).count();
         let backup = self
             .snapshot_create("pre-restore", None, None, &format!("before restore {id}"))
             .await?;
-        let reverted_files = self
-            .run_opt(&["diff", "--name-only", &sha], &[])
-            .await?
-            .map(|out| out.lines().count())
-            .unwrap_or(0);
-        let deleted_untracked = self.simulate_clean().await?.len();
-        self.run(&["reset", "--hard", &sha], &[]).await?;
-        self.run(&["clean", "-fd"], &[]).await?;
+        let journal = crate::FileJournal::new(&self.home, &self.workspace, &Uuid::new_v4().to_string(), "snapshot-restore")?;
+        journal.apply(edits)?;
         Ok(RestoreReport {
             restored_to: sha,
             reverted_files,
@@ -801,7 +809,79 @@ impl GitEngine {
         })
     }
 
+    async fn snapshot_edits(&self, snap: &Snapshot) -> Result<(Vec<crate::FileEdit>, String)> {
+        use sha2::{Digest, Sha256};
+        use std::collections::BTreeMap;
+        let cwd = self.workspace.canonicalize()?;
+        anyhow::ensure!(snap.workspace.as_ref().is_none_or(|root| root == &cwd), "快照属于其他工作目录");
+        let (code, tree, error) = self.run_output(&["ls-tree", "-rz", &snap.sha], &[]).await?;
+        anyhow::ensure!(code == 0, "无法读取快照：{error}");
+        let mut files = BTreeMap::new();
+        for row in tree.split('\0').filter(|s| !s.is_empty()) {
+            let (meta, name) = row.split_once('\t').context("invalid snapshot tree")?;
+            let fields: Vec<_> = meta.split_whitespace().collect();
+            anyhow::ensure!(fields.len() == 3 && matches!(fields[0], "100644" | "100755") && fields[1] == "blob", "快照包含暂不支持恢复的符号链接或子模块：{name}");
+            files.insert(name.to_owned(), Some((fields[2].to_owned(), if fields[0] == "100755" { 0o755 } else { 0o644 })));
+        }
+        let (code, current, error) = self.run_output(&["ls-files", "-z", "--cached", "--others", "--exclude-standard"], &[]).await?;
+        anyhow::ensure!(code == 0, "无法读取当前文件：{error}");
+        for name in current.split('\0').filter(|s| !s.is_empty()) { files.entry(name.to_owned()).or_insert(None); }
+        let journal = crate::FileJournal::new(&self.home, &self.workspace, &Uuid::new_v4().to_string(), "validate-snapshot")?;
+        let mut edits = Vec::new();
+        let mut fingerprint = Sha256::new();
+        fingerprint.update(snap.sha.as_bytes());
+        let mut total = 0usize;
+        for (name, target) in files {
+            let path = cwd.join(&name);
+            journal.relative_path(&path)?;
+            if let Ok(meta) = std::fs::symlink_metadata(&path) {
+                anyhow::ensure!(meta.is_file() && meta.len() <= 32 * 1024 * 1024, "恢复只支持不超过 32 MiB 的普通文件：{name}");
+            }
+            let before = match std::fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            let (after, mode) = if let Some((object, mode)) = target {
+                let size: usize = self.run(&["cat-file", "-s", &object], &[]).await?.parse()?;
+                anyhow::ensure!(size <= 32 * 1024 * 1024, "恢复文件超过 32 MiB：{name}");
+                let output = if self.runtime_home.as_ref().is_some_and(|home| proot_backend(home).is_ok()) {
+                    // Existing Git runtime routing retains PRoot's workspace binding.
+                    let args = vec!["cat-file".to_owned(), "blob".to_owned(), object.clone()];
+                    let backend = proot_backend(self.runtime_home.as_ref().unwrap())?;
+                    let mut command = backend.command(&self.workspace, "git", &args)?.into_tokio();
+                    tokio::time::timeout(GIT_COMMAND_TIMEOUT, command.kill_on_drop(true).output()).await??
+                } else {
+                    tokio::time::timeout(GIT_COMMAND_TIMEOUT, Command::new("git").args(["cat-file", "blob", &object])
+                        .current_dir(&self.workspace).kill_on_drop(true).output()).await??
+                };
+                anyhow::ensure!(output.status.success(), "无法读取快照文件：{name}");
+                (Some(output.stdout), Some(mode))
+            } else { (None, None) };
+            fingerprint.update(name.as_bytes());
+            fingerprint.update([0]);
+            fingerprint.update([u8::from(before.is_some())]);
+            if let Some(bytes) = &before { fingerprint.update(Sha256::digest(bytes)); }
+            #[cfg(unix)]
+            let mode_changed = {
+                use std::os::unix::fs::PermissionsExt;
+                let current_mode = std::fs::metadata(&path).ok().map(|m| m.permissions().mode() & 0o7777);
+                fingerprint.update(current_mode.unwrap_or(0).to_le_bytes());
+                mode.is_some() && current_mode != mode
+            };
+            #[cfg(not(unix))]
+            let mode_changed = false;
+            if before != after || mode_changed {
+                total += before.as_ref().map_or(0, Vec::len) + after.as_ref().map_or(0, Vec::len);
+                anyhow::ensure!(total <= 128 * 1024 * 1024, "恢复内容超过 128 MiB，请分开处理");
+                edits.push(crate::FileEdit { path, before, after, after_mode: mode });
+            }
+        }
+        Ok((edits, format!("{:x}", fingerprint.finalize())))
+    }
+
     pub async fn snapshot_delete(&self, id: &str) -> Result<()> {
+        self.index_find(id)?;
         self.index_remove(id)?;
         let _ = self
             .run_opt(&["update-ref", "-d", &format!("{SNAPSHOT_REF_PREFIX}/{id}")], &[])
@@ -809,39 +889,9 @@ impl GitEngine {
         Ok(())
     }
 
-    async fn simulate_clean(&self) -> Result<Vec<String>> {
-        let Some(raw) = self.run_opt(&["clean", "-nd"], &[]).await? else {
-            return Ok(Vec::new());
-        };
-        // 统一 LC_ALL=C 后，输出形如 "Would remove foo/bar.txt"。
-        let mut paths = Vec::new();
-        for line in raw.lines() {
-            if let Some(rest) = line.strip_prefix("Would remove ") {
-                paths.push(rest.to_owned());
-            }
-        }
-        Ok(paths)
-    }
-
     /// 保留最近 MAX_SNAPSHOTS 个（跳过 locked），从最旧开始清理 ref。
     async fn prune_snapshots(&self) -> Result<()> {
-        let mut list = self.index_load()?;
-        list.sort_by_key(|s| s.created_at);
-        while list.len() > MAX_SNAPSHOTS {
-            match list.iter().position(|s| !s.locked) {
-                Some(pos) => {
-                    let victim = list.remove(pos);
-                    let _ = self
-                        .run_opt(
-                            &["update-ref", "-d", &format!("{SNAPSHOT_REF_PREFIX}/{}", victim.id)],
-                            &[],
-                        )
-                        .await?;
-                }
-                None => break,
-            }
-        }
-        self.index_save(&list)
+        self.prune_snapshots_retain(MAX_SNAPSHOTS).await
     }
 
     /// 按定时快照的 retain 配置清理：保留最近 `retain` 个（跳过 locked），
@@ -852,7 +902,7 @@ impl GitEngine {
         if retain == 0 {
             return Ok(());
         }
-        let mut list = self.index_load()?;
+        let mut list = self.snapshot_list().await?;
         list.sort_by_key(|s| s.created_at);
         // 先按 created_at 从旧到新找出需要清理的受害者（locked 跳过，保留最近 retain 个）。
         let mut victims = Vec::new();
@@ -905,10 +955,12 @@ impl GitEngine {
     }
 
     fn index_find(&self, id: &str) -> Result<Snapshot> {
-        self.index_load()?
+        let snap = self.index_load()?
             .into_iter()
             .find(|s| s.id == id)
-            .ok_or_else(|| anyhow!("snapshot not found: {id}"))
+            .ok_or_else(|| anyhow!("snapshot not found: {id}"))?;
+        anyhow::ensure!(snap.workspace.as_ref().is_none_or(|root| self.workspace.canonicalize().is_ok_and(|cwd| root == &cwd)), "快照属于其他工作目录");
+        Ok(snap)
     }
 
     fn index_add(&self, snapshot: &Snapshot) -> Result<()> {
@@ -1616,6 +1668,9 @@ mod tests {
     async fn snapshot_create_list_restore_roundtrip() -> Result<()> {
         let (dir, engine) = repo().await;
         let root = dir.path().join("repo");
+        // The HTTP server canonicalizes cwd on startup. Exercise that same
+        // path form, including the verbatim prefix on Windows.
+        let engine = GitEngine::new(engine.home.clone(), root.canonicalize()?);
         write(&root, "keep.txt", "keep").await;
         engine.stage(&["keep.txt".into()], false).await?;
         engine.commit("keep").await?;
@@ -1658,6 +1713,100 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn snapshot_restore_preserves_head_index_binary_and_rejects_stale_preview() -> Result<()> {
+        let (dir, engine) = repo().await;
+        let root = dir.path().join("repo");
+        std::fs::write(root.join("data.bin"), [0, 255, 3, 128])?;
+        write(&root, " staged.txt", "snapshot\n").await;
+        engine.run(&["add", "-A"], &[]).await?;
+        engine.commit("baseline").await?;
+        let snap = engine.snapshot_create("manual", None, None, "before").await?;
+        write(&root, " staged.txt", "later commit\n").await;
+        engine.run(&["add", "-A"], &[]).await?;
+        engine.commit("later").await?;
+        write(&root, " staged.txt", "staged\n").await;
+        engine.run(&["add", "-A"], &[]).await?;
+        write(&root, " staged.txt", "unstaged\n").await;
+        std::fs::write(root.join("data.bin"), [9, 0, 1])?;
+        write(&root, "extra", "extra").await;
+        let head = engine.run(&["rev-parse", "HEAD"], &[]).await?;
+        let index = std::fs::read(root.join(".git/index"))?;
+        let old = engine.snapshot_preview(&snap.id).await?;
+        write(&root, "extra", "later edit").await;
+        assert!(engine.snapshot_restore_checked(&snap.id, &old.revision).await.is_err());
+        assert_eq!(std::fs::read(root.join("data.bin"))?, [9,0,1]);
+        let preview = engine.snapshot_preview(&snap.id).await?;
+        assert_eq!(preview.reverted_files.len(), 2);
+        assert_eq!(preview.untracked_to_delete, vec!["extra"]);
+        engine.snapshot_restore_checked(&snap.id, &preview.revision).await?;
+        assert_eq!(engine.run(&["rev-parse", "HEAD"], &[]).await?, head);
+        assert_eq!(std::fs::read(root.join(".git/index"))?, index);
+        assert_eq!(std::fs::read(root.join("data.bin"))?, [0,255,3,128]);
+        assert_eq!(std::fs::read_to_string(root.join(" staged.txt"))?, "snapshot\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_pruning_and_deletion_are_workspace_scoped() -> Result<()> {
+        let (dir, engine) = repo().await;
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(&other)?;
+        let other = GitEngine::new(engine.home.clone(), other);
+        seed_snapshot(&engine, "own-old", 1, false)?;
+        seed_snapshot(&engine, "own-new", 3, false)?;
+        seed_snapshot(&other, "other-old", 0, false)?;
+        engine.prune_snapshots_retain(1).await?;
+        assert_eq!(engine.snapshot_list().await?.len(), 1);
+        assert_eq!(other.snapshot_list().await?[0].id, "other-old");
+        assert!(engine.snapshot_delete("other-old").await.is_err());
+        assert_eq!(other.snapshot_list().await?.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_preserves_tracked_ignored_files_and_original_index() -> Result<()> {
+        let (dir, engine) = repo().await;
+        let root = dir.path().join("repo");
+        write(&root, ".gitignore", "*.private\n").await;
+        write(&root, "committed.private", "committed\n").await;
+        engine.run(&["add", ".gitignore"], &[]).await?;
+        engine.run(&["add", "-f", "committed.private"], &[]).await?;
+        engine.commit("tracked ignored file").await?;
+        write(&root, "committed.private", "before turn\n").await;
+        write(&root, "staged.private", "staged\n").await;
+        engine.run(&["add", "-f", "staged.private"], &[]).await?;
+        write(&root, "staged.private", "working copy\n").await;
+        write(&root, "untracked.private", "not in snapshot\n").await;
+        let index_before = std::fs::read(root.join(".git/index"))?;
+        let snapshot = engine.snapshot_create("manual", None, None, "ignored files").await?;
+        assert_eq!(std::fs::read(root.join(".git/index"))?, index_before);
+        write(&root, "committed.private", "after turn\n").await;
+        std::fs::remove_file(root.join("staged.private"))?;
+        write(&root, "untracked.private", "still ignored\n").await;
+        engine.snapshot_restore(&snapshot.id).await?;
+        assert_eq!(std::fs::read_to_string(root.join("committed.private"))?, "before turn\n");
+        assert_eq!(std::fs::read_to_string(root.join("staged.private"))?, "working copy\n");
+        assert_eq!(std::fs::read_to_string(root.join("untracked.private"))?, "still ignored\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_roundtrip_in_linked_worktree() -> Result<()> {
+        let (dir, engine) = repo().await;
+        let linked = dir.path().join("linked");
+        engine.run(&["worktree", "add", "-b", "linked", linked.to_str().unwrap()], &[]).await?;
+        let linked_engine = GitEngine::new(dir.path().join("linked-home"), linked.canonicalize()?);
+        write(&linked, "file.txt", "before\n").await;
+        let snapshot = linked_engine.snapshot_create("manual", None, None, "linked").await?;
+        write(&linked, "file.txt", "after\n").await;
+        write(&linked, "extra.txt", "extra\n").await;
+        linked_engine.snapshot_restore(&snapshot.id).await?;
+        assert_eq!(std::fs::read_to_string(linked.join("file.txt"))?, "before\n");
+        assert!(!linked.join("extra.txt").exists());
+        Ok(())
+    }
+
     /// 直写索引构造快照（created_at 精确可控，不依赖真实 git 提交的时钟粒度）。
     fn seed_snapshot(engine: &GitEngine, id: &str, created_at: u64, locked: bool) -> Result<()> {
         engine.index_add(&Snapshot {
@@ -1671,6 +1820,7 @@ mod tests {
             file_count: 0,
             note: None,
             locked,
+            workspace: Some(engine.workspace.canonicalize()?),
         })
     }
 

@@ -11139,12 +11139,18 @@ async fn git_snapshot_delete(
 async fn git_snapshot_restore(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
+    Json(body): Json<SnapshotRestoreRequest>,
 ) -> Result<Json<RestoreReport>, ApiError> {
+    let _lease = tokio::time::timeout(Duration::from_secs(3), coomi_tools::lock_file_mutations()).await
+        .map_err(|_| ApiError::conflict("有文件操作正在执行，请稍后重试"))?;
     let engine = git_engine(&state);
     require_snapshot(&engine, &id).await?;
-    let report = engine.snapshot_restore(&id).await.map_err(ApiError::from)?;
+    let report = engine.snapshot_restore_checked(&id, &body.revision).await.map_err(ApiError::from)?;
     Ok(Json(report))
 }
+
+#[derive(Deserialize)]
+struct SnapshotRestoreRequest { revision: String }
 
 async fn git_remote_test(
     State(state): State<AppState>,

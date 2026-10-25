@@ -95,6 +95,7 @@ export interface Snapshot {
 }
 
 export interface SnapshotPreview {
+  revision: string
   snapshot: Snapshot
   stat: string
   /** 还原将被回退的已跟踪文件。 */
@@ -298,8 +299,8 @@ export function gitSnapshotPreview(id: string): Promise<SnapshotPreview> {
   return apiSend(`/api/git/snapshots/${encodeURIComponent(id)}/preview`, 'POST')
 }
 
-export function gitSnapshotRestore(id: string): Promise<RestoreReport> {
-  return apiSend(`/api/git/snapshots/${encodeURIComponent(id)}/restore`, 'POST')
+export function gitSnapshotRestore(id: string, revision: string): Promise<RestoreReport> {
+  return apiSend(`/api/git/snapshots/${encodeURIComponent(id)}/restore`, 'POST', {revision})
 }
 
 export function gitSnapshotUpdate(id: string, body: { note?: string; locked?: boolean }): Promise<Snapshot> {

@@ -94,7 +94,7 @@ async function confirmRestore() {
   if (!sheet || !snap || sheet.busy) return
   sheet.busy = true
   try {
-    const result = await gitSnapshotRestore(snap.id)
+    const result = await gitSnapshotRestore(snap.id, sheet.preview!.revision)
     report.value = result
     previewState.value = null
     notice.value = '还原完成'
@@ -263,7 +263,7 @@ onMounted(() => {
     </PageHead>
     <main v-show="!props.embedded || (!previewState && !editing && !deleteRequest)" class="body">
       <div v-if="props.embedded" class="embedded-toolbar"><button class="mini-btn" aria-label="刷新" @click="load"><CoomiIcon name="refresh" :size="13" /> 刷新</button></div>
-      <p class="scope-note">快照由引擎按轮次 / 会话自动创建，也可手动备份；还原前引擎会自动生成一份「还原前备份」快照。</p>
+      <p class="scope-note">还原会恢复预览中列出的工作区文件，Git 当前提交和暂存区保持不变。确认后若文件已变化，将要求重新预览。未跟踪且被忽略的文件、工作区外文件和外部操作不会恢复；还原前会自动备份。聊天回撤使用每轮单独记录的文件修改。</p>
 
       <!-- 还原报告 -->
       <section v-if="report" class="report-card">
@@ -380,11 +380,11 @@ onMounted(() => {
           <p class="ps-meta">创建于 {{ fmtTime(previewState.preview.snapshot.created_at) }} · {{ previewState.preview.snapshot.file_count }} 个文件 · <span class="mono">{{ previewState.preview.snapshot.id }}</span></p>
           <pre v-if="previewState.preview.stat" class="diff-pre stat-pre"><span v-for="(l, i) in splitDiffLines(previewState.preview.stat)" :key="'st' + i" class="dl-plain">{{ l.text }}</span></pre>
           <div v-if="previewState.preview.reverted_files.length" class="warn-block">
-            <p class="warn-title">将回退 {{ previewState.preview.reverted_files.length }} 个已跟踪文件</p>
+            <p class="warn-title">将恢复 {{ previewState.preview.reverted_files.length }} 个文件</p>
             <p v-for="f in previewState.preview.reverted_files" :key="'r' + f" class="warn-file mono">{{ f }}</p>
           </div>
           <div v-if="previewState.preview.untracked_to_delete.length" class="warn-block del">
-            <p class="warn-title">将删除 {{ previewState.preview.untracked_to_delete.length }} 个未跟踪文件</p>
+            <p class="warn-title">将移除 {{ previewState.preview.untracked_to_delete.length }} 个快照中不存在的文件</p>
             <p v-for="f in previewState.preview.untracked_to_delete" :key="'d' + f" class="warn-file mono">{{ f }}</p>
           </div>
           <p v-if="!previewState.preview.reverted_files.length && !previewState.preview.untracked_to_delete.length" class="hint">工作区与快照内容一致，还原不会有实际改动。</p>

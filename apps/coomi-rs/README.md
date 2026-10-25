@@ -14,7 +14,7 @@ Coomi is a compact terminal coding agent organized as six workspace layers.
 Installed Skills are exposed to the agent through `list_skills` and
 `read_skill`, so full instructions are loaded only when a task needs them.
 
-## Web chat undo
+## Web chat undo and snapshot restore
 
 The chat undo dialog previews the latest user turn and offers conversation-only
 undo or file restoration followed by conversation undo. New turns record exact
@@ -35,6 +35,13 @@ per turn. Empty directories, timestamps, ACLs and external side effects are not
 restored. Interrupted transactions retain backups and block further automatic
 restoration; automatic recovery after process termination/power loss and backup
 retention management are not yet implemented.
+
+Git snapshot restore also previews and validates file changes before applying
+them, keeps HEAD and the user's index unchanged, and creates a pre-restore
+snapshot. It restores Git tree contents, so Git filters/line-ending normalization
+still apply. Untracked ignored files are excluded; tracked ignored files remain
+covered. Snapshots with workspace ownership are listed and pruned per workspace.
+Legacy snapshots without ownership retain their previous compatibility behavior.
 
 ## Provider configuration
 
