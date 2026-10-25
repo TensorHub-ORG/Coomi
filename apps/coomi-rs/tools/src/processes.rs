@@ -95,6 +95,7 @@ async fn kill_managed(process: &Arc<AsyncMutex<ManagedProcess>>) {
     if let Some(pgid) = pgid {
         let _ = std::process::Command::new("kill")
             .arg("-9")
+            .arg("--")
             .arg(format!("-{pgid}"))
             .status();
     }
@@ -114,7 +115,7 @@ impl Drop for ShellProcessGroup {
     fn drop(&mut self) {
         if let Some(pid) = self.0 {
             #[cfg(unix)]
-            { let _ = std::process::Command::new("kill").arg("-9").arg(format!("-{pid}")).output(); }
+            { let _ = std::process::Command::new("kill").args(["-9", "--"]).arg(format!("-{pid}")).output(); }
             #[cfg(windows)]
             { let _ = std::process::Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output(); }
         }
@@ -561,6 +562,26 @@ fn platform_shell(command: &str) -> Command {
 mod owner_tests {
     use super::*;
     use serde_json::json;
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn scoped_stop_kills_descendants_before_they_can_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ProcessManager::default();
+        let result = manager.execute(dir.path(), &json!({
+            "command":"(sleep 1; printf unwanted > late.txt) & printf ready > ready.txt; wait",
+            "yield_time_ms":0,"environment":"host"
+        })).await;
+        assert!(result.success, "{}", result.output);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !dir.path().join("ready.txt").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("shell did not start");
+        manager.terminate_owned().await;
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert!(!dir.path().join("late.txt").exists(), "a descendant survived cancellation");
+    }
+
     #[tokio::test]
     async fn completed_commands_release_owned_output_buffers() {
         let dir = tempfile::tempdir().unwrap();
